@@ -1,0 +1,143 @@
+#!/usr/bin/env python3
+"""
+Reprocess a transcription or translation from its archived batch zip (or the
+loose batch files) after a change to post-processing -- using the saved JSON
+output, with no Gemini resubmission and no manual unzipping.
+
+Usage:
+  python3 scripts/reprocess-batch-files.py <archive.zip> [--out PATH]
+  python3 scripts/reprocess-batch-files.py <stem>.batch.txt [--out PATH]
+  python3 scripts/reprocess-batch-files.py <stem>.translate.txt [--out PATH]
+
+The zip is expected to contain the files written by archive-batch-files.py:
+  transcription: <stem>.batch.txt, <stem>.batch.jsonl, <stem>-output.jsonl
+  translation:   <stem>.translate.txt, <stem>.translate.jsonl,
+                 <stem>.translate-output.jsonl
+
+The result is written next to the input as
+  @citekey - transcription|translation - vol. N.md
+(or without " - vol. N" for a single-volume work), or to --out.
+"""
+import re
+import shutil
+import sys
+import tempfile
+import zipfile
+from importlib.machinery import SourceFileLoader
+from pathlib import Path
+
+VAULT = Path("/Users/josephhill/Documents/Obsidian Vault")
+SCRIPTS = Path(__file__).resolve().parent
+
+
+def load(name: str):
+    path = SCRIPTS / name
+    return SourceFileLoader(path.stem, str(path)).load_module()
+
+
+def vault_name(stem: str, doc_type: str) -> str:
+    m = re.match(r'(@\S+)', stem)
+    citekey = m.group(1) if m else stem
+    vm = re.search(r'\b(?:vol|v)\.\s*(\d+)\b', stem, re.I)
+    if vm:
+        return f"{citekey} - {doc_type} - vol. {int(vm.group(1))}.md"
+    return f"{citekey} - {doc_type}.md"
+
+
+def resolve(src: Path, workdir: Path):
+    """Return (doc_type, stem, base_dir). Unzips src if needed."""
+    if src.suffix.lower() == ".zip":
+        with zipfile.ZipFile(src) as z:
+            z.extractall(workdir)
+        files = [workdir / n for n in z.namelist()]
+        base = workdir
+    else:
+        files = [src]
+        base = src.parent
+
+    for f in files:
+        if f.name.endswith(".batch.txt"):
+            return "transcription", f.name[:-len(".batch.txt")], base
+    for f in files:
+        if f.name.endswith(".translate.txt"):
+            return "translation", f.name[:-len(".translate.txt")], base
+    for f in files:
+        if f.name.endswith(".translate-output.jsonl"):
+            return "translation", f.name[:-len(".translate-output.jsonl")], base
+        if f.name.endswith("-output.jsonl"):
+            return "transcription", f.name[:-len("-output.jsonl")], base
+    raise SystemExit("ERROR: could not determine batch type/stem from the input")
+
+
+def main():
+    if len(sys.argv) < 2:
+        print("Usage: python3 scripts/reprocess-batch-files.py <archive.zip|batch.txt> [--out PATH]")
+        sys.exit(1)
+
+    src = Path(sys.argv[1]).resolve()
+    if not src.exists():
+        print(f"ERROR: {src} not found")
+        sys.exit(1)
+
+    out_override = None
+    if "--out" in sys.argv:
+        idx = sys.argv.index("--out")
+        if idx + 1 < len(sys.argv):
+            out_override = Path(sys.argv[idx + 1]).expanduser()
+
+    workdir = Path(tempfile.mkdtemp(prefix="reprocess_"))
+    try:
+        doc_type, stem, base = resolve(src, workdir)
+        if not base.exists():
+            base.mkdir(parents=True, exist_ok=True)
+
+        mv = load("transcription-translation-move-to-vault.py")
+        tbp = load("translate-batch-process.py")
+        citekey, volume = tbp.citekey_and_volume(stem)
+
+        if doc_type == "translation":
+            jsonl = base / f"{stem}.translate-output.jsonl"
+            if not jsonl.exists():
+                print(f"ERROR: {jsonl.name} not found in the archive")
+                sys.exit(1)
+            result = tbp.read_output_jsonl(jsonl)
+            result = tbp.postprocess_translation(result)
+            if out_override:
+                out_override.write_text(tbp.build_translation(stem, result), encoding="utf-8")
+                dest = out_override
+            else:
+                dest = mv.write_note(result, citekey, "translation", volume=volume)
+        else:
+            jsonl = base / f"{stem}-output.jsonl"
+            if not jsonl.exists():
+                print(f"ERROR: {jsonl.name} not found in the archive")
+                sys.exit(1)
+            tpr = load("transcription-process-raw.py")
+            raw_path = workdir / f"{stem}-raw.md"
+            tpr.concatenate(jsonl, raw_path)
+            yaml = tpr._build_yaml(stem)
+            raw_text = raw_path.read_text(encoding="utf-8")
+            raw_path.write_text(yaml.rstrip("\n") + "\n\n" + raw_text.lstrip("\n"), encoding="utf-8")
+
+            processed = workdir / "processed.md"
+            tpp = load("transcription-postprocess.py")
+            tpp.run(raw_path, out_path=processed)
+
+            if out_override:
+                out_override.write_text(processed.read_text(encoding="utf-8"), encoding="utf-8")
+                dest = out_override
+            else:
+                body = processed.read_text(encoding="utf-8")
+                if body.startswith("---"):
+                    end = body.find("---", 3)
+                    if end > 0:
+                        body = body[end + 3:].strip()
+                dest = mv.write_note(body, citekey, "transcription", volume=volume)
+
+        print(f"\nReprocessed -> {dest}")
+    finally:
+        shutil.rmtree(workdir, ignore_errors=True)
+
+
+if __name__ == "__main__":
+    main()

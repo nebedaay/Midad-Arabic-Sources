@@ -1,0 +1,37 @@
+# vscode
+.vscode
+
+# Intellij
+*.iml
+.idea
+
+# npm
+node_modules
+
+# Exclude sourcemaps
+*.map
+
+# TypeScript incremental build state
+*.tsbuildinfo
+
+# obsidian
+data.json
+.DS_Store
+dist
+.hotreload
+coverage
+yarn-error.log
+
+# Python cache
+scripts/__pycache__/
+**/__pycache__/
+
+# Local working notes / scratch output
+tmp/
+
+# Editor lock/temp files (Word "~$name.docx", LibreOffice ".~lock.name#")
+~$*
+.~lock.*#
+
+# Duplicate copies Finder/browser makes when a name collides — "main (1).js"
+* ([0-9]*).*

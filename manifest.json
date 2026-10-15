@@ -1,0 +1,9 @@
+{
+	"id": "midad-arabic-sources",
+	"name": "Midad Arabic Sources",
+	"version": "0.1.0",
+	"minAppVersion": "1.4.4",
+	"description": "Import classical Arabic sources (tafsīrs, Qur'ān translations, ḥadīth, riwāyāt) into the vault, transliterate Arabic, and export references to Zotero.",
+	"author": "Joseph Hill",
+	"isDesktopOnly": true
+}

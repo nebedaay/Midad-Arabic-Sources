@@ -1,0 +1,622 @@
+/* Midad Arabic Sources — merged styles.
+   Consolidates .obsidian/snippets/Arabic and Quran.css into the plugin so it
+   ships with the plugin. Retire the snippet once you have verified this. */
+
+/* FONTS — loaded online (Fontsource on jsDelivr) so every user gets the same
+   faces without installing anything. Each import declares `unicode-range`
+   subsets, so a Latin family placed first leaves the Arabic codepoints to the
+   Arabic family after it — no custom @font-face plumbing needed.
+   (@import must precede every other rule in the file.) */
+@import url("https://cdn.jsdelivr.net/npm/@fontsource/noto-serif/400.css");
+@import url("https://cdn.jsdelivr.net/npm/@fontsource/noto-serif/700.css");
+@import url("https://cdn.jsdelivr.net/npm/@fontsource/amiri-quran/400.css");
+@import url("https://cdn.jsdelivr.net/npm/@fontsource/scheherazade-new/400.css");
+@import url("https://cdn.jsdelivr.net/npm/@fontsource/scheherazade-new/700.css");
+@import url("https://cdn.jsdelivr.net/npm/@fontsource/noto-naskh-arabic/400.css");
+@import url("https://cdn.jsdelivr.net/npm/@fontsource/noto-naskh-arabic/700.css");
+
+/* Qur'ān text and the ۝ end-of-āya glyph. Each face is range-scoped, so Latin
+   (transliteration, digits) renders in Noto Serif while the Arabic stays in the
+   Qur'ān face. The Arabic face is a fallback chain:
+     1. a locally installed KFGQPC Uthmanic Script HAFS (the vault's default);
+     2. the same face online, from a pinned npm package on jsDelivr;
+     3. the online Amiri Quran.
+   A `src` list is a fallback chain — the browser takes the first entry that
+   resolves — so every machine gets the KFGQPC hand, and one with no network
+   still falls back cleanly. (The npm package's own CSS is deliberately NOT
+   imported: it declares `font-family: Arabic`, which would hijack the Arabic
+   family used for RTL text.) */
+@font-face {
+    font-family: 'mas-quran';
+    src: local("Noto Serif"), local("NotoSerif-Regular"),
+         url("https://cdn.jsdelivr.net/npm/@fontsource/noto-serif/files/noto-serif-latin-400-normal.woff2") format("woff2");
+    unicode-range: U+0000-024F, U+1E00-1EFF, U+0250-02AF; /* Latin / transliteration */
+}
+@font-face {
+    font-family: 'mas-quran';
+    src: local("KFGQPC Uthmanic Script HAFS"), local("KFGQPCUthmanicScriptHAFS"),
+         url("https://cdn.jsdelivr.net/npm/kfgqpc-uthmanic-script-hafs-regular@1.0.0/arabic.otf") format("opentype"),
+         url("https://cdn.jsdelivr.net/npm/@fontsource/amiri-quran/files/amiri-quran-arabic-400-normal.woff2") format("woff2");
+    unicode-range: U+0600-06FF, U+0750-077F, U+08A0-08FF, U+FB50-FDFF, U+FE70-FEFF;
+}
+
+
+:root {
+
+    /* RTL script font — online, first match wins:
+         "Scheherazade New"   or   "Noto Naskh Arabic" */
+    --arabic-font: "Scheherazade New", "Noto Naskh Arabic", serif;
+    /* Qur'ān text and end-of-āya glyph (۝ is U+06DD, present in KFGQPC HAFS and
+       in Amiri Quran). See the `mas-quran` @font-face above: KFGQPC HAFS local,
+       else KFGQPC HAFS online, else Amiri Quran. */
+    --quran-font: "mas-quran", "Amiri Quran", "Scheherazade New", "Noto Naskh Arabic", serif;
+    --arabic-font-size: 1.3rem;
+    --arabic-line-height: 170%;
+    --quran-font-size: 1.40rem;
+    --quran-line-height: 190%;
+
+}
+
+
+
+/* Arabic / RTL styling — applies in BOTH Live Preview and Reading view.
+   Live Preview: Obsidian writes a literal dir="rtl" on each .cm-line.
+   Reading view: Obsidian writes dir="auto" on each block, which only :dir()
+   can see; there is no literal dir attribute to match there. */
+[dir="rtl"],
+[dir="rtl"] *,
+.mod-rtl,
+.markdown-source-view.mod-cm6 .cm-line:dir(rtl),
+.markdown-preview-view :dir(rtl),
+.markdown-rendered :dir(rtl),
+.callout[data-callout*="arabic"] {
+    font-family: "Noto Serif", var(--arabic-font), serif;
+    font-size: var(--arabic-font-size);
+    line-height: var(--arabic-line-height) !important;
+    direction: rtl !important;
+}
+
+/* CALLOUTS */
+
+.callout[data-callout*="arabic-"] {
+    font-size: var(--arabic-font-size);
+    * {
+        direction: rtl !important;    
+    }
+}
+
+/* Qur'an quotes: enlarge and space only the RTL/Arabic ones, not the English
+   translation that happens to use the same class. :dir(rtl) follows the
+   resolved/inherited direction in both modes; [dir="rtl"] covers the editor,
+   .markdown-preview-view covers the reading view. */
+.callout[data-callout="quran"],
+.quran[dir="rtl"], .quran:dir(rtl),
+.quran-quote:dir(rtl), [class*="quran-quote"]:dir(rtl),
+[dir="rtl"] .quran-quote, [dir="rtl"] [class*="quran-quote"],
+.markdown-preview-view .quran-quote:dir(rtl),
+.markdown-rendered .quran-quote:dir(rtl),
+.markdown-source-view.mod-cm6 .cm-line:dir(rtl) .quran-quote {
+    font-size: var(--quran-font-size) !important;
+}
+
+/* Give Arabic callouts the selected script font even in LTR notes, where the
+   [dir="rtl"] rule above does not reach. (Quran callouts get their own font.) */
+.callout[data-callout^="arabic-"] {
+    font-family: "Noto Serif", var(--arabic-font), serif;
+}
+
+
+/* The dictionary definition callout (`mas-dictionary-definition`). The older
+   `hans-wehr-definition` name is kept as an alias so notes not yet re-rendered
+   still style; re-rendering renames the callout. */
+.callout[data-callout="mas-dictionary-definition"],
+.callout[data-callout="hans-wehr-definition"] {
+    --callout-color: 150, 150, 120;
+    .callout-title {
+        display: none;
+    }
+    .callout-content {
+        ul {
+            list-style-type: none;
+            li.list-bullet::before, li.list-bullet::after {
+                display:none !important;
+            }
+            display: grid;
+            grid-template-columns: 100px 1fr;
+            width: 100%;
+        }
+        ul li {
+            font-weight: normal;
+            /* A dictionary entry is not Arabic prose. Obsidian marks a bullet RTL
+               when it merely *starts* with Arabic — `(تَحَاضَنَ) to embrace one
+               another …` — and the generic RTL rule then gives the line the Arabic
+               size. That rule also reaches the *inner* block Obsidian wraps the
+               text in (`.markdown-rendered :dir(rtl)`), so the whole subtree is
+               reset here, not just the `li`. Arabic still gets the Arabic face
+               from the family list, which is applied per character. */
+            font-size: var(--font-text-size);
+            background: #ffffeebb;
+            vertical-align: top;
+            text-align: left;
+            margin: 2px;
+            border: 0px;
+            padding: 7px 7px;
+            list-style-type: none;
+            .list-bullet::before, .list-bullet::after {
+                display:none !important;
+            }
+        }
+        ul li *:not(sup) {
+            font-size: var(--font-text-size);
+        }
+        ul li .mas-hw {
+            font-size: var(--arabic-font-size);
+        }
+        li:nth-child(2n+1) {
+            text-align: right;
+            font-weight: bold;
+        }
+        /* The gloss column is Latin text even when it opens with an Arabic term. */
+        li:nth-child(2n),
+        li:nth-child(2n) * {
+            direction: ltr !important;
+        }
+    }
+}
+
+
+/* Lane's Lexicon renders as prose, not the two-column grid: a root note is a
+   series of headings with a paragraph or two under each. Such a note carries the
+   `mas-prose` class (Wehr's grid notes do not). Obsidian marks a paragraph RTL
+   when it merely *starts* with Arabic (`حَرْبٌ War, battle …`) and the generic RTL
+   rule then sizes the whole line as Arabic, right-aligns it, and gives it the
+   Arabic leading — and that rule reaches the inner block Obsidian wraps the text
+   in, so the whole subtree is reset here, not just the paragraph. The
+   `.markdown-preview-view` / `.markdown-source-view` prefixes are what put the
+   `font-size` above `.markdown-rendered :dir(rtl)`; `direction` and `line-height`
+   need `!important` because that rule declares them that way. The marker's own
+   paragraph and the heading lines are left out: the first declares its own size
+   once, the second is handled below. The headword span then wins on class count. */
+.markdown-preview-view.mas-prose p:not(:has(.mas-managed)),
+.markdown-preview-view.mas-prose p:not(:has(.mas-managed)) *:not(sup),
+.markdown-source-view.mod-cm6.mas-prose .cm-line:not(:has(.mas-managed)):not(:has(.cm-header)),
+.markdown-source-view.mod-cm6.mas-prose .cm-line:not(:has(.mas-managed)):not(:has(.cm-header)) *:not(sup) {
+    font-size: var(--font-text-size);
+    direction: ltr !important;
+    line-height: normal !important;
+}
+.markdown-preview-view.mas-prose p:not(:has(.mas-managed)) .mas-hw,
+.markdown-source-view.mod-cm6.mas-prose .cm-line:not(:has(.mas-managed)):not(:has(.cm-header)) .mas-hw {
+    font-size: var(--arabic-font-size);
+}
+
+/* A derived entry's heading is the Arabic headword and nothing else — Lane gives
+   no transliteration for it — so it really is Arabic and its RTL direction is
+   left alone. But the generic RTL rule would shrink it to the Arabic *text* size,
+   below any heading, so restore a heading size and leading. (The root's `#`
+   heading carries its transliteration and is Latin-led, so it is unaffected.) */
+.markdown-preview-view.mas-prose h2,
+.markdown-source-view.mod-cm6.mas-prose .cm-line:has(.cm-header-2) {
+    font-size: 1.17em;
+    line-height: normal !important;
+}
+
+/* Lane's verses become `arabic-poetry` callouts, and they are Arabic: the prose
+   reset above (which exists for Lane's *English*) must not force them left-to-
+   right or down to the Latin size. This is scoped to `.mas-prose`, so Wehr's
+   dictionary callouts — whose notes carry no such class — are untouched. */
+.markdown-preview-view.mas-prose .callout[data-callout="arabic-poetry"] p,
+.markdown-preview-view.mas-prose .callout[data-callout="arabic-poetry"] li,
+.markdown-source-view.mod-cm6.mas-prose .callout[data-callout="arabic-poetry"] .cm-line {
+    direction: rtl !important;
+    font-size: var(--arabic-font-size);
+    line-height: var(--arabic-line-height) !important;
+}
+
+
+/* The plugin's own list callout on the top-level Sources note. */
+.callout[data-callout="mas-sources-list"] {
+    --callout-color: 120, 135, 150;
+    .callout-title {
+        display: none;
+    }
+    .callout-content {
+        ul {
+            list-style: none;
+            padding-inline-start: 0;
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            grid-gap: 2px;
+            gap: 5px;
+            padding: 0!important;
+            margin: 0!important;
+            li {
+            list-style:none;
+            background-color: #666;
+            color: #edc;
+            text-align: center;
+            padding:8px !important;
+            margin: 0px !important;
+            border-radius: 3px;
+            a:link {
+                color: #ff4;
+                }
+            }
+            .list-bullet::before, .list-bullet::after {
+                display: none !important;
+            }
+        }
+    }
+}
+
+
+/* 
+
+Displaying Qur'an sūras in the Qur'an vault
+
+*/
+.quran .cm-content * {
+    direction: rtl !important;
+    display: inline-block;
+}
+
+.quran .cm-content {
+    direction: rtl !important;
+    position: relative;
+}
+
+.quran .cm-line:has(.cm-header-1), .quran h1 {
+    position: absolute !important;
+    right: 0 !important;
+    width: 3.5em !important;     /* Locks the box width to your column size */
+    z-index: 10;
+    pointer-events: none;       /* Allows you to click "through" the symbol to edit text */
+    text-align: center;
+    margin: 0 !important;
+    padding: 0 !important;
+}
+
+/* --- STEP 2: STYLES FOR THE NUMBER & AYAH GLYPH --- */
+.quran .cm-line {
+    border: 0px !important;
+}
+
+.quran .cm-header-1, .quran h1 {
+    display: inline-flex !important;
+    align-items: center;
+    justify-content: center;
+    text-decoration: none !important;
+    font-size: .8rem !important;
+    font-family: "Noto Serif", serif !important;
+    font-weight: normal;
+    color: #008800 !important;
+    position: relative; 
+    top: 1.8rem;
+    left:0rem;
+    width: 2rem; 
+    height: 2rem;
+    margin: 0 !important;
+    line-height: 1 !important;
+}
+
+.quran .cm-header-1::before, .quran h1::before {
+    content: "۝";
+    font-family: var(--quran-font);
+    position: absolute;
+    top: .35rem;
+    left: 1rem;
+    transform: translate(-50%, -35%);
+    text-decoration:none!important;
+    font-size: 3rem; 
+    z-index: -1; 
+    background: linear-gradient(to bottom, --bright(var(--gold)), --dark(var(--gold)));
+    background-clip: text;
+    color: transparent;
+}
+
+.callout[data-callout="quran"] h1 {
+    display:none;
+}
+
+/* --- STEP 3: INDENT ALL ĀYĀT, THE REGULAR TEXT LINES --- */
+/* Target every line <div> that does NOT contain a heading.
+   .cm-line = Live Preview, p/.el-p = Reading view. */
+.quran .cm-line:not(:has(.cm-header-1)), .quran p,
+.callout[data-callout="quran"] .el-p, .callout[data-callout="quran"] .cm-line {
+    margin-right: 3.5em !important; /* Matches the width allocated for the heading */
+    text-align: justify;
+    text-rendering: optimizeLegibility;
+    font-feature-settings: "mark" on, "mkmk" on, "liga" on;
+    font-variant-ligatures: discretionary-ligatures;
+    font-kerning: normal;
+}
+
+/* Qur'an font + gilded text, both modes. The .markdown-preview-view /
+   .markdown-source-view selectors keep this above the generic RTL rule. */
+.quran .cm-line:not(:has(.cm-header-1)), .quran p,
+.callout[data-callout="quran"] .el-p, .callout[data-callout="quran"] .cm-line,
+.quran-quote, [class*="quran-quote"],
+.markdown-preview-view .quran-quote, .markdown-rendered .quran-quote,
+.markdown-source-view.mod-cm6 .quran-quote {
+    font-family: var(--quran-font);
+    background-image: repeating-linear-gradient(to bottom, hsla(var(--gold), 100%, 35%, 100%) 0em, hsla(var(--gold), 100%, 35%, 100%) 0.3em, hsla(var(--gold), 100%, 18%, 100%) 1.8em)!important;
+    box-decoration-break: clone!important;
+    background-clip: text!important;
+    color: transparent;
+}
+
+/* Taller line spacing only for RTL/Arabic Qur'an text and quotes, both modes. */
+.quran .cm-line:not(:has(.cm-header-1)), .quran p,
+.callout[data-callout="quran"] .el-p, .callout[data-callout="quran"] .cm-line,
+.quran-quote:dir(rtl), [class*="quran-quote"]:dir(rtl),
+[dir="rtl"] .quran-quote, [dir="rtl"] [class*="quran-quote"],
+.markdown-preview-view .quran-quote:dir(rtl),
+.markdown-rendered .quran-quote:dir(rtl),
+.markdown-source-view.mod-cm6 .cm-line:dir(rtl) .quran-quote {
+    line-height: var(--quran-line-height) !important;
+}
+
+
+.quran-quote {
+    font-style:normal;
+}
+
+
+/* ── Managed-region marker ───────────────────────────────────────────────
+   The generated region is bounded by <span class="mas-managed">. Keep it faint
+   so it never competes with the text, in Qur'an notes and any other genre (the
+   gilded Qur'an rule targets .quran p, so we override the text fill here).
+
+   The font-size is declared ONCE, on the span. Do not also set a font-size on
+   the :has() block below: percentage font-sizes multiply, so a 75% span inside
+   a 70% paragraph renders at ~52% — and inside a .quran h1 (50%) it collapses
+   to ~half of that again. That compounding is why the marker looked far
+   smaller than the number in the rule. */
+
+/* The gilded Qur'an rule targets the paragraph (.quran p) itself, so styling
+   only the inner <span> leaves the paragraph's gradient in place. :has()
+   (Chromium, already used above) lets us neutralise that paragraph, and it
+   works for any genre, not just .quran. Covers reading view (p/.el-p) and
+   live preview (.cm-line). No font-size here — see the note above. */
+.mas-managed {
+    background: #ddc7 !important;
+    background-image: none !important;
+    font-family: sans-serif;
+    font-size: 70%;
+    padding: 3px;
+    border-radius: 3px !important;
+    color: #06a9 !important;
+}
+   p:has(> .mas-managed),
+.el-p:has(.mas-managed),
+.cm-line:has(.mas-managed) {
+    color: #6669 !important;
+    background: none !important;
+    background-image: none !important;
+    margin-right: 0 !important;
+    padding-right: 0 !important;
+    text-align: left !important;
+    line-height: 1 !important;
+}
+
+
+/* The source's own editorial apparatus — manuscript variants (`زيادة من د.`)
+   and bibliographic refs (`صحيح`, `رواه`, `انظر:`) — shown as a muted
+   superscript aside instead of a wikilink. */
+.mas-src-note {
+    color: var(--text-muted);
+    font-size: 0.75em;
+}
+
+/* ── Manage sources modal ─────────────────────────────────────────────────────
+   A full-height two-pane dialogue in the manner of ScholarWeft's "Add
+   literature notes" modal: a filter sidebar on the left, a selectable list on
+   the right. Rows are highlighted when selected (no checkboxes). */
+.mas-manage-modal {
+    width: min(1040px, 94vw);
+    height: min(85vh, 820px);
+    display: flex;
+    flex-direction: column;
+}
+.mas-manage-modal .modal-content {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: hidden;
+}
+.mas-manage {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    min-height: 0;
+}
+.mas-manage__tabs {
+    display: flex;
+    gap: 4px;
+    border-bottom: 1px solid var(--background-modifier-border);
+}
+.mas-manage__tab {
+    background: transparent;
+    border: none;
+    box-shadow: none;
+    border-radius: 0;
+    border-bottom: 2px solid transparent;
+    padding: 6px 10px;
+    color: var(--text-muted);
+    font-size: var(--font-ui-small);
+    cursor: pointer;
+}
+.mas-manage__tab:hover {
+    color: var(--text-normal);
+    background: var(--background-modifier-hover);
+}
+.mas-manage__tab.is-active {
+    color: var(--text-normal);
+    border-bottom-color: var(--interactive-accent);
+    font-weight: var(--font-semibold);
+}
+.mas-manage__desc {
+    margin: 6px 0;
+    color: var(--text-muted);
+    font-size: var(--font-ui-small);
+}
+.mas-manage__searchrow {
+    display: flex;
+    align-items: center;
+    gap: var(--size-4-2);
+    margin-bottom: var(--size-4-2);
+}
+.mas-manage__label {
+    color: var(--text-muted);
+    font-size: var(--font-ui-small);
+}
+.mas-manage__search {
+    flex: 1 1 auto;
+}
+.mas-manage__body {
+    display: flex;
+    gap: var(--size-4-3);
+    flex: 1 1 auto;
+    min-height: 0;
+}
+.mas-manage__side {
+    flex: 0 0 230px;
+    display: flex;
+    flex-direction: column;
+    gap: var(--size-4-2);
+    overflow-y: auto;
+    min-height: 0;
+}
+.mas-manage__group {
+    margin-top: var(--size-4-2);
+    padding-top: var(--size-4-2);
+    border-top: 1px solid var(--background-modifier-border);
+    font-size: var(--font-ui-smaller);
+    font-weight: var(--font-semibold);
+    color: var(--text-muted);
+}
+.mas-manage__toggles {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+}
+.mas-manage__toggle {
+    font-size: var(--font-ui-smaller);
+    line-height: 1.2;
+    padding: 2px 7px;
+    height: auto;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: var(--radius-s);
+    background: transparent;
+    color: var(--text-muted);
+    box-shadow: none;
+    cursor: pointer;
+}
+.mas-manage__toggle:hover {
+    background: var(--background-modifier-hover);
+}
+.mas-manage__toggle.is-on {
+    background: var(--interactive-accent);
+    border-color: var(--interactive-accent);
+    color: var(--text-on-accent);
+}
+.mas-manage__repo-list {
+    flex: 1 1 auto;
+    min-height: 100px;
+    overflow-y: auto;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: var(--radius-s);
+    padding: var(--size-4-1) 0;
+}
+.mas-manage__repo {
+    font-size: var(--font-ui-smaller);
+    line-height: 1.35;
+    padding: 1px 8px;
+    border-radius: var(--radius-s);
+    cursor: pointer;
+    overflow-wrap: anywhere;
+    background: var(--background-modifier-active-hover);
+}
+.mas-manage__repo:hover {
+    filter: brightness(0.97);
+}
+.mas-manage__repo.is-off {
+    color: var(--text-faint);
+    background: transparent;
+}
+.mas-manage__pane {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+}
+.mas-manage__list {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: var(--radius-s);
+    padding: var(--size-4-1);
+}
+.mas-manage__head {
+    display: grid;
+    column-gap: 8px;
+    padding: 4px;
+    position: sticky;
+    top: 0;
+    background: var(--background-primary);
+    font-weight: var(--font-semibold);
+    color: var(--text-muted);
+    font-size: var(--font-ui-smaller);
+}
+.mas-manage__collection {
+    font-weight: var(--font-semibold);
+    margin: 6px 4px 2px;
+    color: var(--text-muted);
+    font-size: var(--font-ui-smaller);
+}
+.mas-manage__row {
+    display: grid;
+    column-gap: 8px;
+    align-items: center;
+    padding: 3px 4px;
+    border-radius: var(--radius-s);
+    cursor: pointer;
+}
+.mas-manage__row:hover {
+    background: var(--background-modifier-hover);
+}
+.mas-manage__row.is-selected {
+    background: var(--background-modifier-active-hover);
+}
+.mas-manage__row.is-hidden,
+.mas-manage__collection.is-hidden {
+    display: none;
+}
+.mas-manage__lang,
+.mas-manage__mut {
+    color: var(--text-muted);
+    font-size: var(--font-ui-smaller);
+}
+.mas-manage__size {
+    color: var(--text-muted);
+    font-size: var(--font-ui-smaller);
+    text-align: right;
+}
+.mas-manage__foot {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--size-4-2);
+    padding-top: var(--size-4-2);
+}
+.mas-manage__status {
+    color: var(--text-muted);
+    font-size: var(--font-ui-smaller);
+}
+.mas-manage__actions {
+    display: flex;
+    gap: var(--size-4-2);
+}
+.mas-manage__actions .mas-manage__toggle.is-hidden {
+    display: none;
+}

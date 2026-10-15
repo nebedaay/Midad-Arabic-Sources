@@ -1,0 +1,21 @@
+{
+  "compilerOptions": {
+    "baseUrl": ".",
+    "target": "ES2018",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2018", "DOM", "DOM.Iterable"],
+    "noImplicitAny": true,
+    "strictNullChecks": false,
+    "alwaysStrict": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "isolatedModules": true,
+    "forceConsistentCasingInFileNames": true,
+    "noEmit": true,
+    "types": ["node"]
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["node_modules"]
+}
