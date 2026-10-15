@@ -1,0 +1,84 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "*"
+
+permissions:
+  contents: write
+  # Artifact attestations: the OIDC token proves the assets were built by this
+  # workflow from this repository (the `attestations` scope stores the record).
+  id-token: write
+  attestations: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+      - run: npm ci
+      - run: npm run build
+      # ── Channel handling ────────────────────────────────────────────────────
+      # A STABLE tag is a bare `x.y.z` and MUST equal the committed manifest
+      # version (the directory reads manifest.json at HEAD). A PRE-RELEASE tag
+      # contains a '-' (e.g. 0.3.0-alpha, 0.3.0-beta.1): it is published as a
+      # GitHub prerelease — invisible to the community directory and Obsidian's
+      # in-app updater, but visible to BRAT with "beta versions" enabled — and
+      # the tag version is stamped into the PUBLISHED manifest.json only (HEAD's
+      # copy stays at the stable version).
+      - name: Verify manifest version matches the stable tag
+        if: ${{ !contains(github.ref_name, '-') }}
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          node -e "const m=require('./manifest.json'); if (m.version !== process.env.TAG) { console.error('manifest.json version ('+m.version+') != tag ('+process.env.TAG+')'); process.exit(1); }"
+
+      - name: Stamp the tag version into the published manifest (prereleases)
+        if: ${{ contains(github.ref_name, '-') }}
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          node -e "const fs=require('fs'); const m=JSON.parse(fs.readFileSync('manifest.json','utf8')); m.version=process.env.TAG; fs.writeFileSync('manifest.json', JSON.stringify(m,null,'\t')+'\n');"
+
+      # Provenance for the release assets, so a user can cryptographically verify
+      # they were built from this repository by this workflow rather than
+      # substituted. Runs after the manifest steps so it signs the final files.
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            main.js
+            manifest.json
+            styles.css
+
+      # The release body comes from release-notes.md, which is committed with
+      # the release. Stable releases use it; pre-releases fall back to generated
+      # notes. A stable release with no notes file still gets generated notes,
+      # so a release is never blocked.
+      - name: Create GitHub release (stable, notes from release-notes.md)
+        if: ${{ hashFiles('release-notes.md') != '' && !contains(github.ref_name, '-') }}
+        uses: softprops/action-gh-release@v2
+        with:
+          prerelease: false
+          files: |
+            main.js
+            manifest.json
+            styles.css
+          body_path: release-notes.md
+          fail_on_unmatched_files: true
+      - name: Create GitHub release (generated notes / prerelease)
+        if: ${{ hashFiles('release-notes.md') == '' || contains(github.ref_name, '-') }}
+        uses: softprops/action-gh-release@v2
+        with:
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          files: |
+            main.js
+            manifest.json
+            styles.css
+          generate_release_notes: true
+          fail_on_unmatched_files: true

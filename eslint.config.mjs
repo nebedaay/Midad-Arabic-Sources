@@ -33,32 +33,51 @@ const reviewWarnings = {
   // directory only warns about). `no-console` cannot be disabled per-line — the
   // plugin forbids it — so severity is the only lever, and the review warns.
   "obsidianmd/rule-custom-message": "warn",
-  // Sentence case for UI text, with the plugin's own proper nouns declared so
-  // the rule does not "correct" Midad -> midad, Zotero -> zotero, or the
-  // literal property names the plugin writes (e.g. `mas-managed`).
+  // Sentence case for UI text. The option object REPLACES the plugin's
+  // defaults, so the default brand/acronym lists are repeated here in full and
+  // the plugin's own proper nouns are appended. (Without this, declaring any
+  // brand would silently drop `Obsidian`, `Zotero`, `Gemini`, `API`, … and
+  // flag every UI string that uses them.)
   "obsidianmd/ui/sentence-case": [
     "warn",
     {
       mode: "loose",
       brands: [
-        "Midad",
-        "Zotero",
-        "Obsidian",
-        "Gemini",
-        "CAMeL",
-        "Python",
-        "Eta",
-        "YAML",
-        "Markdown",
-        "Qur'ān",
-        "Qurʾān",
-        "tafsīr",
-        "ḥadīth",
-        "riwāya",
-        "riwāyāt",
+        // OS
+        "iOS", "iPadOS", "macOS", "Windows", "Android", "Linux",
+        // Obsidian
+        "Obsidian", "Obsidian Sync", "Obsidian Publish",
+        // Services/APIs
+        "Google", "Gemini", "Vertex AI", "OpenAI", "GPT", "Anthropic", "Claude", "Cursor", "Microsoft",
+        // Cloud storage
+        "Google Drive", "Dropbox", "OneDrive", "iCloud Drive",
+        // Communication platforms
+        "YouTube", "Slack", "Discord", "Telegram", "WhatsApp", "Twitter", "X",
+        // Productivity tools
+        "Readwise", "Zotero", "Excalidraw", "Mermaid",
+        // Languages
+        "Markdown", "LaTeX", "JavaScript", "TypeScript",
+        // Development tools
+        "Node.js", "npm", "pnpm", "Yarn", "Git", "GitHub", "GitLab",
+        // Other tools
+        "Anki", "CalDAV", "CardDAV", "Evernote", "IntelliJ IDEA", "Jekyll", "Logseq", "Notion", "PyCharm", "React", "Reddit", "Roam Research", "Svelte", "VS Code", "Visual Studio Code", "WebDAV", "WebStorm",
+        // Midad Arabic Sources
+        "Midad", "Midad Arabic Sources", "Arabic", "Python", "Eta", "DeepSeek", "CAMeL",
+        "Qurʾān", "Qur’ān", "Qur'ān", "Qur’an", "Qur'an",
+        "GEMINI_API_KEY", "GOOGLE_API_KEY",
       ],
-      acronyms: ["ETA", "CSS", "JSON", "URL", "MOC", "OCR", "LLM", "PDF", "SQLite"],
-      ignoreRegex: ["mas-", "@[a-z]"],
+      acronyms: [
+        // Defaults
+        "API", "HTTP", "HTTPS", "URL", "DNS", "TCP", "IP", "SSH", "TLS", "SSL", "FTP", "SFTP", "SMTP",
+        "JSON", "XML", "HTML", "CSS", "PDF", "CSV", "YAML", "SQL", "PNG", "JPG", "JPEG", "GIF", "SVG",
+        "2FA", "MFA", "OAuth", "JWT", "LDAP", "SAML", "SDK", "IDE", "CLI", "GUI", "CRUD", "REST", "SOAP",
+        "CPU", "GPU", "RAM", "SSD", "USB", "UI", "OK", "RSS", "S3", "ID", "UUID", "GUID", "SHA", "MD5",
+        "ASCII", "UTF-8", "UTF-16", "DOM", "CDN", "FAQ", "AI", "ML", "LLM",
+        // Midad Arabic Sources
+        "ETA", "MOC", "OCR", "CSL", "SQLite", "BERT", "MLE", "CAMeL", "PDFS",
+      ],
+      ignoreWords: ["Use", "Copy", "Settings", "Community"],
+      ignoreRegex: ["mas-", "@[a-z]", "midad-arabic-sources"],
     },
   ],
 };

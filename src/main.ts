@@ -1,7 +1,11 @@
+import { execFile, spawn } from "child_process";
+import * as fs from "fs";
+import * as http from "http";
+import * as os from "os";
+import { promisify } from "util";
 import {
 	App,
 	Editor,
-	FileSystemAdapter,
 	MarkdownView,
 	Modal,
 	Notice,
@@ -40,10 +44,6 @@ import {
 // and pick the first that can actually import the pipeline's modules.
 
 async function execProbe(file: string, args: string[]): Promise<boolean> {
-	// eslint-disable-next-line @typescript-eslint/no-var-requires
-	const { execFile } = require("child_process");
-	// eslint-disable-next-line @typescript-eslint/no-var-requires
-	const { promisify } = require("util");
 	try {
 		await promisify(execFile)(file, args);
 		return true;
@@ -58,8 +58,7 @@ async function findPython3(configured: string, modules: string[]): Promise<strin
 	const win = platform === "win32";
 	let home = "";
 	try {
-		// eslint-disable-next-line @typescript-eslint/no-var-requires
-		home = require("os").homedir() ?? "";
+		home = os.homedir() ?? "";
 	} catch {
 		home = "";
 	}
@@ -452,7 +451,7 @@ export default class ArabicSupportPlugin extends Plugin {
 	resolvePython(): Promise<string> {
 		const configured = this.settings.pythonPath ?? "";
 		if (configured.trim()) return Promise.resolve(configured.trim());
-		if (!this.pythonPromise) {
+		if (this.pythonPromise == null) {
 			this.pythonPromise = findPython3("", ["fitz", "requests", "google.genai"]).then((p) => p ?? "python3");
 		}
 		return this.pythonPromise;
@@ -504,8 +503,6 @@ export default class ArabicSupportPlugin extends Plugin {
 	/** Resolve a script path: bundled in the plugin dir first, then the vault. */
 	resolveScript(rel: string): string {
 		const vault = this.vaultPath();
-		// eslint-disable-next-line @typescript-eslint/no-var-requires
-		const fs = require("fs");
 		const bundled = `${vault}/.obsidian/plugins/midad-arabic-sources/${rel}`;
 		try {
 			if (fs.existsSync(bundled)) return bundled;
@@ -514,8 +511,6 @@ export default class ArabicSupportPlugin extends Plugin {
 	}
 
 	async runScript(scriptRel: string, args: string[], onEvent: (ev: any) => void): Promise<{ code: number; lines: string[] }> {
-		// eslint-disable-next-line @typescript-eslint/no-var-requires
-		const { spawn } = require("child_process");
 		const vault = this.vaultPath();
 		const python = await this.resolvePython();
 		const lines: string[] = [];
@@ -621,18 +616,14 @@ export default class ArabicSupportPlugin extends Plugin {
 	}
 
 	jobPath(title: string, ext: string): string {
-		// eslint-disable-next-line @typescript-eslint/no-var-requires
-		const fs = require("fs");
 		const dir = `${this.vaultPath()}/.midad-arabic-sources/jobs`;
 		try { fs.mkdirSync(dir, { recursive: true }); } catch { /* ignore */ }
 		const ts = new Date().toISOString().replace(/[:.]/g, "-");
 		return `${dir}/${ts}-${title.replace(/[^\w.-]+/g, "_")}.${ext}`;
 	}
 
-	newestState(): any | null {
+	newestState(): Record<string, any> | null {
 		try {
-			// eslint-disable-next-line @typescript-eslint/no-var-requires
-			const fs = require("fs");
 			const dir = `${this.vaultPath()}/.midad-arabic-sources/jobs`;
 			if (!fs.existsSync(dir)) return null;
 			const files = (fs.readdirSync(dir) as string[]).filter((f) => f.endsWith(".json")).sort();
@@ -648,8 +639,6 @@ export default class ArabicSupportPlugin extends Plugin {
 
 	async openLastLog() {
 		try {
-			// eslint-disable-next-line @typescript-eslint/no-var-requires
-			const fs = require("fs");
 			const dir = `${this.vaultPath()}/.midad-arabic-sources/jobs`;
 			if (!fs.existsSync(dir)) { new Notice("No pipeline logs yet."); return; }
 			const files = (fs.readdirSync(dir) as string[]).filter((f) => f.endsWith(".log")).sort();
@@ -945,8 +934,6 @@ export default class ArabicSupportPlugin extends Plugin {
 	 * talks to it normally.
 	 */
 	async localHttp(method: string, url: string, headers: Record<string, string>, body?: string): Promise<{ status: number; text: string; headers: Record<string, string> }> {
-		// eslint-disable-next-line @typescript-eslint/no-var-requires
-		const http = require("http");
 		const u = new URL(url);
 		const h = { ...headers };
 		if (body) h["Content-Type"] = "application/json";
@@ -1005,7 +992,7 @@ export default class ArabicSupportPlugin extends Plugin {
 		} catch {
 			json = null;
 		}
-		console.log("[arabic-support] zotero", method, url, "→", status);
+		console.debug("[arabic-support] zotero", method, url, "→", status);
 		return { status, text, json, headers: hdrs };
 	}
 
@@ -1058,7 +1045,7 @@ export default class ArabicSupportPlugin extends Plugin {
 		try {
 			const text = await this.app.vault.adapter.read(hub);
 			if (text.includes(`[[@${citekey}]]`)) return;
-			const next = text.replace(/^(mas-up:\n(?:  - .+\n)+)/m, (m) => `${m}  - "[[@${citekey}]]"\n`);
+			const next = text.replace(/^(mas-up:\n(?: {2}- .+\n)+)/m, (m) => `${m}  - "[[@${citekey}]]"\n`);
 			if (next !== text) await this.app.vault.adapter.write(hub, next);
 		} catch { /* ignore */ }
 	}
@@ -1670,7 +1657,7 @@ export default class ArabicSupportPlugin extends Plugin {
 
 	bundledTemplateDir(): string {
 		// Relative to the vault config dir, like ScholarWeft (plugin.manifest.dir).
-		const dir = this.manifest.dir ?? ".obsidian/plugins/midad-arabic-sources";
+		const dir = this.manifest.dir ?? `${this.app.vault.configDir}/plugins/midad-arabic-sources`;
 		return `${dir}/${TEMPLATE_FOLDER}`;
 	}
 
@@ -1954,8 +1941,6 @@ export default class ArabicSupportPlugin extends Plugin {
 
 	async loadAllSourceModels(): Promise<SourceModel[]> {
 		const root = `${this.vaultPath()}/.midad-arabic-sources/source-models`;
-		// eslint-disable-next-line @typescript-eslint/no-var-requires
-		const fs = require("fs");
 		const files: string[] = [];
 		const walk = (dir: string) => {
 			for (const name of fs.readdirSync(dir)) {
@@ -2019,8 +2004,6 @@ export default class ArabicSupportPlugin extends Plugin {
 	/** Re-render every cached model (run after editing a template). */
 	async rerenderAllSources(): Promise<string[]> {
 		const root = `${this.vaultPath()}/.midad-arabic-sources/source-models`;
-		// eslint-disable-next-line @typescript-eslint/no-var-requires
-		const fs = require("fs");
 		const models: string[] = [];
 		const walk = (dir: string) => {
 			for (const name of fs.readdirSync(dir)) {
@@ -2244,15 +2227,17 @@ export default class ArabicSupportPlugin extends Plugin {
 		} else if (this.settings.autoUpdateSourceTemplates === false) {
 			return;
 		} else {
-			new SourceTemplateUpdateConsentModal(this.app, incomplete.length + stale.full.length + stale.hubs.length + (indexDirty ? 1 : 0), async (choice) => {
-				if (choice === "yes") {
-					this.settings.autoUpdateSourceTemplates = true;
-					await this.saveSettings();
-					await apply();
-				} else if (choice === "no") {
-					this.settings.autoUpdateSourceTemplates = false;
-					await this.saveSettings();
-				}
+			new SourceTemplateUpdateConsentModal(this.app, incomplete.length + stale.full.length + stale.hubs.length + (indexDirty ? 1 : 0), (choice) => {
+				void (async () => {
+					if (choice === "yes") {
+						this.settings.autoUpdateSourceTemplates = true;
+						await this.saveSettings();
+						await apply();
+					} else if (choice === "no") {
+						this.settings.autoUpdateSourceTemplates = false;
+						await this.saveSettings();
+					}
+				})();
 			}).open();
 		}
 	}
@@ -2289,7 +2274,7 @@ export default class ArabicSupportPlugin extends Plugin {
 				return null;
 			}
 			return data.romanized ?? "";
-		} catch (e) {
+		} catch {
 			new Notice(
 				`Transliteration server not reachable at ${this.settings.serverUrl}. ` +
 					"Start it with: python3 scripts/transliterate-server.py"
@@ -2319,7 +2304,7 @@ export default class ArabicSupportPlugin extends Plugin {
 				body: JSON.stringify({ entries }),
 			});
 			new Notice(`Lexicon updated (${Object.keys(entries).length} term(s)).`);
-		} catch (e) {
+		} catch {
 			new Notice("Could not update the lexicon.");
 		}
 	}
@@ -2328,7 +2313,7 @@ export default class ArabicSupportPlugin extends Plugin {
 		try {
 			const res = await requestUrl({ url: this.baseUrl() + "/health", method: "GET" });
 			return res.json;
-		} catch (e) {
+		} catch {
 			return null;
 		}
 	}
@@ -2341,10 +2326,6 @@ export default class ArabicSupportPlugin extends Plugin {
 			new Notice(`Transliteration server already running at ${this.settings.serverUrl}.`);
 			return;
 		}
-		// eslint-disable-next-line @typescript-eslint/no-var-requires
-		const { spawn } = require("child_process");
-		// eslint-disable-next-line @typescript-eslint/no-var-requires
-		const fs = require("fs");
 		const vault = this.vaultPath();
 		const script = this.resolveScript(this.settings.transliterationServerScript || "scripts/transliterate-server.py");
 		const python = (this.settings.pythonPath ?? "").trim() || "python3";
@@ -2369,7 +2350,7 @@ export default class ArabicSupportPlugin extends Plugin {
 		const loading = new Notice("Starting transliteration server…", 0);
 		try {
 			for (let i = 0; i < 40; i++) {
-				await new Promise((resolve) => setTimeout(resolve, 1000));
+				await new Promise((resolve) => window.setTimeout(resolve, 1000));
 				if (await this.health()) {
 					new Notice("Transliteration server started.");
 					return;
@@ -2393,8 +2374,6 @@ export default class ArabicSupportPlugin extends Plugin {
 			new Notice("Transliteration server stopped.");
 			return;
 		}
-		// eslint-disable-next-line @typescript-eslint/no-var-requires
-		const { execFile } = require("child_process");
 		const name = (this.settings.transliterationServerScript || "transliterate-server.py").split("/").pop();
 		execFile("pkill", ["-f", String(name)], (err: unknown) => {
 			new Notice(err ? "No running transliteration server found." : "Transliteration server stopped.");
@@ -2591,7 +2570,7 @@ class ArabicSupportSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName("Engine")
-			.setDesc("bert: best for unvocalized prose. mle: faster, rougher. none: no CAMeL; fully vocalized text only.")
+			.setDesc("BERT: best for unvocalized prose. MLE: faster, rougher. None: no CAMeL; fully vocalized text only.")
 			.addDropdown((drop) =>
 				drop
 					.addOptions({ bert: "bert", mle: "mle", none: "none" })
@@ -2645,7 +2624,7 @@ class ArabicSupportSettingTab extends PluginSettingTab {
 					})
 			);
 
-		containerEl.createEl("h3", { text: "LLM romanization" });
+		new Setting(containerEl).setName("LLM romanization").setHeading();
 
 		new Setting(containerEl)
 			.setName("Provider")
@@ -2681,13 +2660,13 @@ class ArabicSupportSettingTab extends PluginSettingTab {
 				text.inputEl.type = "password";
 			});
 
-		containerEl.createEl("h3", { text: "Transcription & translation pipeline" });
+		new Setting(containerEl).setName("Transcription & translation pipeline").setHeading();
 
 		new Setting(containerEl)
 			.setName("Python executable")
 			.setDesc("Python used to run the Gemini batch pipeline scripts. Leave blank to auto-detect.")
 			.addText((text) =>
-				text.setPlaceholder("auto-detect").setValue(this.plugin.settings.pythonPath).onChange(async (value) => {
+				text.setPlaceholder("Auto-detect").setValue(this.plugin.settings.pythonPath).onChange(async (value) => {
 					this.plugin.settings.pythonPath = value.trim();
 					this.plugin.pythonPromise = null;
 					await this.plugin.saveSettings();
@@ -2715,7 +2694,7 @@ class ArabicSupportSettingTab extends PluginSettingTab {
 				text.inputEl.type = "password";
 			});
 
-		containerEl.createEl("h3", { text: "Text source importer" });
+		new Setting(containerEl).setName("Text source importer").setHeading();
 
 		new Setting(containerEl)
 			.setName("Importer script")
@@ -2751,7 +2730,7 @@ class ArabicSupportSettingTab extends PluginSettingTab {
 			.setName("Canonical Qurʾān riwāya")
 			.setDesc("Riwāya whose sūra notes are unprefixed (the main reference). Set once, to the first riwāya you install; edit here to switch. Qurʾān citation linking in source notes requires Ḥafṣ (hafs): almost all source texts quote the Ḥafṣ reading, so citations cannot be matched against another riwāya.")
 			.addText((text) =>
-				text.setPlaceholder("hafs").setValue(this.plugin.settings.canonicalQuranRiwāya).onChange(async (value) => {
+				text.setPlaceholder("Ḥafṣ").setValue(this.plugin.settings.canonicalQuranRiwāya).onChange(async (value) => {
 					this.plugin.settings.canonicalQuranRiwāya = value.trim();
 					await this.plugin.saveSettings();
 				})
@@ -2889,8 +2868,8 @@ class ArabicSupportSettingTab extends PluginSettingTab {
 			);
 
 		keySetting = new Setting(containerEl)
-			.setName("Zotero Web API key")
-			.setDesc("From zotero.org/settings/keys, with write access. Stored in this vault's plugin data.")
+			.setName("Zotero web API key")
+			.setDesc("From Zotero.org/settings/keys, with write access. Stored in this vault's plugin data.")
 			.addText((t) =>
 				t.setValue(this.plugin.settings.zoteroApiKey).onChange(async (v: string) => {
 					this.plugin.settings.zoteroApiKey = v.trim();
@@ -2973,34 +2952,36 @@ class StatusPanel {
 		s.overflow = "hidden";
 
 		this.header = this.root.createDiv();
-		const hs = this.header.style;
-		hs.display = "flex";
-		hs.alignItems = "center";
-		hs.gap = "6px";
-		hs.padding = "6px 8px";
-		hs.cursor = "pointer";
-		hs.fontWeight = "600";
-		hs.fontSize = "var(--font-ui-small)";
+		this.header.setCssStyles({
+			display: "flex",
+			alignItems: "center",
+			gap: "6px",
+			padding: "6px 8px",
+			cursor: "pointer",
+			fontWeight: "600",
+			fontSize: "var(--font-ui-small)",
+		});
 		this.titleEl = this.header.createSpan({ text: `⟳ ${title}` });
 		const spacer = this.header.createDiv();
-		spacer.style.flex = "1";
+		spacer.setCssStyles({ flex: "1" });
 		const minBtn = this.header.createEl("button", { text: "–" });
-		minBtn.style.cursor = "pointer";
+		minBtn.setCssStyles({ cursor: "pointer" });
 		minBtn.onclick = (e) => { e.stopPropagation(); this.toggleMinimize(); };
 		const closeBtn = this.header.createEl("button", { text: "×" });
-		closeBtn.style.cursor = "pointer";
+		closeBtn.setCssStyles({ cursor: "pointer" });
 		closeBtn.onclick = (e) => { e.stopPropagation(); this.hide(); };
 		this.header.onclick = () => { if (this.minimized) this.toggleMinimize(); };
 
 		this.body = this.root.createDiv();
-		this.body.style.padding = "0 8px 8px";
+		this.body.setCssStyles({ padding: "0 8px 8px" });
 		this.logEl = this.body.createEl("pre");
-		const ls = this.logEl.style;
-		ls.whiteSpace = "pre-wrap";
-		ls.fontSize = "var(--font-ui-smaller)";
-		ls.maxHeight = "32vh";
-		ls.overflow = "auto";
-		ls.margin = "0";
+		this.logEl.setCssStyles({
+			whiteSpace: "pre-wrap",
+			fontSize: "var(--font-ui-smaller)",
+			maxHeight: "32vh",
+			overflow: "auto",
+			margin: "0",
+		});
 	}
 
 	append(ev: any): void {
@@ -3027,11 +3008,10 @@ class StatusPanel {
 		const valid = paths.filter((p) => typeof p === "string" && p);
 		if (!valid.length) return;
 		const row = this.body.createDiv();
-		row.style.marginTop = "4px";
+		row.setCssStyles({ marginTop: "4px" });
 		for (const path of valid) {
 			const a = row.createEl("a", { text: `↗ ${basenameJS(path)}` });
-			a.style.marginRight = "10px";
-			a.style.cursor = "pointer";
+			a.setCssStyles({ marginRight: "10px", cursor: "pointer" });
 			a.onclick = (e) => { e.preventDefault(); this.openPath(path); };
 		}
 		this.scrollToBottom();
@@ -3041,19 +3021,19 @@ class StatusPanel {
 		const vault = (this.app.vault.adapter as any)?.getBasePath?.() ?? "";
 		const rel = vault && path.startsWith(vault) ? path.slice(vault.length + 1) : path;
 		const file = this.app.vault.getAbstractFileByPath(rel);
-		if (file) this.app.workspace.getLeaf("tab").openFile(file as any);
-		else this.app.workspace.openLinkText(rel, "", true);
+		if (file) void this.app.workspace.getLeaf("tab").openFile(file as any);
+		else void this.app.workspace.openLinkText(rel, "", true);
 	}
 
 	reveal(): void {
-		this.root.style.display = "flex";
+		this.root.setCssStyles({ display: "flex" });
 		if (this.minimized) this.toggleMinimize();
 		this.scrollToBottom();
 		this.root.scrollIntoView({ block: "nearest" });
 	}
 
 	hide(): void {
-		this.root.style.display = "none";
+		this.root.setCssStyles({ display: "none" });
 	}
 
 	toggleMinimize(): void {
@@ -3083,10 +3063,12 @@ class LogModal extends Modal {
 		contentEl.createEl("h3", { text: this.title });
 		const pre = contentEl.createEl("pre");
 		pre.setText(this.text);
-		pre.style.whiteSpace = "pre-wrap";
-		pre.style.maxHeight = "60vh";
-		pre.style.overflow = "auto";
-		pre.style.fontSize = "var(--font-ui-smaller)";
+		pre.setCssStyles({
+			whiteSpace: "pre-wrap",
+			maxHeight: "60vh",
+			overflow: "auto",
+			fontSize: "var(--font-ui-smaller)",
+		});
 	}
 
 	onClose(): void {
@@ -3143,9 +3125,11 @@ class ResumeModal extends Modal {
 		contentEl.createEl("p", { text: `${this.state.stage ?? "unknown"}${pdf ? " — " + pdf : ""}` });
 		const pre = contentEl.createEl("pre");
 		pre.setText(JSON.stringify(this.state, null, 1));
-		pre.style.maxHeight = "30vh";
-		pre.style.overflow = "auto";
-		pre.style.fontSize = "var(--font-ui-smaller)";
+		pre.setCssStyles({
+			maxHeight: "30vh",
+			overflow: "auto",
+			fontSize: "var(--font-ui-smaller)",
+		});
 		const setting = new Setting(contentEl);
 		let alive = false;
 		try { if (this.state.pid) { process.kill(this.state.pid, 0); alive = true; } } catch { alive = false; }
@@ -3159,7 +3143,7 @@ class ResumeModal extends Modal {
 				})
 			);
 		}
-		setting.addButton((b) => b.setButtonText("Open log").onClick(() => { this.close(); this.plugin.openLastLog(); }));
+		setting.addButton((b) => b.setButtonText("Open log").onClick(() => { this.close(); void this.plugin.openLastLog(); }));
 		setting.addButton((b) => b.setButtonText("Dismiss").onClick(() => this.close()));
 	}
 
@@ -3206,7 +3190,7 @@ class TranscribeModal extends Modal {
 			row.createSpan({ text: "vol." });
 			const vol = new TextComponent(row);
 			vol.setValue(pdf.volume != null ? String(pdf.volume) : "").setPlaceholder("—");
-			vol.inputEl.style.width = "3.5em";
+			vol.inputEl.setCssStyles({ width: "3.5em" });
 			this.checks.push({ pdf, el: cb, vol });
 		}
 
@@ -3255,7 +3239,7 @@ class TranslateModal extends Modal {
 
 		const transcriptions = this.notes.filter((n) => n.type === "transcription");
 		if (!transcriptions.length) {
-			contentEl.createEl("p", { text: "No transcription exists yet. Run “Transcribe this item's PDF file(s)” first." });
+			contentEl.createEl("p", { text: "No transcription exists yet. Run “transcribe this item's PDF file(s)” first." });
 		} else {
 			contentEl.createEl("p", { text: "Choose the transcription(s) to translate." });
 			new Setting(contentEl)
@@ -3286,7 +3270,7 @@ class TranslateModal extends Modal {
 		new Setting(contentEl)
 			.setName("Volume")
 			.setDesc("Optional volume number.")
-			.addText((t) => t.setPlaceholder("e.g. 2").onChange((v) => (this.volume = v.trim())));
+			.addText((t) => t.setPlaceholder("E.g. 2").onChange((v) => (this.volume = v.trim())));
 
 		new Setting(contentEl).addButton((b) =>
 			b
@@ -3729,7 +3713,7 @@ class ManageSourcesModal extends Modal {
 		const foot = pane.createDiv({ cls: "mas-manage__foot" });
 		const statusEl = foot.createDiv({ cls: "mas-manage__status" });
 		const actions = foot.createDiv({ cls: "mas-manage__actions" });
-		const selectAllBtn = actions.createEl("button", { cls: "mas-manage__toggle", text: "Select All/None" });
+		const selectAllBtn = actions.createEl("button", { cls: "mas-manage__toggle", text: "Select all/none" });
 		const cancelBtn = actions.createEl("button", { text: "Cancel" });
 		const applyBtn = actions.createEl("button", { cls: "mod-cta", text: "Apply" });
 
@@ -3900,37 +3884,37 @@ class ZoteroSendModal extends Modal {
 		});
 
 		const controls = contentEl.createDiv();
-		controls.style.display = "flex";
-		controls.style.gap = "8px";
-		controls.style.margin = "6px 0";
+		controls.setCssStyles({ display: "flex", gap: "8px", margin: "6px 0" });
 		const all = controls.createEl("button", { text: "Check all" });
 		const none = controls.createEl("button", { text: "Uncheck all" });
 
 		const list = contentEl.createDiv();
-		list.style.maxHeight = "50vh";
-		list.style.overflow = "auto";
-		list.style.border = "1px solid var(--background-modifier-border)";
-		list.style.borderRadius = "6px";
-		list.style.padding = "4px";
+		list.setCssStyles({
+			maxHeight: "50vh",
+			overflow: "auto",
+			border: "1px solid var(--background-modifier-border)",
+			borderRadius: "6px",
+			padding: "4px",
+		});
 
 		const COLS = "18px minmax(180px,2fr) minmax(120px,1fr) 90px";
 		for (const e of this.entries) {
 			const row = list.createDiv();
-			row.style.display = "grid";
-			row.style.gridTemplateColumns = COLS;
-			row.style.columnGap = "8px";
-			row.style.alignItems = "center";
-			row.style.padding = "3px 4px";
+			row.setCssStyles({
+				display: "grid",
+				gridTemplateColumns: COLS,
+				columnGap: "8px",
+				alignItems: "center",
+				padding: "3px 4px",
+			});
 			const cb = row.createEl("input") as HTMLInputElement;
 			cb.type = "checkbox";
 			cb.checked = e.status !== "current";
 			row.createSpan({ text: String(e.work.title || e.work.name || e.work.key) });
 			const author = row.createSpan({ text: String(e.work.author || "") });
-			author.style.opacity = "0.6";
-			author.style.fontSize = "var(--font-ui-smaller)";
+			author.setCssStyles({ opacity: "0.6", fontSize: "var(--font-ui-smaller)" });
 			const status = row.createSpan({ text: e.status });
-			status.style.opacity = "0.6";
-			status.style.fontSize = "var(--font-ui-smaller)";
+			status.setCssStyles({ opacity: "0.6", fontSize: "var(--font-ui-smaller)" });
 			this.checks.push({ key: String(e.work.key), el: cb });
 		}
 		all.onclick = () => this.checks.forEach((c) => (c.el.checked = true));
