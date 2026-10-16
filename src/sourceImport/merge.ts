@@ -110,15 +110,15 @@ function reconcile(merge: FrontmatterMerge, existing: string[] | undefined, gene
 	const has = !!existing && existing.length > 0;
 	switch (merge) {
 		case "keep":
-			return has ? existing! : generated;
+			return has ? existing : generated;
 		case "append":
 			if (!has) return generated;
-			if (isListBlock(existing!) && isListBlock(generated)) return appendListItems(existing!, generated);
+			if (isListBlock(existing) && isListBlock(generated)) return appendListItems(existing, generated);
 			return generated;
 		case "subtract":
 			if (!has) return existing ?? [];
-			if (isListBlock(existing!) && isListBlock(generated)) return subtractListItems(existing!, generated);
-			return existing!;
+			if (isListBlock(existing) && isListBlock(generated)) return subtractListItems(existing, generated);
+			return existing;
 		case "replace":
 		default:
 			return generated;

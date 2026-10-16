@@ -3,6 +3,9 @@ import { makeEngine, SourceTemplateEngine } from "./engine";
 import { YamlFieldSpec } from "./yaml";
 import { mergeNote, substantiveContentDiffers } from "./merge";
 
+/** Loosely-typed JSON data: importer work/unit models (fields are template-driven). */
+export type JsonObject = Record<string, any>;
+
 /**
  * Turns an acquisition render-model (produced by
  * src/midad-arabic-sources/scripts/text-source-import.py) into Obsidian notes using
@@ -12,8 +15,8 @@ import { mergeNote, substantiveContentDiffers } from "./merge";
 export interface SourceModel {
 	schema: number;
 	generated: string;
-	work: Record<string, any>;
-	units: Array<Record<string, any>>;
+	work: JsonObject;
+	units: Array<JsonObject>;
 }
 
 export interface TemplateSet {
@@ -47,7 +50,7 @@ export interface RenderProgress {
 
 export interface MocSection {
 	name: string;
-	works: Array<Record<string, any>>;
+	works: Array<JsonObject>;
 }
 
 export const TEMPLATE_FILES: Record<keyof TemplateSet, string> = {
@@ -103,7 +106,7 @@ function renderTemplate(engine: SourceTemplateEngine, tpl: string, data: Record<
 	return { content, specs };
 }
 
-export function renderUnit(engine: SourceTemplateEngine, templates: TemplateSet, model: SourceModel, unit: Record<string, any>): RenderOutput {
+export function renderUnit(engine: SourceTemplateEngine, templates: TemplateSet, model: SourceModel, unit: JsonObject): RenderOutput {
 	const tpl = unit.kind === "hadith" ? templates.hadith
 		: unit.kind === "quran" ? templates.quran
 		: unit.kind === "dict" ? templates.dictionary
@@ -118,7 +121,7 @@ export function renderUnit(engine: SourceTemplateEngine, templates: TemplateSet,
 	});
 }
 
-export function renderHub(engine: SourceTemplateEngine, templates: TemplateSet, model: SourceModel, singleUnit?: Record<string, any>): RenderOutput {
+export function renderHub(engine: SourceTemplateEngine, templates: TemplateSet, model: SourceModel, singleUnit?: JsonObject): RenderOutput {
 	return renderTemplate(engine, templates.hub, {
 		work: model.work,
 		units: model.units,
@@ -140,7 +143,7 @@ export function expectedNotePaths(
 	const isCanonical = isQuranText && String(model.work.id) === canonicalId;
 	// Dictionary *root* notes keep unprefixed names (the vault already names them
 	// `HW …`); a dictionary's letter-index notes are prefixed like any other unit.
-	const unprefixed = (unit: Record<string, any>) =>
+	const unprefixed = (unit: JsonObject) =>
 		isCanonical || (model.work.collection === "dictionary" && unit.kind === "dict");
 	const paths = [`${outRoot}/${dir}.md`];
 	const singleUnit = model.units.length === 1 ? model.units[0] : undefined;
@@ -157,16 +160,18 @@ export function expectedNotePaths(
 }
 
 /** Group works into their MOC sections, dropping sections with no works. */
-export function buildMocSections(works: Array<Record<string, any>>): MocSection[] {
+export function buildMocSections(works: Array<JsonObject>): MocSection[] {
 	const order: string[] = [];
-	const map = new Map<string, Array<Record<string, any>>>();
+	const map = new Map<string, Array<JsonObject>>();
 	for (const w of works) {
 		for (const s of (w.moc_sections as string[]) ?? []) {
-			if (!map.has(s)) {
-				map.set(s, []);
+			let arr = map.get(s);
+			if (!arr) {
+				arr = [];
+				map.set(s, arr);
 				order.push(s);
 			}
-			map.get(s)!.push(w);
+			arr.push(w);
 		}
 	}
 	return order.map((name) => ({
@@ -201,7 +206,7 @@ async function listMarkdown(app: App, folder: string): Promise<string[]> {
 export async function deleteNote(app: App, path: string): Promise<void> {
 	const p = normalizePath(path);
 	const file = app.vault.getAbstractFileByPath(p);
-	if (file instanceof TFile) await app.vault.delete(file);
+	if (file instanceof TFile) await app.fileManager.trashFile(file);
 }
 
 /** Write a rendered note, merging into an existing one so edits survive. */
@@ -245,7 +250,8 @@ export async function renderModelToVault(
 	// has unprefixed sūra notes, and they live in `canonical_root`.
 	for (const unit of model.units) {
 		const dictRoot = model.work.collection === "dictionary" && unit.kind === "dict";
-		unit.note_stem = (isCanonical || dictRoot) ? unit.base : `${dir} - ${unit.base}`;
+		const base = String(unit.base);
+		unit.note_stem = (isCanonical || dictRoot) ? base : `${dir} - ${base}`;
 		unit.note_folder = isCanonical && canonicalRoot ? canonicalRoot : folder;
 	}
 
@@ -307,7 +313,8 @@ export async function renderModelHub(
 	// unit notes are not written here.
 	for (const unit of model.units) {
 		const dictRoot = model.work.collection === "dictionary" && unit.kind === "dict";
-		unit.note_stem = (isCanonical || dictRoot) ? unit.base : `${dir} - ${unit.base}`;
+		const base = String(unit.base);
+		unit.note_stem = (isCanonical || dictRoot) ? base : `${dir} - ${base}`;
 	}
 	const singleUnit = model.units.length === 1 ? model.units[0] : undefined;
 	const hubPath = `${outRoot}/${dir}.md`;
@@ -323,19 +330,23 @@ export async function renderModelHub(
 export async function renderMocs(
 	app: App,
 	templates: TemplateSet,
-	works: Array<Record<string, any>>,
+	works: Array<JsonObject>,
 	outRoot: string,
 	generated: string,
 	parent: string,
 	force = false
 ): Promise<string[]> {
 	const engine = makeEngine();
-	const groups = new Map<string, Array<Record<string, any>>>();
+	const groups = new Map<string, Array<JsonObject>>();
 	for (const w of works) {
 		const moc = w.moc as string | undefined;
 		if (!moc) continue;
-		if (!groups.has(moc)) groups.set(moc, []);
-		groups.get(moc)!.push(w);
+		let arr = groups.get(moc);
+		if (!arr) {
+			arr = [];
+			groups.set(moc, arr);
+		}
+		arr.push(w);
 	}
 	const written: string[] = [];
 	for (const [moc, group] of groups) {

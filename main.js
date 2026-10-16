@@ -1007,11 +1007,13 @@ function buildMocSections(works) {
   const map = new Map();
   for (const w of works) {
     for (const s of (_a = w.moc_sections) != null ? _a : []) {
-      if (!map.has(s)) {
-        map.set(s, []);
+      let arr = map.get(s);
+      if (!arr) {
+        arr = [];
+        map.set(s, arr);
         order.push(s);
       }
-      map.get(s).push(w);
+      arr.push(w);
     }
   }
   return order.map((name) => {
@@ -1048,7 +1050,7 @@ async function deleteNote(app, path2) {
   const p = (0, import_obsidian.normalizePath)(path2);
   const file = app.vault.getAbstractFileByPath(p);
   if (file instanceof import_obsidian.TFile)
-    await app.vault.delete(file);
+    await app.fileManager.trashFile(file);
 }
 async function writeMerged(app, path2, out, force = false, replaceUnmanaged = true) {
   if (!out.content.trim())
@@ -1077,7 +1079,8 @@ async function renderModelToVault(app, templates, model, outRoot, force = false,
   const tick = () => onStep == null ? void 0 : onStep(++done, steps);
   for (const unit of model.units) {
     const dictRoot = model.work.collection === "dictionary" && unit.kind === "dict";
-    unit.note_stem = isCanonical || dictRoot ? unit.base : `${dir} - ${unit.base}`;
+    const base = String(unit.base);
+    unit.note_stem = isCanonical || dictRoot ? base : `${dir} - ${base}`;
     unit.note_folder = isCanonical && canonicalRoot ? canonicalRoot : folder;
   }
   if (singleUnit && !isQuranText) {
@@ -1120,7 +1123,8 @@ async function renderModelHub(app, templates, model, outRoot, force = false) {
   const isCanonical = isQuranText && model.work.canonical === true;
   for (const unit of model.units) {
     const dictRoot = model.work.collection === "dictionary" && unit.kind === "dict";
-    unit.note_stem = isCanonical || dictRoot ? unit.base : `${dir} - ${unit.base}`;
+    const base = String(unit.base);
+    unit.note_stem = isCanonical || dictRoot ? base : `${dir} - ${base}`;
   }
   const singleUnit = model.units.length === 1 ? model.units[0] : void 0;
   const hubPath = `${outRoot}/${dir}.md`;
@@ -1134,9 +1138,12 @@ async function renderMocs(app, templates, works, outRoot, generated, parent, for
     const moc = w.moc;
     if (!moc)
       continue;
-    if (!groups.has(moc))
-      groups.set(moc, []);
-    groups.get(moc).push(w);
+    let arr = groups.get(moc);
+    if (!arr) {
+      arr = [];
+      groups.set(moc, arr);
+    }
+    arr.push(w);
   }
   const written = [];
   for (const [moc, group] of groups) {
@@ -2048,21 +2055,23 @@ var ArabicSupportPlugin = class extends import_obsidian2.Plugin {
     return method === "local" ? "http://127.0.0.1:23119/api/users/0" : `https://api.zotero.org/users/${this.settings.zoteroLibraryId.trim()}`;
   }
   async ensureZoteroCollection(method) {
-    var _a, _b, _c, _d, _e, _f, _g, _h;
+    var _a, _b, _c, _d, _e, _f, _g;
     const base = this.zoteroLibraryPath(method);
     const headers = this.zoteroHeaders(method);
     const list = await this.zbFetch("GET", `${base}/collections?limit=100`, headers);
-    const found = ((_a = list.json) != null ? _a : []).find((c) => {
+    const refs = (_a = list.json) != null ? _a : [];
+    const found = refs.find((c) => {
       var _a2;
       return ((_a2 = c.data) == null ? void 0 : _a2.name) === ZOTERO_MARK;
     });
     if (found)
       return String((_d = (_c = found.key) != null ? _c : (_b = found.data) == null ? void 0 : _b.key) != null ? _d : "");
     const resp = await this.zbFetch("POST", `${base}/collections`, headers, JSON.stringify([{ name: ZOTERO_MARK }]));
-    return String((_h = (_g = (_f = (_e = resp.json) == null ? void 0 : _e.successful) == null ? void 0 : _f["0"]) == null ? void 0 : _g.key) != null ? _h : "");
+    const created = resp.json;
+    return String((_g = (_f = (_e = created == null ? void 0 : created.successful) == null ? void 0 : _e["0"]) == null ? void 0 : _f.key) != null ? _g : "");
   }
   async applyCitekeys(pending, keys, method) {
-    var _a, _b;
+    var _a;
     const base = this.zoteroLibraryPath(method);
     const headers = this.zoteroHeaders(method);
     for (let i = 0; i < pending.length; i++) {
@@ -2070,7 +2079,8 @@ var ArabicSupportPlugin = class extends import_obsidian2.Plugin {
         continue;
       try {
         const resp = await this.zbFetch("GET", `${base}/items/${keys[i]}`, headers);
-        const ck = (_b = (_a = resp.json) == null ? void 0 : _a.data) == null ? void 0 : _b.citationKey;
+        const item = resp.json;
+        const ck = (_a = item == null ? void 0 : item.data) == null ? void 0 : _a.citationKey;
         if (ck)
           await this.addCitekeyUp(pending[i].work, String(ck));
       } catch (e) {
@@ -2092,19 +2102,20 @@ var ArabicSupportPlugin = class extends import_obsidian2.Plugin {
     }
   }
   async zoteroItemVersion(method, itemKey) {
-    var _a, _b, _c, _d;
+    var _a, _b;
     try {
       const url = method === "web" ? `https://api.zotero.org/users/${this.settings.zoteroLibraryId.trim()}/items/${itemKey}` : `http://127.0.0.1:23119/api/users/0/items/${itemKey}`;
       const headers = method === "web" ? { "Zotero-API-Key": this.settings.zoteroApiKey.trim(), "Zotero-API-Version": "3" } : this.settings.zoteroServerId ? { "Zotero-Server-ID": this.settings.zoteroServerId } : {};
       const resp = await this.zbFetch("GET", url, headers);
-      const v = (_d = (_a = resp.json) == null ? void 0 : _a.version) != null ? _d : (_c = (_b = resp.json) == null ? void 0 : _b.data) == null ? void 0 : _c.version;
+      const item = resp.json;
+      const v = (_b = item == null ? void 0 : item.version) != null ? _b : (_a = item == null ? void 0 : item.data) == null ? void 0 : _a.version;
       return typeof v === "number" ? v : null;
     } catch (e) {
       return null;
     }
   }
   async sendZoteroLocal(pending) {
-    var _a, _b, _c, _d;
+    var _a, _b;
     const base = "http://127.0.0.1:23119/api";
     const probe = await this.zbFetch("GET", `${base}/users/0/items?limit=1`, {});
     const serverId = header(probe, "Zotero-Server-ID") || this.settings.zoteroServerId;
@@ -2112,7 +2123,8 @@ var ArabicSupportPlugin = class extends import_obsidian2.Plugin {
       throw new Error("Local Zotero is running, but its server id could not be read.");
     const version = header(probe, "Last-Modified-Version") || "0";
     const auth = await this.zbFetch("POST", `${base}/local/authorize`, { "Zotero-Server-ID": serverId }, JSON.stringify({ appName: "Midad Arabic Sources" }));
-    const key = String((_b = (_a = auth.json) == null ? void 0 : _a.key) != null ? _b : "");
+    const authResp = auth.json;
+    const key = String((_a = authResp == null ? void 0 : authResp.key) != null ? _a : "");
     if (!key)
       throw new Error(`Local Zotero refused the connection (${auth.status}): ${auth.text.slice(0, 160)}`);
     const headers = { "Zotero-API-Key": key, "Zotero-Server-ID": serverId };
@@ -2123,7 +2135,8 @@ var ArabicSupportPlugin = class extends import_obsidian2.Plugin {
       const resp = await this.zbFetch("POST", `${base}/users/0/items`, { ...headers, "If-Unmodified-Since-Version": version }, JSON.stringify(creates.map(([p]) => p.item)));
       if (resp.status >= 400)
         throw new Error(`Zotero ${resp.status}: ${resp.text.slice(0, 200)}`);
-      const successful = (_d = (_c = resp.json) == null ? void 0 : _c.successful) != null ? _d : {};
+      const created = resp.json;
+      const successful = (_b = created == null ? void 0 : created.successful) != null ? _b : {};
       creates.forEach(([, i], n) => {
         var _a2, _b2;
         out[i] = String((_b2 = (_a2 = successful[String(n)]) == null ? void 0 : _a2.key) != null ? _b2 : "");
@@ -2139,7 +2152,7 @@ var ArabicSupportPlugin = class extends import_obsidian2.Plugin {
     return out;
   }
   async sendZoteroWeb(pending) {
-    var _a, _b;
+    var _a;
     const key = this.settings.zoteroApiKey.trim();
     const lib = this.settings.zoteroLibraryId.trim();
     if (!key || !lib)
@@ -2152,10 +2165,11 @@ var ArabicSupportPlugin = class extends import_obsidian2.Plugin {
       const resp = await this.zbFetch("POST", `https://api.zotero.org/users/${lib}/items`, headers, JSON.stringify(creates.map(([p]) => p.item)));
       if (resp.status >= 400)
         throw new Error(`Zotero ${resp.status}: ${resp.text.slice(0, 200)}`);
-      const successful = (_b = (_a = resp.json) == null ? void 0 : _a.successful) != null ? _b : {};
+      const created = resp.json;
+      const successful = (_a = created == null ? void 0 : created.successful) != null ? _a : {};
       creates.forEach(([, i], n) => {
-        var _a2, _b2;
-        out[i] = String((_b2 = (_a2 = successful[String(n)]) == null ? void 0 : _a2.key) != null ? _b2 : "");
+        var _a2, _b;
+        out[i] = String((_b = (_a2 = successful[String(n)]) == null ? void 0 : _a2.key) != null ? _b : "");
       });
     }
     for (const [p, i] of idx.filter(([p2]) => p2.itemKey)) {
@@ -2169,11 +2183,10 @@ var ArabicSupportPlugin = class extends import_obsidian2.Plugin {
   }
   async writeZoteroCsl(pending) {
     const csl = pending.map((p) => {
+      var _a;
       const it = p.item;
-      const of = (t) => {
-        var _a;
-        return ((_a = it.creators) != null ? _a : []).filter((c) => c.creatorType === t).map((c) => c.name ? { literal: c.name } : { family: c.lastName || void 0, given: c.firstName || void 0 });
-      };
+      const creators = (_a = it.creators) != null ? _a : [];
+      const of = (t) => creators.filter((c) => c.creatorType === t).map((c) => c.name ? { literal: c.name } : { family: c.lastName || void 0, given: c.firstName || void 0 });
       return {
         type: "book",
         title: it.title,
@@ -2484,14 +2497,15 @@ var ArabicSupportPlugin = class extends import_obsidian2.Plugin {
     for (const m of models) {
       const k = this.workKey(m.work);
       const prev = byKey.get(k);
-      byKey.set(k, prev ? { ...m.work, status: prev.status } : m.work);
+      const merged = prev ? { ...m.work, status: prev.status } : m.work;
+      byKey.set(k, merged);
     }
     const works = [...byKey.values()];
     await this.saveSourceManifest(works);
     const installed = works.filter((w) => this.workStatus(w) === "installed");
     const today = new Date().toISOString().slice(0, 10);
     const written = await renderMocs(this.app, templates, installed, outRoot, today, this.settings.sourceMocParent.trim() || "Sources", true);
-    const mocNames = [...new Set(installed.map((w) => w.moc).filter(Boolean))].sort();
+    const mocNames = [...new Set(installed.map((w) => typeof w.moc === "string" ? w.moc : "").filter(Boolean))].sort();
     const parentPath = await this.updateSourceParent(templates, mocNames, today);
     if (parentPath)
       written.push(parentPath);
@@ -2611,7 +2625,8 @@ var ArabicSupportPlugin = class extends import_obsidian2.Plugin {
     const path2 = (0, import_obsidian2.normalizePath)(".midad-arabic-sources/last-update-check.json");
     let last = 0;
     try {
-      last = (_b = JSON.parse(await this.app.vault.adapter.read(path2)).at) != null ? _b : 0;
+      const parsed = JSON.parse(await this.app.vault.adapter.read(path2));
+      last = (_b = parsed.at) != null ? _b : 0;
     } catch (e) {
       last = 0;
     }
@@ -3266,7 +3281,8 @@ var ArabicSupportPlugin = class extends import_obsidian2.Plugin {
     return path2;
   }
   async loadSettings() {
-    this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+    const data = await this.loadData();
+    this.settings = Object.assign({}, DEFAULT_SETTINGS, data != null ? data : {});
     if (!this.settings.canonicalQuranRiw\u0101ya.trim()) {
       try {
         if (await this.app.vault.adapter.exists((0, import_obsidian2.normalizePath)(".midad-arabic-sources/source-models/quran-text/hafs.json"))) {
@@ -3647,11 +3663,12 @@ var StatusPanel = class {
     this.scrollToBottom();
   }
   openPath(path2) {
-    var _a, _b, _c;
-    const vault = (_c = (_b = (_a = this.app.vault.adapter) == null ? void 0 : _a.getBasePath) == null ? void 0 : _b.call(_a)) != null ? _c : "";
+    var _a, _b;
+    const adapter = this.app.vault.adapter;
+    const vault = (_b = (_a = adapter == null ? void 0 : adapter.getBasePath) == null ? void 0 : _a.call(adapter)) != null ? _b : "";
     const rel = vault && path2.startsWith(vault) ? path2.slice(vault.length + 1) : path2;
     const file = this.app.vault.getAbstractFileByPath(rel);
-    if (file)
+    if (file instanceof import_obsidian2.TFile)
       void this.app.workspace.getLeaf("tab").openFile(file);
     else
       void this.app.workspace.openLinkText(rel, "", true);
@@ -3968,7 +3985,7 @@ var ReconcileSourcesModal = class extends import_obsidian2.Modal {
       for (const c of chosen)
         await this.plugin.reinstallSource(c.work);
       new import_obsidian2.Notice(`Reinstalled ${chosen.length} work(s).`);
-    })).addButton((b) => b.setButtonText("Remove selected").setWarning().onClick(async () => {
+    })).addButton((b) => b.setButtonText("Remove selected").setDestructive().onClick(async () => {
       const chosen = this.checks.filter((c) => c.el.checked);
       if (!chosen.length) {
         new import_obsidian2.Notice("Select at least one work.");

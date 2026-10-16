@@ -1879,7 +1879,10 @@ def _hw_skeleton(text: str) -> str:
 
     Variants of the same letter are folded too, because the sources use them for
     loanwords and the scans confuse them: a jīm written `g` or `ǧ` (`ātešgī`),
-    and a qāf written `ḳ` (Wehr's own letter) or a khāʾ written `ḵ`.
+    a qāf written `ḳ` (Wehr's own letter), and a khāʾ written `ḵ`. A `ṯ` (ث) lost
+    its underline to the scan and came out as plain `t`, but that is *not* folded
+    here — the comparison merges the two (`_hw_skeletons`), while the underline is
+    put back on the rendered name by `_hw_fix_underlined`, which needs them apart.
     """
     t = text.lower()
     for digraph, one in (("sh", "š"), ("th", "ṯ"), ("kh", "ḫ"), ("dh", "ḏ"),
@@ -2095,10 +2098,13 @@ def _hw_skeletons(arabic: str) -> str:
 
     Gemination is collapsed and the hamza ignored; the weak letters are dropped
     too, because they are interchangeable and often do not survive derivation —
-    `آدى` still matches the root `ادو`, whose و the derived verb loses.
+    `آدى` still matches the root `ادو`, whose و the derived verb loses. A `ṯ` (ث)
+    is merged with `t`, since a scan loses that underline almost always and the
+    reading is still the same word; `_hw_fix_underlined` restores it for display.
     """
     skeleton = _hw_root_skeleton(arabic).replace("ʾ", "")
-    return _hw_collapse_gemination(skeleton.replace("w", "").replace("y", ""))[0]
+    skeleton = skeleton.replace("w", "").replace("y", "").replace("ṯ", "t")
+    return _hw_collapse_gemination(skeleton)[0]
 
 
 def _hw_is_root(arabic: str, root: str) -> bool:
@@ -2202,11 +2208,46 @@ def _hw_translit_skeleton(roman: str) -> str:
     """A Latin transliteration's skeleton, normalised exactly as an Arabic word's.
 
     `_hw_skeletons` folds digraphs, drops the vowels, ignores the hamza and drops
-    the weak letters; this does the same to the Latin side so the two compare.
+    the weak letters; this does the same to the Latin side so the two compare,
+    including the `ṯ`/`t` merge that a lost underline forces.
     """
     return _hw_collapse_gemination(
-        _hw_skeleton(roman).replace("ʾ", "").replace("w", "").replace("y", "")
+        _hw_skeleton(roman).replace("ʾ", "").replace("w", "").replace("y", "").replace("ṯ", "t")
     )[0]
+
+
+_HW_TRANSLIT_UNIT_RE = re.compile(r"sh|th|kh|dh|gh|ch|zh|[A-Za-z\u00C0-\u024F\u1E00-\u1EFF]")
+
+
+def _hw_fix_underlined(reading: str, arabic: str, convention: str = DEFAULT_ROMANIZATION) -> str:
+    """Render a `t` the scan lost its underline from where the Arabic has ث.
+
+    A scan almost always writes `ṯ` as plain `t`, so such a reading is accepted on
+    that basis (see `_hw_skeleton`); this writes the name as it should read — `ṯ` in
+    the Wehr work, `th` in the vault's convention, which never uses the underlined
+    letters. The two consonant skeletons are walked in step — they correspond, the
+    reading having just been validated against this headword — and only a `t`
+    standing where a ث does is rewritten. The walk applies only when the skeletons
+    hold the same number of consonants, so a reading with extra letters, or a
+    loanword whose letters do not line up, is left exactly as written.
+    """
+    arabic_units = [u for u in _HW_TRANSLIT_UNIT_RE.findall(_hw_root_skeleton(arabic))
+                    if u not in ("w", "y")]
+    reading_units = [(m.group(0), m.start(), m.end())
+                     for m in _HW_TRANSLIT_UNIT_RE.finditer(reading)
+                     if m.group(0) not in ("w", "y")
+                     and m.group(0)[0] not in "aeiouāēīōū"]
+    if not arabic_units or len(arabic_units) != len(reading_units):
+        return reading
+    underlined = "ṯ" if convention == "wehr" else "th"
+    out: list[str] = []
+    at = 0
+    for unit, (text, start, end) in zip(arabic_units, reading_units):
+        out.append(reading[at:start])
+        out.append(underlined if unit in ("th", "ṯ") and text == "t" else text)
+        at = end
+    out.append(reading[at:])
+    return "".join(out)
 
 
 def _hw_reads_arabic(roman: str, arabic: str) -> bool:
@@ -2468,7 +2509,8 @@ def _hw_root_entry(entry_id: int, word: str, definition: str, derived: list[tupl
             # below carry the text.
             paragraphs = []
         return {
-            "id": entry_id, "arabic": arabic, "roman": _hw_root_romanization(arabic, derived, convention),
+            "id": entry_id, "arabic": arabic,
+            "roman": _hw_fix_underlined(_hw_root_romanization(arabic, derived, convention), arabic, convention),
             "verb_form": False, "paragraphs": paragraphs,
         }
     arabic = _hw_headword(definition) or (word or "").strip()
@@ -2497,6 +2539,7 @@ def _hw_root_entry(entry_id: int, word: str, definition: str, derived: list[tupl
                  or _hw_root_romanization(arabic, derived, convention))
     # A verb-form root's own callout is never italicised, though its heading uses
     # the transliteration found above.
+    roman = _hw_fix_underlined(_hw_romanize(roman, convention), arabic, convention)
     return {
         "id": entry_id, "arabic": arabic, "roman": roman, "verb_form": verb,
         "bullets": _hw_grid_bullets(arabic, definition, None if verb else roman),
@@ -2530,6 +2573,7 @@ def _hw_derived_entry(entry_id: int, word: str, definition: str,
     extracted = _hw_extract_romanization(definition)
     roman = ((extracted if extracted and _hw_reads_arabic(extracted, arabic) else None)
              or _hw_word_romanization(arabic, convention))
+    roman = _hw_fix_underlined(roman, arabic, convention)
     return {
         "id": entry_id, "arabic": arabic, "roman": roman, "verb_form": False,
         "bullets": _hw_grid_bullets(arabic, definition, roman),

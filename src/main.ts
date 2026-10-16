@@ -22,6 +22,7 @@ import {
 	TEMPLATE_FOLDER,
 	SourceModel,
 	TemplateSet,
+	JsonObject,
 	RenderProgress,
 	expectedNotePaths,
 	loadTemplates,
@@ -54,7 +55,7 @@ async function execProbe(file: string, args: string[]): Promise<boolean> {
 
 async function findPython3(configured: string, modules: string[]): Promise<string | null> {
 	if (configured.trim()) return configured.trim();
-	const platform = (window as any).process?.platform;
+	const platform = (window as NodeWindow).process?.platform;
 	const win = platform === "win32";
 	let home = "";
 	try {
@@ -154,6 +155,135 @@ interface RunOptions {
 	fullVocalization: boolean;
 }
 
+/** Electron exposes a Node `process` on the window; the Obsidian typings do not. */
+interface NodeWindow extends Window {
+	process?: { platform?: string };
+}
+
+/** Obsidian app internals the plugin reaches into (absent from the public typings). */
+interface ScholarWeftApi {
+	bibManager?: { zCitekeyToPDFLinks?: Map<string, string[]> };
+}
+interface AppInternals {
+	plugins?: { plugins?: Record<string, ScholarWeftApi> };
+	setting?: { open(): void; openTabById(id: string): void };
+}
+
+/** One PDF attachment, as the pipeline reports it. */
+interface PipelinePdf {
+	key?: string;
+	path: string;
+	filename?: string;
+	exists?: boolean;
+	volume?: number | string;
+}
+
+/** One transcription note, as the pipeline reports it. */
+interface PipelineNote {
+	type: string;
+	path: string;
+	name?: string;
+}
+
+/** One archived batch, as the reprocess dialogue reports it. */
+interface ArchiveZip {
+	name: string;
+	path: string;
+}
+
+/** The `result` payload a pipeline script emits on its final stdout line. */
+interface PipelineResult {
+	notes?: string[];
+	sources?: string[];
+	pdfs?: PipelinePdf[];
+	zips?: ArchiveZip[];
+	changed?: string[];
+	date_only?: string[];
+	models?: string[];
+	[k: string]: unknown;
+}
+
+/** One JSON progress line from a pipeline script. */
+interface PipelineEvent {
+	event: string;
+	message?: string;
+	name?: string;
+	status?: string;
+	detail?: string;
+	result?: PipelineResult;
+	works?: JsonObject[];
+	[k: string]: unknown;
+}
+
+/** The persisted job state a pipeline script writes while running. */
+interface PipelineState {
+	stage?: string;
+	pdf?: string;
+	pid?: number;
+	_path: string;
+	[k: string]: unknown;
+}
+
+/** A creator in the work model: a name string or a `{first,last}` / `{name}` object. */
+type CreatorValue =
+	| string
+	| { first?: string; last?: string; firstName?: string; lastName?: string; name?: string };
+
+/** A Zotero creator as a built item carries it. */
+interface ZoteroCreator {
+	creatorType?: string;
+	name?: string;
+	firstName?: string;
+	lastName?: string;
+}
+
+/** The subset of a built Zotero item that the CSL-JSON export reads. */
+interface CslSourceItem {
+	title?: string;
+	url?: string;
+	publisher?: string;
+	place?: string;
+	edition?: string;
+	extra?: string;
+	date?: string;
+	creators?: ZoteroCreator[];
+}
+
+/** One unresolved Arabic word the transliteration service reports. */
+interface LexiconGuess {
+	term: string;
+	guess: string;
+}
+
+/** The transliteration service's `/romanize` response. */
+interface TransliterateResponse {
+	unknown?: LexiconGuess[];
+	error?: string;
+	romanized?: string;
+}
+
+/** Zotero API response shapes the plugin reads (fields vary by endpoint). */
+interface ZoteroCollectionRef {
+	key?: string;
+	data?: { name?: string; key?: string };
+}
+interface ZoteroItemData {
+	key?: string;
+	version?: number;
+	citationKey?: string;
+}
+interface ZoteroItemResponse {
+	key?: string;
+	version?: number;
+	data?: ZoteroItemData;
+}
+interface ZoteroCreateResponse {
+	successful?: Record<string, { key?: string; version?: number }>;
+}
+interface ZoteroAuthResponse {
+	key?: string;
+}
+
 /** How long the on-disk source catalogue is reused before it is re-listed. */
 const SOURCE_CATALOG_TTL = 7 * 86_400_000;
 
@@ -225,10 +355,10 @@ const DEFAULT_SETTINGS: ArabicSupportSettings = {
 
 export default class ArabicSupportPlugin extends Plugin {
 	settings: ArabicSupportSettings;
-	lastUnknown: Array<{ term: string; guess: string }> = [];
+	lastUnknown: LexiconGuess[] = [];
 	statusPanels: StatusPanel[] = [];
 	/** Catalogue of available works, cached per session (and on disk for longer). */
-	sourceCatalog: any[] | null = null;
+	sourceCatalog: SourceWork[] | null = null;
 	/** Guards the automatic Zotero sync against overlapping runs. */
 	zoteroSyncRunning = false;
 	zoteroSyncAgain = false;
@@ -438,7 +568,7 @@ export default class ArabicSupportPlugin extends Plugin {
 	// ── Gemini transcription/translation pipeline ────────────────────────────
 
 	vaultPath(): string {
-		const adapter: any = this.app.vault.adapter;
+		const adapter = this.app.vault.adapter as unknown as { getBasePath?: () => string; basePath?: string };
 		try {
 			if (typeof adapter?.getBasePath === "function") return adapter.getBasePath();
 		} catch { /* ignore */ }
@@ -459,7 +589,7 @@ export default class ArabicSupportPlugin extends Plugin {
 
 	/** PDF paths ScholarWeft has already resolved for a citekey, if any. */
 	swPdfPaths(citekey: string): string[] {
-		const sw: any = (this.app as any).plugins?.plugins?.["scholar-weft"];
+		const sw = (this.app as unknown as AppInternals).plugins?.plugins?.["scholar-weft"];
 		const map = sw?.bibManager?.zCitekeyToPDFLinks;
 		try {
 			return map && typeof map.get === "function" ? (map.get(citekey) ?? []) : [];
@@ -474,7 +604,7 @@ export default class ArabicSupportPlugin extends Plugin {
 	}
 
 	openSettings(): void {
-		const s: any = (this.app as any).setting;
+		const s = (this.app as unknown as AppInternals).setting;
 		if (s) {
 			s.open();
 			s.openTabById("midad-arabic-sources");
@@ -510,7 +640,7 @@ export default class ArabicSupportPlugin extends Plugin {
 		return `${vault}/${rel}`;
 	}
 
-	async runScript(scriptRel: string, args: string[], onEvent: (ev: any) => void): Promise<{ code: number; lines: string[] }> {
+	async runScript(scriptRel: string, args: string[], onEvent: (ev: PipelineEvent) => void): Promise<{ code: number; lines: string[] }> {
 		const vault = this.vaultPath();
 		const python = await this.resolvePython();
 		const lines: string[] = [];
@@ -540,7 +670,7 @@ export default class ArabicSupportPlugin extends Plugin {
 					if (!line) continue;
 					lines.push(line);
 					try {
-						onEvent(JSON.parse(line));
+						onEvent(JSON.parse(line) as PipelineEvent);
 					} catch {
 						onEvent({ event: "log", message: line });
 					}
@@ -557,12 +687,12 @@ export default class ArabicSupportPlugin extends Plugin {
 	}
 
 	/** Run the Gemini pipeline orchestrator (thin wrapper over runScript). */
-	async runPipeline(args: string[], onEvent: (ev: any) => void): Promise<{ code: number; lines: string[] }> {
+	async runPipeline(args: string[], onEvent: (ev: PipelineEvent) => void): Promise<{ code: number; lines: string[] }> {
 		return this.runScript(this.settings.pipelineScript, args, onEvent);
 	}
 
-	async pipelineResult(args: string[]): Promise<any> {
-		let result: any = null;
+	async pipelineResult(args: string[]): Promise<PipelineResult> {
+		let result: PipelineResult | null = null;
 		let lastError = "";
 		const { code, lines } = await this.runPipeline(args, (ev) => {
 			if (ev.event === "result") result = ev.result;
@@ -576,7 +706,7 @@ export default class ArabicSupportPlugin extends Plugin {
 		return result;
 	}
 
-	async runWithProgress(title: string, args: string[], scriptRel?: string): Promise<any> {
+	async runWithProgress(title: string, args: string[], scriptRel?: string): Promise<PipelineResult> {
 		// Clear finished panels so only the current job(s) stay visible.
 		for (const p of this.statusPanels.filter((x) => x.state !== "running")) p.destroy();
 		this.statusPanels = this.statusPanels.filter((p) => p.state === "running");
@@ -587,7 +717,7 @@ export default class ArabicSupportPlugin extends Plugin {
 		const statePath = this.jobPath(title, "json");
 		const fullArgs = args[0] === "transcribe" ? [...args, "--log", logPath, "--state", statePath] : args;
 
-		let result: any = null;
+		let result: PipelineResult | null = null;
 		const { code } = await this.runScript(scriptRel ?? this.settings.pipelineScript, fullArgs, (ev) => {
 			panel.append(ev);
 			if (ev.event === "result") result = ev.result;
@@ -599,12 +729,12 @@ export default class ArabicSupportPlugin extends Plugin {
 		return result;
 	}
 
-	async runResume(statePath: string): Promise<any> {
+	async runResume(statePath: string): Promise<PipelineResult> {
 		for (const p of this.statusPanels.filter((x) => x.state !== "running")) p.destroy();
 		this.statusPanels = this.statusPanels.filter((p) => p.state === "running");
 		const panel = new StatusPanel(this.app, "Resuming");
 		this.statusPanels.push(panel);
-		let result: any = null;
+		let result: PipelineResult | null = null;
 		const { code } = await this.runPipeline(["resume", "--state", statePath], (ev) => {
 			panel.append(ev);
 			if (ev.event === "result") result = ev.result;
@@ -622,14 +752,14 @@ export default class ArabicSupportPlugin extends Plugin {
 		return `${dir}/${ts}-${title.replace(/[^\w.-]+/g, "_")}.${ext}`;
 	}
 
-	newestState(): Record<string, any> | null {
+	newestState(): PipelineState | null {
 		try {
 			const dir = `${this.vaultPath()}/.midad-arabic-sources/jobs`;
 			if (!fs.existsSync(dir)) return null;
-			const files = (fs.readdirSync(dir) as string[]).filter((f) => f.endsWith(".json")).sort();
+			const files = fs.readdirSync(dir).filter((f) => f.endsWith(".json")).sort();
 			if (!files.length) return null;
 			const name = files[files.length - 1];
-			const st = JSON.parse(fs.readFileSync(`${dir}/${name}`, "utf8"));
+			const st = JSON.parse(fs.readFileSync(`${dir}/${name}`, "utf8")) as PipelineState;
 			st._path = `${dir}/${name}`;
 			return st;
 		} catch {
@@ -641,7 +771,7 @@ export default class ArabicSupportPlugin extends Plugin {
 		try {
 			const dir = `${this.vaultPath()}/.midad-arabic-sources/jobs`;
 			if (!fs.existsSync(dir)) { new Notice("No pipeline logs yet."); return; }
-			const files = (fs.readdirSync(dir) as string[]).filter((f) => f.endsWith(".log")).sort();
+			const files = fs.readdirSync(dir).filter((f) => f.endsWith(".log")).sort();
 			if (!files.length) { new Notice("No pipeline logs yet."); return; }
 			const name = files[files.length - 1];
 			new LogModal(this.app, name, fs.readFileSync(`${dir}/${name}`, "utf8")).open();
@@ -656,7 +786,7 @@ export default class ArabicSupportPlugin extends Plugin {
 		if (!this.ensureApiKey()) return;
 		let pdfs = (await this.pipelineResult(["list-pdfs", item.path]))?.pdfs ?? [];
 		// If Python could not reach Zotero, use ScholarWeft's already-resolved paths.
-		if (!pdfs.some((p: any) => p.exists)) {
+		if (!pdfs.some((p) => p.exists)) {
 			const sw = this.swPdfPaths(item.citekey);
 			if (sw.length) {
 				pdfs = sw.map((path) => {
@@ -673,7 +803,7 @@ export default class ArabicSupportPlugin extends Plugin {
 		const item = this.activeItem();
 		if (!item) { new Notice("Open a literature note (@citekey) first."); return; }
 		if (!this.ensureApiKey()) return;
-		const notes = (await this.pipelineResult(["list-transcriptions", item.path]))?.notes ?? [];
+		const notes = ((await this.pipelineResult(["list-transcriptions", item.path]))?.notes ?? []) as unknown as PipelineNote[];
 		const pdfs = (await this.pipelineResult(["list-pdfs", item.path]))?.pdfs ?? [];
 		new TranslateModal(this.app, this, item.citekey, notes, pdfs).open();
 	}
@@ -684,10 +814,10 @@ export default class ArabicSupportPlugin extends Plugin {
 	}
 
 	/** Ask the importer script for its catalogue of available works. */
-	async listSources(): Promise<any[]> {
-		let works: any[] = [];
+	async listSources(): Promise<SourceWork[]> {
+		let works: SourceWork[] = [];
 		const { code, lines } = await this.runScript(this.settings.sourceImportScript, ["list", "--json"], (ev) => {
-			if (ev.event === "works") works = ev.works;
+			if (ev.event === "works") works = ev.works as SourceWork[];
 		});
 		if (!works.length) console.error("[midad-arabic-sources] source list", { code, lines });
 		return works;
@@ -699,12 +829,12 @@ export default class ArabicSupportPlugin extends Plugin {
 	 * SOURCE_CATALOG_TTL — rather than re-listing every time the modal opens.
 	 * `force` bypasses both caches.
 	 */
-	async listSourcesCached(force = false): Promise<any[]> {
+	async listSourcesCached(force = false): Promise<SourceWork[]> {
 		if (!force && this.sourceCatalog) return this.sourceCatalog;
 		const path = normalizePath(".midad-arabic-sources/source-catalog.json");
 		if (!force) {
 			try {
-				const cached = JSON.parse(await this.app.vault.adapter.read(path)) as { at?: number; schema?: number; works?: any[] };
+				const cached = JSON.parse(await this.app.vault.adapter.read(path)) as { at?: number; schema?: number; works?: SourceWork[] };
 				if (
 					Array.isArray(cached.works) && cached.works.length &&
 					cached.schema === SOURCE_CATALOG_SCHEMA &&
@@ -752,7 +882,7 @@ export default class ArabicSupportPlugin extends Plugin {
 	 * repositories do not carry an imprint — so the work's own source is named
 	 * where we know it, else the repository that supplied the text.
 	 */
-	zoteroPublisher(w: Record<string, any>): string {
+	zoteroPublisher(w: JsonObject): string {
 		const FRIENDLY: Record<string, string> = {
 			"qul.tarteel.ai": "Quranic Universal Library (Tarteel)",
 			"altafsir.com": "Altafsir.com",
@@ -777,7 +907,7 @@ export default class ArabicSupportPlugin extends Plugin {
 	 * The user's publication map (their template folder first, then the bundled
 	 * default): researched bibliographic details keyed by work key.
 	 */
-	async loadPublicationMap(): Promise<Record<string, Record<string, any>>> {
+	async loadPublicationMap(): Promise<Record<string, JsonObject>> {
 		const folder = this.settings.sourceTemplateFolder.trim();
 		const paths = [
 			folder ? `${folder}/${TEMPLATE_FOLDER}/publication-map.json` : "",
@@ -787,7 +917,7 @@ export default class ArabicSupportPlugin extends Plugin {
 			if (!p) continue;
 			try {
 				const text = await this.app.vault.adapter.read(normalizePath(p));
-				return (JSON.parse(text) ?? {}) as Record<string, Record<string, any>>;
+				return (JSON.parse(text) ?? {}) as Record<string, JsonObject>;
 			} catch { /* try the next */ }
 		}
 		return {};
@@ -802,22 +932,22 @@ export default class ArabicSupportPlugin extends Plugin {
 	}
 
 	/** A Zotero creator from a name string, or a `{first, last}` / `{name}` object. */
-	creator(creatorType: string, value: any): Record<string, any> {
+	creator(creatorType: string, value: CreatorValue): JsonObject {
 		if (value && typeof value === "object") {
 			const last = value.last ?? value.lastName ?? "";
 			const first = value.first ?? value.firstName ?? "";
 			if (last || first) return { creatorType, firstName: String(first), lastName: String(last) };
 			if (value.name) return { creatorType, name: String(value.name) };
 		}
-		return { creatorType, ...this.nameParts(String(value ?? "")) };
+		return { creatorType, ...this.nameParts(String((value as string | null | undefined) ?? "")) };
 	}
 
 	/** The display form of a name (string or `{first, last}` object). */
-	nameText(value: any): string {
+	nameText(value: CreatorValue): string {
 		if (value && typeof value === "object") {
 			return String(value.name ?? [value.first, value.last].filter(Boolean).join(" "));
 		}
-		return String(value ?? "");
+		return String((value as string | null | undefined) ?? "");
 	}
 
 	/**
@@ -826,7 +956,7 @@ export default class ArabicSupportPlugin extends Plugin {
 	 * property the hub carries, so nothing in the Zotero `extra` is kept only in
 	 * Zotero. Mirrors the `extra` built by `zoteroItem`.
 	 */
-	masNote(pub: Record<string, any>): string {
+	masNote(pub: JsonObject): string {
 		return [
 			pub.note ? String(pub.note) : "",
 			pub.verified ? "" : BIB_PROVISIONAL,
@@ -834,10 +964,10 @@ export default class ArabicSupportPlugin extends Plugin {
 	}
 
 	/** A Zotero `book` item built from a work's model, overlaid by the publication map. */
-	zoteroItem(w: Record<string, any>, pub: Record<string, any> = {}): Record<string, any> {
-		const authors = (pub.authors ?? w.authors ?? []) as any[];
-		const translators = (pub.translators ?? w.translators ?? []) as any[];
-		const editors = (pub.editors ?? []) as any[];
+	zoteroItem(w: JsonObject, pub: JsonObject = {}): JsonObject {
+		const authors = (pub.authors ?? w.authors ?? []) as CreatorValue[];
+		const translators = (pub.translators ?? w.translators ?? []) as CreatorValue[];
+		const editors = (pub.editors ?? []) as CreatorValue[];
 		const creators = [
 			...authors.map((n) => this.creator("author", n)),
 			...translators.map((n) => this.creator("translator", n)),
@@ -870,14 +1000,14 @@ export default class ArabicSupportPlugin extends Plugin {
 	 * Every installed work with its Zotero status: `new` (never sent), `changed`
 	 * (sent before but altered, or deleted in Zotero), or `current`.
 	 */
-	async zoteroEntries(): Promise<Array<{ work: Record<string, any>; item: Record<string, any>; hash: string; itemKey: string; status: "new" | "changed" | "current" }>> {
+	async zoteroEntries(): Promise<Array<{ work: JsonObject; item: JsonObject; hash: string; itemKey: string; status: "new" | "changed" | "current" }>> {
 		const models = await this.loadAllSourceModels();
 		const manifest = await this.loadSourceManifest();
 		const installed = new Set(manifest.filter((w) => this.workStatus(w) === "installed").map((w) => this.workKey(w)));
 		const state = await this.loadZoteroState();
 		const live = this.settings.zoteroMethod === "local" ? await this.zoteroLiveKeys() : null;
 		const pubs = await this.loadPublicationMap();
-		const out: Array<{ work: Record<string, any>; item: Record<string, any>; hash: string; itemKey: string; status: "new" | "changed" | "current" }> = [];
+		const out: Array<{ work: JsonObject; item: JsonObject; hash: string; itemKey: string; status: "new" | "changed" | "current" }> = [];
 		for (const m of models) {
 			const key = String(m.work.key);
 			if (!installed.has(key)) continue;
@@ -896,16 +1026,16 @@ export default class ArabicSupportPlugin extends Plugin {
 	}
 
 	/** The installed works that need (re)sending. */
-	async zoteroPending(): Promise<Array<{ work: Record<string, any>; item: Record<string, any>; hash: string; itemKey: string }>> {
+	async zoteroPending(): Promise<Array<{ work: JsonObject; item: JsonObject; hash: string; itemKey: string }>> {
 		return (await this.zoteroEntries()).filter((e) => e.status !== "current");
 	}
 
 	/** The installed work whose hub or folder contains `path`, if any. */
-	async workForPath(path: string): Promise<Record<string, any> | null> {
+	async workForPath(path: string): Promise<JsonObject | null> {
 		const outRoot = this.settings.sourceImportRoot.trim() || "_7 Sources";
 		const models = await this.loadAllSourceModels();
 		const manifest = await this.loadSourceManifest();
-		const byKey = new Map<string, Record<string, any>>();
+		const byKey = new Map<string, JsonObject>();
 		for (const w of manifest) byKey.set(this.workKey(w), w);
 		for (const m of models) byKey.set(String(m.work.key), m.work);
 		for (const w of byKey.values()) {
@@ -941,14 +1071,14 @@ export default class ArabicSupportPlugin extends Plugin {
 		return await new Promise((resolve, reject) => {
 			const req = http.request(
 				{ hostname: u.hostname, port: u.port || 80, path: u.pathname + u.search, method, headers: h },
-				(res: any) => {
+				(res: http.IncomingMessage) => {
 					const chunks: Buffer[] = [];
 					res.on("data", (c: Buffer) => chunks.push(c));
 					res.on("end", () =>
 						resolve({
 							status: res.statusCode ?? 0,
 							text: Buffer.concat(chunks).toString("utf8"),
-							headers: res.headers ?? {},
+							headers: (res.headers ?? {}) as Record<string, string>,
 						})
 					);
 				}
@@ -964,7 +1094,7 @@ export default class ArabicSupportPlugin extends Plugin {
 	 * `localHttp`), never throws on an empty body, logs the method/url/status, and
 	 * returns the parsed parts.
 	 */
-	async zbFetch(method: string, url: string, headers: Record<string, string>, body?: string): Promise<{ status: number; text: string; json: any; headers: Record<string, string> }> {
+	async zbFetch(method: string, url: string, headers: Record<string, string>, body?: string): Promise<{ status: number; text: string; json: unknown; headers: Record<string, string> }> {
 		let status = 0;
 		let text = "";
 		let hdrs: Record<string, string> = {};
@@ -986,7 +1116,7 @@ export default class ArabicSupportPlugin extends Plugin {
 			text = resp.text ?? "";
 			hdrs = resp.headers ?? {};
 		}
-		let json: any = null;
+		let json: unknown = null;
 		try {
 			json = text ? JSON.parse(text) : null;
 		} catch {
@@ -1014,15 +1144,17 @@ export default class ArabicSupportPlugin extends Plugin {
 		const base = this.zoteroLibraryPath(method);
 		const headers = this.zoteroHeaders(method);
 		const list = await this.zbFetch("GET", `${base}/collections?limit=100`, headers);
-		const found = (list.json ?? []).find((c: any) => c.data?.name === ZOTERO_MARK);
+		const refs = (list.json as ZoteroCollectionRef[] | null) ?? [];
+		const found = refs.find((c) => c.data?.name === ZOTERO_MARK);
 		if (found) return String(found.key ?? found.data?.key ?? "");
 		const resp = await this.zbFetch("POST", `${base}/collections`, headers, JSON.stringify([{ name: ZOTERO_MARK }]));
-		return String(resp.json?.successful?.["0"]?.key ?? "");
+		const created = resp.json as ZoteroCreateResponse | null;
+		return String(created?.successful?.["0"]?.key ?? "");
 	}
 
 	/** Add `mas-up: [[@citekey]]` to the work note for any item Better BibTeX has keyed. */
 	async applyCitekeys(
-		pending: Array<{ work: Record<string, any> }>,
+		pending: Array<{ work: JsonObject }>,
 		keys: string[],
 		method: "local" | "web"
 	): Promise<void> {
@@ -1032,14 +1164,15 @@ export default class ArabicSupportPlugin extends Plugin {
 			if (!keys[i]) continue;
 			try {
 				const resp = await this.zbFetch("GET", `${base}/items/${keys[i]}`, headers);
-				const ck = resp.json?.data?.citationKey;
+				const item = resp.json as ZoteroItemResponse | null;
+				const ck = item?.data?.citationKey;
 				if (ck) await this.addCitekeyUp(pending[i].work, String(ck));
 			} catch { /* ignore */ }
 		}
 	}
 
 	/** Prepend `- "[[@citekey]]"` under the work note's `mas-up:` list, once. */
-	async addCitekeyUp(work: Record<string, any>, citekey: string): Promise<void> {
+	async addCitekeyUp(work: JsonObject, citekey: string): Promise<void> {
 		const outRoot = this.settings.sourceImportRoot.trim() || "_7 Sources";
 		const hub = normalizePath(`${outRoot}/${work.dir}.md`);
 		try {
@@ -1060,14 +1193,15 @@ export default class ArabicSupportPlugin extends Plugin {
 				? { "Zotero-API-Key": this.settings.zoteroApiKey.trim(), "Zotero-API-Version": "3" }
 				: (this.settings.zoteroServerId ? { "Zotero-Server-ID": this.settings.zoteroServerId } : {});
 			const resp = await this.zbFetch("GET", url, headers);
-			const v = resp.json?.version ?? resp.json?.data?.version;
+			const item = resp.json as ZoteroItemResponse | null;
+			const v = item?.version ?? item?.data?.version;
 			return typeof v === "number" ? v : null;
 		} catch {
 			return null;
 		}
 	}
 
-	async sendZoteroLocal(pending: Array<{ item: Record<string, any>; itemKey: string }>): Promise<string[]> {
+	async sendZoteroLocal(pending: Array<{ item: JsonObject; itemKey: string }>): Promise<string[]> {
 		const base = "http://127.0.0.1:23119/api";
 		const probe = await this.zbFetch("GET", `${base}/users/0/items?limit=1`, {});
 		const serverId = header(probe, "Zotero-Server-ID") || this.settings.zoteroServerId;
@@ -1079,7 +1213,8 @@ export default class ArabicSupportPlugin extends Plugin {
 			{ "Zotero-Server-ID": serverId },
 			JSON.stringify({ appName: "Midad Arabic Sources" })
 		);
-		const key = String(auth.json?.key ?? "");
+		const authResp = auth.json as ZoteroAuthResponse | null;
+		const key = String(authResp?.key ?? "");
 		if (!key) throw new Error(`Local Zotero refused the connection (${auth.status}): ${auth.text.slice(0, 160)}`);
 		const headers = { "Zotero-API-Key": key, "Zotero-Server-ID": serverId };
 		const out: string[] = pending.map(() => "");
@@ -1095,7 +1230,8 @@ export default class ArabicSupportPlugin extends Plugin {
 				JSON.stringify(creates.map(([p]) => p.item))
 			);
 			if (resp.status >= 400) throw new Error(`Zotero ${resp.status}: ${resp.text.slice(0, 200)}`);
-			const successful = resp.json?.successful ?? {};
+			const created = resp.json as ZoteroCreateResponse | null;
+			const successful = created?.successful ?? {};
 			creates.forEach(([, i], n) => { out[i] = String(successful[String(n)]?.key ?? ""); });
 		}
 		// …and items we sent before are updated in place, never duplicated.
@@ -1113,7 +1249,7 @@ export default class ArabicSupportPlugin extends Plugin {
 		return out;
 	}
 
-	async sendZoteroWeb(pending: Array<{ item: Record<string, any>; itemKey: string }>): Promise<string[]> {
+	async sendZoteroWeb(pending: Array<{ item: JsonObject; itemKey: string }>): Promise<string[]> {
 		const key = this.settings.zoteroApiKey.trim();
 		const lib = this.settings.zoteroLibraryId.trim();
 		if (!key || !lib) throw new Error("Web API key and library ID are required.");
@@ -1130,7 +1266,8 @@ export default class ArabicSupportPlugin extends Plugin {
 				JSON.stringify(creates.map(([p]) => p.item))
 			);
 			if (resp.status >= 400) throw new Error(`Zotero ${resp.status}: ${resp.text.slice(0, 200)}`);
-			const successful = resp.json?.successful ?? {};
+			const created = resp.json as ZoteroCreateResponse | null;
+			const successful = created?.successful ?? {};
 			creates.forEach(([, i], n) => { out[i] = String(successful[String(n)]?.key ?? ""); });
 		}
 		for (const [p, i] of idx.filter(([p]) => p.itemKey)) {
@@ -1147,10 +1284,11 @@ export default class ArabicSupportPlugin extends Plugin {
 		return out;
 	}
 
-	async writeZoteroCsl(pending: Array<{ item: Record<string, any> }>): Promise<string> {
+	async writeZoteroCsl(pending: Array<{ item: JsonObject }>): Promise<string> {
 		const csl = pending.map((p) => {
-			const it = p.item;
-			const of = (t: string) => (it.creators ?? []).filter((c: any) => c.creatorType === t).map((c: any) => (
+			const it = p.item as CslSourceItem;
+			const creators = it.creators ?? [];
+			const of = (t: string) => creators.filter((c) => c.creatorType === t).map((c) => (
 				c.name ? { literal: c.name } : { family: c.lastName || undefined, given: c.firstName || undefined }
 			));
 			return {
@@ -1295,7 +1433,7 @@ export default class ArabicSupportPlugin extends Plugin {
 	async detectZoteroLocal(): Promise<{ libraryId: number; serverId: string } | null> {
 		try {
 			const resp = await this.zbFetch("GET", "http://127.0.0.1:23119/api/users/0/items?limit=1", {});
-			const first = (resp.json ?? [])[0];
+			const first = ((resp.json as Array<{ library?: { id?: number } }> | null) ?? [])[0];
 			const libraryId = first?.library?.id;
 			if (!libraryId) return null;
 			return {
@@ -1356,7 +1494,7 @@ export default class ArabicSupportPlugin extends Plugin {
 	 * `onProgress(done, total)` reports per-file progress so a slow removal is
 	 * not silent.
 	 */
-	async removeSource(work: Record<string, any>, onProgress?: (done: number, total: number) => void): Promise<void> {
+	async removeSource(work: JsonObject, onProgress?: (done: number, total: number) => void): Promise<void> {
 		const outRoot = this.settings.sourceImportRoot.trim() || "_7 Sources";
 		const dir = work.dir as string;
 		const adapter = this.app.vault.adapter;
@@ -1452,7 +1590,7 @@ export default class ArabicSupportPlugin extends Plugin {
 	 * rendered notes. This is what the user's drive actually holds, which is not
 	 * the same as the repository size (a fetch, a model, and markdown all count).
 	 */
-	async onDiskBytes(work: Record<string, any>): Promise<number> {
+	async onDiskBytes(work: JsonObject): Promise<number> {
 		const outRoot = this.settings.sourceImportRoot.trim() || "_7 Sources";
 		const adapter = this.app.vault.adapter;
 		let total = Number(work.cache_bytes ?? 0);
@@ -1475,7 +1613,7 @@ export default class ArabicSupportPlugin extends Plugin {
 	 * Guarded on `document-type: text-source` so an unrelated note of the same name
 	 * is never touched.
 	 */
-	async pruneRenamedFolder(work: Record<string, any>): Promise<void> {
+	async pruneRenamedFolder(work: JsonObject): Promise<void> {
 		const outRoot = this.settings.sourceImportRoot.trim() || "_7 Sources";
 		const dir = String(work.dir ?? "");
 		const title = String(work.title ?? "");
@@ -1509,13 +1647,14 @@ export default class ArabicSupportPlugin extends Plugin {
 		const manifest = await this.loadSourceManifest();
 		// Keep every entry — including ones still being removed — in the manifest
 		// (the status list), but only list live, non-deleting works in the index.
-		const byKey = new Map<string, Record<string, any>>();
+		const byKey = new Map<string, JsonObject>();
 		for (const w of manifest) byKey.set(this.workKey(w), w);
 		for (const m of models) {
-			const k = this.workKey(m.work as Record<string, any>);
+			const k = this.workKey(m.work);
 			const prev = byKey.get(k);
 			// A cached model must not erase a "deleting" status set on the entry.
-			byKey.set(k, prev ? { ...m.work, status: prev.status } : m.work);
+			const merged: JsonObject = prev ? { ...m.work, status: prev.status as string } : m.work;
+			byKey.set(k, merged);
 		}
 		const works = [...byKey.values()];
 		await this.saveSourceManifest(works);
@@ -1525,7 +1664,7 @@ export default class ArabicSupportPlugin extends Plugin {
 		const installed = works.filter((w) => this.workStatus(w) === "installed");
 		const today = new Date().toISOString().slice(0, 10);
 		const written = await renderMocs(this.app, templates, installed, outRoot, today, this.settings.sourceMocParent.trim() || "Sources", true);
-		const mocNames = [...new Set(installed.map((w) => w.moc).filter(Boolean) as string[])].sort();
+		const mocNames = [...new Set(installed.map((w) => (typeof w.moc === "string" ? w.moc : "")).filter(Boolean))].sort();
 		const parentPath = await this.updateSourceParent(templates, mocNames, today);
 		if (parentPath) written.push(parentPath);
 		return written;
@@ -1533,7 +1672,7 @@ export default class ArabicSupportPlugin extends Plugin {
 
 	/** Works whose notes are partially or wholly missing in the vault. */
 	/** Works whose notes or cached model are missing in the vault. */
-	async findIncompleteSources(): Promise<Array<{ work: Record<string, any>; missing: number; total: number; reason: string }>> {
+	async findIncompleteSources(): Promise<Array<{ work: JsonObject; missing: number; total: number; reason: string }>> {
 		const outRoot = this.settings.sourceImportRoot.trim() || "_7 Sources";
 		const models = await this.loadAllSourceModels();
 		const modelByKey = new Map(models.map((m) => [`${m.work.collection}:${m.work.id}`, m]));
@@ -1541,7 +1680,7 @@ export default class ArabicSupportPlugin extends Plugin {
 		const pending = await this.loadPendingDeletions();
 		const canonicalId = this.resolveCanonicalQuran();
 		const canonicalRoot = this.settings.canonicalQuranFolder.trim() || `${outRoot}/Quran`;
-		const out: Array<{ work: Record<string, any>; missing: number; total: number; reason: string }> = [];
+		const out: Array<{ work: JsonObject; missing: number; total: number; reason: string }> = [];
 		for (const work of manifest) {
 			if (pending.has(this.workKey(work))) continue; // being removed
 			const model = modelByKey.get(`${work.collection}:${work.id}`);
@@ -1577,7 +1716,7 @@ export default class ArabicSupportPlugin extends Plugin {
 	}
 
 	/** Reinstall a work by re-fetching (cached) and re-rendering it. */
-	async reinstallSource(work: Record<string, any>): Promise<void> {
+	async reinstallSource(work: JsonObject): Promise<void> {
 		await this.importSources([`${work.collection}:${work.id}`]);
 	}
 
@@ -1618,7 +1757,7 @@ export default class ArabicSupportPlugin extends Plugin {
 	 * without transliteration, false to proceed with it, or null to cancel.
 	 */
 	async confirmTransliteration(keys: string[]): Promise<boolean | null> {
-		let needs: Record<string, any> | undefined;
+		let needs: JsonObject | undefined;
 		try {
 			const works = await this.listSourcesCached();
 			const byKey = new Map(works.map((w) => [String(w.key), w]));
@@ -1646,7 +1785,8 @@ export default class ArabicSupportPlugin extends Plugin {
 		const path = normalizePath(".midad-arabic-sources/last-update-check.json");
 		let last = 0;
 		try {
-			last = JSON.parse(await this.app.vault.adapter.read(path)).at ?? 0;
+			const parsed = JSON.parse(await this.app.vault.adapter.read(path)) as { at?: number };
+			last = parsed.at ?? 0;
 		} catch { last = 0; }
 		if (Date.now() - last < days * 86_400_000) return;
 		try {
@@ -1778,7 +1918,7 @@ export default class ArabicSupportPlugin extends Plugin {
 			try {
 				const model = JSON.parse(text) as SourceModel;
 				// Never re-render a work that is mid-removal.
-				if (pending.has(this.workKey(model.work as Record<string, any>))) continue;
+				if (pending.has(this.workKey(model.work))) continue;
 				batch.push(model);
 			} catch { /* skip */ }
 		}
@@ -1797,7 +1937,7 @@ export default class ArabicSupportPlugin extends Plugin {
 			// the canonical riwāya has unprefixed sūra notes (in canonical_root).
 			// Every other genre needs its folder here too, or the hub would link
 			// to the canonical Qur'ān notes instead of its own.
-			m.work.unit_prefix = isCanonical ? "" : m.work.dir;
+			m.work.unit_prefix = isCanonical ? "" : (m.work.dir as string);
 		}
 		const written: string[] = [];
 		const pubs = await this.loadPublicationMap();
@@ -1806,7 +1946,7 @@ export default class ArabicSupportPlugin extends Plugin {
 			// Hand the templates the researched bibliographic details, if any — plus
 			// the combined `mas-note` text, so the note holds everything the Zotero
 			// `extra` does.
-			const pub = pubs[this.workKey(model.work as Record<string, any>)] ?? {};
+			const pub = pubs[this.workKey(model.work)] ?? {};
 			model.work.publication = { ...pub, mas_note: this.masNote(pub) };
 			const work = String(model.work.title || model.work.dir || model.work.id);
 			const emit = (step: number, steps: number) =>
@@ -1817,7 +1957,7 @@ export default class ArabicSupportPlugin extends Plugin {
 			} catch (e) {
 				// One unusable model must not abort the whole batch: a template/model
 				// mismatch used to kill a re-render, leaving only a flashed notice.
-				console.error("[midad-arabic-sources] render failed", this.workKey(model.work as Record<string, any>), e);
+				console.error("[midad-arabic-sources] render failed", this.workKey(model.work), e);
 				new Notice(`Could not render ${work}: ${e instanceof Error ? e.message : e}`);
 			}
 			await this.pruneRenamedFolder(model.work);
@@ -1861,17 +2001,17 @@ export default class ArabicSupportPlugin extends Plugin {
 		return file.path;
 	}
 
-	async loadSourceManifest(): Promise<Array<Record<string, any>>> {
+	async loadSourceManifest(): Promise<Array<JsonObject>> {
 		try {
 			const text = await this.app.vault.adapter.read(normalizePath(".midad-arabic-sources/source-imports.json"));
-			const parsed = JSON.parse(text) as { works?: Array<Record<string, any>> };
+			const parsed = JSON.parse(text) as { works?: Array<JsonObject> };
 			return Array.isArray(parsed.works) ? parsed.works : [];
 		} catch {
 			return [];
 		}
 	}
 
-	async saveSourceManifest(works: Array<Record<string, any>>): Promise<void> {
+	async saveSourceManifest(works: Array<JsonObject>): Promise<void> {
 		try {
 			await this.app.vault.adapter.write(
 				normalizePath(".midad-arabic-sources/source-imports.json"),
@@ -1889,12 +2029,12 @@ export default class ArabicSupportPlugin extends Plugin {
 	// leaves a half-deleted one; the removal resumes on the next run instead.
 
 	/** A work's status, defaulting to installed for older manifest entries. */
-	workStatus(work: Record<string, any>): "installed" | "deleting" {
+	workStatus(work: JsonObject): "installed" | "deleting" {
 		return work.status === "deleting" ? "deleting" : "installed";
 	}
 
 	/** The stable identity of a work (its key, falling back to its folder). */
-	workKey(work: Record<string, any>): string {
+	workKey(work: JsonObject): string {
 		return String(work.key ?? `${work.collection}:${work.id}`);
 	}
 
@@ -1902,7 +2042,7 @@ export default class ArabicSupportPlugin extends Plugin {
 		const list = Array.isArray(keys) ? keys : [keys];
 		const manifest = await this.loadSourceManifest();
 		let changed = false;
-		const next: Array<Record<string, any>> = [];
+		const next: Array<JsonObject> = [];
 		for (const w of manifest) {
 			if (!list.includes(this.workKey(w))) {
 				next.push(w);
@@ -1921,7 +2061,7 @@ export default class ArabicSupportPlugin extends Plugin {
 	}
 
 	/** The manifest entries for works whose removal has not finished. */
-	async findPendingDeletions(): Promise<Array<Record<string, any>>> {
+	async findPendingDeletions(): Promise<Array<JsonObject>> {
 		const manifest = await this.loadSourceManifest();
 		return manifest.filter((w) => this.workStatus(w) === "deleting");
 	}
@@ -2116,13 +2256,13 @@ export default class ArabicSupportPlugin extends Plugin {
 	 * whose *unit* template changed is re-rendered whole; one whose *hub* alone
 	 * changed needs only its hub note rewritten.
 	 */
-	async findStaleSourceWorks(): Promise<{ full: Array<Record<string, any>>; hubs: Array<Record<string, any>> }> {
+	async findStaleSourceWorks(): Promise<{ full: Array<JsonObject>; hubs: Array<JsonObject> }> {
 		const store = await this.loadSourceHashes();
 		const manifest = await this.loadSourceManifest();
 		const pending = await this.loadPendingDeletions();
 		const outRoot = this.settings.sourceImportRoot.trim() || "_7 Sources";
-		const full: Array<Record<string, any>> = [];
-		const hubs: Array<Record<string, any>> = [];
+		const full: Array<JsonObject> = [];
+		const hubs: Array<JsonObject> = [];
 		for (const work of manifest) {
 			if (this.workStatus(work) !== "installed") continue;
 			if (pending.has(this.workKey(work))) continue;
@@ -2132,7 +2272,7 @@ export default class ArabicSupportPlugin extends Plugin {
 			if (!unitAt && !hubAt) continue; // these templates have never changed
 			const file = this.app.vault.getAbstractFileByPath(normalizePath(`${outRoot}/${work.dir}.md`));
 			const fm = file instanceof TFile ? this.app.metadataCache.getFileCache(file)?.frontmatter : null;
-			const upd = fm?.["updated"];
+			const upd: unknown = fm?.["updated"];
 			const ms = typeof upd === "string" ? Date.parse(upd.replace(" ", "T")) : null;
 			const olderThan = (at: number) => at > 0 && (ms == null || !Number.isFinite(ms) || ms < at);
 			if (olderThan(unitAt)) full.push(work);
@@ -2145,7 +2285,7 @@ export default class ArabicSupportPlugin extends Plugin {
 	 * Rewrite a work's hub note from its cached model — for when only the hub
 	 * template changed.
 	 */
-	async renderHubFor(work: Record<string, any>): Promise<void> {
+	async renderHubFor(work: JsonObject): Promise<void> {
 		const rel = normalizePath(`.midad-arabic-sources/source-models/${work.collection}/${work.id}.json`);
 		try {
 			const model = JSON.parse(await this.app.vault.adapter.read(rel)) as SourceModel;
@@ -2267,7 +2407,7 @@ export default class ArabicSupportPlugin extends Plugin {
 				contentType: "application/json",
 				body: JSON.stringify(body),
 			});
-			const data = res.json ?? {};
+			const data = (res.json ?? {}) as TransliterateResponse;
 			this.lastUnknown = Array.isArray(data.unknown) ? data.unknown : [];
 			if (data.error) {
 				new Notice(`Transliteration error: ${data.error}`);
@@ -2312,7 +2452,7 @@ export default class ArabicSupportPlugin extends Plugin {
 	async health(): Promise<{ engines_loaded?: string[]; providers?: Record<string, boolean> } | null> {
 		try {
 			const res = await requestUrl({ url: this.baseUrl() + "/health", method: "GET" });
-			return res.json;
+			return res.json as { engines_loaded?: string[]; providers?: Record<string, boolean> } | null;
 		} catch {
 			return null;
 		}
@@ -2396,7 +2536,8 @@ export default class ArabicSupportPlugin extends Plugin {
 	}
 
 	async loadSettings() {
-		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+		const data = (await this.loadData()) as Partial<ArabicSupportSettings> | null;
+		this.settings = Object.assign({}, DEFAULT_SETTINGS, data ?? {});
 		// Pre-designation installs: Ḥafṣ was the first riwāya, so adopt it once and
 		// persist it, after which the designation is purely the setting.
 		if (!this.settings.canonicalQuranRiwāya.trim()) {
@@ -2482,14 +2623,14 @@ class TransliterateModal extends Modal {
 
 class LexiconModal extends Modal {
 	plugin: ArabicSupportPlugin;
-	unknown: Array<{ term: string; guess: string }>;
+	unknown: LexiconGuess[];
 	inputs: Array<{ term: string; comp: TextComponent }> = [];
 	onSaved: (() => Promise<void> | void) | null;
 
 	constructor(
 		app: App,
 		plugin: ArabicSupportPlugin,
-		unknown: Array<{ term: string; guess: string }>,
+		unknown: LexiconGuess[],
 		onSaved: (() => Promise<void> | void) | null = null
 	) {
 		super(app);
@@ -2890,7 +3031,7 @@ class ArabicSupportSettingTab extends PluginSettingTab {
 					this.plugin.settings.zoteroLibraryId = String(found.libraryId);
 					this.plugin.settings.zoteroServerId = found.serverId;
 					await this.plugin.saveSettings();
-					const input = libSetting.settingEl.querySelector("input") as HTMLInputElement | null;
+					const input = libSetting.settingEl.querySelector("input");
 					if (input) input.value = String(found.libraryId);
 					new Notice(`Local Zotero: library ${found.libraryId}.`);
 				})
@@ -2909,7 +3050,7 @@ class ArabicSupportSettingTab extends PluginSettingTab {
 
 // ── Transcription / translation modals ───────────────────────────────────────
 
-function formatEvent(ev: any): string {
+function formatEvent(ev: PipelineEvent): string {
 	if (ev.event === "log") return ev.message ?? "";
 	if (ev.event === "step") return `[${ev.name}] ${ev.status}${ev.detail ? " — " + ev.detail : ""}`;
 	if (ev.event === "result") return "✓ done";
@@ -2984,7 +3125,7 @@ class StatusPanel {
 		});
 	}
 
-	append(ev: any): void {
+	append(ev: PipelineEvent): void {
 		this.logEl.setText((this.logEl.getText() ? this.logEl.getText() + "\n" : "") + formatEvent(ev));
 		if (ev.event === "step") {
 			const detail = ev.detail ? ` — ${String(ev.detail).slice(0, 40)}` : "";
@@ -3018,10 +3159,11 @@ class StatusPanel {
 	}
 
 	openPath(path: string): void {
-		const vault = (this.app.vault.adapter as any)?.getBasePath?.() ?? "";
+		const adapter = this.app.vault.adapter as unknown as { getBasePath?: () => string };
+		const vault = adapter?.getBasePath?.() ?? "";
 		const rel = vault && path.startsWith(vault) ? path.slice(vault.length + 1) : path;
 		const file = this.app.vault.getAbstractFileByPath(rel);
-		if (file) void this.app.workspace.getLeaf("tab").openFile(file as any);
+		if (file instanceof TFile) void this.app.workspace.getLeaf("tab").openFile(file);
 		else void this.app.workspace.openLinkText(rel, "", true);
 	}
 
@@ -3110,9 +3252,9 @@ class ApiKeyModal extends Modal {
 
 class ResumeModal extends Modal {
 	plugin: ArabicSupportPlugin;
-	state: any;
+	state: PipelineState;
 
-	constructor(app: App, plugin: ArabicSupportPlugin, state: any) {
+	constructor(app: App, plugin: ArabicSupportPlugin, state: PipelineState) {
 		super(app);
 		this.plugin = plugin;
 		this.state = state;
@@ -3155,10 +3297,10 @@ class ResumeModal extends Modal {
 class TranscribeModal extends Modal {
 	plugin: ArabicSupportPlugin;
 	citekey: string;
-	pdfs: any[];
-	checks: Array<{ pdf: any; el: HTMLInputElement; vol: TextComponent }> = [];
+	pdfs: PipelinePdf[];
+	checks: Array<{ pdf: PipelinePdf; el: HTMLInputElement; vol: TextComponent }> = [];
 
-	constructor(app: App, plugin: ArabicSupportPlugin, citekey: string, pdfs: any[]) {
+	constructor(app: App, plugin: ArabicSupportPlugin, citekey: string, pdfs: PipelinePdf[]) {
 		super(app);
 		this.plugin = plugin;
 		this.citekey = citekey;
@@ -3182,7 +3324,7 @@ class TranscribeModal extends Modal {
 
 		for (const pdf of this.pdfs) {
 			const row = contentEl.createDiv();
-			const cb = row.createEl("input") as HTMLInputElement;
+			const cb = row.createEl("input");
 			cb.type = "checkbox";
 			cb.checked = !!pdf.exists;
 			cb.disabled = !pdf.exists;
@@ -3220,12 +3362,12 @@ class TranscribeModal extends Modal {
 class TranslateModal extends Modal {
 	plugin: ArabicSupportPlugin;
 	citekey: string;
-	notes: any[];
-	pdfs: any[];
-	checks: Array<{ note: any; el: HTMLInputElement }> = [];
+	notes: PipelineNote[];
+	pdfs: PipelinePdf[];
+	checks: Array<{ note: PipelineNote; el: HTMLInputElement }> = [];
 	volume = "";
 
-	constructor(app: App, plugin: ArabicSupportPlugin, citekey: string, notes: any[], pdfs: any[]) {
+	constructor(app: App, plugin: ArabicSupportPlugin, citekey: string, notes: PipelineNote[], pdfs: PipelinePdf[]) {
 		super(app);
 		this.plugin = plugin;
 		this.citekey = citekey;
@@ -3251,7 +3393,7 @@ class TranslateModal extends Modal {
 				);
 			for (const n of transcriptions) {
 				const row = contentEl.createDiv();
-				const cb = row.createEl("input") as HTMLInputElement;
+				const cb = row.createEl("input");
 			cb.type = "checkbox";
 				cb.checked = true;
 				row.createSpan({ text: ` ${n.name}` });
@@ -3295,10 +3437,10 @@ class TranslateModal extends Modal {
 
 class ReprocessModal extends Modal {
 	plugin: ArabicSupportPlugin;
-	zips: any[];
-	checks: Array<{ zip: any; el: HTMLInputElement }> = [];
+	zips: ArchiveZip[];
+	checks: Array<{ zip: ArchiveZip; el: HTMLInputElement }> = [];
 
-	constructor(app: App, plugin: ArabicSupportPlugin, zips: any[]) {
+	constructor(app: App, plugin: ArabicSupportPlugin, zips: ArchiveZip[]) {
 		super(app);
 		this.plugin = plugin;
 		this.zips = zips;
@@ -3314,7 +3456,7 @@ class ReprocessModal extends Modal {
 		contentEl.createEl("p", { text: "Re-run post-processing on an archived batch (no Gemini resubmission)." });
 		for (const z of this.zips) {
 			const row = contentEl.createDiv();
-			const cb = row.createEl("input") as HTMLInputElement;
+			const cb = row.createEl("input");
 			cb.type = "checkbox";
 			row.createSpan({ text: ` ${z.name}` });
 			this.checks.push({ zip: z, el: cb });
@@ -3385,10 +3527,10 @@ class SourceTemplateUpdateConsentModal extends Modal {
 
 class ReconcileSourcesModal extends Modal {
 	plugin: ArabicSupportPlugin;
-	items: Array<{ work: Record<string, any>; missing: number; total: number; reason: string }>;
-	checks: Array<{ work: Record<string, any>; el: HTMLInputElement }> = [];
+	items: Array<{ work: JsonObject; missing: number; total: number; reason: string }>;
+	checks: Array<{ work: JsonObject; el: HTMLInputElement }> = [];
 
-	constructor(app: App, plugin: ArabicSupportPlugin, items: Array<{ work: Record<string, any>; missing: number; total: number; reason: string }>) {
+	constructor(app: App, plugin: ArabicSupportPlugin, items: Array<{ work: JsonObject; missing: number; total: number; reason: string }>) {
 		super(app);
 		this.plugin = plugin;
 		this.items = items;
@@ -3402,7 +3544,7 @@ class ReconcileSourcesModal extends Modal {
 		});
 		for (const it of this.items) {
 			const row = contentEl.createDiv();
-			const cb = row.createEl("input") as HTMLInputElement;
+			const cb = row.createEl("input");
 			cb.type = "checkbox";
 			cb.checked = true;
 			const detail = it.reason === "model" ? "cached source missing"
@@ -3422,7 +3564,7 @@ class ReconcileSourcesModal extends Modal {
 				})
 			)
 			.addButton((b) =>
-				b.setButtonText("Remove selected").setWarning().onClick(async () => {
+				b.setButtonText("Remove selected").setDestructive().onClick(async () => {
 					const chosen = this.checks.filter((c) => c.el.checked);
 					if (!chosen.length) { new Notice("Select at least one work."); return; }
 					this.close();
@@ -3867,7 +4009,7 @@ class ManageSourcesModal extends Modal {
  */
 class ZoteroSendModal extends Modal {
 	plugin: ArabicSupportPlugin;
-	entries: Array<{ work: Record<string, any>; item: Record<string, any>; hash: string; itemKey: string; status: "new" | "changed" | "current" }>;
+	entries: Array<{ work: JsonObject; item: JsonObject; hash: string; itemKey: string; status: "new" | "changed" | "current" }>;
 	checks: Array<{ key: string; el: HTMLInputElement }> = [];
 
 	constructor(app: App, plugin: ArabicSupportPlugin, entries: ZoteroSendModal["entries"]) {
@@ -3907,7 +4049,7 @@ class ZoteroSendModal extends Modal {
 				alignItems: "center",
 				padding: "3px 4px",
 			});
-			const cb = row.createEl("input") as HTMLInputElement;
+			const cb = row.createEl("input");
 			cb.type = "checkbox";
 			cb.checked = e.status !== "current";
 			row.createSpan({ text: String(e.work.title || e.work.name || e.work.key) });
