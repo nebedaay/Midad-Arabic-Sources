@@ -14,7 +14,7 @@
 # <%= unit.base %>
 
 <% for (const r of unit.roots) { -%>
-- [[<%~ r.base %>]]
+- <%= wikilink(r.base, r.title || `${r.arabic} ${r.roman}`) %>
 <% } -%>
 
 <span class="mas-managed">/mas-managed</span>

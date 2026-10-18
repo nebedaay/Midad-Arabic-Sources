@@ -76,14 +76,14 @@
 A dictionary has too many roots to list here, so they are indexed by first letter. Each note also carries `term-ar`, `term`, and a `<%= work.note_prefix || 'HW' %> …` alias, so search works too.
 
 <% for (const u of letters) { -%>
-- <%= wikilink(u.note_stem) %> — <%= u.roots.length %>
+- <%= wikilink(u.note_stem, u.title || u.base) %> — <%= u.roots.length %>
 <% } -%>
 
 <% } else { -%>
 ## <%= work.unit_label %>
 
 <% for (const u of units) { -%>
-- <%= wikilink(u.note_stem || (work.unit_prefix ? `${work.unit_prefix} - ${u.base}` : u.base)) %>
+- <%= wikilink(u.note_stem || (work.unit_prefix ? `${work.unit_prefix} - ${u.base}` : u.base), u.title || u.base) %>
 <% } -%>
 
 <% } -%>

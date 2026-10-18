@@ -1646,9 +1646,11 @@ _HW_ROMAN_RE = re.compile(r"(?:<b>)?([IVXLCDM]+)(?:</b>)?\s+")
 #          pronominal or prepositional ending and the two tanwīn exceptions are
 #          kept (`baḥr`, `kataba`, `minka`, `qāḍin`, `ṭabʿan`). Lane uses this.
 #   wehr   Hans Wehr's own — the European Orientalist system of the printed
-#          dictionary (`š`, `ṯ`, `ḵ`, `ḏ`, `ġ`, `ḳ`, `č`, `ž`). Wehr uses it, so
-#          a name the engine produced still matches the transliterations the
-#          note's own text carries.
+#          dictionary (`š`, `ṯ`, `ḵ`, `ḏ`, `ġ`, `č`, `ž`). Wehr uses it, so a name
+#          the engine produced still matches the transliterations the note's own
+#          text carries. Note that Wehr writes qāf as plain `q`: the `ḳ` that turns
+#          up in its scanned text is a mis-read khāʾ (`aḳaḍa` for `aḫaḏa`), not a
+#          qāf, and `_hw_skeleton` folds it onto khāʾ accordingly.
 #   full   fully vocalised, every case ending written. That is the service's
 #          `keep_case` mode — it changes how a reading is *produced*, not how its
 #          letters are written — and is what the vault uses for Qur'ān passages.
@@ -1658,7 +1660,7 @@ DEFAULT_ROMANIZATION = "vault"
 
 _WEHR_LETTERS: tuple[tuple[str, str], ...] = (
     ("sh", "š"), ("th", "ṯ"), ("kh", "ḵ"), ("dh", "ḏ"), ("gh", "ġ"),
-    ("ch", "č"), ("zh", "ž"), ("q", "ḳ"),
+    ("ch", "č"), ("zh", "ž"),
 )
 
 
@@ -1888,7 +1890,7 @@ def _hw_skeleton(text: str) -> str:
     for digraph, one in (("sh", "š"), ("th", "ṯ"), ("kh", "ḫ"), ("dh", "ḏ"),
                          ("gh", "ġ"), ("ch", "č")):
         t = t.replace(digraph, one)
-    for variant, one in (("ǧ", "j"), ("g", "j"), ("ḳ", "q"), ("ḵ", "ḫ")):
+    for variant, one in (("ǧ", "j"), ("g", "j"), ("ḳ", "ḫ"), ("ḵ", "ḫ")):
         t = t.replace(variant, one)
     return "".join(
         ch for ch in t
@@ -2632,7 +2634,7 @@ def _hw_letter_index(units: list[dict], convention: str = DEFAULT_ROMANIZATION) 
             "letter": letter,
             "roman": _hw_romanize(_HW_RADICALS.get(letter, ""), convention),
             "roots": [
-                {"base": u["base"], "arabic": u["root"]["arabic"], "roman": u["root"]["roman"]}
+                {"base": u["base"], "title": u["title"], "arabic": u["root"]["arabic"], "roman": u["root"]["roman"]}
                 for u in roots
             ],
         })

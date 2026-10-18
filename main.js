@@ -1064,7 +1064,7 @@ async function writeMerged(app, path2, out, force = false, replaceUnmanaged = tr
   if (force || substantiveContentDiffers(existing, merged))
     await writeNote(app, path2, merged);
 }
-async function renderModelToVault(app, templates, model, outRoot, force = false, onStep) {
+async function renderModelToVault(app, templates, model, outRoot, force = false, onStep, onlyKinds) {
   var _a;
   const engine = makeEngine();
   const dir = model.work.dir;
@@ -1074,7 +1074,8 @@ async function renderModelToVault(app, templates, model, outRoot, force = false,
   const canonicalRoot = typeof model.work.canonical_root === "string" ? model.work.canonical_root : "";
   const written = [];
   const singleUnit = model.units.length === 1 ? model.units[0] : void 0;
-  const steps = singleUnit && !isQuranText ? 1 : model.units.length + 1;
+  const todo = onlyKinds ? model.units.filter((u) => onlyKinds.has(String(u.kind))) : model.units;
+  const steps = singleUnit && !isQuranText ? 1 : todo.length + 1;
   let done = 0;
   const tick = () => onStep == null ? void 0 : onStep(++done, steps);
   for (const unit of model.units) {
@@ -1089,7 +1090,7 @@ async function renderModelToVault(app, templates, model, outRoot, force = false,
     await ensureFolder(app, folder);
     if (isCanonical && canonicalRoot)
       await ensureFolder(app, canonicalRoot);
-    for (const unit of model.units) {
+    for (const unit of todo) {
       const path2 = `${unit.note_folder}/${unit.note_stem}.md`;
       await writeMerged(app, path2, renderUnit(engine, templates, model, unit), force);
       written.push(path2);
@@ -1115,21 +1116,6 @@ async function renderModelToVault(app, templates, model, outRoot, force = false,
   written.push(hubPath);
   tick();
   return written;
-}
-async function renderModelHub(app, templates, model, outRoot, force = false) {
-  const engine = makeEngine();
-  const dir = model.work.dir;
-  const isQuranText = model.work.collection === "quran-text";
-  const isCanonical = isQuranText && model.work.canonical === true;
-  for (const unit of model.units) {
-    const dictRoot = model.work.collection === "dictionary" && unit.kind === "dict";
-    const base = String(unit.base);
-    unit.note_stem = isCanonical || dictRoot ? base : `${dir} - ${base}`;
-  }
-  const singleUnit = model.units.length === 1 ? model.units[0] : void 0;
-  const hubPath = `${outRoot}/${dir}.md`;
-  await writeMerged(app, hubPath, renderHub(engine, templates, model, isQuranText ? void 0 : singleUnit), force);
-  return [hubPath];
 }
 async function renderMocs(app, templates, works, outRoot, generated, parent, force = false) {
   const engine = makeEngine();
@@ -1259,6 +1245,13 @@ function requiredModelSchema(collection) {
 }
 var ZOTERO_MARK = "Midad Arabic Sources";
 var BIB_PROVISIONAL = "Bibliographic details are provisional \u2014 verify against the edition you used before citing.";
+var SOURCE_TEMPLATE_KIND = {
+  source: "source",
+  hadith: "hadith",
+  quran: "quran",
+  dictionary: "dict",
+  dictionaryIndex: "dict-index"
+};
 var DEFAULT_SETTINGS = {
   serverUrl: "http://127.0.0.1:8756",
   transliterationServerScript: "scripts/transliterate-server.py",
@@ -1301,6 +1294,7 @@ var ArabicSupportPlugin = class extends import_obsidian2.Plugin {
     this.zoteroSyncRunning = false;
     this.zoteroSyncAgain = false;
     this.pythonPromise = null;
+    this.sourceCatalogRefreshing = false;
     this.sourceTemplateCheckTimer = null;
     this.translitServerPid = null;
   }
@@ -1507,6 +1501,9 @@ var ArabicSupportPlugin = class extends import_obsidian2.Plugin {
     window.setTimeout(() => {
       void this.autoSyncZotero();
     }, 2e4);
+    window.setTimeout(() => {
+      void this.maybeRefreshSourceCatalog();
+    }, 25e3);
     this.registerEvent(this.app.vault.on("modify", (file) => {
       if (file instanceof import_obsidian2.TFile && this.isSourceTemplateFile(file.path)) {
         void this.recordSourceTemplateAndCheck();
@@ -1793,15 +1790,18 @@ var ArabicSupportPlugin = class extends import_obsidian2.Plugin {
     if (!force && this.sourceCatalog)
       return this.sourceCatalog;
     const path2 = (0, import_obsidian2.normalizePath)(".midad-arabic-sources/source-catalog.json");
-    if (!force) {
-      try {
-        const cached = JSON.parse(await this.app.vault.adapter.read(path2));
-        if (Array.isArray(cached.works) && cached.works.length && cached.schema === SOURCE_CATALOG_SCHEMA && Date.now() - ((_a = cached.at) != null ? _a : 0) < SOURCE_CATALOG_TTL) {
-          this.sourceCatalog = cached.works;
-          return cached.works;
-        }
-      } catch (e) {
-      }
+    let cached = null;
+    try {
+      cached = JSON.parse(await this.app.vault.adapter.read(path2));
+    } catch (e) {
+    }
+    const works0 = cached == null ? void 0 : cached.works;
+    const usable = Array.isArray(works0) && works0.length > 0 && (cached == null ? void 0 : cached.schema) === SOURCE_CATALOG_SCHEMA;
+    if (!force && usable && works0) {
+      this.sourceCatalog = works0;
+      if (Date.now() - ((_a = cached == null ? void 0 : cached.at) != null ? _a : 0) >= SOURCE_CATALOG_TTL)
+        void this.refreshSourceCatalogInBackground();
+      return works0;
     }
     const works = await this.listSources();
     if (works.length) {
@@ -1812,6 +1812,32 @@ var ArabicSupportPlugin = class extends import_obsidian2.Plugin {
       }
     }
     return works;
+  }
+  async refreshSourceCatalogInBackground() {
+    if (this.sourceCatalogRefreshing)
+      return;
+    this.sourceCatalogRefreshing = true;
+    try {
+      const works = await this.listSources();
+      if (works.length) {
+        this.sourceCatalog = works;
+        await this.app.vault.adapter.write((0, import_obsidian2.normalizePath)(".midad-arabic-sources/source-catalog.json"), JSON.stringify({ at: Date.now(), schema: SOURCE_CATALOG_SCHEMA, works }));
+      }
+    } catch (e) {
+      console.error("[midad-arabic-sources] catalogue refresh", e);
+    } finally {
+      this.sourceCatalogRefreshing = false;
+    }
+  }
+  async maybeRefreshSourceCatalog() {
+    var _a;
+    try {
+      const text = await this.app.vault.adapter.read((0, import_obsidian2.normalizePath)(".midad-arabic-sources/source-catalog.json"));
+      const cached = JSON.parse(text);
+      if (Date.now() - ((_a = cached.at) != null ? _a : 0) >= SOURCE_CATALOG_TTL)
+        await this.refreshSourceCatalogInBackground();
+    } catch (e) {
+    }
   }
   zoteroStatePath() {
     return ".midad-arabic-sources/zotero-export.json";
@@ -1831,6 +1857,29 @@ var ArabicSupportPlugin = class extends import_obsidian2.Plugin {
       await this.app.vault.adapter.write((0, import_obsidian2.normalizePath)(this.zoteroStatePath()), JSON.stringify({ items }, null, 1));
     } catch (e) {
     }
+  }
+  async loadSourceStats() {
+    try {
+      const text = await this.app.vault.adapter.read((0, import_obsidian2.normalizePath)(".midad-arabic-sources/source-stats.json"));
+      const parsed = JSON.parse(text);
+      return (parsed == null ? void 0 : parsed.works) && typeof parsed.works === "object" ? parsed.works : {};
+    } catch (e) {
+      return {};
+    }
+  }
+  async saveSourceStats(works) {
+    try {
+      await this.app.vault.adapter.write((0, import_obsidian2.normalizePath)(".midad-arabic-sources/source-stats.json"), JSON.stringify({ works }, null, 1));
+    } catch (e) {
+    }
+  }
+  hubUpdatedMs(work) {
+    var _a;
+    const outRoot = this.settings.sourceImportRoot.trim() || "_7 Sources";
+    const file = this.app.vault.getAbstractFileByPath((0, import_obsidian2.normalizePath)(`${outRoot}/${work.dir}.md`));
+    const fm = file instanceof import_obsidian2.TFile ? (_a = this.app.metadataCache.getFileCache(file)) == null ? void 0 : _a.frontmatter : null;
+    const upd = fm == null ? void 0 : fm["updated"];
+    return typeof upd === "string" ? Date.parse(upd.replace(" ", "T")) : 0;
   }
   zoteroPublisher(w) {
     var _a;
@@ -1937,25 +1986,22 @@ var ArabicSupportPlugin = class extends import_obsidian2.Plugin {
   }
   async zoteroEntries() {
     var _a;
-    const models = await this.loadAllSourceModels();
     const manifest = await this.loadSourceManifest();
-    const installed = new Set(manifest.filter((w) => this.workStatus(w) === "installed").map((w) => this.workKey(w)));
+    const installed = manifest.filter((w) => this.workStatus(w) === "installed");
     const state = await this.loadZoteroState();
     const live = this.settings.zoteroMethod === "local" ? await this.zoteroLiveKeys() : null;
     const pubs = await this.loadPublicationMap();
     const out = [];
-    for (const m of models) {
-      const key = String(m.work.key);
-      if (!installed.has(key))
-        continue;
-      const item = this.zoteroItem(m.work, (_a = pubs[key]) != null ? _a : {});
+    for (const work of installed) {
+      const key = this.workKey(work);
+      const item = this.zoteroItem(work, (_a = pubs[key]) != null ? _a : {});
       const hash = hashString(JSON.stringify(item));
       const prev = state[key];
       let status = "new";
       const itemKey = prev && prev.itemKey && (live === null || live.has(prev.itemKey)) ? prev.itemKey : "";
       if (prev)
         status = itemKey === "" || prev.hash !== hash ? "changed" : "current";
-      out.push({ work: m.work, item, hash, itemKey, status });
+      out.push({ work, item, hash, itemKey, status });
     }
     out.sort((a, b) => String(a.work.title).localeCompare(String(b.work.title)));
     return out;
@@ -1966,14 +2012,8 @@ var ArabicSupportPlugin = class extends import_obsidian2.Plugin {
   async workForPath(path2) {
     var _a;
     const outRoot = this.settings.sourceImportRoot.trim() || "_7 Sources";
-    const models = await this.loadAllSourceModels();
     const manifest = await this.loadSourceManifest();
-    const byKey = new Map();
-    for (const w of manifest)
-      byKey.set(this.workKey(w), w);
-    for (const m of models)
-      byKey.set(String(m.work.key), m.work);
-    for (const w of byKey.values()) {
+    for (const w of manifest) {
       const dir = String((_a = w.dir) != null ? _a : "");
       if (!dir)
         continue;
@@ -2352,10 +2392,27 @@ var ArabicSupportPlugin = class extends import_obsidian2.Plugin {
       const statusKeys = (status) => new Set(manifest.filter((w) => this.workStatus(w) === status).map((w) => this.workKey(w)));
       const installedKeys = statusKeys("installed");
       const sizes = new Map();
+      const stats = await this.loadSourceStats();
+      let statsDirty = false;
       for (const w of works) {
-        if (installedKeys.has(w.key) || w.cache_bytes)
-          sizes.set(w.key, await this.onDiskBytes(w));
+        const st = stats[w.key];
+        if (installedKeys.has(w.key)) {
+          if (st && st.at > this.hubUpdatedMs(w)) {
+            sizes.set(w.key, st.bytes);
+          } else {
+            const bytes = await this.onDiskBytes(w);
+            sizes.set(w.key, bytes);
+            stats[w.key] = { bytes, at: Date.now() };
+            statsDirty = true;
+          }
+        } else if (st) {
+          sizes.set(w.key, st.bytes);
+        } else if (w.cache_bytes) {
+          sizes.set(w.key, w.cache_bytes);
+        }
       }
+      if (statsDirty)
+        await this.saveSourceStats(stats);
       const zoteroStatus = new Map();
       if (this.settings.zoteroExport) {
         for (const e of await this.zoteroEntries())
@@ -2489,16 +2546,19 @@ var ArabicSupportPlugin = class extends import_obsidian2.Plugin {
       return [];
     }
     const outRoot = this.settings.sourceImportRoot.trim() || "_7 Sources";
-    const models = await this.loadAllSourceModels();
     const manifest = await this.loadSourceManifest();
     const byKey = new Map();
     for (const w of manifest)
       byKey.set(this.workKey(w), w);
-    for (const m of models) {
-      const k = this.workKey(m.work);
-      const prev = byKey.get(k);
-      const merged = prev ? { ...m.work, status: prev.status } : m.work;
-      byKey.set(k, merged);
+    for (const key of await this.listModelKeys()) {
+      if (byKey.has(key))
+        continue;
+      try {
+        const rel = (0, import_obsidian2.normalizePath)(`.midad-arabic-sources/source-models/${key.replace(":", "/")}.json`);
+        const m = JSON.parse(await this.app.vault.adapter.read(rel));
+        byKey.set(key, m.work);
+      } catch (e) {
+      }
     }
     const works = [...byKey.values()];
     await this.saveSourceManifest(works);
@@ -2561,14 +2621,13 @@ var ArabicSupportPlugin = class extends import_obsidian2.Plugin {
   }
   async checkSourceUpdates() {
     var _a, _b;
-    const models = await this.loadAllSourceModels();
     const manifest = await this.loadSourceManifest();
     const pending = await this.loadPendingDeletions();
     const keys = new Set();
-    for (const m of models)
-      keys.add(`${m.work.collection}:${m.work.id}`);
     for (const w of manifest)
       keys.add(`${w.collection}:${w.id}`);
+    for (const k of await this.listModelKeys())
+      keys.add(k);
     for (const k of pending)
       keys.delete(k);
     if (!keys.size) {
@@ -2885,6 +2944,28 @@ var ArabicSupportPlugin = class extends import_obsidian2.Plugin {
     }
     return models;
   }
+  async listModelKeys() {
+    const root = `${this.vaultPath()}/.midad-arabic-sources/source-models`;
+    const keys = [];
+    const walk = (dir) => {
+      for (const name of fs2.readdirSync(dir)) {
+        const p = `${dir}/${name}`;
+        if (fs2.statSync(p).isDirectory())
+          walk(p);
+        else if (name.endsWith(".json")) {
+          const rel = p.slice(root.length + 1).replace(/\.json$/, "");
+          const slash = rel.indexOf("/");
+          if (slash > 0)
+            keys.push(`${rel.slice(0, slash)}:${rel.slice(slash + 1)}`);
+        }
+      }
+    };
+    try {
+      walk(root);
+    } catch (e) {
+    }
+    return keys;
+  }
   async copyImportTemplates() {
     const folder = this.settings.sourceTemplateFolder.trim();
     if (!folder) {
@@ -3014,42 +3095,68 @@ var ArabicSupportPlugin = class extends import_obsidian2.Plugin {
     const manifest = await this.loadSourceManifest();
     const pending = await this.loadPendingDeletions();
     const outRoot = this.settings.sourceImportRoot.trim() || "_7 Sources";
-    const full = [];
-    const hubs = [];
+    const out = [];
     for (const work of manifest) {
       if (this.workStatus(work) !== "installed")
         continue;
       if (pending.has(this.workKey(work)))
         continue;
-      const keys = this.templateKeysFor(String((_a = work.collection) != null ? _a : ""));
-      const unitAt = Math.max(0, ...keys.filter((k) => k !== "hub").map((k) => templateChangedAt(store, k)));
-      const hubAt = templateChangedAt(store, "hub");
-      if (!unitAt && !hubAt)
-        continue;
       const file = this.app.vault.getAbstractFileByPath((0, import_obsidian2.normalizePath)(`${outRoot}/${work.dir}.md`));
-      const fm = file instanceof import_obsidian2.TFile ? (_b = this.app.metadataCache.getFileCache(file)) == null ? void 0 : _b.frontmatter : null;
+      const fm = file instanceof import_obsidian2.TFile ? (_a = this.app.metadataCache.getFileCache(file)) == null ? void 0 : _a.frontmatter : null;
       const upd = fm == null ? void 0 : fm["updated"];
       const ms = typeof upd === "string" ? Date.parse(upd.replace(" ", "T")) : null;
-      const olderThan = (at) => at > 0 && (ms == null || !Number.isFinite(ms) || ms < at);
-      if (olderThan(unitAt))
-        full.push(work);
-      else if (olderThan(hubAt))
-        hubs.push(work);
+      const staleAt = (at) => at > 0 && (ms == null || !Number.isFinite(ms) || ms < at);
+      const kinds = new Set();
+      for (const key of this.templateKeysFor(String((_b = work.collection) != null ? _b : ""))) {
+        if (key === "hub")
+          continue;
+        if (!staleAt(templateChangedAt(store, key)))
+          continue;
+        const kind = SOURCE_TEMPLATE_KIND[key];
+        if (kind)
+          kinds.add(kind);
+      }
+      if (!kinds.size && !staleAt(templateChangedAt(store, "hub")))
+        continue;
+      out.push({ work, kinds });
     }
-    return { full, hubs };
+    return out;
   }
-  async renderHubFor(work) {
-    const rel = (0, import_obsidian2.normalizePath)(`.midad-arabic-sources/source-models/${work.collection}/${work.id}.json`);
+  async renderStaleScoped(items) {
+    var _a, _b, _c;
+    if (!items.length)
+      return;
+    const userFolder = this.settings.sourceTemplateFolder.trim() || null;
+    let templates;
     try {
-      const model = JSON.parse(await this.app.vault.adapter.read(rel));
-      const outRoot = this.settings.sourceImportRoot.trim() || "_7 Sources";
-      model.work.canonical_root = this.settings.canonicalQuranFolder.trim() || `${outRoot}/Quran`;
-      model.work.canonical = model.work.collection === "quran-text" && String(model.work.id) === this.resolveCanonicalQuran();
-      const userFolder = this.settings.sourceTemplateFolder.trim() || null;
-      const templates = await loadTemplates(this.app, this.bundledTemplateDir(), userFolder);
-      await renderModelHub(this.app, templates, model, outRoot, true);
+      templates = await loadTemplates(this.app, this.bundledTemplateDir(), userFolder);
     } catch (e) {
-      console.error("[midad-arabic-sources] hub render", work.key, e);
+      new import_obsidian2.Notice(`Import templates could not be loaded: ${e instanceof Error ? e.message : e}`);
+      return;
+    }
+    const outRoot = this.settings.sourceImportRoot.trim() || "_7 Sources";
+    const canonicalId = this.resolveCanonicalQuran();
+    const canonicalRoot = this.settings.canonicalQuranFolder.trim() || `${outRoot}/Quran`;
+    const notice = new import_obsidian2.Notice("Updating imported sources\u2026", 0);
+    let done = 0;
+    try {
+      for (const it of items) {
+        const label = String((_b = (_a = it.work.title) != null ? _a : it.work.dir) != null ? _b : it.work.id);
+        notice.setMessage(`Updating imported sources: ${++done}/${items.length} \u2014 ${label}`);
+        const rel = (0, import_obsidian2.normalizePath)(`.midad-arabic-sources/source-models/${it.work.collection}/${it.work.id}.json`);
+        try {
+          if (!await this.app.vault.adapter.exists(rel))
+            continue;
+          const model = JSON.parse(await this.app.vault.adapter.read(rel));
+          model.work.canonical_root = canonicalRoot;
+          model.work.canonical = model.work.collection === "quran-text" && String(model.work.id) === canonicalId;
+          await renderModelToVault(this.app, templates, model, outRoot, true, void 0, (_c = it.kinds) != null ? _c : void 0);
+        } catch (e) {
+          console.error("[midad-arabic-sources] scoped render", it.work.key, e);
+        }
+      }
+    } finally {
+      notice.hide();
     }
   }
   async maintainSources() {
@@ -3064,15 +3171,14 @@ var ArabicSupportPlugin = class extends import_obsidian2.Plugin {
     const changedKeys = await this.recordSourceTemplate();
     const stale = await this.findStaleSourceWorks();
     const indexDirty = changedKeys.some((k) => k === "moc" || k === "sources");
-    if (!incomplete.length && !stale.full.length && !stale.hubs.length && !indexDirty)
+    if (!incomplete.length && !stale.length && !indexDirty)
       return;
     const apply = async () => {
-      var _a, _b;
-      const renderPaths = new Set();
+      const rerender = [];
       for (const it of incomplete) {
         const rel = (0, import_obsidian2.normalizePath)(`.midad-arabic-sources/source-models/${it.work.collection}/${it.work.id}.json`);
         if (it.reason === "notes" && await this.app.vault.adapter.exists(rel)) {
-          renderPaths.add(`${this.vaultPath()}/${rel}`);
+          rerender.push({ work: it.work, kinds: null });
           continue;
         }
         try {
@@ -3081,36 +3187,18 @@ var ArabicSupportPlugin = class extends import_obsidian2.Plugin {
           console.error("[midad-arabic-sources] restore", it.work.key, e);
         }
       }
-      for (const w of stale.full) {
-        const rel = (0, import_obsidian2.normalizePath)(`.midad-arabic-sources/source-models/${w.collection}/${w.id}.json`);
-        if (await this.app.vault.adapter.exists(rel))
-          renderPaths.add(`${this.vaultPath()}/${rel}`);
-      }
-      if (renderPaths.size)
-        await this.renderWithProgress([...renderPaths], true, "Updating imported sources");
-      else if (indexDirty)
+      for (const s of stale)
+        rerender.push({ work: s.work, kinds: s.kinds });
+      await this.renderStaleScoped(rerender);
+      if (indexDirty)
         await this.refreshSourcesIndex();
-      const fullKeys = new Set(stale.full.map((w) => this.workKey(w)));
-      const hubWorks = stale.hubs.filter((w) => !fullKeys.has(this.workKey(w)));
-      if (hubWorks.length) {
-        const hubNotice = new import_obsidian2.Notice("Updating source notes\u2026", 0);
-        try {
-          let done = 0;
-          for (const w of hubWorks) {
-            hubNotice.setMessage(`Updating source notes: ${++done}/${hubWorks.length} \u2014 ${String((_b = (_a = w.title) != null ? _a : w.dir) != null ? _b : w.id)}`);
-            await this.renderHubFor(w);
-          }
-        } finally {
-          hubNotice.hide();
-        }
-      }
     };
     if (this.settings.autoUpdateSourceTemplates === true) {
       await apply();
     } else if (this.settings.autoUpdateSourceTemplates === false) {
       return;
     } else {
-      new SourceTemplateUpdateConsentModal(this.app, incomplete.length + stale.full.length + stale.hubs.length + (indexDirty ? 1 : 0), (choice) => {
+      new SourceTemplateUpdateConsentModal(this.app, incomplete.length + stale.length + (indexDirty ? 1 : 0), (choice) => {
         void (async () => {
           if (choice === "yes") {
             this.settings.autoUpdateSourceTemplates = true;

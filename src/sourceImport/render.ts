@@ -223,14 +223,21 @@ export async function writeMerged(app: App, path: string, out: RenderOutput, for
 	if (force || substantiveContentDiffers(existing, merged)) await writeNote(app, path, merged);
 }
 
-/** Render one model's units and hub (the category MOCs are handled separately). */
+/**
+ * Render one model's units and hub (the category MOCs are handled separately).
+ * When `onlyKinds` is set, only units of those kinds are rewritten — a change to
+ * the dictionary letter-index template, say, no longer rewrites the 50,000 root
+ * notes. The hub is always rewritten: its `updated` is the work's staleness
+ * watermark, so a scoped render must still bump it.
+ */
 export async function renderModelToVault(
 	app: App,
 	templates: TemplateSet,
 	model: SourceModel,
 	outRoot: string,
 	force = false,
-	onStep?: (done: number, total: number) => void
+	onStep?: (done: number, total: number) => void,
+	onlyKinds?: Set<string>
 ): Promise<string[]> {
 	const engine = makeEngine();
 	const dir = model.work.dir as string;
@@ -240,14 +247,16 @@ export async function renderModelToVault(
 	const canonicalRoot = typeof model.work.canonical_root === "string" ? model.work.canonical_root : "";
 	const written: string[] = [];
 	const singleUnit = model.units.length === 1 ? model.units[0] : undefined;
-	const steps = singleUnit && !isQuranText ? 1 : model.units.length + 1;
+	const todo = onlyKinds ? model.units.filter((u) => onlyKinds.has(String(u.kind))) : model.units;
+	const steps = singleUnit && !isQuranText ? 1 : todo.length + 1;
 	let done = 0;
 	const tick = () => onStep?.(++done, steps);
 
 	// One source of truth for each unit's note name: the same `note_stem` is used
 	// for the file AND for every link to it (the hub lists `unit.note_stem`), so a
 	// link can never name a note that was not written. Only the canonical riwāya
-	// has unprefixed sūra notes, and they live in `canonical_root`.
+	// has unprefixed sūra notes, and they live in `canonical_root`. Every unit's
+	// stem is set even for a scoped render, because the hub links to all of them.
 	for (const unit of model.units) {
 		const dictRoot = model.work.collection === "dictionary" && unit.kind === "dict";
 		const base = String(unit.base);
@@ -261,7 +270,7 @@ export async function renderModelToVault(
 	} else {
 		await ensureFolder(app, folder);
 		if (isCanonical && canonicalRoot) await ensureFolder(app, canonicalRoot);
-		for (const unit of model.units) {
+		for (const unit of todo) {
 			const path = `${unit.note_folder}/${unit.note_stem}.md`;
 			await writeMerged(app, path, renderUnit(engine, templates, model, unit), force);
 			written.push(path);

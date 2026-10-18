@@ -27,7 +27,6 @@ import {
 	expectedNotePaths,
 	loadTemplates,
 	renderMocs,
-	renderModelHub,
 	renderModelToVault,
 	renderSourcesNote,
 	vaultRelative,
@@ -284,6 +283,12 @@ interface ZoteroAuthResponse {
 	key?: string;
 }
 
+/** A cached on-disk footprint for one work, and when it was measured. */
+interface SourceStat {
+	bytes: number;
+	at: number;
+}
+
 /** How long the on-disk source catalogue is reused before it is re-listed. */
 const SOURCE_CATALOG_TTL = 7 * 86_400_000;
 
@@ -318,6 +323,15 @@ const ZOTERO_MARK = "Midad Arabic Sources";
 
 /** Appended to an item whose bibliographic details are still unverified. */
 const BIB_PROVISIONAL = "Bibliographic details are provisional — verify against the edition you used before citing.";
+
+/** Which unit `kind` each per-work template renders (the scoped re-render map). */
+const SOURCE_TEMPLATE_KIND: Record<string, string> = {
+	source: "source",
+	hadith: "hadith",
+	quran: "quran",
+	dictionary: "dict",
+	dictionaryIndex: "dict-index",
+};
 
 const DEFAULT_SETTINGS: ArabicSupportSettings = {
 	serverUrl: "http://127.0.0.1:8756",
@@ -551,6 +565,8 @@ export default class ArabicSupportPlugin extends Plugin {
 		// Bring Zotero in step at startup too (covers a publication-map edit and
 		// works installed while auto-create was off).
 		window.setTimeout(() => { void this.autoSyncZotero(); }, 20000);
+		// Re-list the source catalogue in the background when its cache is old.
+		window.setTimeout(() => { void this.maybeRefreshSourceCatalog(); }, 25000);
 		this.registerEvent(
 			this.app.vault.on("modify", (file) => {
 				if (file instanceof TFile && this.isSourceTemplateFile(file.path)) {
@@ -832,18 +848,18 @@ export default class ArabicSupportPlugin extends Plugin {
 	async listSourcesCached(force = false): Promise<SourceWork[]> {
 		if (!force && this.sourceCatalog) return this.sourceCatalog;
 		const path = normalizePath(".midad-arabic-sources/source-catalog.json");
-		if (!force) {
-			try {
-				const cached = JSON.parse(await this.app.vault.adapter.read(path)) as { at?: number; schema?: number; works?: SourceWork[] };
-				if (
-					Array.isArray(cached.works) && cached.works.length &&
-					cached.schema === SOURCE_CATALOG_SCHEMA &&
-					Date.now() - (cached.at ?? 0) < SOURCE_CATALOG_TTL
-				) {
-					this.sourceCatalog = cached.works;
-					return cached.works;
-				}
-			} catch { /* no usable cache */ }
+		let cached: { at?: number; schema?: number; works?: SourceWork[] } | null = null;
+		try {
+			cached = JSON.parse(await this.app.vault.adapter.read(path)) as { at?: number; schema?: number; works?: SourceWork[] };
+		} catch { /* no usable cache */ }
+		const works0 = cached?.works;
+		const usable = Array.isArray(works0) && works0.length > 0 && cached?.schema === SOURCE_CATALOG_SCHEMA;
+		if (!force && usable && works0) {
+			this.sourceCatalog = works0;
+			// Serve the cache immediately; refresh in the background when it is old,
+			// so opening the modal never waits on the repositories.
+			if (Date.now() - (cached?.at ?? 0) >= SOURCE_CATALOG_TTL) void this.refreshSourceCatalogInBackground();
+			return works0;
 		}
 		const works = await this.listSources();
 		if (works.length) {
@@ -853,6 +869,37 @@ export default class ArabicSupportPlugin extends Plugin {
 			} catch { /* ignore */ }
 		}
 		return works;
+	}
+
+	sourceCatalogRefreshing = false;
+
+	/** Re-list the catalogue and persist it, without blocking the caller. */
+	async refreshSourceCatalogInBackground(): Promise<void> {
+		if (this.sourceCatalogRefreshing) return;
+		this.sourceCatalogRefreshing = true;
+		try {
+			const works = await this.listSources();
+			if (works.length) {
+				this.sourceCatalog = works;
+				await this.app.vault.adapter.write(
+					normalizePath(".midad-arabic-sources/source-catalog.json"),
+					JSON.stringify({ at: Date.now(), schema: SOURCE_CATALOG_SCHEMA, works })
+				);
+			}
+		} catch (e) {
+			console.error("[midad-arabic-sources] catalogue refresh", e);
+		} finally {
+			this.sourceCatalogRefreshing = false;
+		}
+	}
+
+	/** Refresh the catalogue in the background at startup when it is past its TTL. */
+	async maybeRefreshSourceCatalog(): Promise<void> {
+		try {
+			const text = await this.app.vault.adapter.read(normalizePath(".midad-arabic-sources/source-catalog.json"));
+			const cached = JSON.parse(text) as { at?: number };
+			if (Date.now() - (cached.at ?? 0) >= SOURCE_CATALOG_TTL) await this.refreshSourceCatalogInBackground();
+		} catch { /* no cache yet */ }
 	}
 
 	// ── Zotero export ───────────────────────────────────────────────────────
@@ -875,6 +922,40 @@ export default class ArabicSupportPlugin extends Plugin {
 		try {
 			await this.app.vault.adapter.write(normalizePath(this.zoteroStatePath()), JSON.stringify({ items }, null, 1));
 		} catch { /* ignore */ }
+	}
+
+	/**
+	 * Measured on-disk footprints, keyed by work. Kept in its own file (not the
+	 * catalogue, which is re-listed, nor the manifest, which is rebuilt) so a
+	 * measurement survives both. A removed work keeps its last size, as the user
+	 * asked; an installed work is re-measured only after its hub changes.
+	 */
+	async loadSourceStats(): Promise<Record<string, SourceStat>> {
+		try {
+			const text = await this.app.vault.adapter.read(normalizePath(".midad-arabic-sources/source-stats.json"));
+			const parsed = JSON.parse(text) as { works?: Record<string, SourceStat> };
+			return parsed?.works && typeof parsed.works === "object" ? parsed.works : {};
+		} catch {
+			return {};
+		}
+	}
+
+	async saveSourceStats(works: Record<string, SourceStat>): Promise<void> {
+		try {
+			await this.app.vault.adapter.write(
+				normalizePath(".midad-arabic-sources/source-stats.json"),
+				JSON.stringify({ works }, null, 1)
+			);
+		} catch { /* ignore */ }
+	}
+
+	/** A work's hub note `updated` time (its last-render watermark), in ms. */
+	hubUpdatedMs(work: JsonObject): number {
+		const outRoot = this.settings.sourceImportRoot.trim() || "_7 Sources";
+		const file = this.app.vault.getAbstractFileByPath(normalizePath(`${outRoot}/${work.dir}.md`));
+		const fm = file instanceof TFile ? this.app.metadataCache.getFileCache(file)?.frontmatter : null;
+		const upd: unknown = fm?.["updated"];
+		return typeof upd === "string" ? Date.parse(upd.replace(" ", "T")) : 0;
 	}
 
 	/**
@@ -1001,17 +1082,15 @@ export default class ArabicSupportPlugin extends Plugin {
 	 * (sent before but altered, or deleted in Zotero), or `current`.
 	 */
 	async zoteroEntries(): Promise<Array<{ work: JsonObject; item: JsonObject; hash: string; itemKey: string; status: "new" | "changed" | "current" }>> {
-		const models = await this.loadAllSourceModels();
 		const manifest = await this.loadSourceManifest();
-		const installed = new Set(manifest.filter((w) => this.workStatus(w) === "installed").map((w) => this.workKey(w)));
+		const installed = manifest.filter((w) => this.workStatus(w) === "installed");
 		const state = await this.loadZoteroState();
 		const live = this.settings.zoteroMethod === "local" ? await this.zoteroLiveKeys() : null;
 		const pubs = await this.loadPublicationMap();
 		const out: Array<{ work: JsonObject; item: JsonObject; hash: string; itemKey: string; status: "new" | "changed" | "current" }> = [];
-		for (const m of models) {
-			const key = String(m.work.key);
-			if (!installed.has(key)) continue;
-			const item = this.zoteroItem(m.work, pubs[key] ?? {});
+		for (const work of installed) {
+			const key = this.workKey(work);
+			const item = this.zoteroItem(work, pubs[key] ?? {});
 			const hash = hashString(JSON.stringify(item));
 			const prev = state[key];
 			let status: "new" | "changed" | "current" = "new";
@@ -1019,7 +1098,7 @@ export default class ArabicSupportPlugin extends Plugin {
 			// created; otherwise an update targets the existing item in place.
 			const itemKey = prev && prev.itemKey && (live === null || live.has(prev.itemKey)) ? prev.itemKey : "";
 			if (prev) status = itemKey === "" || prev.hash !== hash ? "changed" : "current";
-			out.push({ work: m.work, item, hash, itemKey, status });
+			out.push({ work, item, hash, itemKey, status });
 		}
 		out.sort((a, b) => String(a.work.title).localeCompare(String(b.work.title)));
 		return out;
@@ -1033,12 +1112,8 @@ export default class ArabicSupportPlugin extends Plugin {
 	/** The installed work whose hub or folder contains `path`, if any. */
 	async workForPath(path: string): Promise<JsonObject | null> {
 		const outRoot = this.settings.sourceImportRoot.trim() || "_7 Sources";
-		const models = await this.loadAllSourceModels();
 		const manifest = await this.loadSourceManifest();
-		const byKey = new Map<string, JsonObject>();
-		for (const w of manifest) byKey.set(this.workKey(w), w);
-		for (const m of models) byKey.set(String(m.work.key), m.work);
-		for (const w of byKey.values()) {
+		for (const w of manifest) {
 			const dir = String(w.dir ?? "");
 			if (!dir) continue;
 			if (path === `${outRoot}/${dir}.md` || path.startsWith(`${outRoot}/${dir}/`)) return w;
@@ -1471,10 +1546,30 @@ export default class ArabicSupportPlugin extends Plugin {
 			const installedKeys = statusKeys("installed");
 			// A real footprint is known only for works we've downloaded (installed or
 			// cached); the repositories don't publish sizes, so the rest show "—".
+			// Measurements are cached (loadSourceStats): an installed work is
+			// re-measured only after its hub changes, and a removed work keeps its
+			// last size — so opening the modal never re-stats the whole corpus.
 			const sizes = new Map<string, number>();
+			const stats = await this.loadSourceStats();
+			let statsDirty = false;
 			for (const w of works) {
-				if (installedKeys.has(w.key) || w.cache_bytes) sizes.set(w.key, await this.onDiskBytes(w));
+				const st = stats[w.key];
+				if (installedKeys.has(w.key)) {
+					if (st && st.at > this.hubUpdatedMs(w)) {
+						sizes.set(w.key, st.bytes);
+					} else {
+						const bytes = await this.onDiskBytes(w);
+						sizes.set(w.key, bytes);
+						stats[w.key] = { bytes, at: Date.now() };
+						statsDirty = true;
+					}
+				} else if (st) {
+					sizes.set(w.key, st.bytes); // removed, but its last size is remembered
+				} else if (w.cache_bytes) {
+					sizes.set(w.key, w.cache_bytes);
+				}
 			}
+			if (statsDirty) await this.saveSourceStats(stats);
 			// Zotero status per work, so the modal can pre-check the new/changed ones.
 			const zoteroStatus = new Map<string, string>();
 			if (this.settings.zoteroExport) {
@@ -1643,18 +1738,21 @@ export default class ArabicSupportPlugin extends Plugin {
 			return [];
 		}
 		const outRoot = this.settings.sourceImportRoot.trim() || "_7 Sources";
-		const models = await this.loadAllSourceModels();
 		const manifest = await this.loadSourceManifest();
 		// Keep every entry — including ones still being removed — in the manifest
 		// (the status list), but only list live, non-deleting works in the index.
 		const byKey = new Map<string, JsonObject>();
 		for (const w of manifest) byKey.set(this.workKey(w), w);
-		for (const m of models) {
-			const k = this.workKey(m.work);
-			const prev = byKey.get(k);
-			// A cached model must not erase a "deleting" status set on the entry.
-			const merged: JsonObject = prev ? { ...m.work, status: prev.status as string } : m.work;
-			byKey.set(k, merged);
+		// Self-heal: a model on disk with no manifest entry (e.g. the manifest was
+		// lost) is re-adopted from that model. Filenames are scanned first, so the
+		// only models read are the ones actually missing — never the whole corpus.
+		for (const key of await this.listModelKeys()) {
+			if (byKey.has(key)) continue;
+			try {
+				const rel = normalizePath(`.midad-arabic-sources/source-models/${key.replace(":", "/")}.json`);
+				const m = JSON.parse(await this.app.vault.adapter.read(rel)) as SourceModel;
+				byKey.set(key, m.work);
+			} catch { /* skip */ }
 		}
 		const works = [...byKey.values()];
 		await this.saveSourceManifest(works);
@@ -1722,12 +1820,11 @@ export default class ArabicSupportPlugin extends Plugin {
 
 	/** Ask the source repositories whether any imported work has changed upstream. */
 	async checkSourceUpdates(): Promise<string[]> {
-		const models = await this.loadAllSourceModels();
 		const manifest = await this.loadSourceManifest();
 		const pending = await this.loadPendingDeletions();
 		const keys = new Set<string>();
-		for (const m of models) keys.add(`${m.work.collection}:${m.work.id}`);
 		for (const w of manifest) keys.add(`${w.collection}:${w.id}`);
+		for (const k of await this.listModelKeys()) keys.add(k);
 		for (const k of pending) keys.delete(k); // being removed: leave them alone
 		if (!keys.size) {
 			new Notice("No imported sources to check.");
@@ -2101,6 +2198,31 @@ export default class ArabicSupportPlugin extends Plugin {
 		return models;
 	}
 
+	/**
+	 * The `collection:id` keys of the cached models on disk, read from filenames
+	 * only — never parsed. Used to notice a model whose manifest entry is missing
+	 * without paying to read the whole (often 100+ MB) corpus.
+	 */
+	async listModelKeys(): Promise<string[]> {
+		const root = `${this.vaultPath()}/.midad-arabic-sources/source-models`;
+		const keys: string[] = [];
+		const walk = (dir: string) => {
+			for (const name of fs.readdirSync(dir)) {
+				const p = `${dir}/${name}`;
+				if (fs.statSync(p).isDirectory()) walk(p);
+				else if (name.endsWith(".json")) {
+					const rel = p.slice(root.length + 1).replace(/\.json$/, "");
+					const slash = rel.indexOf("/");
+					if (slash > 0) keys.push(`${rel.slice(0, slash)}:${rel.slice(slash + 1)}`);
+				}
+			}
+		};
+		try {
+			walk(root);
+		} catch { /* none yet */ }
+		return keys;
+	}
+
 	/** Copy the bundled ETA templates into the user's template folder. */
 	async copyImportTemplates(): Promise<void> {
 		const folder = this.settings.sourceTemplateFolder.trim();
@@ -2251,52 +2373,77 @@ export default class ArabicSupportPlugin extends Plugin {
 
 	/**
 	 * The installed works whose notes predate a change to one of the templates
-	 * that renders them. Attribution is per template, so editing the dictionary
-	 * template re-renders the dictionary alone — not the whole corpus. A work
-	 * whose *unit* template changed is re-rendered whole; one whose *hub* alone
-	 * changed needs only its hub note rewritten.
+	 * that renders them, each with the *unit kinds* affected. Attribution is per
+	 * template, so editing the dictionary letter-index template re-renders only
+	 * the letter pages — not the 50,000 root notes — and editing the dictionary
+	 * template re-renders only the roots. A scoped render always rewrites the hub
+	 * too, because its `updated` is the work's staleness watermark.
 	 */
-	async findStaleSourceWorks(): Promise<{ full: Array<JsonObject>; hubs: Array<JsonObject> }> {
+	async findStaleSourceWorks(): Promise<Array<{ work: JsonObject; kinds: Set<string> }>> {
 		const store = await this.loadSourceHashes();
 		const manifest = await this.loadSourceManifest();
 		const pending = await this.loadPendingDeletions();
 		const outRoot = this.settings.sourceImportRoot.trim() || "_7 Sources";
-		const full: Array<JsonObject> = [];
-		const hubs: Array<JsonObject> = [];
+		const out: Array<{ work: JsonObject; kinds: Set<string> }> = [];
 		for (const work of manifest) {
 			if (this.workStatus(work) !== "installed") continue;
 			if (pending.has(this.workKey(work))) continue;
-			const keys = this.templateKeysFor(String(work.collection ?? ""));
-			const unitAt = Math.max(0, ...keys.filter((k) => k !== "hub").map((k) => templateChangedAt(store, k)));
-			const hubAt = templateChangedAt(store, "hub");
-			if (!unitAt && !hubAt) continue; // these templates have never changed
 			const file = this.app.vault.getAbstractFileByPath(normalizePath(`${outRoot}/${work.dir}.md`));
 			const fm = file instanceof TFile ? this.app.metadataCache.getFileCache(file)?.frontmatter : null;
 			const upd: unknown = fm?.["updated"];
 			const ms = typeof upd === "string" ? Date.parse(upd.replace(" ", "T")) : null;
-			const olderThan = (at: number) => at > 0 && (ms == null || !Number.isFinite(ms) || ms < at);
-			if (olderThan(unitAt)) full.push(work);
-			else if (olderThan(hubAt)) hubs.push(work);
+			const staleAt = (at: number) => at > 0 && (ms == null || !Number.isFinite(ms) || ms < at);
+			const kinds = new Set<string>();
+			for (const key of this.templateKeysFor(String(work.collection ?? ""))) {
+				if (key === "hub") continue;
+				if (!staleAt(templateChangedAt(store, key))) continue;
+				const kind = SOURCE_TEMPLATE_KIND[key];
+				if (kind) kinds.add(kind);
+			}
+			// Nothing stale at all (no unit template and not the hub).
+			if (!kinds.size && !staleAt(templateChangedAt(store, "hub"))) continue;
+			out.push({ work, kinds });
 		}
-		return { full, hubs };
+		return out;
 	}
 
 	/**
-	 * Rewrite a work's hub note from its cached model — for when only the hub
-	 * template changed.
+	 * Re-render the stale works, each scoped to the unit kinds whose template
+	 * changed (`kinds: null` means a full render). Reads only the affected works'
+	 * models — never the whole corpus.
 	 */
-	async renderHubFor(work: JsonObject): Promise<void> {
-		const rel = normalizePath(`.midad-arabic-sources/source-models/${work.collection}/${work.id}.json`);
+	async renderStaleScoped(items: Array<{ work: JsonObject; kinds: Set<string> | null }>): Promise<void> {
+		if (!items.length) return;
+		const userFolder = this.settings.sourceTemplateFolder.trim() || null;
+		let templates: TemplateSet;
 		try {
-			const model = JSON.parse(await this.app.vault.adapter.read(rel)) as SourceModel;
-			const outRoot = this.settings.sourceImportRoot.trim() || "_7 Sources";
-			model.work.canonical_root = this.settings.canonicalQuranFolder.trim() || `${outRoot}/Quran`;
-			model.work.canonical = model.work.collection === "quran-text" && String(model.work.id) === this.resolveCanonicalQuran();
-			const userFolder = this.settings.sourceTemplateFolder.trim() || null;
-			const templates = await loadTemplates(this.app, this.bundledTemplateDir(), userFolder);
-			await renderModelHub(this.app, templates, model, outRoot, true);
+			templates = await loadTemplates(this.app, this.bundledTemplateDir(), userFolder);
 		} catch (e) {
-			console.error("[midad-arabic-sources] hub render", work.key, e);
+			new Notice(`Import templates could not be loaded: ${e instanceof Error ? e.message : e}`);
+			return;
+		}
+		const outRoot = this.settings.sourceImportRoot.trim() || "_7 Sources";
+		const canonicalId = this.resolveCanonicalQuran();
+		const canonicalRoot = this.settings.canonicalQuranFolder.trim() || `${outRoot}/Quran`;
+		const notice = new Notice("Updating imported sources…", 0);
+		let done = 0;
+		try {
+			for (const it of items) {
+				const label = String(it.work.title ?? it.work.dir ?? it.work.id);
+				notice.setMessage(`Updating imported sources: ${++done}/${items.length} — ${label}`);
+				const rel = normalizePath(`.midad-arabic-sources/source-models/${it.work.collection}/${it.work.id}.json`);
+				try {
+					if (!(await this.app.vault.adapter.exists(rel))) continue;
+					const model = JSON.parse(await this.app.vault.adapter.read(rel)) as SourceModel;
+					model.work.canonical_root = canonicalRoot;
+					model.work.canonical = model.work.collection === "quran-text" && String(model.work.id) === canonicalId;
+					await renderModelToVault(this.app, templates, model, outRoot, true, undefined, it.kinds ?? undefined);
+				} catch (e) {
+					console.error("[midad-arabic-sources] scoped render", it.work.key, e);
+				}
+			}
+		} finally {
+			notice.hide();
 		}
 	}
 
@@ -2318,17 +2465,17 @@ export default class ArabicSupportPlugin extends Plugin {
 		const changedKeys = await this.recordSourceTemplate();
 		const stale = await this.findStaleSourceWorks();
 		const indexDirty = changedKeys.some((k) => k === "moc" || k === "sources");
-		if (!incomplete.length && !stale.full.length && !stale.hubs.length && !indexDirty) return;
+		if (!incomplete.length && !stale.length && !indexDirty) return;
 		const apply = async () => {
 			// A work whose cached model is present only needs re-rendering; re-fetch
 			// only the ones whose model is gone. (A fetch is cache-backed — it does
 			// not re-download — but it still re-runs acquisition, so skip it when a
 			// plain re-render will do.)
-			const renderPaths = new Set<string>();
+			const rerender: Array<{ work: JsonObject; kinds: Set<string> | null }> = [];
 			for (const it of incomplete) {
 				const rel = normalizePath(`.midad-arabic-sources/source-models/${it.work.collection}/${it.work.id}.json`);
 				if (it.reason === "notes" && (await this.app.vault.adapter.exists(rel))) {
-					renderPaths.add(`${this.vaultPath()}/${rel}`);
+					rerender.push({ work: it.work, kinds: null }); // full: recreate the missing notes
 					continue;
 				}
 				try {
@@ -2337,37 +2484,17 @@ export default class ArabicSupportPlugin extends Plugin {
 					console.error("[midad-arabic-sources] restore", it.work.key, e);
 				}
 			}
-			// Only the works whose own unit template changed — not the whole corpus.
-			for (const w of stale.full) {
-				const rel = normalizePath(`.midad-arabic-sources/source-models/${w.collection}/${w.id}.json`);
-				if (await this.app.vault.adapter.exists(rel)) renderPaths.add(`${this.vaultPath()}/${rel}`);
-			}
-			if (renderPaths.size) await this.renderWithProgress([...renderPaths], true, "Updating imported sources");
-			else if (indexDirty) await this.refreshSourcesIndex();
-			// A hub-only change needs just the work note, not its thousands of units.
-			// (Those whose unit template also changed were rendered whole above.)
-			const fullKeys = new Set(stale.full.map((w) => this.workKey(w)));
-			const hubWorks = stale.hubs.filter((w) => !fullKeys.has(this.workKey(w)));
-			if (hubWorks.length) {
-				// Still background work, so it still reports.
-				const hubNotice = new Notice("Updating source notes…", 0);
-				try {
-					let done = 0;
-					for (const w of hubWorks) {
-						hubNotice.setMessage(`Updating source notes: ${++done}/${hubWorks.length} — ${String(w.title ?? w.dir ?? w.id)}`);
-						await this.renderHubFor(w);
-					}
-				} finally {
-					hubNotice.hide();
-				}
-			}
+			// Stale works: only the unit kinds whose template changed, plus the hub.
+			for (const s of stale) rerender.push({ work: s.work, kinds: s.kinds });
+			await this.renderStaleScoped(rerender);
+			if (indexDirty) await this.refreshSourcesIndex();
 		};
 		if (this.settings.autoUpdateSourceTemplates === true) {
 			await apply();
 		} else if (this.settings.autoUpdateSourceTemplates === false) {
 			return;
 		} else {
-			new SourceTemplateUpdateConsentModal(this.app, incomplete.length + stale.full.length + stale.hubs.length + (indexDirty ? 1 : 0), (choice) => {
+			new SourceTemplateUpdateConsentModal(this.app, incomplete.length + stale.length + (indexDirty ? 1 : 0), (choice) => {
 				void (async () => {
 					if (choice === "yes") {
 						this.settings.autoUpdateSourceTemplates = true;
