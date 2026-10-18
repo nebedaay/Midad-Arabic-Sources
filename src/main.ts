@@ -1689,15 +1689,18 @@ export default class ArabicSupportPlugin extends Plugin {
 		const outRoot = this.settings.sourceImportRoot.trim() || "_7 Sources";
 		const adapter = this.app.vault.adapter;
 		let total = Number(work.cache_bytes ?? 0);
-		const add = async (p: string) => {
-			try {
-				const s = await adapter.stat(normalizePath(p));
-				if (s) total += s.size;
-			} catch { /* not present */ }
-		};
-		await add(`.midad-arabic-sources/source-models/${work.collection}/${work.id}.json`);
-		await add(`${outRoot}/${work.dir}.md`);
-		for (const f of await this.listFilesUnder(normalizePath(`${outRoot}/${work.dir}`))) await add(f);
+		// The cached model is plugin state, outside the vault index.
+		try {
+			const s = await adapter.stat(normalizePath(`.midad-arabic-sources/source-models/${work.collection}/${work.id}.json`));
+			if (s) total += s.size;
+		} catch { /* not present */ }
+		// The hub and the work's folder come from the vault index, which is already
+		// in memory — so a 50,000-file work costs no per-file `stat`.
+		const hub = normalizePath(`${outRoot}/${work.dir}.md`);
+		const prefix = normalizePath(`${outRoot}/${work.dir}/`);
+		for (const f of this.app.vault.getFiles()) {
+			if (f.path === hub || f.path.startsWith(prefix)) total += f.stat.size;
+		}
 		return total;
 	}
 

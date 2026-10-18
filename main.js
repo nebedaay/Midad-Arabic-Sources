@@ -2502,18 +2502,18 @@ var ArabicSupportPlugin = class extends import_obsidian2.Plugin {
     const outRoot = this.settings.sourceImportRoot.trim() || "_7 Sources";
     const adapter = this.app.vault.adapter;
     let total = Number((_a = work.cache_bytes) != null ? _a : 0);
-    const add = async (p) => {
-      try {
-        const s = await adapter.stat((0, import_obsidian2.normalizePath)(p));
-        if (s)
-          total += s.size;
-      } catch (e) {
-      }
-    };
-    await add(`.midad-arabic-sources/source-models/${work.collection}/${work.id}.json`);
-    await add(`${outRoot}/${work.dir}.md`);
-    for (const f of await this.listFilesUnder((0, import_obsidian2.normalizePath)(`${outRoot}/${work.dir}`)))
-      await add(f);
+    try {
+      const s = await adapter.stat((0, import_obsidian2.normalizePath)(`.midad-arabic-sources/source-models/${work.collection}/${work.id}.json`));
+      if (s)
+        total += s.size;
+    } catch (e) {
+    }
+    const hub = (0, import_obsidian2.normalizePath)(`${outRoot}/${work.dir}.md`);
+    const prefix = (0, import_obsidian2.normalizePath)(`${outRoot}/${work.dir}/`);
+    for (const f of this.app.vault.getFiles()) {
+      if (f.path === hub || f.path.startsWith(prefix))
+        total += f.stat.size;
+    }
     return total;
   }
   async pruneRenamedFolder(work) {
