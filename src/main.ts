@@ -283,10 +283,39 @@ interface ZoteroAuthResponse {
 	key?: string;
 }
 
-/** A cached on-disk footprint for one work, and when it was measured. */
+/**
+ * A cached measurement for one work: its on-disk size, and — the important part —
+ * per-template render watermarks. A single "rendered at" cannot work once
+ * re-renders are scoped by unit kind: rewriting only the dictionary letter pages
+ * must not mark the roots as up to date. So each template key records when the
+ * work was last rendered *with that template*.
+ */
 interface SourceStat {
-	bytes: number;
-	at: number;
+	bytes?: number;
+	/** When `bytes` was measured (epoch ms). */
+	at?: number;
+	/** Per-template last-render time (epoch ms), keyed by template key. */
+	rendered?: Record<string, number>;
+	/** Note count from the last full render, for a cheap completeness check. */
+	notes?: number;
+	/** The model schema at the last render, so a stale model is still noticed. */
+	schema?: number;
+}
+
+/**
+ * A frontmatter date as epoch ms. Obsidian's YAML parser (js-yaml's default
+ * schema) turns a bare `YYYY-MM-DD HH:MM:SS` into a **Date**, not a string, so a
+ * `typeof value === "string"` check silently yields "no watermark" — which made
+ * every work look stale on every startup. Accept a Date, a number, or a string.
+ */
+function frontmatterTimeMs(value: unknown): number | null {
+	if (value instanceof Date) return Number.isFinite(value.getTime()) ? value.getTime() : null;
+	if (typeof value === "number") return Number.isFinite(value) ? value : null;
+	if (typeof value === "string") {
+		const ms = Date.parse(value.replace(" ", "T"));
+		return Number.isFinite(ms) ? ms : null;
+	}
+	return null;
 }
 
 /** How long the on-disk source catalogue is reused before it is re-listed. */
@@ -954,8 +983,17 @@ export default class ArabicSupportPlugin extends Plugin {
 		const outRoot = this.settings.sourceImportRoot.trim() || "_7 Sources";
 		const file = this.app.vault.getAbstractFileByPath(normalizePath(`${outRoot}/${work.dir}.md`));
 		const fm = file instanceof TFile ? this.app.metadataCache.getFileCache(file)?.frontmatter : null;
-		const upd: unknown = fm?.["updated"];
-		return typeof upd === "string" ? Date.parse(upd.replace(" ", "T")) : 0;
+		return frontmatterTimeMs(fm?.["updated"]) ?? 0;
+	}
+
+	/**
+	 * When a work was last rendered (epoch ms): its newest per-template watermark
+	 * if recorded, else its hub note's `updated`, else 0.
+	 */
+	workRenderedMs(work: JsonObject, stat?: SourceStat): number {
+		const vals = stat?.rendered ? Object.values(stat.rendered) : [];
+		if (vals.length) return Math.max(...vals);
+		return this.hubUpdatedMs(work);
 	}
 
 	/**
@@ -1555,15 +1593,15 @@ export default class ArabicSupportPlugin extends Plugin {
 			for (const w of works) {
 				const st = stats[w.key];
 				if (installedKeys.has(w.key)) {
-					if (st && st.at > this.hubUpdatedMs(w)) {
+					if (st && typeof st.bytes === "number" && (st.at ?? 0) > this.workRenderedMs(w, st)) {
 						sizes.set(w.key, st.bytes);
 					} else {
 						const bytes = await this.onDiskBytes(w);
 						sizes.set(w.key, bytes);
-						stats[w.key] = { bytes, at: Date.now() };
+						stats[w.key] = { ...st, bytes, at: Date.now() };
 						statsDirty = true;
 					}
-				} else if (st) {
+				} else if (st && typeof st.bytes === "number") {
 					sizes.set(w.key, st.bytes); // removed, but its last size is remembered
 				} else if (w.cache_bytes) {
 					sizes.set(w.key, w.cache_bytes);
@@ -1775,18 +1813,37 @@ export default class ArabicSupportPlugin extends Plugin {
 	/** Works whose notes or cached model are missing in the vault. */
 	async findIncompleteSources(): Promise<Array<{ work: JsonObject; missing: number; total: number; reason: string }>> {
 		const outRoot = this.settings.sourceImportRoot.trim() || "_7 Sources";
-		const models = await this.loadAllSourceModels();
-		const modelByKey = new Map(models.map((m) => [`${m.work.collection}:${m.work.id}`, m]));
 		const manifest = await this.loadSourceManifest();
 		const pending = await this.loadPendingDeletions();
+		const modelKeys = new Set(await this.listModelKeys());
+		const stats = await this.loadSourceStats();
 		const canonicalId = this.resolveCanonicalQuran();
 		const canonicalRoot = this.settings.canonicalQuranFolder.trim() || `${outRoot}/Quran`;
 		const out: Array<{ work: JsonObject; missing: number; total: number; reason: string }> = [];
 		for (const work of manifest) {
 			if (pending.has(this.workKey(work))) continue; // being removed
-			const model = modelByKey.get(`${work.collection}:${work.id}`);
-			if (!model) {
+			if (!modelKeys.has(`${work.collection}:${work.id}`)) {
 				// The cached model is gone, so the work can no longer be re-rendered.
+				out.push({ work, missing: 0, total: 0, reason: "model" });
+				continue;
+			}
+			// Cheap path: a work whose last full render we recorded, at the current
+			// model schema, and whose file count is intact needs no model read — so
+			// startup never parses the whole (100+ MB) corpus.
+			const st = stats[this.workKey(work)];
+			if (
+				st && typeof st.notes === "number" && typeof st.schema === "number" &&
+				st.schema >= requiredModelSchema(String(work.collection ?? "")) &&
+				this.countWorkFiles(work) === st.notes
+			) {
+				continue;
+			}
+			// Precise path: read the model and check each expected note.
+			let model: SourceModel;
+			try {
+				const rel = normalizePath(`.midad-arabic-sources/source-models/${work.collection}/${work.id}.json`);
+				model = JSON.parse(await this.app.vault.adapter.read(rel)) as SourceModel;
+			} catch {
 				out.push({ work, missing: 0, total: 0, reason: "model" });
 				continue;
 			}
@@ -1798,16 +1855,22 @@ export default class ArabicSupportPlugin extends Plugin {
 			}
 			const paths = expectedNotePaths(model, outRoot, canonicalRoot, canonicalId);
 			let missing = 0;
-			for (const p of paths) {
-				let exists = false;
-				try {
-					exists = await this.app.vault.adapter.exists(normalizePath(p));
-				} catch { exists = false; }
-				if (!exists) missing++;
-			}
+			for (const p of paths) if (!this.app.vault.getAbstractFileByPath(normalizePath(p))) missing++;
 			if (missing > 0) out.push({ work, missing, total: paths.length, reason: "notes" });
 		}
 		return out;
+	}
+
+	/** How many notes a work currently has (its hub plus everything in its folder). */
+	countWorkFiles(work: JsonObject): number {
+		const outRoot = this.settings.sourceImportRoot.trim() || "_7 Sources";
+		const hub = normalizePath(`${outRoot}/${work.dir}.md`);
+		const prefix = normalizePath(`${outRoot}/${work.dir}/`);
+		let n = 0;
+		for (const f of this.app.vault.getFiles()) {
+			if (f.path === hub || f.path.startsWith(prefix)) n++;
+		}
+		return n;
 	}
 
 	async checkIncompleteSources(): Promise<void> {
@@ -2041,6 +2104,7 @@ export default class ArabicSupportPlugin extends Plugin {
 		}
 		const written: string[] = [];
 		const pubs = await this.loadPublicationMap();
+		const stats = await this.loadSourceStats();
 		for (let i = 0; i < batch.length; i++) {
 			const model = batch[i];
 			// Hand the templates the researched bibliographic details, if any — plus
@@ -2053,7 +2117,14 @@ export default class ArabicSupportPlugin extends Plugin {
 				onProgress?.({ index: i, total: batch.length, work, step, steps });
 			emit(0, 0);
 			try {
-				written.push(...(await renderModelToVault(this.app, templates, model, outRoot, force, emit)));
+				const w = await renderModelToVault(this.app, templates, model, outRoot, force, emit);
+				written.push(...w);
+				// A full render brings every template the work uses up to date.
+				const key = this.workKey(model.work);
+				const now = Date.now();
+				const rendered: Record<string, number> = { ...(stats[key]?.rendered ?? {}) };
+				for (const tkey of this.templateKeysFor(String(model.work.collection ?? ""))) rendered[tkey] = now;
+				stats[key] = { ...stats[key], rendered, notes: w.length, schema: Number(model.schema ?? 0) };
 			} catch (e) {
 				// One unusable model must not abort the whole batch: a template/model
 				// mismatch used to kill a re-render, leaving only a flashed notice.
@@ -2062,6 +2133,7 @@ export default class ArabicSupportPlugin extends Plugin {
 			}
 			await this.pruneRenamedFolder(model.work);
 		}
+		await this.saveSourceStats(stats);
 		// Category MOCs and the parent note reflect exactly what is installed;
 		// a manifest keeps a work listed even if its cached model is removed.
 		written.push(...(await this.refreshSourcesIndex()));
@@ -2386,25 +2458,35 @@ export default class ArabicSupportPlugin extends Plugin {
 		const store = await this.loadSourceHashes();
 		const manifest = await this.loadSourceManifest();
 		const pending = await this.loadPendingDeletions();
-		const outRoot = this.settings.sourceImportRoot.trim() || "_7 Sources";
+		const stats = await this.loadSourceStats();
 		const out: Array<{ work: JsonObject; kinds: Set<string> }> = [];
 		for (const work of manifest) {
 			if (this.workStatus(work) !== "installed") continue;
 			if (pending.has(this.workKey(work))) continue;
-			const file = this.app.vault.getAbstractFileByPath(normalizePath(`${outRoot}/${work.dir}.md`));
-			const fm = file instanceof TFile ? this.app.metadataCache.getFileCache(file)?.frontmatter : null;
-			const upd: unknown = fm?.["updated"];
-			const ms = typeof upd === "string" ? Date.parse(upd.replace(" ", "T")) : null;
-			const staleAt = (at: number) => at > 0 && (ms == null || !Number.isFinite(ms) || ms < at);
+			const stat = stats[this.workKey(work)];
+			// A work rendered by an older build has no per-template watermark; seed
+			// from its hub note so it is not re-rendered once just for the upgrade.
+			// Once ANY per-template watermark exists, a missing key means "not
+			// rendered with that template" — never the legacy hub time, which a
+			// scoped render would have bumped.
+			const rendered = stat?.rendered;
+			const hasRendered = !!rendered && Object.keys(rendered).length > 0;
+			const legacyMs = hasRendered ? 0 : this.hubUpdatedMs(work);
+			const renderedMs = (key: string) => (hasRendered ? (rendered?.[key] ?? 0) : legacyMs);
+			const stale = (key: string) => {
+				const at = templateChangedAt(store, key);
+				if (at <= 0) return false;
+				const ms = renderedMs(key);
+				return !ms || ms < at;
+			};
 			const kinds = new Set<string>();
 			for (const key of this.templateKeysFor(String(work.collection ?? ""))) {
 				if (key === "hub") continue;
-				if (!staleAt(templateChangedAt(store, key))) continue;
+				if (!stale(key)) continue;
 				const kind = SOURCE_TEMPLATE_KIND[key];
 				if (kind) kinds.add(kind);
 			}
-			// Nothing stale at all (no unit template and not the hub).
-			if (!kinds.size && !staleAt(templateChangedAt(store, "hub"))) continue;
+			if (!kinds.size && !stale("hub")) continue; // nothing stale
 			out.push({ work, kinds });
 		}
 		return out;
@@ -2428,25 +2510,59 @@ export default class ArabicSupportPlugin extends Plugin {
 		const outRoot = this.settings.sourceImportRoot.trim() || "_7 Sources";
 		const canonicalId = this.resolveCanonicalQuran();
 		const canonicalRoot = this.settings.canonicalQuranFolder.trim() || `${outRoot}/Quran`;
+		const stats = await this.loadSourceStats();
 		const notice = new Notice("Updating imported sources…", 0);
 		let done = 0;
 		try {
 			for (const it of items) {
 				const label = String(it.work.title ?? it.work.dir ?? it.work.id);
-				notice.setMessage(`Updating imported sources: ${++done}/${items.length} — ${label}`);
+				const nth = `${++done}/${items.length}`;
+				notice.setMessage(`Updating imported sources: ${nth} — ${label}`);
+				const key = this.workKey(it.work);
+				const legacy = this.hubUpdatedMs(it.work); // read before the render bumps it
 				const rel = normalizePath(`.midad-arabic-sources/source-models/${it.work.collection}/${it.work.id}.json`);
 				try {
 					if (!(await this.app.vault.adapter.exists(rel))) continue;
 					const model = JSON.parse(await this.app.vault.adapter.read(rel)) as SourceModel;
 					model.work.canonical_root = canonicalRoot;
 					model.work.canonical = model.work.collection === "quran-text" && String(model.work.id) === canonicalId;
-					await renderModelToVault(this.app, templates, model, outRoot, true, undefined, it.kinds ?? undefined);
+					// Per-note progress: a large work (a dictionary) can take minutes, so
+					// the work name alone would look frozen. Throttled so a 6,000-note
+					// work does not rewrite the notice DOM 6,000 times.
+					let lastTick = 0;
+					const onStep = (step: number, steps: number) => {
+						if (step !== steps && step - lastTick < 25) return;
+						lastTick = step;
+						const pct = steps ? Math.floor((step / steps) * 100) : 0;
+						notice.setMessage(`Updating imported sources: ${nth} — ${label} — ${step}/${steps} notes (${pct}%)`);
+					};
+					const written = await renderModelToVault(this.app, templates, model, outRoot, true, onStep, it.kinds ?? undefined);
+					// Record which templates this render brought up to date. A scoped
+					// render marks only the rendered kinds (plus the hub); a full render
+					// (kinds === null) marks every template the work uses. On the first
+					// touch, seed every key from the hub's old watermark, so a scoped
+					// render does not implicitly mark templates we did NOT re-render.
+					const now = Date.now();
+					const rendered: Record<string, number> = { ...(stats[key]?.rendered ?? {}) };
+					if (!stats[key]?.rendered) {
+						for (const tkey of this.templateKeysFor(String(it.work.collection ?? ""))) rendered[tkey] = legacy;
+					}
+					rendered["hub"] = now;
+					for (const tkey of this.templateKeysFor(String(it.work.collection ?? ""))) {
+						if (tkey === "hub") continue;
+						const kind = SOURCE_TEMPLATE_KIND[tkey];
+						if (it.kinds === null || (kind && it.kinds.has(kind))) rendered[tkey] = now;
+					}
+					stats[key] = it.kinds === null
+						? { ...stats[key], rendered, notes: written.length, schema: Number(model.schema ?? 0) }
+						: { ...stats[key], rendered, schema: Number(model.schema ?? 0) };
 				} catch (e) {
 					console.error("[midad-arabic-sources] scoped render", it.work.key, e);
 				}
 			}
 		} finally {
 			notice.hide();
+			await this.saveSourceStats(stats);
 		}
 	}
 
