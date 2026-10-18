@@ -1307,6 +1307,7 @@ var ArabicSupportPlugin = class extends import_obsidian2.Plugin {
     this.pythonPromise = null;
     this.sourceCatalogRefreshing = false;
     this.sourceTemplateCheckTimer = null;
+    this.templateCheckRunning = false;
     this.translitServerPid = null;
   }
   async onload() {
@@ -1457,6 +1458,14 @@ var ArabicSupportPlugin = class extends import_obsidian2.Plugin {
       }
     });
     this.addCommand({
+      id: "apply-template-changes",
+      name: "Apply template changes to imported sources",
+      callback: async () => {
+        const n = await this.applyTemplateChanges();
+        new import_obsidian2.Notice(n ? `Re-rendered ${n} source(s) for template changes.` : "No template changes to apply.");
+      }
+    });
+    this.addCommand({
       id: "redownload-sources",
       name: "Re-download imported sources (rebuild models)",
       callback: async () => {
@@ -1515,6 +1524,9 @@ var ArabicSupportPlugin = class extends import_obsidian2.Plugin {
     window.setTimeout(() => {
       void this.maybeRefreshSourceCatalog();
     }, 25e3);
+    this.registerInterval(window.setInterval(() => {
+      void this.pollTemplateChanges();
+    }, 45e3));
     this.registerEvent(this.app.vault.on("modify", (file) => {
       if (file instanceof import_obsidian2.TFile && this.isSourceTemplateFile(file.path)) {
         void this.recordSourceTemplateAndCheck();
@@ -3236,6 +3248,37 @@ var ArabicSupportPlugin = class extends import_obsidian2.Plugin {
     } finally {
       notice.hide();
       await this.saveSourceStats(stats);
+    }
+  }
+  async applyTemplateChanges() {
+    const changedKeys = await this.recordSourceTemplate();
+    const stale = await this.findStaleSourceWorks();
+    const indexDirty = changedKeys.some((k) => k === "moc" || k === "sources");
+    if (!stale.length && !indexDirty)
+      return 0;
+    await this.renderStaleScoped(stale.map((s) => ({ work: s.work, kinds: s.kinds })));
+    if (indexDirty)
+      await this.refreshSourcesIndex();
+    return stale.length;
+  }
+  async pollTemplateChanges() {
+    if (this.templateCheckRunning)
+      return;
+    if (this.settings.autoUpdateSourceTemplates !== true)
+      return;
+    this.templateCheckRunning = true;
+    try {
+      const hashes = await this.sourceTemplateHashes();
+      const store = await this.loadSourceHashes();
+      const changed = Object.entries(hashes).some(([k, h]) => {
+        var _a;
+        return h && ((_a = store.templates[k]) == null ? void 0 : _a.hash) !== h;
+      });
+      if (changed)
+        await this.applyTemplateChanges();
+    } catch (e) {
+    } finally {
+      this.templateCheckRunning = false;
     }
   }
   async maintainSources() {

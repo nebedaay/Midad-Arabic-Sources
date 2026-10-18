@@ -543,6 +543,15 @@ export default class ArabicSupportPlugin extends Plugin {
 		});
 
 		this.addCommand({
+			id: "apply-template-changes",
+			name: "Apply template changes to imported sources",
+			callback: async () => {
+				const n = await this.applyTemplateChanges();
+				new Notice(n ? `Re-rendered ${n} source(s) for template changes.` : "No template changes to apply.");
+			},
+		});
+
+		this.addCommand({
 			id: "redownload-sources",
 			name: "Re-download imported sources (rebuild models)",
 			callback: async () => { await this.redownloadSources(); },
@@ -596,6 +605,9 @@ export default class ArabicSupportPlugin extends Plugin {
 		window.setTimeout(() => { void this.autoSyncZotero(); }, 20000);
 		// Re-list the source catalogue in the background when its cache is old.
 		window.setTimeout(() => { void this.maybeRefreshSourceCatalog(); }, 25000);
+		// Templates live in `.obsidian`, which Obsidian's vault watcher ignores, so
+		// poll for edits and apply them without a reload.
+		this.registerInterval(window.setInterval(() => { void this.pollTemplateChanges(); }, 45000));
 		this.registerEvent(
 			this.app.vault.on("modify", (file) => {
 				if (file instanceof TFile && this.isSourceTemplateFile(file.path)) {
@@ -2567,6 +2579,43 @@ export default class ArabicSupportPlugin extends Plugin {
 	}
 
 	/** Restore anything incomplete and re-render notes that predate the template. */
+	/**
+	 * Record the current template hashes and re-render only the sources a change
+	 * affects. Cheap (unaffected works are not read), so it is safe to call from
+	 * the poll and the command as well as from maintainSources.
+	 */
+	async applyTemplateChanges(): Promise<number> {
+		const changedKeys = await this.recordSourceTemplate();
+		const stale = await this.findStaleSourceWorks();
+		const indexDirty = changedKeys.some((k) => k === "moc" || k === "sources");
+		if (!stale.length && !indexDirty) return 0;
+		await this.renderStaleScoped(stale.map((s) => ({ work: s.work, kinds: s.kinds })));
+		if (indexDirty) await this.refreshSourcesIndex();
+		return stale.length;
+	}
+
+	templateCheckRunning = false;
+
+	/**
+	 * Poll the templates for edits and apply them. The bundled copies live in
+	 * `.obsidian`, which Obsidian's vault watcher ignores (and `sourceTemplateFolder`
+	 * may be unset), so without this an edit to a bundled template is only noticed
+	 * on the next reload. This is what makes editing a template take effect live.
+	 */
+	async pollTemplateChanges(): Promise<void> {
+		if (this.templateCheckRunning) return;
+		if (this.settings.autoUpdateSourceTemplates !== true) return;
+		this.templateCheckRunning = true;
+		try {
+			const hashes = await this.sourceTemplateHashes();
+			const store = await this.loadSourceHashes();
+			const changed = Object.entries(hashes).some(([k, h]) => h && store.templates[k]?.hash !== h);
+			if (changed) await this.applyTemplateChanges();
+		} catch { /* templates unavailable */ } finally {
+			this.templateCheckRunning = false;
+		}
+	}
+
 	async maintainSources(): Promise<void> {
 		// Finish any interrupted removal first, and never restore such a work —
 		// the user already asked for it gone, so it does not prompt.
