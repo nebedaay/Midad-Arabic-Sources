@@ -91,6 +91,7 @@ export default defineConfig([
       "node_modules/**",
       "scripts/**",
       "midad-arabic-sources-import-templates/**",
+      "src/assets.generated.ts",
     ],
   },
   ...obsidianmd.configs.recommended,

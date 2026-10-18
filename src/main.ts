@@ -38,6 +38,7 @@ import {
 	recordTemplateHashes,
 	templateChangedAt,
 } from "./sourceImport/history";
+import { BUNDLED_ASSETS } from "./assets.generated";
 
 // ── External tool resolution (mirrors ScholarWeft's tools.ts) ────────────────
 // Electron's renderer does not inherit the shell PATH, so we probe candidates
@@ -408,6 +409,9 @@ export default class ArabicSupportPlugin extends Plugin {
 
 	async onload() {
 		await this.loadSettings();
+		// Extract the bundled templates and Python scripts into the plugin folder
+		// (they ship inside main.js; see gen-assets.mjs).
+		this.extractBundledAssets();
 		this.addSettingTab(new ArabicSupportSettingTab(this.app, this));
 
 		this.addCommand({
@@ -630,6 +634,30 @@ export default class ArabicSupportPlugin extends Plugin {
 			if (typeof adapter?.getBasePath === "function") return adapter.getBasePath();
 		} catch { /* ignore */ }
 		return adapter?.basePath ?? "";
+	}
+
+	/**
+	 * Write the bundled templates and Python scripts into the plugin folder when
+	 * they differ. They are compiled into main.js (gen-assets.mjs), so a release
+	 * ships them inside the three assets BRAT downloads; a plugin update therefore
+	 * updates them, which changes their hashes and triggers the scoped re-render.
+	 * Only files whose content differs are written, so a normal load touches
+	 * nothing.
+	 */
+	extractBundledAssets(): void {
+		const vault = this.vaultPath();
+		if (!vault) return;
+		const base = this.manifest.dir ?? `${this.app.vault.configDir}/plugins/midad-arabic-sources`;
+		for (const asset of BUNDLED_ASSETS) {
+			try {
+				const dest = `${vault}/${base}/${asset.path}`;
+				if (fs.existsSync(dest) && fs.readFileSync(dest, "utf8") === asset.content) continue;
+				fs.mkdirSync(dest.slice(0, dest.lastIndexOf("/")), { recursive: true });
+				fs.writeFileSync(dest, asset.content);
+			} catch (e) {
+				console.error("[midad-arabic-sources] asset extract", asset.path, e);
+			}
+		}
 	}
 
 	pythonPromise: Promise<string> | null = null;
@@ -2548,7 +2576,7 @@ export default class ArabicSupportPlugin extends Plugin {
 						const pct = steps ? Math.floor((step / steps) * 100) : 0;
 						notice.setMessage(`Updating imported sources: ${nth} — ${label} — ${step}/${steps} notes (${pct}%)`);
 					};
-					const written = await renderModelToVault(this.app, templates, model, outRoot, true, onStep, it.kinds ?? undefined);
+					await renderModelToVault(this.app, templates, model, outRoot, false, onStep, it.kinds ?? undefined);
 					// Record which templates this render brought up to date. A scoped
 					// render marks only the rendered kinds (plus the hub); a full render
 					// (kinds === null) marks every template the work uses. On the first
@@ -2565,9 +2593,7 @@ export default class ArabicSupportPlugin extends Plugin {
 						const kind = SOURCE_TEMPLATE_KIND[tkey];
 						if (it.kinds === null || (kind && it.kinds.has(kind))) rendered[tkey] = now;
 					}
-					stats[key] = it.kinds === null
-						? { ...stats[key], rendered, notes: written.length, schema: Number(model.schema ?? 0) }
-						: { ...stats[key], rendered, schema: Number(model.schema ?? 0) };
+					stats[key] = { ...stats[key], rendered, notes: expectedNotePaths(model, outRoot, canonicalRoot, canonicalId).length, schema: Number(model.schema ?? 0) };
 				} catch (e) {
 					console.error("[midad-arabic-sources] scoped render", it.work.key, e);
 				}
