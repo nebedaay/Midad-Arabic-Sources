@@ -17,13 +17,15 @@ POST /transliterate
     -> {"romanized": "...", "unknown": [...]} | {"error": "..."}
 
 POST /romanize
-    body: {"text": "...", "provider": "gemini"|"deepseek", "translate": false,
+    body: {"text": "...", "provider": "gemini"|"deepseek"|"openai", "translate": false,
            "keep_case": false, "name": false, "model": "<optional override>",
-           "api_key": "<optional>"}
+           "base_url": "<openai only, optional>", "api_key": "<optional>"}
     -> {"romanized": "...", "translation": "..."} | {"error": "..."}
-    Keys come from the server's environment: GEMINI_API_KEY (or GOOGLE_API_KEY)
-    and DEEPSEEK_API_KEY, or from a per-request api_key. The provider SDKs are
-    imported lazily.
+    Keys come from the server's environment: GEMINI_API_KEY (or GOOGLE_API_KEY),
+    DEEPSEEK_API_KEY, or OPENAI_API_KEY, or from a per-request api_key. "openai"
+    is any OpenAI-compatible endpoint (OpenAI, OpenRouter, Groq, a local server):
+    set OPENAI_BASE_URL / OPENAI_MODEL, or pass base_url / model per request. The
+    provider SDKs are imported lazily.
 
 GET  /lexicon   -> {"lexicon": {...}}
 POST /lexicon   body: {"term": "...", "romanization": "..."} or {"entries": {...}}
@@ -62,6 +64,7 @@ def _load_engine_module():
 bw = _load_engine_module()
 
 _ENGINES = {}                    # engine name -> disambiguator (None for 'none')
+_ACTUAL = {}                     # requested engine -> engine actually loaded
 _ENGINE_LOCK = threading.Lock()  # guards _ENGINES while loading
 _CALL_LOCK = threading.Lock()    # serializes CAMeL calls
 
@@ -72,7 +75,15 @@ def get_engine(name):
     with _ENGINE_LOCK:
         if name not in _ENGINES:
             print(f'Loading {name} engine…', file=sys.stderr)
-            _ENGINES[name] = None if name == 'none' else bw.load_disambiguator(name)
+            if name == 'none':
+                _ENGINES[name] = None
+                _ACTUAL[name] = 'none'
+            else:
+                # `bert` may resolve to `mle` if it cannot load; record what was
+                # actually loaded so the client can tell the user.
+                dis, actual = bw.load_disambiguator_result(name)
+                _ENGINES[name] = dis
+                _ACTUAL[name] = actual
         return _ENGINES[name]
 
 
@@ -83,6 +94,10 @@ def request_args(payload):
         keep_case=bool(payload.get('keep_case', False)),
         dotless_ya=payload.get('dotless_ya', 'maqsura'),
         name=bool(payload.get('name', False)),
+        # `citation` reads each word as a headword: a verb keeps its final
+        # inflection, a noun loses its case ending, even when the source is fully
+        # vocalised (which would otherwise preserve it).
+        citation=bool(payload.get('citation', False)),
         debug=False,
     )
 
@@ -91,7 +106,8 @@ def transliterate_payload(payload):
     text = payload.get('text', '')
     if not isinstance(text, str) or not text.strip():
         raise ValueError('field "text" is required')
-    disambiguator = get_engine(payload.get('engine', 'bert'))
+    requested = payload.get('engine', 'bert')
+    disambiguator = get_engine(requested)
     args = request_args(payload)
     # `standalone` reads the text as a word on its own (a citation form) rather
     # than an excerpt, so its last word is not given the pausal form.
@@ -101,7 +117,8 @@ def transliterate_payload(payload):
         terms = sorted(bw._UNKNOWN)
         unknown = [{'term': t, 'guess': bw.transliterate_document(t, disambiguator, args)}
                    for t in terms]
-    return {'romanized': romanized, 'unknown': unknown}
+    return {'romanized': romanized, 'unknown': unknown,
+            'engine': _ACTUAL.get(requested, requested)}
 
 
 def lexicon_payload(payload):
@@ -136,13 +153,17 @@ def place_payload(payload):
 GEMINI_DEFAULT_MODEL = os.environ.get('GEMINI_MODEL', 'gemini-3.5-flash-lite')
 DEEPSEEK_BASE_URL = os.environ.get('DEEPSEEK_BASE_URL', 'https://api.deepseek.com')
 DEEPSEEK_DEFAULT_MODEL = os.environ.get('DEEPSEEK_MODEL', 'deepseek-chat')
+# Any OpenAI-compatible endpoint (OpenAI itself, OpenRouter, Groq, a local
+# llama.cpp/Ollama/vLLM server, …): base URL and model are configurable.
+OPENAI_DEFAULT_BASE_URL = os.environ.get('OPENAI_BASE_URL', 'https://api.openai.com/v1')
+OPENAI_DEFAULT_MODEL = os.environ.get('OPENAI_MODEL', 'gpt-4o-mini')
 
 ROMANIZE_SYSTEM = (
     "You romanize Arabic into Latin script following Islamic Africa's IAFR "
     "conventions, and optionally translate. Use exactly these mappings:\n"
     "- Consonants: ب b, ت t, ث th, ج j, ح ḥ, خ kh, د d, ذ dh, ر r, ز z, ش sh, "
     "ص ṣ, ض ḍ, ط ṭ, ظ ẓ, ع ʿ, غ gh, ف f, ق q, ك k, ل l, م m, ن n, ه h, و w, ي y, ء ʾ.\n"
-    "- NEVER use the scientific letters š, č, ž, ǧ, ḵ, ḏ, ṯ, ḫ, ġ, ḳ; always write "
+    "- NEVER use the scientific letters š, č, ž, ǧ, ḵ, ḏ, ṯ, ḫ, ḡ, ḳ; always write "
     "sh, ch, zh, j, kh, dh, th, kh, gh, q.\n"
     "- Short vowels a i u; long vowels ā ī ū (macrons).\n"
     "- Definite article is al-, hyphenated and invariant before sun letters; elision "
@@ -181,8 +202,10 @@ _LLM_LOCK = threading.Lock()
 def provider_available(name):
     if name == 'gemini':
         return bool(os.environ.get('GEMINI_API_KEY') or os.environ.get('GOOGLE_API_KEY'))
-    if name in ('deepseek', 'openai'):
+    if name == 'deepseek':
         return bool(os.environ.get('DEEPSEEK_API_KEY'))
+    if name == 'openai':
+        return bool(os.environ.get('OPENAI_API_KEY'))
     return False
 
 
@@ -210,6 +233,20 @@ def deepseek_client(api_key=None):
         return _LLM_CLIENTS[cache_key]
 
 
+def openai_client(api_key=None, base_url=None):
+    """A client for any OpenAI-compatible API (OpenAI, OpenRouter, Groq, local …)."""
+    with _LLM_LOCK:
+        key = api_key or os.environ.get('OPENAI_API_KEY')
+        if not key:
+            raise ValueError('OPENAI_API_KEY is not set for the server process, and no key was supplied')
+        base = (base_url or OPENAI_DEFAULT_BASE_URL).rstrip('/')
+        cache_key = 'openai:' + base + ':' + key
+        if cache_key not in _LLM_CLIENTS:
+            from openai import OpenAI
+            _LLM_CLIENTS[cache_key] = OpenAI(api_key=key, base_url=base)
+        return _LLM_CLIENTS[cache_key]
+
+
 def parse_llm_json(text):
     cleaned = re.sub(r'^```(?:json)?\s*', '', (text or '').strip())
     cleaned = re.sub(r'\s*```$', '', cleaned)
@@ -225,7 +262,7 @@ _LLM_LATIN_FIXES = {
     'ǧ': 'j', 'Ǧ': 'J', 'ǰ': 'j',
     'ḵ': 'kh', 'Ḵ': 'Kh', 'ḫ': 'kh', 'Ḫ': 'Kh', 'ẖ': 'kh',
     'ḏ': 'dh', 'Ḏ': 'Dh', 'ṯ': 'th', 'Ṯ': 'Th',
-    'ġ': 'gh', 'Ġ': 'Gh', 'ḳ': 'q', 'Ḳ': 'Q',
+    'ġ': 'gh', 'Ġ': 'Gh', 'ḡ': 'gh', 'Ḡ': 'Gh', 'ḳ': 'q', 'Ḳ': 'Q',
 }
 
 
@@ -271,8 +308,14 @@ def romanize_payload(payload):
             model=payload.get('model') or GEMINI_DEFAULT_MODEL, contents=user, config=config)
         result = parse_llm_json(response.text)
     elif provider in ('deepseek', 'openai'):
-        response = deepseek_client(api_key).chat.completions.create(
-            model=payload.get('model') or DEEPSEEK_DEFAULT_MODEL,
+        if provider == 'deepseek':
+            client = deepseek_client(api_key)
+            model = payload.get('model') or DEEPSEEK_DEFAULT_MODEL
+        else:
+            client = openai_client(api_key, payload.get('base_url'))
+            model = payload.get('model') or OPENAI_DEFAULT_MODEL
+        response = client.chat.completions.create(
+            model=model,
             temperature=0,
             response_format={'type': 'json_object'},
             messages=[
@@ -366,10 +409,12 @@ PAGE_HTML = """<!doctype html>
           <select id="provider">
             <option value="gemini">Gemini</option>
             <option value="deepseek">DeepSeek</option>
+            <option value="openai">OpenAI-compatible</option>
           </select>
         </label>
         <label>Model <input type="text" id="model" value="gemini-3.5-flash-lite" size="22"></label>
       </div>
+      <div class="row"><label>Base URL <input type="text" id="baseurl" size="30" placeholder="OpenAI-compatible only; else OPENAI_BASE_URL"></label></div>
       <div class="row"><label><input type="checkbox" id="translate"> Also translate to English</label></div>
       <div class="row"><label>API key <input type="password" id="apikey" size="30" placeholder="(optional; else server env)"></label></div>
     </fieldset>
@@ -394,6 +439,7 @@ async function run(opts) {
     body.keep_case = $('full').checked;
     body.name = $('name').checked;
     body.translate = $('translate').checked;
+    if ($('baseurl').value) body.base_url = $('baseurl').value;
     if ($('apikey').value) body.api_key = $('apikey').value;
   } else {
     body.engine = document.querySelector('input[name=engine]:checked').value;
@@ -495,12 +541,18 @@ class Handler(BaseHTTPRequestHandler):
         elif self.path == '/health':
             with _ENGINE_LOCK:
                 loaded = sorted(_ENGINES)
+                actual = dict(_ACTUAL)
             self._send(200, {
                 'status': 'ok',
+                'pid': os.getpid(),
                 'engines_loaded': loaded,
+                # What each requested engine actually resolved to (bert → mle on
+                # a machine without transformers/model data).
+                'engines_actual': actual,
                 'providers': {
                     'gemini': provider_available('gemini'),
                     'deepseek': provider_available('deepseek'),
+                    'openai': provider_available('openai'),
                 },
             })
         elif self.path == '/lexicon':
@@ -535,7 +587,9 @@ def main():
     parser.add_argument('--host', default='127.0.0.1')
     parser.add_argument('--port', type=int, default=8756)
     parser.add_argument('--preload', action='append', default=None, choices=('bert', 'mle', 'none'),
-                        help='engine to load at startup (repeatable; defaults to bert)')
+                        help='engine to load at startup (repeatable; defaults to bert). '
+                             'Preload mle only if you have chosen it: it is opt-in, '
+                             'not the default.')
     args = parser.parse_args()
 
     for engine in (args.preload if args.preload is not None else ['bert']):

@@ -62,7 +62,7 @@ const reviewWarnings = {
         // Other tools
         "Anki", "CalDAV", "CardDAV", "Evernote", "IntelliJ IDEA", "Jekyll", "Logseq", "Notion", "PyCharm", "React", "Reddit", "Roam Research", "Svelte", "VS Code", "Visual Studio Code", "WebDAV", "WebStorm",
         // Midad Arabic Sources
-        "Midad", "Midad Arabic Sources", "Arabic", "Python", "Eta", "DeepSeek", "CAMeL",
+        "Midad", "Midad Arabic Sources", "Turath", "Arabic", "Python", "Eta", "DeepSeek", "CAMeL",
         "Qurʾān", "Qur’ān", "Qur'ān", "Qur’an", "Qur'an",
         "GEMINI_API_KEY", "GOOGLE_API_KEY",
       ],
@@ -76,8 +76,8 @@ const reviewWarnings = {
         // Midad Arabic Sources
         "ETA", "MOC", "OCR", "CSL", "SQLite", "BERT", "MLE", "CAMeL", "PDFS",
       ],
-      ignoreWords: ["Use", "Copy", "Settings", "Community"],
-      ignoreRegex: ["mas-", "@[a-z]", "midad-arabic-sources"],
+      ignoreWords: ["Use", "Copy", "Manage", "Settings", "Community"],
+      ignoreRegex: ["mas-", "@[a-z]", "midad-arabic-sources", "app\\.turath\\.io"],
     },
   ],
 };

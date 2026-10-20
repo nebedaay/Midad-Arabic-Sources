@@ -32,6 +32,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import html
+import importlib.util
 import json
 import os
 import re
@@ -63,10 +64,15 @@ def _find_vault() -> Path:
 VAULT = _find_vault()
 CACHE_DIR = VAULT / ".midad-arabic-sources" / "cache" / "text-sources"
 MODEL_DIR = VAULT / ".midad-arabic-sources" / "source-models"
+# Canonical, schema-bearing source data (the FODT dictionary keeps its homonym
+# and diptote fields here; the model is only the render cache).
+SOURCE_DATA_DIR = VAULT / ".midad-arabic-sources" / "source-data"
 QURAN_DIR = VAULT / "_7 Sources" / "Quran"
 
 # Optional per-work title/author/dir overrides, keyed by "<collection>:<id>".
 OVERRIDES_FILE = VAULT / ".midad-arabic-sources" / "text-source-titles.json"
+# User-added Turath works (the "add by URL" list), merged into the catalogue.
+CUSTOM_WORKS_FILE = VAULT / ".midad-arabic-sources" / "turath-custom-works.json"
 
 DEFAULT_LAYOUT = "stacked"  # "stacked" | "table" (facing-page cells)
 
@@ -162,6 +168,20 @@ COLLECTIONS: dict[str, dict] = {
         # asks the user before rendering a collection that declares this.
         "needs_transliteration": True,
     },
+    "turath": {
+        "label": "Turath.io (classical texts)",
+        "genre": "turath",
+        "repo_label": "turath.io",
+        "catalog": None,  # curated static list below
+        # One request per book, a minified file keyed by Arabic diacritics
+        # (decoded in `build_turath_units`). There is no bulk listing endpoint.
+        "data": "https://files.turath.io/books-v3/{id}.json",
+        "kind": "book",
+        "languages": {"ar": "arabic"},
+        "shape": "turath-v3",
+        "moc": "Turath",
+        "cssclass": "book",
+    },
 }
 
 # Static catalogue for lexicons distributed as SQLite. The importer downloads
@@ -181,9 +201,38 @@ DICTIONARIES: list[dict] = [
         # and its `aliases:` — one per dictionary, so the two never collide.
         "body": "grid",
         "note_prefix": "HW",
+        # This work exists only once across the imported repositories, so it does
+        # not need a repo qualifier in its folder/file name (see `unique`).
+        "unique": True,
         # Wehr's own transliteration — the European Orientalist system its text
         # uses (š, ṯ, ḵ, …) — so an engine reading still matches the note's text.
         "convention": "wehr",
+    },
+    {
+        # The same dictionary from the FODT origin rather than the app's SQLite.
+        # It keeps Wehr's homonym numbers and diptote markers, which the app's
+        # conversion dropped. A separate work (folder, `HWF` prefix) so the two
+        # can be compared side by side; the 62 entries the FODT lost are carried
+        # from the app's SQLite and marked `source: "app-supplement"`.
+        "id": "hanswehr-fodt",
+        "title": "Hans Wehr Dictionary (FODT)",
+        "arabic": "معجم هانس ڤير",
+        "author": "Hans Wehr",
+        "editor": "J Milton Cowan",
+        "source": "https://github.com/muhammad-abdurrahman/hans-wehr-fodt-parser",
+        "db": "https://raw.githubusercontent.com/muhammad-abdurrahman/"
+              "hans-wehr-fodt-parser/master/hanswehr.xml",
+        "db_path": "hanswehr.xml",
+        "body": "grid",
+        "note_prefix": "HWF",
+        "unique": True,
+        "convention": "wehr",
+        "shape": "fodt",
+        "license_attribution": "Text: Hans Wehr, A Dictionary of Modern Written Arabic, "
+                               "ed. J Milton Cowan. Digitisation: muhammad-abdurrahman/"
+                               "hans-wehr-fodt-parser (MIT, code only). The 62 entries the "
+                               "FODT lacks are carried from the app's SQLite, marked "
+                               "app-supplement.",
     },
     {
         "id": "lanelexicon",
@@ -199,6 +248,8 @@ DICTIONARIES: list[dict] = [
         # names come from the transliteration service.
         "body": "prose",
         "note_prefix": "LL",
+        # Lane, too, exists only once across the imported repositories.
+        "unique": True,
         # Lane transliterates nothing itself, so its names follow the vault's own
         # convention (no case endings, verb/pronoun/preposition endings kept, the
         # two tanwīn exceptions).
@@ -257,6 +308,207 @@ QURAN_TEXTS: list[dict] = [
     {"id": "shubah", "source_id": "shubah", "title": "Qurʾān (riwāyat Shuʿbah)", "riwaya_ar": "رواية شعبة"},
     {"id": "susi", "source_id": "susi", "title": "Qurʾān (riwāyat al-Sūsī)", "riwaya_ar": "رواية السوسي"},
 ]
+
+# Static catalogue for Turath.io (api.turath.io), a keyless library of ~8,500
+# classical texts served as one JSON per book (files.turath.io/books-v3/<id>.json).
+# Turath exposes no bulk listing, so this is a curated starter list; more works can
+# be added here or per-vault via `.midad-arabic-sources/text-source-titles.json`.
+#
+# `type` is both the manage-modal genre toggle and the work's "<Type> Sources" MOC
+# (see `TURATH_TYPES`); the repository MOC `Turath` is added for every work. Latin
+# titles and authors are hand-checked against the vault's transliteration; the
+# Arabic forms are Turath's own metadata.
+TURATH_TYPES: dict[str, str] = {
+    "tafsir": "Tafsīr Sources",
+    "hadith": "Ḥadīth Sources",
+    "fiqh": "Fiqh Sources",
+    "usul": "Uṣūl al-Fiqh Sources",
+    "aqida": "ʿAqīda Sources",
+    "tarikh": "Tārīkh Sources",
+    "language": "Language Sources",
+    "quran-sciences": "ʿUlūm al-Qurʾān Sources",
+}
+
+TURATH_BOOKS: list[dict] = [
+    # ── Tafsīr ───────────────────────────────────────────────────────────────
+    {"id": "7798", "title": "Tafsīr al-Ṭabarī", "arabic": "تفسير الطبري", "author": "Abū Jaʿfar al-Ṭabarī", "type": "tafsir"},
+    {"id": "20855", "title": "al-Jāmiʿ li-Aḥkām al-Qurʾān", "arabic": "الجامع لأحكام القرآن", "author": "Abū ʿAbdallāh al-Qurṭubī", "type": "tafsir"},
+    {"id": "8473", "title": "Tafsīr Ibn Kathīr", "arabic": "تفسير ابن كثير", "author": "Ismāʿīl b. ʿUmar Ibn Kathīr", "type": "tafsir"},
+    {"id": "23627", "title": "al-Kashshāf", "arabic": "الكشاف", "author": "Maḥmūd b. ʿUmar al-Zamakhsharī", "type": "tafsir"},
+    {"id": "23635", "title": "Mafātīḥ al-Ghayb", "arabic": "مفاتيح الغيب", "author": "Fakhr al-Dīn al-Rāzī", "type": "tafsir"},
+    {"id": "23591", "title": "al-Baḥr al-Muḥīṭ", "arabic": "البحر المحيط", "author": "Abū Ḥayyān al-Andalusī", "type": "tafsir"},
+    {"id": "12884", "title": "al-Durr al-Manthūr", "arabic": "الدر المنثور", "author": "Jalāl al-Dīn al-Suyūṭī", "type": "tafsir"},
+    {"id": "12876", "title": "Tafsīr al-Jalālayn", "arabic": "تفسير الجلالين", "authors": ["Jalāl al-Dīn al-Maḥallī", "Jalāl al-Dīn al-Suyūṭī"], "type": "tafsir"},
+    {"id": "22918", "title": "Aḍwāʾ al-Bayān", "arabic": "أضواء البيان", "author": "Muḥammad al-Amīn al-Shinqīṭī", "type": "tafsir"},
+    {"id": "23631", "title": "Maḥāsin al-Taʾwīl", "arabic": "محاسن التأويل", "author": "Jamāl al-Dīn al-Qāsimī", "type": "tafsir"},
+    {"id": "42", "title": "Taysīr al-Karīm al-Raḥmān", "arabic": "تيسير الكريم الرحمن", "author": "ʿAbd al-Raḥmān al-Saʿdī", "type": "tafsir"},
+    # ── Ḥadīth ───────────────────────────────────────────────────────────────
+    {"id": "735", "title": "Ṣaḥīḥ al-Bukhārī", "arabic": "صحيح البخاري", "author": "Muḥammad b. Ismāʿīl al-Bukhārī", "type": "hadith"},
+    {"id": "1727", "title": "Ṣaḥīḥ Muslim", "arabic": "صحيح مسلم", "author": "Muslim b. al-Ḥajjāj", "type": "hadith"},
+    {"id": "117359", "title": "Sunan Abī Dāwūd", "arabic": "سنن أبي داود", "author": "Abū Dāwūd al-Sijistānī", "type": "hadith"},
+    {"id": "7895", "title": "Sunan al-Tirmidhī", "arabic": "سنن الترمذي", "author": "Abū ʿĪsā al-Tirmidhī", "type": "hadith"},
+    {"id": "1198", "title": "Sunan Ibn Mājah", "arabic": "سنن ابن ماجه", "author": "Ibn Mājah al-Qazwīnī", "type": "hadith"},
+    {"id": "1699", "title": "al-Muwaṭṭaʾ", "arabic": "موطأ مالك", "author": "Mālik b. Anas", "type": "hadith"},
+    {"id": "25794", "title": "Musnad Aḥmad", "arabic": "مسند أحمد", "author": "Aḥmad b. Ḥanbal", "type": "hadith"},
+    {"id": "1673", "title": "Fatḥ al-Bārī", "arabic": "فتح الباري", "author": "Ibn Ḥajar al-ʿAsqalānī", "type": "hadith"},
+    {"id": "1711", "title": "al-Minhāj Sharḥ Ṣaḥīḥ Muslim", "arabic": "شرح النووي على مسلم", "author": "Yaḥyā al-Nawawī", "type": "hadith"},
+    {"id": "2348", "title": "Riyāḍ al-Ṣāliḥīn", "arabic": "رياض الصالحين", "author": "Yaḥyā al-Nawawī", "type": "hadith"},
+    {"id": "12836", "title": "al-Arbaʿūn al-Nawawiyya", "arabic": "الأربعون النووية", "author": "Yaḥyā al-Nawawī", "type": "hadith"},
+    # ── Fiqh ─────────────────────────────────────────────────────────────────
+    {"id": "1655", "title": "al-Umm", "arabic": "الأم", "author": "Muḥammad b. Idrīs al-Shāfiʿī", "type": "fiqh"},
+    {"id": "6910", "title": "al-Mughnī", "arabic": "المغني", "author": "Muwaffaq al-Dīn Ibn Qudāma", "type": "fiqh"},
+    {"id": "2186", "title": "al-Majmūʿ Sharḥ al-Muhadhdhab", "arabic": "المجموع شرح المهذب", "author": "Yaḥyā al-Nawawī", "type": "fiqh"},
+    {"id": "8183", "title": "Badāʾiʿ al-Ṣanāʾiʿ", "arabic": "بدائع الصنائع", "author": "ʿAlāʾ al-Dīn al-Kāsānī", "type": "fiqh"},
+    {"id": "11820", "title": "al-Hidāya", "arabic": "الهداية", "author": "Burhān al-Dīn al-Marghīnānī", "type": "fiqh"},
+    {"id": "587", "title": "al-Mudawwana", "arabic": "المدونة", "author": "Mālik b. Anas", "type": "fiqh"},
+    {"id": "21739", "title": "Bidāyat al-Mujtahid", "arabic": "بداية المجتهد", "author": "Ibn Rushd", "type": "fiqh"},
+    {"id": "1679", "title": "al-Rawḍ al-Murabbaʿ", "arabic": "الروض المربع", "author": "Manṣūr al-Buhūtī", "type": "fiqh"},
+    {"id": "11373", "title": "al-Risāla al-Qayrawāniyya", "arabic": "الرسالة", "author": "Ibn Abī Zayd al-Qayrawānī", "type": "fiqh"},
+    {"id": "9548", "title": "Mukhtaṣar al-Akhḍarī", "arabic": "متن الأخضري في العبادات", "author": "al-Akhḍarī", "type": "fiqh"},
+    {"id": "124336", "title": "Mukhtaṣar al-Qudūrī", "arabic": "مختصر القدوري", "author": "al-Qudūrī", "type": "fiqh"},
+    {"id": "6125", "title": "al-Muqaddima al-Ḥaḍramiyya", "arabic": "المقدمة الحضرمية", "author": "ʿAbdallāh Bā Faḍl al-Ḥaḍramī", "type": "fiqh"},
+    {"id": "11315", "title": "ʿUmdat al-Fiqh", "arabic": "عمدة الفقه", "author": "Ibn Qudāma", "type": "fiqh"},
+    {"id": "11355", "title": "Mukhtaṣar Khalīl", "arabic": "مختصر خليل", "author": "Khalīl b. Isḥāq", "type": "fiqh"},
+    {"id": "91", "title": "Sharḥ al-Kharashī", "arabic": "شرح الخرشي على مختصر خليل", "author": "al-Kharashī", "type": "fiqh"},
+    {"id": "569", "title": "Mawāhib al-Jalīl", "arabic": "مواهب الجليل في شرح مختصر خليل", "author": "al-Ḥaṭṭāb", "type": "fiqh"},
+    {"id": "21611", "title": "al-Tāj wa-l-Iklīl", "arabic": "التاج والإكليل لمختصر خليل", "author": "al-Mawwāq", "type": "fiqh"},
+    {"id": "21614", "title": "Manḥ al-Jalīl", "arabic": "منح الجليل شرح مختصر خليل", "author": "ʿUlaysh", "type": "fiqh"},
+    {"id": "95864", "title": "al-Kawkab al-Zahrī", "arabic": "الكوكب الزهري نظم مختصر الأخضري", "author": "Muḥammad Bāy Bilʿālam", "type": "fiqh"},
+    # ── Uṣūl al-fiqh ─────────────────────────────────────────────────────────
+    {"id": "8180", "title": "al-Risāla", "arabic": "الرسالة", "author": "Muḥammad b. Idrīs al-Shāfiʿī", "type": "usul"},
+    {"id": "5459", "title": "al-Mustaṣfā", "arabic": "المستصفى", "author": "Abū Ḥāmid al-Ghazālī", "type": "usul"},
+    {"id": "7439", "title": "al-Burhān fī Uṣūl al-Fiqh", "arabic": "البرهان في أصول الفقه", "author": "Imām al-Ḥaramayn al-Juwaynī", "type": "usul"},
+    {"id": "2022", "title": "al-Maḥṣūl", "arabic": "المحصول", "author": "Fakhr al-Dīn al-Rāzī", "type": "usul"},
+    {"id": "6301", "title": "Uṣūl al-Sarakhsī", "arabic": "أصول السرخسي", "author": "Abū Bakr al-Sarakhsī", "type": "usul"},
+    {"id": "12010", "title": "Rawḍat al-Nāẓir", "arabic": "روضة الناظر", "author": "Ibn Qudāma al-Maqdisī", "type": "usul"},
+    # ── ʿAqīda ───────────────────────────────────────────────────────────────
+    {"id": "8352", "title": "Sharḥ al-ʿAqīda al-Ṭaḥāwiyya", "arabic": "شرح العقيدة الطحاوية", "author": "Ibn Abī al-ʿIzz", "type": "aqida"},
+    {"id": "18098", "title": "al-ʿAqīda al-Wāsiṭiyya", "arabic": "العقيدة الواسطية", "author": "Aḥmad b. Taymiyya", "type": "aqida"},
+    {"id": "8178", "title": "al-Ibāna ʿan Uṣūl al-Diyāna", "arabic": "الإبانة عن أصول الديانة", "author": "Abū al-Ḥasan al-Ashʿarī", "type": "aqida"},
+    {"id": "13035", "title": "al-Sharīʿa", "arabic": "الشريعة", "author": "Abū Bakr al-Ājurrī", "type": "aqida"},
+    {"id": "13032", "title": "Kitāb al-Sunna", "arabic": "السنة", "author": "Muḥammad b. Naṣr al-Marwazī", "type": "aqida"},
+    # ── Tārīkh, rijāl, ṭabaqāt ───────────────────────────────────────────────
+    {"id": "9783", "title": "Tārīkh al-Ṭabarī", "arabic": "تاريخ الطبري", "author": "Abū Jaʿfar al-Ṭabarī", "type": "tarikh"},
+    {"id": "8376", "title": "al-Bidāya wa-l-Nihāya", "arabic": "البداية والنهاية", "author": "Ibn Kathīr", "type": "tarikh"},
+    {"id": "21712", "title": "al-Kāmil fī al-Tārīkh", "arabic": "الكامل في التاريخ", "author": "Ibn al-Athīr", "type": "tarikh"},
+    {"id": "12320", "title": "Tārīkh Ibn Khaldūn", "arabic": "تاريخ ابن خلدون", "author": "ʿAbd al-Raḥmān Ibn Khaldūn", "type": "tarikh"},
+    {"id": "22669", "title": "Siyar Aʿlām al-Nubalāʾ", "arabic": "سير أعلام النبلاء", "author": "Shams al-Dīn al-Dhahabī", "type": "tarikh"},
+    {"id": "1000", "title": "Wafayāt al-Aʿyān", "arabic": "وفيات الأعيان", "author": "Ibn Khallikān", "type": "tarikh"},
+    {"id": "3310", "title": "Tahdhīb al-Tahdhīb", "arabic": "تهذيب التهذيب", "author": "Ibn Ḥajar al-ʿAsqalānī", "type": "tarikh"},
+    {"id": "8609", "title": "Taqrīb al-Tahdhīb", "arabic": "تقريب التهذيب", "author": "Ibn Ḥajar al-ʿAsqalānī", "type": "tarikh"},
+    {"id": "3722", "title": "Tahdhīb al-Kamāl", "arabic": "تهذيب الكمال", "author": "Yūsuf al-Mizzī", "type": "tarikh"},
+    {"id": "146", "title": "al-Ṭabaqāt al-Kubrā", "arabic": "الطبقات الكبرى", "author": "Ibn Saʿd", "type": "tarikh"},
+    {"id": "12286", "title": "al-Aʿlām", "arabic": "الأعلام", "author": "Khayr al-Dīn al-Ziriklī", "type": "tarikh"},
+    # ── Language and adab ────────────────────────────────────────────────────
+    {"id": "1687", "title": "Lisān al-ʿArab", "arabic": "لسان العرب", "author": "Ibn Manẓūr", "type": "language"},
+    {"id": "7283", "title": "al-Qāmūs al-Muḥīṭ", "arabic": "القاموس المحيط", "author": "al-Fīrūzābādī", "type": "language"},
+    {"id": "23235", "title": "al-Ṣiḥāḥ", "arabic": "الصحاح", "author": "al-Jawharī", "type": "language"},
+    {"id": "21710", "title": "Maqāyīs al-Lugha", "arabic": "مقاييس اللغة", "author": "Ibn Fāris", "type": "language"},
+    {"id": "23018", "title": "al-Kitāb", "arabic": "الكتاب", "author": "Sībawayh", "type": "language"},
+    {"id": "26349", "title": "Adab al-Kātib", "arabic": "أدب الكاتب", "author": "Ibn Qutayba", "type": "language"},
+    {"id": "10614", "title": "al-Bayān wa-l-Tabyīn", "arabic": "البيان والتبيين", "author": "al-Jāḥiẓ", "type": "language"},
+    {"id": "6936", "title": "al-Muzhir", "arabic": "المزهر", "author": "Jalāl al-Dīn al-Suyūṭī", "type": "language"},
+    {"id": "12732", "title": "Khizānat al-Adab", "arabic": "خزانة الأدب", "author": "ʿAbd al-Qādir al-Baghdādī", "type": "language"},
+    {"id": "17387", "title": "Asrār al-Balāgha", "arabic": "أسرار البلاغة", "author": "ʿAbd al-Qāhir al-Jurjānī", "type": "language"},
+    {"id": "11235", "title": "Fiqh al-Lugha wa-Sirr al-ʿArabiyya", "arabic": "فقه اللغة وسر العربية", "author": "Abū Manṣūr al-Thaʿlabī", "type": "language"},
+    {"id": "11371", "title": "al-Ājurrūmiyya", "arabic": "الآجرومية", "author": "Ibn Ājurrūm", "type": "language"},
+    {"id": "122235", "title": "al-Shāfiya fī ʿIlmay al-Taṣrīf wa-l-Khaṭṭ", "arabic": "الشافية في علمي التصريف والخط", "author": "Ibn al-Ḥājib", "type": "language"},
+    # ── ʿUlūm al-Qurʾān and maqāṣid ──────────────────────────────────────────
+    {"id": "11728", "title": "al-Itqān fī ʿUlūm al-Qurʾān", "arabic": "الإتقان في علوم القرآن", "author": "Jalāl al-Dīn al-Suyūṭī", "type": "quran-sciences"},
+    {"id": "11436", "title": "al-Burhān fī ʿUlūm al-Qurʾān", "arabic": "البرهان في علوم القرآن", "author": "Badr al-Dīn al-Zarkashī", "type": "quran-sciences"},
+    {"id": "11435", "title": "al-Muwāfaqāt", "arabic": "الموافقات", "author": "Abū Isḥāq al-Shāṭibī", "type": "quran-sciences"},
+    {"id": "17798", "title": "Iʿlām al-Muwaqqiʿīn", "arabic": "إعلام الموقعين", "author": "Ibn Qayyim al-Jawziyya", "type": "quran-sciences"},
+    {"id": "11495", "title": "al-Ṭuruq al-Ḥukmiyya", "arabic": "الطرق الحكمية", "author": "Ibn Qayyim al-Jawziyya", "type": "quran-sciences"},
+]
+
+# Finer, discipline-level classification and a longer descriptive title for
+# works whose main title says little about the contents (shown under the main
+# title in the manage-sources list). `genres` overrides the broad `type`; a work
+# may belong to several kinds (e.g. a ḥadīth commentary is also ḥadīth).
+TURATH_DETAILS: dict[str, dict] = {
+    # Tafsīr
+    "20855": {"subtitle": "A legal (aḥkām) Qurʾān commentary"},
+    "22918": {"subtitle": "A Qurʾān commentary by Qurʾān"},
+    "23591": {"subtitle": "A Qurʾān commentary"},
+    "23627": {"subtitle": "A Muʿtazilī Qurʾān commentary"},
+    "23635": {"subtitle": "A Qurʾān commentary (kalām)"},
+    "12884": {"subtitle": "A Qurʾān commentary by transmitted reports"},
+    "12876": {"subtitle": "A concise Qurʾān commentary"},
+    "23631": {"subtitle": "A Qurʾān commentary"},
+    "8473": {"subtitle": "A Qurʾān commentary"},
+    "42": {"subtitle": "A Qurʾān commentary"},
+    "7798": {"subtitle": "A Qurʾān commentary by transmitted reports"},
+    # Ḥadīth
+    "1673": {"genres": ["hadith", "hadith-commentary"], "subtitle": "A commentary on Ṣaḥīḥ al-Bukhārī"},
+    "1711": {"genres": ["hadith", "hadith-commentary"], "subtitle": "A commentary on Ṣaḥīḥ Muslim"},
+    "2348": {"subtitle": "A ḥadīth anthology"},
+    "12836": {"subtitle": "Forty ḥadīth"},
+    # Fiqh
+    "1655": {"subtitle": "Shāfiʿī fiqh"},
+    "6910": {"subtitle": "Ḥanbalī fiqh"},
+    "2186": {"subtitle": "Shāfiʿī fiqh"},
+    "8183": {"subtitle": "Ḥanafī fiqh"},
+    "11820": {"subtitle": "Ḥanafī fiqh"},
+    "587": {"subtitle": "Mālikī fiqh"},
+    "21739": {"subtitle": "Comparative fiqh"},
+    "1679": {"subtitle": "Ḥanbalī fiqh"},
+    "11373": {"subtitle": "Mālikī fiqh (the Risāla)"},
+    "9548": {"subtitle": "Mālikī fiqh (worship)"},
+    "124336": {"subtitle": "Ḥanafī fiqh"},
+    "6125": {"subtitle": "Shāfiʿī fiqh"},
+    "11315": {"subtitle": "Ḥanbalī fiqh"},
+    "11355": {"subtitle": "Mālikī fiqh (the matn)"},
+    "91": {"genres": ["fiqh"], "subtitle": "A commentary on Mukhtaṣar Khalīl"},
+    "569": {"genres": ["fiqh"], "subtitle": "A commentary on Mukhtaṣar Khalīl"},
+    "21611": {"genres": ["fiqh"], "subtitle": "A commentary on Mukhtaṣar Khalīl"},
+    "21614": {"genres": ["fiqh"], "subtitle": "A commentary on Mukhtaṣar Khalīl"},
+    "95864": {"genres": ["fiqh"], "subtitle": "A versification of Mukhtaṣar al-Akhḍarī"},
+    # Uṣūl al-fiqh
+    "8180": {"subtitle": "Uṣūl al-fiqh"},
+    "5459": {"subtitle": "Uṣūl al-fiqh"},
+    "7439": {"subtitle": "Uṣūl al-fiqh"},
+    "2022": {"subtitle": "Uṣūl al-fiqh"},
+    "6301": {"subtitle": "Uṣūl al-fiqh"},
+    "12010": {"subtitle": "Uṣūl al-fiqh"},
+    # ʿAqīda
+    "8352": {"genres": ["aqida", "theology"], "subtitle": "A creed commentary"},
+    "8178": {"genres": ["aqida", "theology"], "subtitle": "A creed"},
+    "18098": {"subtitle": "A creed"},
+    "13035": {"subtitle": "A creed and ḥadīth collection"},
+    "13032": {"subtitle": "A creed"},
+    # Tārīkh / rijāl
+    "9783": {"subtitle": "A universal history"},
+    "8376": {"subtitle": "A universal history"},
+    "21712": {"subtitle": "A universal history"},
+    "12320": {"subtitle": "A universal history, with the Muqaddima"},
+    "22669": {"genres": ["tarikh", "biography"], "subtitle": "A biographical dictionary"},
+    "1000": {"genres": ["biography"], "subtitle": "A biographical dictionary"},
+    "3310": {"genres": ["biography"], "subtitle": "Narrator biography (rijāl)"},
+    "8609": {"genres": ["biography"], "subtitle": "Narrator biography (rijāl)"},
+    "3722": {"genres": ["biography"], "subtitle": "Narrator biography (rijāl)"},
+    "146": {"genres": ["biography"], "subtitle": "A biographical dictionary"},
+    "12286": {"genres": ["biography"], "subtitle": "A biographical dictionary"},
+    # Language / adab
+    "1687": {"genres": ["language", "lexicography", "dictionary"], "subtitle": "An Arabic lexicon"},
+    "7283": {"genres": ["language", "lexicography", "dictionary"], "subtitle": "An Arabic lexicon"},
+    "23235": {"genres": ["language", "lexicography", "dictionary"], "subtitle": "An Arabic lexicon"},
+    "21710": {"genres": ["language", "lexicography", "dictionary"], "subtitle": "Arabic lexicology"},
+    "23018": {"genres": ["grammar"], "subtitle": "Arabic grammar (naḥw)"},
+    "26349": {"genres": ["adab", "language"], "subtitle": "Literary adab and style"},
+    "10614": {"genres": ["rhetoric", "adab"], "subtitle": "Rhetoric and adab"},
+    "6936": {"genres": ["language", "linguistics"], "subtitle": "Arabic language and linguistics"},
+    "12732": {"genres": ["grammar", "adab"], "subtitle": "Grammar and literary evidence"},
+    "17387": {"genres": ["rhetoric"], "subtitle": "Arabic rhetoric"},
+    "11235": {"genres": ["language", "linguistics"], "subtitle": "Arabic philology"},
+    "11371": {"genres": ["grammar"], "subtitle": "Arabic grammar (naḥw): a primer"},
+    "122235": {"genres": ["grammar"], "subtitle": "Arabic morphology (ṣarf)"},
+    # ʿUlūm al-Qurʾān / maqāṣid
+    "11728": {"subtitle": "Qurʾānic sciences"},
+    "11436": {"subtitle": "Qurʾānic sciences"},
+    "11435": {"genres": ["usul", "maqasid"], "subtitle": "Uṣūl al-fiqh and maqāṣid"},
+    "17798": {"genres": ["usul", "fiqh"], "subtitle": "Uṣūl al-fiqh"},
+    "11495": {"genres": ["usul", "fiqh"], "subtitle": "Uṣūl al-fiqh and policy"},
+}
 
 # Language code → English name. Extend freely; the importer derives the code
 # from a catalogue's language string and renders the English name in the vault.
@@ -412,11 +664,24 @@ def slug_to_dir(value: str) -> str:
     return re.sub(r"\s+", " ", value).strip()
 
 
+def repo_qualifier(work: dict) -> str:
+    """A short repository label for the output folder, e.g. `turath.io`.
+
+    Folder and file names carry it so the same work from two repositories (or two
+    editions) can coexist; the `title:` properties and TOC aliases stay clean.
+    """
+    repo = str(work.get("repository") or "").strip().rstrip("/")
+    if not repo:
+        return ""
+    return re.sub(r"[<>:\"/\\|?*]", "", repo.split("/")[-1]).strip()
+
+
 # Romanization → searchable form: drop diacritics, map ʿ/ʾ to a straight apostrophe.
 _DIACRITICS = str.maketrans({
     "ā": "a", "ī": "i", "ū": "u", "á": "a", "í": "i", "ú": "u",
     "ḥ": "h", "ṣ": "s", "ḍ": "d", "ṭ": "t", "ẓ": "z", "ḏ": "d", "ṯ": "t",
-    "ġ": "g", "ḫ": "kh", "š": "sh", "ž": "zh", "ñ": "n",
+    "ġ": "g", "ḡ": "g", "ḫ": "kh", "š": "sh", "ž": "zh", "ñ": "n",
+    "Ġ": "G", "Ḡ": "G",
     "Ā": "A", "Ī": "I", "Ū": "U", "Ḥ": "H", "Ṣ": "S", "Ḍ": "D", "Ṭ": "T", "Ẓ": "Z",
     "ʿ": "'", "ʾ": "'", "ʹ": "'", "ʻ": "'", "ʼ": "'",
 })
@@ -701,6 +966,12 @@ _REPO_COMMITS = {
 def repo_updated(work: dict) -> str:
     """Best-effort date (YYYY-MM-DD) of the source repository's last update for a work."""
     coll = work.get("collection")
+    if coll == "turath":
+        ts = work.get("date_built") or 0
+        try:
+            return datetime.fromtimestamp(int(ts)).strftime("%Y-%m-%d") if ts else ""
+        except (ValueError, OverflowError, OSError):
+            return ""
     if coll == "tafsir-qul":
         ts = work.get("qul_updated") or 0
         try:
@@ -756,12 +1027,16 @@ def _github_slug(work: dict) -> tuple[str, str] | None:
 
 def repo_url(work: dict) -> str:
     """The repository the work's text is drawn from (for the `repository:` property)."""
+    if work.get("collection") == "turath":
+        return "https://app.turath.io"
     slug = _github_slug(work)
     return f"https://github.com/{slug[0]}/{slug[1]}" if slug else ""
 
 
 def repo_license_attribution(work: dict) -> str:
-    """Attribution the source licence requires (currently the riwāyāt, from Tanzil)."""
+    """Attribution the source licence requires (the riwāyāt, or a dictionary's text)."""
+    if work.get("collection") == "dictionary":
+        return str(work.get("license_attribution") or "")
     if work.get("collection") != "quran-text":
         return ""
     try:
@@ -795,6 +1070,9 @@ def repo_hash(work: dict) -> str:
     dated risan catalogue the per-script version is already text-specific.
     """
     coll = work.get("collection")
+    if coll == "turath":
+        # `date_built` moves when Turath rebuilds the book file.
+        return str(work.get("date_built") or "")
     if coll == "tafsir-qul":
         # The catalogue's per-resource `updated_at` is the best text-change signal.
         return str(work.get("qul_updated") or "")
@@ -947,6 +1225,46 @@ def load_catalog(collection: str, *, use_cache: bool = True) -> list[dict]:
                 "supplement_from": int(b.get("supplement_from", 0)),
                 # Which named romanization path its names follow.
                 "convention": b.get("convention", DEFAULT_ROMANIZATION),
+                # `sqlite` (the app's database) or `fodt` (the document origin).
+                "shape": b.get("shape", "sqlite"),
+                # A catalogue-supplied attribution (the FODT work); the app's
+                # dictionaries have none.
+                "license_attribution": b.get("license_attribution", ""),
+                # A work that exists only once can keep its bare folder name.
+                "unique": bool(b.get("unique")),
+                "language": "ar",
+                "language_name": "arabic",
+            })
+    elif spec["kind"] == "book":
+        # Built-in catalogue plus works the user added by URL (their entries win
+        # only where they are not already built in).
+        builtin_ids = {str(b["id"]) for b in TURATH_BOOKS}
+        entries = list(TURATH_BOOKS) + [
+            w for w in _custom_turath_works() if str(w.get("id", "")) not in builtin_ids
+        ]
+        for b in entries:
+            detail = TURATH_DETAILS.get(str(b["id"]), {})
+            type_key = str(b.get("type") or detail.get("type") or "other")
+            genres = b.get("genres") or detail.get("genres") or [type_key]
+            works.append({
+                "collection": collection,
+                "id": str(b["id"]),
+                "name": _sentence_case_title(b.get("title") or b.get("arabic") or str(b["id"])),
+                "arabic": b.get("arabic", ""),
+                "author": b.get("author", ""),
+                "authors": b.get("authors", []),
+                "source": b.get("url") or f"https://app.turath.io/book/{b['id']}",
+                # Both a repository MOC and a work-type MOC (see TURATH_TYPES).
+                "kind_type": type_key,
+                "genre": type_key,
+                # Finer disciplines for the modal's Kinds (a work may sit in
+                # several) and a longer title for the list.
+                "genres": genres,
+                "subtitle": b.get("subtitle") or detail.get("subtitle", ""),
+                "section_level": int(b.get("section_level", 1)),
+                # A Turath work duplicated in another collection keeps its repo
+                # qualifier; a work found only here can opt out with `unique`.
+                "unique": bool(b.get("unique")),
                 "language": "ar",
                 "language_name": "arabic",
             })
@@ -1012,7 +1330,9 @@ def load_catalog(collection: str, *, use_cache: bool = True) -> list[dict]:
         w["key"] = f"{collection}:{w['id']}"
         w["type"] = collection
         w["collection_label"] = spec["label"]
-        w["genre"] = spec.get("genre", collection)
+        # A collection normally has one genre; the Turath books carry their own
+        # (tafsir/fiqh/…), which is both the modal toggle and the type MOC.
+        w.setdefault("genre", spec.get("genre", collection))
         # A collection normally has one repository, but the dictionary collection
         # holds two dictionaries from different ones, so each work names its own.
         if collection == "dictionary":
@@ -1033,6 +1353,73 @@ def load_overrides() -> dict[str, dict]:
         except Exception as exc:  # noqa: BLE001
             emit("error", message=f"Could not read {OVERRIDES_FILE.name}: {exc}")
     return overrides
+
+
+# Proper-name stems kept capitalised in a sentence-cased (non-English) title.
+_TITLE_PROPER = {
+    "ibn", "abī", "abū", "bint", "banū",
+    "ṭabarī", "qurṭubī", "kathīr", "zamakhsharī", "rāzī", "andalusī", "suyūṭī", "maḥallī",
+    "jalālayn", "shinqīṭī", "qāsimī", "saʿdī", "bukhārī", "muslim", "dāwūd", "tirmidhī",
+    "mājah", "mālik", "aḥmad", "ḥanbal", "ḥajar", "ʿasqalānī", "nawawī", "qudāma", "shāfiʿī",
+    "kāsānī", "marghīnānī", "rushd", "buhūtī", "qayrawānī", "akhḍarī", "qudūrī", "ḥaḍramī",
+    "thaʿlabī", "ājurrūm", "ḥājib", "khalīl", "kharashī", "ḥaṭṭāb", "mawwāq", "ʿulaysh",
+    "bilʿālam", "sībawayh", "jāḥiẓ", "manẓūr", "fīrūzābādī", "jawharī", "fāris", "qutayba",
+    "jurjānī", "mizzī", "dhahabī", "khallikān", "saʿd", "ziriklī", "athīr", "taymiyya",
+    "ʿizz", "ashʿarī", "ājurrī", "marwazī", "sarakhsī", "juwaynī", "shāṭibī", "qayyim",
+    "jawziyya", "qurʾān", "qur’ān", "qur'ān", "allāh", "raḥmān", "bārī", "ʿarab", "ʿarabiyya",
+    "nawawiyya", "qayrawāniyya", "ḥaḍramiyya", "ājurrūmiyya", "mālikī", "ḥanafī", "ḥanbalī",
+    "baghdādī", "qazwīnī", "sijistānī", "nasāʾī", "dārimī", "tibrīzī", "dihlawī",
+    "jalīl", "khaldūn", "zahrī", "ṭaḥāwiyya", "wāsiṭiyya",
+}
+
+
+def _sentence_case_title(text: str) -> str:
+    """Sentence case for a romanized non-English title.
+
+    The first word and proper nouns are capitalized; everything else is
+    lowercased. The article stays `al-` (so `al-Baḥr al-muḥīṭ`, not `Al-Baḥr
+    Al-Muḥīṭ`). Arabic-script titles are left as they are.
+    """
+    def cap(value: str) -> str:
+        return value[:1].upper() + value[1:] if value else value
+
+    out: list[str] = []
+    for i, token in enumerate(str(text or "").split()):
+        bare = re.sub(r"^[^\w]+|[^\w]+$", "", token.lower())
+        stem = bare.removeprefix("al-")
+        if stem in _TITLE_PROPER:
+            out.append("al-" + cap(token[3:]) if token.lower().startswith("al-") else cap(token))
+        elif i == 0:
+            out.append("al-" + cap(token[3:]) if token.lower().startswith("al-") else cap(token))
+        else:
+            out.append(token.lower())
+    return " ".join(out)
+
+
+def _custom_turath_works() -> list[dict]:
+    """Works the user added by URL (`turath-custom-works.json`).
+
+    Accepted shape: `{"works": [{id, title, arabic, author, type, genres?,
+    subtitle?, url?}]}` (a bare list works too). Entries without an id are
+    ignored; the plugin writes this file from its "add by URL" dialog.
+    """
+    try:
+        data = json.loads(CUSTOM_WORKS_FILE.read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001 - the file is optional
+        return []
+    rows = data.get("works", []) if isinstance(data, dict) else data
+    if not isinstance(rows, list):
+        return []
+    out = []
+    for w in rows:
+        if not (isinstance(w, dict) and str(w.get("id", "")).strip()):
+            continue
+        # Old custom entries may carry the former split grammar keys.
+        if isinstance(w.get("genres"), list):
+            w["genres"] = ["grammar" if g in ("grammar-syntax", "grammar-inflection") else g
+                           for g in w["genres"]]
+        out.append(w)
+    return out
 
 
 def edition_variant(work_id: str) -> str:
@@ -1078,6 +1465,10 @@ def apply_overrides(work: dict, overrides: dict[str, dict]) -> dict:
         merged["title"] = work["name"]
         merged["dir"] = slug_to_dir(work["name"])
         merged["title_ar"] = work.get("arabic", "")
+    elif work["collection"] == "turath":
+        merged["title"] = work["name"]
+        merged["dir"] = slug_to_dir(work["name"])
+        merged["title_ar"] = work.get("arabic", "")
     else:
         merged["title"] = work["name"]
         merged["dir"] = slug_to_dir(work["name"])
@@ -1089,19 +1480,37 @@ def apply_overrides(work: dict, overrides: dict[str, dict]) -> dict:
     elif work["collection"] == "dictionary":
         if work.get("author"):
             merged["authors"] = [work["author"]]
+    elif work["collection"] == "turath":
+        merged["authors"] = list(work.get("authors") or
+                                 ([work["author"]] if work.get("author") else []))
     elif work["collection"] == "quran":
         if work.get("author"):
             merged["translators"] = [work["author"]]
     spec = COLLECTIONS[work["collection"]]
-    merged["up"] = [f"[[{spec['moc']}]]"]
     merged["cssclass"] = spec["cssclass"]
-    merged["moc"] = spec["moc"]
     # Languages the work actually contains (ḥadīth are bilingual).
     merged["languages"] = ["ar", "en"] if work["collection"] == "hadith" else [work["language"]]
+    if work["collection"] == "turath":
+        # Two axes: the repository (Turath) and the work type (e.g. Fiqh Sources).
+        type_moc = TURATH_TYPES.get(work.get("kind_type", ""), "Turath")
+        merged["moc"] = type_moc
+        merged["mocs"] = ["Turath", type_moc]
+        merged["up"] = [f"[[Turath]]", f"[[{type_moc}]]"]
+    else:
+        merged["moc"] = spec["moc"]
+        merged["mocs"] = [spec["moc"]]
+        merged["up"] = [f"[[{spec['moc']}]]"]
     o = overrides.get(work["key"])
     if o:
         merged.update({k: v for k, v in o.items() if v is not None})
     merged["dir"] = slug_to_dir(merged["dir"])
+    # The repository qualifier is appended by `with_unique_dirs`, *after* any
+    # edition/language qualifier, so `Tafsir Ibn Kathir (Arabic) (tafsir_api)`.
+    # An override that sets its own `dir`, or a work flagged `unique`, opts out.
+    if (o and o.get("dir")) or merged.get("unique"):
+        merged["repo_dir"] = ""
+    else:
+        merged["repo_dir"] = repo_qualifier(merged)
     merged["language_label"] = language_name(merged["language"])
     merged["language_links"] = [language_name(l) for l in merged["languages"]]
     merged["moc_sections"] = [moc_section(l) for l in merged["languages"]]
@@ -1122,7 +1531,7 @@ def _installed_work_dirs() -> dict[str, str]:
         return {}
 
 
-def with_unique_dirs(works: list[dict]) -> None:
+def with_unique_dirs(works: list[dict], *, preserve_installed: bool = True) -> None:
     """Give every work a stable, unique output folder (mutates in place).
 
     The folder comes from the title, but two editions can share a title — one
@@ -1136,48 +1545,65 @@ def with_unique_dirs(works: list[dict]) -> None:
 
     A work already in the manifest keeps **the folder it has** — renaming an
     installed work orphans its notes and leaves a stale folder behind — and that
-    folder is reserved, so a colliding newcomer is qualified instead.
+    folder is reserved, so a colliding newcomer is qualified instead. Pass
+    `preserve_installed=False` to compute the names the current scheme *would*
+    give (the plugin's naming migration does this before moving the files).
     """
-    installed = _installed_work_dirs()
+    installed = _installed_work_dirs() if preserve_installed else {}
     seen: set[str] = set(installed.values())
+
+    def qualified(base: str, repo: str, label: str = "") -> str:
+        """`Title (edition) (repo)` — the edition label, when needed, comes first."""
+        parts = [base]
+        if label:
+            parts.append(f"({label})")
+        if repo:
+            parts.append(f"({repo})")
+        return slug_to_dir(" ".join(parts))
+
     for w in works:
         key = str(w.get("key"))
         if key in installed:
             w["dir"] = installed[key]
             continue
         base = w["dir"]
-        if base not in seen:
-            seen.add(base)
+        repo = str(w.get("repo_dir") or "")
+        candidate = qualified(base, repo)
+        if candidate not in seen:
+            w["dir"] = candidate
+            seen.add(candidate)
             continue
         qualifiers = [
             w.get("language_label") or w.get("language"),
             edition_variant(w["id"]),
             w["id"],
         ]
-        unique = base
+        unique = ""
         for label in qualifiers:
             if not label:
                 continue
-            candidate = slug_to_dir(f"{base} ({label})")
-            if candidate not in seen:
-                unique = candidate
+            attempt = qualified(base, repo, str(label))
+            if attempt not in seen:
+                unique = attempt
                 break
-        else:
+        if not unique:
             n = 2
-            while unique in seen:
-                unique = slug_to_dir(f"{base} ({n})")
+            while not unique:
+                attempt = qualified(base, repo, str(n))
+                if attempt not in seen:
+                    unique = attempt
                 n += 1
         w["dir"] = unique
         seen.add(unique)
 
 
-def all_works(overrides: dict[str, dict]) -> dict[str, dict]:
+def all_works(overrides: dict[str, dict], *, preserve_installed: bool = True) -> dict[str, dict]:
     """Every catalogue work, merged and given a stable unique folder, by key."""
     works: list[dict] = []
     for coll in COLLECTIONS:
         for w in load_catalog(coll, use_cache=True):
             works.append(apply_overrides(w, overrides))
-    with_unique_dirs(works)
+    with_unique_dirs(works, preserve_installed=preserve_installed)
     return {w["key"]: w for w in works}
 
 
@@ -1347,7 +1773,7 @@ def parse_work_file(data, shape: str) -> list[tuple[int, str]]:
 # entry, because a re-render only replays the model and cannot apply an
 # acquisition change. Bump the affected entry whenever this file's output for a
 # collection changes, and mirror it in the plugin's `COLLECTION_MODEL_SCHEMA`.
-MODEL_SCHEMA: dict[str, int] = {"dictionary": 4}
+MODEL_SCHEMA: dict[str, int] = {"dictionary": 6, "turath": 1}
 BASE_MODEL_SCHEMA = 1
 
 
@@ -1597,7 +2023,9 @@ def build_quran_text_units(work: dict, table: list[dict], wanted: set[int] | Non
 #     if that fails is a character-by-character transliteration of the root used.
 
 _HW_ARABIC = r"\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF"
-_HW_HEAD_RE = re.compile(rf"^[{_HW_ARABIC}0-9]+(?:[\s,]+[{_HW_ARABIC}0-9]+)*")
+# A digit is allowed only in the *first* run (a homonym number, `1 بنك`); after a
+# space it is a sense number, not part of the headword (`اذا 1. …`).
+_HW_HEAD_RE = re.compile(rf"^[{_HW_ARABIC}0-9]+(?:[\s,]+[{_HW_ARABIC}]+)*")
 _HW_ARABIC_RE = re.compile(rf"[{_HW_ARABIC}]")
 # Words that open an etymology parenthetical rather than the transliteration:
 # language abbreviations and grammatical pointers. Wehr writes loanwords as
@@ -1613,7 +2041,8 @@ _HW_PAREN_STOP = {
 # mapped positionally to ʿ (ʿayn) and ʾ (hamza) as they are scanned.
 _HW_VALID_CHARS = set(
     "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
-    "āēīūōĀĒĪŪŌéèêäëïöüÄËÏÖÜçÇşŞčČšŠḥḤḳḲṣṢḍḌṭṬẓẒḏḎṯṮḫḪġĠžŽ-"
+    "āēīūōĀĒĪŪŌéèêäëïöüÄËÏÖÜçÇşŞčČšŠḥḤḳḲṣṢḍḌṭṬẓẒḏḎṯṮḫḪġĠḡḠžŽ"
+    "əɛɔɪʊæɑ-"
     "ʿʾɔʔ"
 )
 _HW_SKIP_RE = (
@@ -1646,7 +2075,7 @@ _HW_ROMAN_RE = re.compile(r"(?:<b>)?([IVXLCDM]+)(?:</b>)?\s+")
 #          pronominal or prepositional ending and the two tanwīn exceptions are
 #          kept (`baḥr`, `kataba`, `minka`, `qāḍin`, `ṭabʿan`). Lane uses this.
 #   wehr   Hans Wehr's own — the European Orientalist system of the printed
-#          dictionary (`š`, `ṯ`, `ḵ`, `ḏ`, `ġ`, `č`, `ž`). Wehr uses it, so a name
+#          dictionary (`š`, `ṯ`, `ḵ`, `ḏ`, `ḡ`, `č`, `ž`). Wehr uses it, so a name
 #          the engine produced still matches the transliterations the note's own
 #          text carries. Note that Wehr writes qāf as plain `q`: the `ḳ` that turns
 #          up in its scanned text is a mis-read khāʾ (`aḳaḍa` for `aḫaḏa`), not a
@@ -1658,17 +2087,21 @@ _HW_ROMAN_RE = re.compile(r"(?:<b>)?([IVXLCDM]+)(?:</b>)?\s+")
 ROMANIZATION_CONVENTIONS = ("vault", "wehr", "full")
 DEFAULT_ROMANIZATION = "vault"
 
+# A digraph is only recast when it stands for a *single* letter that Wehr writes
+# differently. ث is deliberately absent: `th` in a reading may equally be ت + ه
+# (`تهته` → `thth`), so that letter is handled positionally instead, where the
+# Arabic is known (`_hw_fix_underlined`).
 _WEHR_LETTERS: tuple[tuple[str, str], ...] = (
-    ("sh", "š"), ("th", "ṯ"), ("kh", "ḵ"), ("dh", "ḏ"), ("gh", "ġ"),
-    ("ch", "č"), ("zh", "ž"),
+    ("sh", "š"), ("kh", "ḵ"), ("dh", "ḏ"), ("gh", "ḡ"), ("ch", "č"), ("zh", "ž"),
 )
 
 
 def _hw_romanize(reading: str, convention: str = DEFAULT_ROMANIZATION) -> str:
     """Recast a reading in the vault's convention as `convention` (idempotent).
 
-    `full` needs no recasting: it is a mode of *producing* a reading, not of
-    writing its letters.
+    Only digraphs that stand for one letter are recast — see `_WEHR_LETTERS` for
+    why ث is not among them. `full` needs no recasting at all: it is a mode of
+    *producing* a reading, not of writing its letters.
     """
     if convention == "wehr":
         for plain, wehr in _WEHR_LETTERS:
@@ -1689,25 +2122,20 @@ _HW_MEDIAL_VOWELS = {"\ufe77": "a", "\ufe7b": "i", "\ufe79": "u"}
 # emits. It must survive the square-bracket rule, so it is written from one
 # constant (see `_hw_prose`).
 _HW_POETRY_CALLOUT = ">[!arabic-poetry]"
-_HW_VOWELS = "aeiouāēīōū"
-# The hamza in any of its seats. A bare alef counts: a root cannot begin with a
-# long vowel, so an alef in a root is a hamza seat (`اثف` is `athf`, `ثأف` is
-# `thʾf`) — never a madd.
+_HW_VOWELS = "aeiouāēīōūəɛɔɪʊæɑ"
+# The hamza in any of its seats, plus the bare alef (for the letter-by-letter
+# fallback, where a first-position alef is a hamza seat rather than a madd).
 _HW_HAMZA = "ءأإآؤئٱا"
-# The vowel marks and other combining signs. Their presence means a word is
-# *vocalised* — a real written form, not a bare root cluster.
-_HW_HARAKAT = (
-    "\u064b\u064c\u064d\u064e\u064f\u0650\u0651\u0652\u0653\u0654\u0655"
-    "\u0670\u06d6\u06d7\u06d8\u06d9\u06da\u06db\u06dc\u06df\u06e0\u06e1\u06e2"
-    "\u06e3\u06e4\u06e7\u06e8\u06ea\u06eb\u06ec\u06ed"
-)
-# The short vowels that can end a fully vocalised word, and the Latin to restore.
-# No tanwīn on a name (`baḥr`, not `baḥrun`), but `-an` is kept, as the guidelines
-# require — so dammatan and kasratan are absent here on purpose.
-_HW_FINAL_VOWELS = {
-    "\u064e": "a", "\u064f": "u", "\u0650": "i",
-    "\u064b": "an",
-}
+# The seats whose *vowel* the engine cannot know from an unvocalised cluster — an
+# explicit hamza-bearing letter, or a bare alif in first position. A medial or
+# final bare alif is not one of them: it is simply a long ā (`غاغة` reads
+# `ghāgha`, and its own row names it), so a root like that keeps its own reading.
+_HW_HAMZA_SEATS = "ءأإآؤئٱ"
+
+
+def _hw_hamza_root(arabic: str) -> bool:
+    """True when the root's own reading needs the engine's vowel guess."""
+    return any(ch in _HW_HAMZA_SEATS for ch in arabic) or arabic.startswith("ا")
 
 
 def _hw_should_skip(text: str, *, pointers: bool = False) -> bool:
@@ -1767,6 +2195,9 @@ def _hw_extract_romanization(text: str) -> str | None:
         return None
     count = len(re.sub(r",", " ", m.group(0)).split())
     rest = cleaned[m.end():].lstrip()
+    # A root whose own paragraph is a verb form (`بختر <b>II</b> tabaḳtara …`)
+    # carries its reading after the form label; the numeral is not the name.
+    rest = re.sub(r"^[IVXLCDM]+\s+", "", rest)
     if rest.startswith("("):
         close = rest.find(")")
         paren = rest[1:close] if close != -1 else rest[1:]
@@ -1779,7 +2210,9 @@ def _hw_extract_romanization(text: str) -> str | None:
         )
         if not (well_formed and _HW_ARABIC_RE.search(paren) and first not in _HW_PAREN_STOP):
             rest = re.sub(r"^\([^)]+\)\s*", "", rest)
-    after = rest
+    # The scan reads `l` as `1` inside a transliteration (`ba1asān`, `a1-`).
+    # Normalise it for the *comparison*; the body keeps the source's own token.
+    after = re.sub(r"(?<=[A-Za-z])1(?![0-9])", "l", rest)
     words: list[str] = []
     current: list[str] = []
     for ch in after:
@@ -1811,6 +2244,10 @@ def _hw_extract_romanization(text: str) -> str | None:
     # A bare verb-form numeral is not a name ("V"), and neither is nothing at all.
     if re.fullmatch(r"[IVXLCDM]+", roman):
         return None
+    # A grammatical abbreviation (`pl.`, `f.`, `adj.`) is not a transliteration;
+    # taking one cost `آس pl. -āt` its real name and made the body italicise `pl`.
+    if roman.strip(".,").lower() in _HW_PAREN_STOP:
+        return None
     return roman
 
 
@@ -1824,7 +2261,10 @@ def _hw_radical_romanization(word: str) -> str:
     """
     out: list[str] = []
     for i, ch in enumerate(word):
-        if ch in _HW_HAMZA:
+        if ch == "ا":
+            # First position is a hamza seat; anywhere else a bare alif is a madd.
+            out.append("a" if i == 0 else "ā")
+        elif ch in _HW_HAMZA:
             out.append("a" if i == 0 else "ʾ")
         else:
             out.append(_HW_RADICALS.get(ch, ch))
@@ -1890,23 +2330,101 @@ def _hw_skeleton(text: str) -> str:
     for digraph, one in (("sh", "š"), ("th", "ṯ"), ("kh", "ḫ"), ("dh", "ḏ"),
                          ("gh", "ġ"), ("ch", "č")):
         t = t.replace(digraph, one)
-    for variant, one in (("ǧ", "j"), ("g", "j"), ("ḳ", "ḫ"), ("ḵ", "ḫ")):
+    # The OCR writes ʿayn and hamza with the same apostrophes (`‘`, `’`, `'`, `` ` ``),
+    # so all of them fold onto one marker: a reading's apostrophe then matches
+    # whichever the Arabic has (`ya‘būb` for `يعبوب`, whose print letter is ʿayn).
+    for mark in ("ʿ", "ʾ", "‘", "’", "'", "`"):
+        t = t.replace(mark, "ʿ")
+    for variant, one in (("ǧ", "j"), ("ḳ", "ḫ"), ("ḵ", "ḫ"), ("ḡ", "ġ")):
         t = t.replace(variant, one)
     return "".join(
         ch for ch in t
-        if ch not in "aeiouāēīōū" and not ch.isspace() and ch not in "-'’‘`.,;:()[]"
+        if ch not in "aeiouāēīōūəɛɔɪʊæɑ" and not ch.isspace() and ch not in "-'’‘`.,;:()[]"
     )
 
 
+# The skeleton's own alphabet: one character per Arabic letter, so a digraph the
+# transliteration writes for a single letter (ث → th) can never be mistaken for two
+# letters that happen to spell the same thing (ت + ه → th, as in تهته). The reading
+# side folds its digraphs to these same characters (`_hw_skeleton`).
+# One character per letter. The hamza-bearing alefs are overridden because the
+# radical table spells them with their vowel (`ʾa`, `ʾi`, `ʾā`) — two characters,
+# which would break the one-letter-one-unit invariant the alignment relies on — and
+# a hamza *is* a consonant that a transliteration writes (`مأخذ` is maʾḫaḏ).
+_HW_SKELETON_LETTERS = {
+    **_HW_RADICALS, "ث": "ṯ", "خ": "ḫ", "ذ": "ḏ", "ش": "š", "غ": "ġ",
+    "أ": "ʾ", "إ": "ʾ", "آ": "ʾ",
+}
+
+
+# ── OCR tolerance ────────────────────────────────────────────────────────────
+#
+# A scan loses the marks that tell several letters apart: the dots under ḥ, ṣ, ḍ,
+# ṭ, ẓ, ḏ, the breve under ḫ, the haček over š, č, ž, the macron over ḡ, the underscore of ḵ and
+# ṯ. So a reading may write ذ as plain `d` (`‘aud` for `عوذ`), ش as `s`, خ as `h`.
+# Both sides of a comparison are reduced to the undiacriticised letter, so any of
+# those stripped forms is a match candidate; `_hw_fix_underlined` then writes the
+# work's own letter back, which is where the Arabic settles the ambiguity.
+_HW_OCR_PLAIN = {
+    "ḥ": "h", "ḫ": "k", "ḏ": "d", "ṯ": "t", "ṣ": "s", "ḍ": "d", "ṭ": "t",
+    # A loanword transcription writes p where the Arabic has ب (`ōpərēt` for اوبريت,
+    # `pāṣ` for باص). Matched, but never rewritten: see the walk's own branch.
+    "p": "b",
+    "ẓ": "z", "š": "s", "ġ": "g", "ḡ": "g", "ḳ": "k", "ḵ": "k", "ǧ": "j", "č": "c",
+    "ž": "z",
+}
+
+
+def _hw_ocr_plain(text: str) -> str:
+    """A transliteration's letters with the marks a scan drops removed.
+
+    The digraph spellings are folded onto their marked letter first, so `kh`,
+    `ḫ` and `ḵ` all reduce to the same letter — exactly as `_hw_skeleton` folds
+    them — and `ʿ`/`ʾ` are left alone: the comparison tells those two apart.
+    """
+    # The scan's `l` is frequently read as `1` (`ba1asān`, `p1astique`, `a1-`).
+    # This is for comparison only; the rendered name keeps its own source token.
+    text = re.sub(r"(?<=[A-Za-z])1(?![0-9])", "l", text)
+    for digraph, one in (("sh", "š"), ("th", "ṯ"), ("kh", "ḫ"), ("dh", "ḏ"),
+                         ("gh", "ġ"), ("ch", "č"), ("zh", "ž")):
+        text = text.replace(digraph, one)
+    text = text.replace("ḳ", "ḫ").replace("ḵ", "ḫ").replace("ǧ", "j")
+    return "".join(_HW_OCR_PLAIN.get(ch, ch) for ch in text)
+
+
+# How an Arabic consonant is written in a work's convention. Only the letters Wehr
+# marks and the vault spells as digraphs differ; every other letter is its own.
+_HW_CONVENTION_LETTER = {
+    "ṯ": {"vault": "th", "wehr": "ṯ"},
+    "ḫ": {"vault": "kh", "wehr": "ḵ"},
+    "ḏ": {"vault": "dh", "wehr": "ḏ"},
+    "š": {"vault": "sh", "wehr": "š"},
+    # Wehr prints غ with a macron over the g, not a dot above it (`ḡ`, U+1E21).
+    # `ġ` (U+0121) is kept as the internal skeleton letter and as the spelling
+    # older app-derived data uses; both fold to the same consonant.
+    "ġ": {"vault": "gh", "wehr": "ḡ"},
+    "ḡ": {"vault": "gh", "wehr": "ḡ"},
+}
+
+
+def _hw_convention_letter(unit: str, convention: str = DEFAULT_ROMANIZATION) -> str:
+    """An Arabic skeleton letter as `convention` writes it."""
+    return _HW_CONVENTION_LETTER.get(unit, {}).get(convention, unit)
+
+
 def _hw_root_skeleton(arabic: str) -> str:
-    """The consonant skeleton of an Arabic root (alif, alif maqṣūra and tāʾ marbūṭa
-    are vocalic in transliteration, so they carry no consonant)."""
-    letters: list[str] = []
-    for ch in arabic:
-        if ch in "اأإآٱىة":
-            continue
-        letters.append(_HW_RADICALS.get(ch, ""))
-    return _hw_skeleton("".join(letters))
+    """The consonant skeleton of an Arabic word, one character per letter.
+
+    Alif, alif waṣla, alif maqṣūra and tāʾ marbūṭa carry no consonant in
+    transliteration. Every other letter maps to a *single* character — ث to `ṯ`, not
+    `th` — so `تهته` (ت + ه + ت + ه) can never collapse into a doubled `ṯ` when a
+    reading is compared with it. (Folding the digraphs here, as this once did, is
+    what turned that word into `ṯṯ` and then, by the gemination rule, into `ṯṯa`.)
+    A hamza-bearing alif keeps its hamza, which is a consonant a transliteration
+    writes (`مأخذ` maʾḫaḏ); only the bare alif is silent. The comparison skeleton
+    (`_hw_skeletons`) drops the hamza again, so nothing that compares changes.
+    """
+    return "".join(_HW_SKELETON_LETTERS.get(ch, "") for ch in arabic if ch not in "اٱىة")
 
 
 def _hw_is_bare_root(arabic: str, roman: str) -> bool:
@@ -1961,8 +2479,7 @@ def _hw_bare_root_reading(arabic: str, roman: str) -> str | None:
     probe = roman
     if probe.endswith(("un", "an", "in")):
         probe = probe[:-2]
-    collapsed = _hw_translit_skeleton(probe)
-    if collapsed != skeleton:
+    if not _hw_skeleton_matches(probe, skeleton):
         return None
     # A doubled consonant is not an added morpheme: it marks the intensive form
     # (II, faʿʿala), and the engine renders the bare pausal faʿʿal (battak), so the
@@ -1992,7 +2509,7 @@ def _hw_server_reading(arabic: str, *, prose: bool = False) -> str | None:
     request = urllib.request.Request(
         _TRANS_SERVER.rstrip("/") + "/transliterate",
         data=json.dumps({"text": arabic, "engine": "bert", "keep_case": False,
-                         "standalone": True}).encode("utf-8"),
+                         "standalone": True, "citation": True}).encode("utf-8"),
         headers={"Content-Type": "application/json"},
         method="POST",
     )
@@ -2013,7 +2530,7 @@ def _hw_local_reading(arabic: str) -> str | None:
     mod = _load_transliterator()
     if mod is None:
         return None
-    for engine in ("bert", "mle", "none"):
+    for engine in ("bert", "none"):
         try:
             if engine not in _TRANS_ENGINES:
                 _TRANS_ENGINES[engine] = None if engine == "none" else mod.load_disambiguator(engine)
@@ -2022,7 +2539,7 @@ def _hw_local_reading(arabic: str) -> str | None:
             continue
         args = types.SimpleNamespace(
             engine=engine, sun_letters=False, keep_case=False,
-            dotless_ya="maqsura", name=False, debug=False,
+            dotless_ya="maqsura", name=False, citation=True, debug=False,
         )
         try:
             if dis is not None:
@@ -2104,8 +2621,8 @@ def _hw_skeletons(arabic: str) -> str:
     is merged with `t`, since a scan loses that underline almost always and the
     reading is still the same word; `_hw_fix_underlined` restores it for display.
     """
-    skeleton = _hw_root_skeleton(arabic).replace("ʾ", "")
-    skeleton = skeleton.replace("w", "").replace("y", "").replace("ṯ", "t")
+    skeleton = _hw_ocr_plain(_hw_root_skeleton(arabic).replace("ʾ", ""))
+    skeleton = skeleton.replace("w", "").replace("y", "")
     return _hw_collapse_gemination(skeleton)[0]
 
 
@@ -2134,26 +2651,17 @@ def _hw_contains_root(arabic: str, root: str) -> bool:
 
 
 def _hw_normalize_citation(reading: str, arabic: str, root: str) -> str:
-    """Bring an engine reading of a vocalised word to the vault's citation form.
+    """Bring an engine reading to the vault's citation form.
 
-    Three adjustments. The guidelines write no tanwīn on a name (`baḥr`, not
-    `baḥrun`), but the engine returns one for a noun (`أَتْمٌ` → `atmun`) — except
-    for a defective root, where an indefinite keeps it (`قَاضٍ` → `qāḍin`), and
-    `-an` is always kept. And a verb's final inflection is retained (`battaka`),
-    while the engine reads a citation form as pausal and drops it — `نَأَتَ` comes
-    back `naʾat` though the vowel is right there in the source.
+    The engine is asked for a citation form (`citation`), so a noun already comes
+    back without its case ending and a verb with its inflection. What is left is
+    the tanwīn: the guidelines write none on a name (`baḥr`, not `baḥrun`), but
+    `-an` is always kept and a defective root's indefinite keeps `-in` (`قَاضٍ` →
+    `qāḍin`), so only `-un`/`-in` are removed here.
     """
     defective = _hw_root_skeleton(root).rstrip().endswith(("w", "y"))
     if reading.endswith("un") or (reading.endswith("in") and not defective):
         reading = reading[:-2]
-    for ch in reversed(arabic or ""):
-        if ch in _HW_HARAKAT:
-            vowel = _HW_FINAL_VOWELS.get(ch, "")
-            if vowel and not reading.endswith(vowel):
-                return reading + vowel
-            return reading
-        if not ch.isspace():
-            break
     return reading
 
 
@@ -2198,7 +2706,7 @@ def _hw_root_romanization(arabic: str, derived: list[tuple],
     `nāt`), whereas `نَأَتَ` gives `naʾata`.
     """
     from_entries = _hw_terms_romanization(arabic, derived)
-    if from_entries and any(ch in _HW_HAMZA for ch in arabic):
+    if from_entries and _hw_hamza_root(arabic):
         return _hw_romanize(from_entries, convention)
     reading = _hw_engine_romanization(arabic)
     if reading:
@@ -2211,45 +2719,177 @@ def _hw_translit_skeleton(roman: str) -> str:
 
     `_hw_skeletons` folds digraphs, drops the vowels, ignores the hamza and drops
     the weak letters; this does the same to the Latin side so the two compare,
-    including the `ṯ`/`t` merge that a lost underline forces.
+    including the `ṯ`/`t` merge that a lost underline forces. An ambiguous `g` is
+    left as it is — a scan writes both ج and غ that way, so `_hw_skeleton_matches`
+    tries both.
     """
-    return _hw_collapse_gemination(
-        _hw_skeleton(roman).replace("ʾ", "").replace("w", "").replace("y", "").replace("ṯ", "t")
-    )[0]
+    base = _hw_ocr_plain(_hw_skeleton(roman))
+    base = base.replace("ʾ", "").replace("w", "").replace("y", "")
+    return _hw_collapse_gemination(base)[0]
 
 
-_HW_TRANSLIT_UNIT_RE = re.compile(r"sh|th|kh|dh|gh|ch|zh|[A-Za-z\u00C0-\u024F\u1E00-\u1EFF]")
+def _hw_skeleton_matches(roman: str, skeleton: str) -> bool:
+    """Whether a reading's skeleton is `skeleton`, allowing for an ambiguous `g`.
+
+    A scan renders both ج and غ as plain `g` (`gāga` for `غاغة`, `wagd` for `وغد`,
+    `ātešgī` for `آتشجي`), so a `g` in a reading may stand for either and each is
+    tried. Everything else is compared as it stands.
+    """
+    base = _hw_translit_skeleton(roman)
+    # An apostrophe in a reading may be the ʿayn or the hamza the scan wrote the same
+    # way, and the two are not interchangeable in the skeleton (the hamza is ignored,
+    # the ʿayn is not). So both readings of the mark are tried: as it stands, and
+    # dropped as a hamza would be. `yaʿbūb` and `yaʾbūb` then both name `يعبوب`.
+    candidates = {base}
+    if "ʿ" in base:
+        candidates.add(base.replace("ʿ", ""))
+    for candidate in list(candidates):
+        if "g" in candidate:
+            candidates.add(candidate.replace("g", "j"))
+            candidates.add(candidate.replace("g", "ġ"))
+    return skeleton in candidates
+
+
+# A run of Latin transliteration — a term, in a definition that also carries the
+# Arabic and the English prose around it.
+# The range reaches into the IPA extensions (U+0250–U+02AF): a loanword transcription
+# uses `ə`, `ɛ`, `ɔ` and friends (`ōpərēt` for اوبريت), and stopping short of them
+# would truncate the token to `ōp`.
+_HW_LATIN_TOKEN_RE = re.compile(r"([A-Za-z\u00C0-\u02AF\u1E00-\u1EFF\u02BE\u02BF\u2018\u2019'`]+)(\d)?")
+
+
+# The apostrophe marks are units of their own: the OCR writes ʿayn and hamza with
+# them, and the rendering walk (`_hw_fix_underlined`) must see one on each side to
+# write the Arabic's own letter back.
+_HW_TRANSLIT_UNIT_RE = re.compile(
+    r"sh|th|kh|dh|gh|ch|zh|[A-Za-z\u00C0-\u024F\u1E00-\u1EFF]|[\u02BE\u02BF\u2018\u2019]")
 
 
 def _hw_fix_underlined(reading: str, arabic: str, convention: str = DEFAULT_ROMANIZATION) -> str:
-    """Render a `t` the scan lost its underline from where the Arabic has ث.
+    """Write back the letters a scan could not carry, taking them from the Arabic.
 
-    A scan almost always writes `ṯ` as plain `t`, so such a reading is accepted on
-    that basis (see `_hw_skeleton`); this writes the name as it should read — `ṯ` in
-    the Wehr work, `th` in the vault's convention, which never uses the underlined
-    letters. The two consonant skeletons are walked in step — they correspond, the
-    reading having just been validated against this headword — and only a `t`
-    standing where a ث does is rewritten. The walk applies only when the skeletons
-    hold the same number of consonants, so a reading with extra letters, or a
-    loanword whose letters do not line up, is left exactly as written.
+    The reading has already been validated against this headword (see
+    `_hw_reads_arabic`), so the two consonant skeletons correspond and can be walked
+    in step: wherever the reading's letter is an *undiacriticised* form of the
+    Arabic's — `t` for ث or ط, `d` for ذ or ض, `s` for ش, `h` for خ, `g` for غ — the
+    Arabic settles which letter it is, and the convention's letter is written in its
+    place (`ṯ`/`ṭ`/`ḏ`/`ḍ` in the Wehr work; `th`/`dh` in the vault's, which never
+    uses the marked letters). A letter that already agrees is left exactly as the
+    source wrote it, and the walk applies only when the two runs hold the same
+    number of consonants — a reading with extra letters, or a loanword whose letters
+    do not line up, is left untouched.
+
+    A doubled consonant in the reading is a shadda on *one* Arabic letter: `بطارية`
+    is `baṭṭārīya` — one ط in the text, two ṭ in the reading — so runs of the same
+    letter are merged on both sides before aligning, and the chosen letter is
+    written once per unit the reading actually has.
     """
-    arabic_units = [u for u in _HW_TRANSLIT_UNIT_RE.findall(_hw_root_skeleton(arabic))
-                    if u not in ("w", "y")]
-    reading_units = [(m.group(0), m.start(), m.end())
-                     for m in _HW_TRANSLIT_UNIT_RE.finditer(reading)
-                     if m.group(0) not in ("w", "y")
-                     and m.group(0)[0] not in "aeiouāēīōū"]
-    if not arabic_units or len(arabic_units) != len(reading_units):
+    # One character per Arabic letter — deliberately *not* the digraph-aware
+    # tokeniser, which would read the ت + ه of `تهته` as a single `th`.
+    arabic_units = [u for u in _hw_root_skeleton(arabic) if u not in ("w", "y")]
+    reading_runs = _hw_merge_runs([
+        (m.group(0), 1, m.start(), m.end())
+        for m in _HW_TRANSLIT_UNIT_RE.finditer(reading)
+        if m.group(0) not in ("w", "y") and m.group(0)[0] not in "aeiouāēīōūəɛɔɪʊæɑ"
+    ])
+    if not arabic_units or not reading_runs:
         return reading
-    underlined = "ṯ" if convention == "wehr" else "th"
-    out: list[str] = []
-    at = 0
-    for unit, (text, start, end) in zip(arabic_units, reading_units):
-        out.append(reading[at:start])
-        out.append(underlined if unit in ("th", "ṯ") and text == "t" else text)
-        at = end
-    out.append(reading[at:])
-    return "".join(out)
+    marks = ("ʿ", "ʾ", "‘", "’", "'", "`")
+    # The Arabic is walked as written first: its own adjacent letters are separate
+    # (`غاغة` is ḡāḡa — two غ, with a long vowel the skeleton drops between them).
+    # Only when that does not line up is a run of the *same* Arabic letter folded,
+    # which is what a genuinely doubled letter (`مردد`) needs.
+    units = [(u, 1, i, i + 1) for i, u in enumerate(arabic_units)]
+
+    def emit(pairs: list[tuple[str | None, tuple[str, int, int, int]]]) -> str:
+        out: list[str] = []
+        at = 0
+        for unit, (text, count, start, end) in pairs:
+            if unit is None:
+                # A mark set aside: left exactly where and as the source wrote it.
+                continue
+            out.append(reading[at:start])
+            letter = _hw_convention_letter(unit, convention)
+            if text in marks and unit in ("ʿ", "ʾ"):
+                # The reading's apostrophe may stand for either; write the Arabic's.
+                out.append(unit * count)
+            elif text == "g" and unit == "ġ":
+                # A scan writes غ as plain `g`; write the convention's letter for it.
+                out.append(_hw_convention_letter("ġ", convention) * count)
+            elif text == "g" and unit == "j":
+                out.append("j" * count)
+            elif text == "p" and unit == "b":
+                # The source's own spelling of a loanword, not a mark the scan lost:
+                # kept exactly as written, so the name reads as the print does.
+                out.append(reading[start:end])
+            elif text != letter and _hw_ocr_plain(text) == _hw_ocr_plain(unit):
+                # The reading is a spelling the work's convention does not use: a mark
+                # the scan could not carry — ذ written `d` (`‘aud`), ث written `t`, ش
+                # written `s`, خ written `k` — or a digraph where the convention wants
+                # the marked letter, and the reverse. The Arabic settles which letter
+                # it is, so the convention's own form is written in its place. Tested
+                # against the convention's letter, not the skeleton's: خ's skeleton
+                # character is `ḫ`, which is *not* how this work writes it.
+                out.append(letter * count)
+            else:
+                out.append(reading[start:end])
+            at = end
+        out.append(reading[at:])
+        return "".join(out)
+
+    def pair(runs: list[tuple[str, int, int, int]], skip_marks: bool):
+        """Match the Arabic letters to the reading's runs, or None if they differ."""
+        remaining = list(runs)
+        out: list[tuple[str | None, tuple[str, int, int, int]]] = []
+        for run in reading_runs:
+            if skip_marks and run[0] in marks:
+                out.append((None, run))
+                continue
+            if not remaining:
+                return None
+            out.append((remaining.pop(0)[0], run))
+        return out if not remaining else None
+
+    # A source transliteration may or may not spell a hamza the Arabic carries
+    # (`مأخذ` maʾḳad, but `أخذ` aḳd), and the Arabic may write a geminate once where
+    # the reading doubles it (`مردد` muraddad). So several alignments are possible;
+    # the most specific is tried first, and the marks are only set aside when no
+    # alignment can place them.
+    variants: list[list[tuple[str, int, int, int]]] = []
+    for drop_hamza in (False, True):
+        base = [u for u in units if not (drop_hamza and u[0] == "ʾ")]
+        if not base:
+            continue
+        for runs in (base, _hw_merge_runs(base)):
+            if runs not in variants:
+                variants.append(runs)
+    for skip_marks in (False, True):
+        for arabic_runs in variants:
+            pairs = pair(arabic_runs, skip_marks)
+            if pairs is not None:
+                return emit(pairs)
+    # Nothing lined up — the reading has letters this Arabic cannot account for.
+    # Leaving it as the source wrote it is the safe answer.
+    return reading
+
+
+def _hw_merge_runs(units: list[tuple[str, int, int, int]]) -> list[tuple[str, int, int, int]]:
+    """Merge units that are identical *and adjacent in the text*.
+
+    A transliteration writes a geminate twice (`baṭṭārīya`) where the unvocalised
+    Arabic writes the letter once (بطارية), so the run has to collapse before the two
+    skeletons can be aligned — and be written back at its own length. Only genuinely
+    adjacent units merge: the two `t` of `tata` are separate letters, and a vowel
+    between them (which the caller has already dropped) keeps them apart.
+    """
+    out: list[tuple[str, int, int, int]] = []
+    for text, count, start, end in units:
+        if out and out[-1][0] == text and out[-1][3] == start:
+            first = out[-1]
+            out[-1] = (first[0], first[1] + count, first[2], end)
+        else:
+            out.append((text, count, start, end))
+    return out
 
 
 def _hw_reads_arabic(roman: str, arabic: str) -> bool:
@@ -2269,7 +2909,49 @@ def _hw_reads_arabic(roman: str, arabic: str) -> bool:
         return False
     if not _hw_root_skeleton(arabic).replace("ʾ", ""):
         return True
-    return _hw_translit_skeleton(roman) == _hw_skeletons(arabic)
+    return _hw_skeleton_matches(roman, _hw_skeletons(arabic))
+
+
+def _hw_loose_skeleton(text: str, *, arabic: bool) -> str:
+    """A loanword-tolerant skeleton: article, final ه/ة, and g/k/q, z/ž/j folded.
+
+    The strict comparison is right for a reading of the Arabic. It rejects the
+    source's own spellings of loanwords and proper names for reasons that are not
+    errors: a final ه/ة is silent (`اسمره` / `asmara`), the article is optional
+    (`الانجليز` / `al-ingəlīz`), a tanwīn adds a final n (`اذا` / `idan`), and a
+    transcription may write g for ك or j for ز (`argīla`, `oksižēn`).
+    """
+    s = _hw_skeletons(text) if arabic else _hw_translit_skeleton(text)
+    if s.startswith("l"):
+        s = s[1:]                      # the Arabic article / a romanized al-
+    s = s.rstrip("h")
+    return s.translate(str.maketrans({"q": "k", "z": "j", "ž": "j"}))
+
+
+def _hw_reads_arabic_loose(roman: str, arabic: str) -> bool:
+    """Whether a source spelling reads the Arabic once loanword variation is allowed."""
+    if not roman:
+        return False
+    target = _hw_loose_skeleton(arabic, arabic=True)
+    if not target:
+        return False
+    base = _hw_translit_skeleton(roman)
+    if base.startswith("l"):
+        base = base[1:]
+    base = base.rstrip("h")
+    # g may stand for ج or ك in a transcription; try both before folding.
+    # g may stand for ج or ك, and in a loanword for a weak letter the Arabic
+    # skeleton has already dropped (`urgūl` / `ارول`); try all three.
+    variants = {_hw_collapse_gemination(
+                    base.replace("g", g).translate(str.maketrans({"q": "k", "z": "j", "c": "k"}))
+                )[0]
+                for g in ("j", "k", "")}
+    tail = arabic.rstrip()
+    if tail.endswith(("ا", "ى")):
+        variants |= {v[:-1] for v in variants if v.endswith("n") and len(v) > 1}
+    if tail.endswith("ة"):
+        variants |= {v[:-1] for v in variants if v.endswith("t") and len(v) > 1}
+    return target in variants
 
 
 def _hw_reads_root(roman: str, root: str) -> bool:
@@ -2284,8 +2966,16 @@ def _hw_reads_root(roman: str, root: str) -> bool:
         return False
     if not _hw_root_skeleton(root).replace("ʾ", ""):
         return True
-    letters = iter(_hw_translit_skeleton(roman))
-    return all(ch in letters for ch in _hw_skeletons(root))
+    skeleton = _hw_skeletons(root)
+    candidates = {_hw_translit_skeleton(roman)}
+    base = next(iter(candidates))
+    if "ʿ" in base:
+        candidates.add(base.replace("ʿ", ""))
+    for candidate in list(candidates):
+        if "g" in candidate:
+            candidates.add(candidate.replace("g", "j"))
+            candidates.add(candidate.replace("g", "ġ"))
+    return any(all(ch in iter(c) for ch in skeleton) for c in candidates)
 
 
 def _hw_find_first_valid_romanization(derived: list[tuple], root: str = "") -> str | None:
@@ -2343,21 +3033,81 @@ def _hw_split_segments(def_text: str) -> list[tuple[str | None, str]]:
     return segments
 
 
-def _hw_grid_bullets(arabic: str, definition: str, roman: str | None) -> list[str]:
+_HW_KAF_TOKEN_RE = re.compile(r"[A-Za-z\u00C0-\u024F\u1E00-\u1EFF]*\u1e33[A-Za-z\u00C0-\u024F\u1E00-\u1EFF]*")
+
+
+def _hw_fix_kaf(text: str, convention: str = DEFAULT_ROMANIZATION) -> str:
+    """Write every ḳ as the work's khāʾ.
+
+    `ḳ` is not a letter Wehr uses — his qāf is plain `q` — so it is a
+    document-conversion artifact and *never* correct where it stands: leaving it is
+    wrong every time, while writing the khāʾ is wrong only where the letter is not
+    one. In this source it stands for خ in 329 of its 330 occurrences; the single
+    exception (`aḳtara` for `akṯara`, where the conversion moved the dot from the ث
+    onto the kāf) is settled by `_EYEBALL` *before* this runs, which is why the
+    replacement can be unconditional here. Anything a future eyeball entry adds has
+    to be written in its corrected form for the same reason.
+
+    Because it takes no Arabic, it can be applied to a note's romanization as well
+    as to a definition's prose — and to prose safely, since `ḳ` cannot occur in
+    English.
+    """
+    return text.replace("ḳ", _hw_convention_letter("ḫ", convention))
+
+
+def _hw_grid_bullets(arabic: str, definition: str, roman: str | None,
+                     source_roman: str | None = None, convention: str = DEFAULT_ROMANIZATION) -> list[str]:
     """The callout body as alternating bullets: label (odd), content (even)."""
     def_text = re.sub(r"\s+", " ", definition or "").strip()
+    # Before the headword is stripped: the token's own Arabic *is* the headword
+    # (`اخذ aḳaḍa`), so the correction needs it still in place.
+    def_text = _hw_fix_kaf(def_text, convention)
     def_text = _HW_HEAD_RE.sub("", def_text, count=1).lstrip()
-    if roman and roman != "unknown":
-        # The printed superscript diptote marker (mamnūʿ min al-ṣarf) came out of
-        # the OCR as a literal digit glued to the transliteration ("aḥmad2",
-        # "makka2"). Take the first occurrence of the term, italicise it, and put
-        # a glued digit back into a real superscript. A plain `\b…\b` match would
-        # fail here: there is no word boundary between "d" and "2".
-        pattern = re.compile(r"(?<!\w)" + re.escape(roman) + r"(\d)?(?![^\W\d])")
-        def_text = pattern.sub(
-            lambda m: f"*{roman}*" + (f"<sup>{m.group(1)}</sup>" if m.group(1) else ""),
-            def_text, count=1,
-        )
+    # Only a source's own token may be touched. `roman` may be a fallback (the
+    # engine, or letter by letter) when Wehr gives no usable transliteration;
+    # inserting that into the text replaces a real gloss — `طوزلق (Turk. tozluk)
+    # gaiter(s)` became `(Turk. tozluk) *ṭwzlq*(s)`. If there is no source token,
+    # leave the definition exactly as written. The source token is tried first,
+    # then the corrected spelling the heading uses (`baṯṯārīya` → `baṭṭārīya`).
+    #
+    # The glued digit after the term is Wehr's diptote marker (mamnūʿ min al-ṣarf,
+    # `makka2`, `aḥmad2`); it is re-emitted as a real superscript.
+    if source_roman:
+        spellings = [source_roman]
+        if roman and roman != source_roman:
+            spellings.append(roman)
+        span: tuple[int, int] | None = None
+        digit: str | None = None
+        for spelling in spellings:
+            m = re.search(r"(?<!\w)" + re.escape(spelling) + r"(\d)?(?![^\W\d])", def_text)
+            if m:
+                span, digit = (m.start(), m.end()), m.group(1)
+                break
+        if span is not None:
+            # Italicise the token *as printed*, never the heading's normalised
+            # spelling: the body is the book's text. The only addition is the
+            # diptote marker, which the scan glued to the term.
+            shown = def_text[span[0]:span[1]]
+            if digit:
+                shown = shown[:-len(digit)]
+            marked = f"*{shown}*" + (f"<sup>{digit}</sup>" if digit else "")
+            def_text = def_text[:span[0]] + marked + def_text[span[1]:]
+
+    # The digitisation put a generated — and often corrupt — vocalised form in
+    # parentheses right after every derived-form label (`<b>III</b> (اَاَخَذَ)`),
+    # where the print gives none; form III of أخذ came out as اَاَخَذَ for آخذ.
+    # Drop it: the form number and the romanized reading already carry the form,
+    # so a wrong spelling in parentheses is worse than none. Where the print *does*
+    # give the form, it sits after this parenthetical and is left in place
+    # (`(اِاْتَخَذَ) اتخذ ittaḳada …` → `اتخذ ittaḳada …`). Scoped to a
+    # `<b>ROMAN</b>` label followed by a parenthetical containing Arabic, so
+    # nothing else is touched. (All 4,970 occurrences in the corpus are a single
+    # vocalised form token.)
+    def_text = re.sub(
+        rf"(<b>\s*[IVXLCDM]+\s*</b>)\s*\([^()]*[{_HW_ARABIC}][^()]*\)",
+        r"\1", def_text,
+    )
+
     segments = _hw_split_segments(def_text)
     bullets: list[str] = [arabic]
     if not segments:
@@ -2410,7 +3160,7 @@ def _hw_prose_quotes(text: str) -> str:
     return text.replace("\x01", "“").replace("\x02", "‘")
 
 
-def _hw_prose(definition: str) -> list[str]:
+def _hw_prose(definition: str, convention: str = DEFAULT_ROMANIZATION) -> list[str]:
     """Lane's definition as markdown paragraphs.
 
     The text is English prose with a little markup: `<i>` for the glosses, a
@@ -2489,7 +3239,88 @@ def _hw_prose(definition: str) -> list[str]:
             lambda m: f'<span class="mas-hw">{m.group(0).strip()}</span>',
             paragraphs[0], count=1,
         )
-    return paragraphs
+    return [_hw_fix_kaf(p, convention) for p in paragraphs]
+
+
+# The language a loanword came from, as Wehr marks it: `اتوبيس (Fr.) otobīs`.
+_HW_LANG_MARKER_RE = re.compile(
+    # The marker may close immediately (`(Fr.) otomobīl`) or hold the word itself
+    # (`(Turk. tozluk)`), so stop at the abbreviation's dot, not at the `)`.
+    # `(pronounced ambā)` is the same kind of guarantee.
+    r"\((?:Fr|Engl|It|Sp|Gk|Lat|Turk|Pers|Ger|Port|Russ|Hind|Mal|Swah|Tam|Chin|Jap)\."
+    r"|\((?:pronounced|pron)\b"
+)
+
+
+def _hw_romanization_after_marker(definition: str) -> str | None:
+    """The transliteration a loanword entry gives after its language marker.
+
+    Wehr writes a loanword as `ARABIC (and ARABIC) (Fr.) otomobīl automobile`, and a
+    French or German transcription may use letters that do not map onto the Arabic at
+    all (`ōpərēt` for اوبريت, a p where the Arabic has ب), so it cannot be validated
+    against the headword the usual way. The marker is the guarantee that the token
+    after it is the entry's own transliteration — and it is the source's, which beats
+    the engine's guess at the bare cluster.
+    """
+    m = _HW_LANG_MARKER_RE.search(definition or "")
+    if not m:
+        return None
+    t = _HW_LATIN_TOKEN_RE.search(definition, m.end())
+    return t.group(1) if t else None
+
+
+def _hw_romanization_in_text(definition: str, arabic: str, *, loose: bool = False) -> str | None:
+    """A transliteration of the headword found anywhere in the definition.
+
+    A loanword entry can carry two spellings with OCR rubble between them and the
+    transliteration at the end (`اتومبيل boyl lIالىd اتوموبيل (Fr.) otomobīl`), so the
+    leading token is not always the term. When the usual extraction fails, any token
+    that actually reads the headword is the source's own name for it — better than
+    the engine's guess at a bare cluster. `loose` also accepts the spelling
+    variations a loanword or proper name uses (see `_hw_reads_arabic_loose`).
+    """
+    for m in _HW_LATIN_TOKEN_RE.finditer(definition or ""):
+        token = m.group(1)
+        if _hw_reads_arabic(token, arabic):
+            return token
+        if loose and _hw_reads_arabic_loose(token, arabic):
+            return token
+    return None
+
+
+def _hw_source_romanization(definition: str, arabic: str) -> tuple[str | None, str]:
+    """The source's own transliteration, and where it came from.
+
+    The order matters: the token right after the headword, then any token that
+    reads the headword, then the token after a language marker (a loanword
+    transcription need not map onto the Arabic at all). `None` means Wehr gives
+    no usable romanization here, so the caller must fall back — and must not
+    insert that fallback into the definition.
+    """
+    extracted = _hw_extract_romanization(definition)
+    if extracted and _hw_reads_arabic(extracted, arabic):
+        return extracted, "definition"
+    text = _hw_romanization_in_text(definition, arabic)
+    if text:
+        return text, "text"
+    # A marker is the guarantee that the next token is the loanword's own
+    # transcription, so it beats the loose check: `(Turk. tozluk)` must keep
+    # `tozluk`, not be "corrected" to a reading of the Arabic.
+    marker = _hw_romanization_after_marker(definition)
+    if marker:
+        return marker, "marker"
+    if extracted and _hw_reads_arabic_loose(extracted, arabic):
+        return extracted, "definition"
+    text = _hw_romanization_in_text(definition, arabic, loose=True)
+    if text:
+        return text, "text"
+    # A multiword headword whose variants defeat the full comparison still has a
+    # usable first name (`الاطلانتيك` → `al-aṯlantīk`).
+    first_ar = re.split(r"[\s,]+", arabic)[0]
+    first_ro = (extracted or "").split()[0] if extracted else ""
+    if first_ro and _hw_reads_arabic_loose(first_ro, first_ar):
+        return first_ro, "definition"
+    return None, ""
 
 
 def _hw_root_entry(entry_id: int, word: str, definition: str, derived: list[tuple],
@@ -2505,46 +3336,70 @@ def _hw_root_entry(entry_id: int, word: str, definition: str, derived: list[tupl
         arabic = _hw_prose_headword(definition) or (word or "").strip()
         if not arabic:
             return None
-        paragraphs = _hw_prose(definition)
+        paragraphs = _hw_prose(definition, convention)
         if len(paragraphs) == 1 and _hw_is_bare_arabic(_hw_strip_tags(paragraphs[0])):
             # The row is the bare root with no entry of its own; the derived rows
             # below carry the text.
             paragraphs = []
         return {
             "id": entry_id, "arabic": arabic,
-            "roman": _hw_fix_underlined(_hw_root_romanization(arabic, derived, convention), arabic, convention),
+            "roman": _hw_fix_kaf(_hw_fix_underlined(_hw_root_romanization(arabic, derived, convention), arabic, convention), convention),
             "verb_form": False, "paragraphs": paragraphs,
         }
     arabic = _hw_headword(definition) or (word or "").strip()
     if not arabic:
         return None
     verb = _hw_is_verb_form(definition)
+    source_roman: str | None = None
+    source_kind = ""
     if verb:
-        roman = _hw_find_first_valid_romanization(derived, arabic)
-        if not roman:
-            for _eid, _w, d in derived:
-                candidate = _hw_extract_romanization(d)
-                if candidate and _hw_reads_arabic(candidate, _hw_headword(d) or _w):
-                    roman = candidate
-                    break
-        if not roman:
-            roman = _hw_root_romanization(arabic, derived, convention)
+        # A root that is itself a verb form can carry its own reading after the
+        # form label (`بختر II tabaḳtara …`); use that before the derived rows.
+        own = _hw_extract_romanization(definition)
+        if own and _hw_reads_root(own, arabic):
+            roman = own
+            source_kind = "definition"
+        else:
+            roman = _hw_find_first_valid_romanization(derived, arabic)
+            if roman:
+                source_kind = "derived"
+            else:
+                for _eid, _w, d in derived:
+                    candidate = _hw_extract_romanization(d)
+                    if candidate and _hw_reads_arabic(candidate, _hw_headword(d) or _w):
+                        roman = candidate
+                        source_kind = "derived"
+                        break
+            if not roman:
+                roman = _hw_root_romanization(arabic, derived, convention)
+                source_kind = "fallback"
     else:
         # The source's own transliteration first — but only if it really reads the
         # headword (the text also carries numerals and cross-references) — then any
         # the entries carry, then the same shared machinery Lane uses. A value the
         # source wrote is kept exactly as written; only an engine reading is recast
         # into the work's convention, inside `_hw_root_romanization`.
-        extracted = _hw_extract_romanization(definition)
-        roman = ((extracted if extracted and _hw_reads_arabic(extracted, arabic) else None)
-                 or _hw_find_first_valid_romanization(derived, arabic)
-                 or _hw_root_romanization(arabic, derived, convention))
-    # A verb-form root's own callout is never italicised, though its heading uses
-    # the transliteration found above.
-    roman = _hw_fix_underlined(_hw_romanize(roman, convention), arabic, convention)
+        source_roman, source_kind = _hw_source_romanization(definition, arabic)
+        roman = source_roman or _hw_find_first_valid_romanization(derived, arabic)
+        if not source_roman and roman:
+            source_kind = "derived"
+        elif not roman:
+            roman = _hw_root_romanization(arabic, derived, convention)
+            source_kind = "fallback"
+    # A marker token is a loanword transcription, not a reading of the Arabic:
+    # the walk would "correct" `tozluk` to `tozluq`. Keep it exactly as Wehr
+    # printed it, apart from the `ḳ` typo. Everything else is a reading and may
+    # be recast/corrected from the Arabic.
+    if source_kind == "marker":
+        roman = _hw_fix_kaf(roman, convention)
+    else:
+        roman = _hw_fix_kaf(_hw_fix_underlined(_hw_romanize(roman, convention), arabic, convention), convention)
     return {
         "id": entry_id, "arabic": arabic, "roman": roman, "verb_form": verb,
-        "bullets": _hw_grid_bullets(arabic, definition, None if verb else roman),
+        "roman_source": source_kind or "fallback",
+        # Only the source's own token may be italicised in the body. A fallback
+        # name is for the heading; inserting it would replace a real gloss.
+        "bullets": _hw_grid_bullets(arabic, definition, None if verb else roman, source_roman, convention),
     }
 
 
@@ -2570,15 +3425,21 @@ def _hw_derived_entry(entry_id: int, word: str, definition: str,
     if _hw_is_verb_form(definition):
         return {
             "id": entry_id, "arabic": arabic, "roman": None, "verb_form": True,
+            "roman_source": "verb",
             "bullets": _hw_grid_bullets(arabic, definition, None),
         }
-    extracted = _hw_extract_romanization(definition)
-    roman = ((extracted if extracted and _hw_reads_arabic(extracted, arabic) else None)
-             or _hw_word_romanization(arabic, convention))
-    roman = _hw_fix_underlined(roman, arabic, convention)
+    source_roman, source_kind = _hw_source_romanization(definition, arabic)
+    roman = source_roman or _hw_word_romanization(arabic, convention)
+    if not source_roman:
+        source_kind = "fallback"
+    if source_kind == "marker":
+        roman = _hw_fix_kaf(roman, convention)
+    else:
+        roman = _hw_fix_kaf(_hw_fix_underlined(roman, arabic, convention), convention)
     return {
         "id": entry_id, "arabic": arabic, "roman": roman, "verb_form": False,
-        "bullets": _hw_grid_bullets(arabic, definition, roman),
+        "roman_source": source_kind,
+        "bullets": _hw_grid_bullets(arabic, definition, roman, source_roman, convention),
     }
 
 
@@ -2641,8 +3502,137 @@ def _hw_letter_index(units: list[dict], convention: str = DEFAULT_ROMANIZATION) 
     return out
 
 
+# ── Eyeball corrections ──────────────────────────────────────────────────────
+#
+# Cases the rules cannot derive, found by reading the entry rather than by a rule.
+# Each is a literal replacement applied to a work's definition *before* anything
+# else runs, so every rule afterwards sees the corrected text and leaves it alone —
+# which is why the replacement is written in the form the rules already agree with.
+# Keyed by the source row's id, the one stable handle a definition has: if a future
+# release moves the row, the entry simply stops matching rather than matching
+# wrongly. (Where a rule would mangle a case rather than leave it, the correction
+# can instead be applied after the rules, matching the output we know they produce.)
+#
+# This is the residue, not a strategy: the point of the rules is that they need no
+# list, and the list is worth keeping short. It also belongs in the upstream
+# correction list, where the same fix can be made once for everyone.
+_EYEBALL: dict[str, dict[int, tuple[str, str]]] = {
+    "hanswehr": {
+        # 951 `اول`: `aḳtara` for أَكْثَر. The document conversion moved the dot off
+        # the ث onto the kāf, so here the `ḳ` is a kāf, not a خ — the single
+        # occurrence in the corpus where it is not a khāʾ. Wehr writes `akṯara`.
+        951: ("aḳtara", "akṯara"),
+        # 26 `ابريز`: the print reads `ابريز ibrīz pure gold`, but both
+        # digitizations dropped `ibrīz` and kept the page number `1`; the page
+        # number is now stripped by the FODT reader, and this restores the
+        # print's word so it is a source token, not an engine guess.
+        26: ("pure gold", "ibrīz pure gold"),
+    },
+}
+
+
+# ── Parent overrides ─────────────────────────────────────────────────────────
+#
+# Rows the digitisation marks as a root of their own — `IS_ROOT`, parented to
+# themselves — while Wehr files them under another root. The letters cannot tell us:
+# the distinction is morphological, not textual (`متأخر` is م + ت + أخر, a form-V
+# participle, so neither a containment test nor a "root plus one prefix" test finds
+# it, and a loose containment test matches thousands of legitimate roots). So, like
+# `_EYEBALL`, this is a short curated list, keyed by the source row's id, mapping it
+# to the root it belongs under. The row then becomes an entry inside that root's note
+# instead of a note of its own, and the renderer's prune removes the orphan.
+#
+# Worth reporting upstream: these flags come from the origin's own schema
+# (`WordMetadata(RootWordId, IsRoot)`), so one fix there reaches every downstream app.
+_REPARENT: dict[str, dict[int, int]] = {
+    "hanswehr": {
+        # A term inadvertently split from the entry *before* it: the digitisation marks
+        # it as a root of its own (its own parent) while Wehr files it under the root
+        # listed just before it. The condition is adjacency *and* direction — the row
+        # sits right after that root's last child, and its word is the previous root's
+        # word plus a derivational prefix — and every entry here has been **eyeballed**,
+        # not taken from the script's output on trust. `scripts/audit-parents.py`
+        # proposes candidates with that rule and flags the ones to look at first: a
+        # term carrying Wehr's homonym number — a digit *before* the Arabic term
+        # (`2بنك` beside `3مبنك`) — is a separate entry, and a pointer (`look up
+        # alphabetically`, `see 2سم`) is skipped by the importer rather than
+        # re-parented. But the number cannot be used as a filter: the digitisation
+        # kept almost none of them, and `جلون`/`مجلون` are unrelated loanwords that
+        # carry none at all. So cases are confirmed by reading, not by the rule —
+        # 3727 `مجلون` was proposed by it and removed for exactly that reason.
+          179: 167,    # متاخر  = مت + اخر   (form-V participle)
+        1180: 1179,  # مبحثر  = م + بحثر
+        5346: 5342,  # محنق   = م + حنق
+        5351: 5347,  # محنك   = م + حنك
+        5678: 5674,  # تخثر   = ت + خثر
+        7030: 7024,  # مدك    = م + دك    (noun of instrument)
+        7716: 7715,  # تربص   = ت + ربص
+        7717: 7716,  # متربص  = م + تربص  (chains onto the row above)
+    },
+}
+
+
+def _hw_starts_new_root(definition: str) -> bool:
+    """Whether a root row begins a new root rather than continuing the previous one.
+
+    Wehr starts every root with its verbs — a form-I verb resembling the root, or a
+    form given by a Roman numeral — so a verb-initial definition after a noun is a
+    different root even when the two share a spelling. The digitisation gives `دك`
+    twice (7024 `dakka u (dakk) to make flat, level or even` and 7031 `<b>II</b> to
+    provide … with a waist-band`), and merging them would combine two entries the
+    print keeps apart. Keeping the text's own division is the whole point.
+    """
+    # The marker comes *after* the headword (`دك <b>II</b> to provide …`), so it is
+    # what follows the headword that has to be examined, not the definition's start.
+    rest = _HW_HEAD_RE.sub("", (definition or "").strip(), count=1).lstrip()
+    if _HW_ROMAN_RE.match(rest):
+        return True
+    return bool(re.match(r"^(?:to|=)\b", rest))
+
+
+def _load_fodt_converter():
+    """The FODT→JSON converter, loaded beside this script (it imports this module)."""
+    path = Path(__file__).resolve().parent / "hanswehr-fodt-json.py"
+    spec = importlib.util.spec_from_file_location("hanswehr_fodt_json", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def build_fodt_dictionary_units(work: dict, args: argparse.Namespace) -> list[dict]:
+    """A dictionary read from the FODT origin instead of the app's SQLite."""
+    module = _load_fodt_converter()
+    # The converter holds its own import of this module, so give that copy the
+    # same transliteration settings as this fetch.
+    module.tsi._TRANS_SERVER = getattr(args, "transliteration_server", "")
+    module.tsi._TRANS_OFF = getattr(args, "no_transliteration", False)
+    emit("step", name=work["title"], status="parsing", detail="FODT")
+    entries, meta, _app, mapping = module.build_entries()
+    emit("step", name=work["title"], status="parsing",
+         detail=f"{len(entries):,} paragraphs, {meta['supplement_rows']} supplement")
+    # The model is a render cache; this is the canonical data, with the fields
+    # the app's SQLite dropped (homonym, level) and the supplement's provenance.
+    data_path = SOURCE_DATA_DIR / "dictionary" / f"{work['id']}.json"
+    data_path.parent.mkdir(parents=True, exist_ok=True)
+    data_path.write_text(json.dumps({
+        "schema": 1,
+        "work": {k: work.get(k) for k in (
+            "key", "collection", "id", "name", "title", "dir", "author",
+            "source", "license_attribution", "note_prefix", "body", "convention")},
+        "source": meta,
+        "entries": entries,
+    }, ensure_ascii=False, indent=1), encoding="utf-8")
+    units = module.build_units(entries, mapping, work=work)
+    work["fodt_paragraphs"] = meta["fodt_paragraphs"]
+    work["fodt_supplement_rows"] = meta["supplement_rows"]
+    work["source_hash"] = meta["fodt_sha256"][:12]
+    return units
+
+
 def build_dictionary_units(work: dict, args: argparse.Namespace) -> list[dict]:
     """One unit (note) per dictionary root, carrying its derived entries."""
+    if work.get("shape") == "fodt":
+        return build_fodt_dictionary_units(work, args)
     url = work.get("db_url") or COLLECTIONS["dictionary"]["data"]
     emit("step", name=work["title"], status="downloading", detail="sqlite")
     data = fetch(url, cache=not args.no_cache)
@@ -2669,6 +3659,21 @@ def build_dictionary_units(work: dict, args: argparse.Namespace) -> list[dict]:
         if is_root:
             root_rows.append(rid)
     root_set = set(root_rows)
+    # Parent overrides (see `_REPARENT`): a row the source marks as a root of its own
+    # but Wehr files under another root is re-parented, so it becomes an entry in that
+    # root's note rather than a note of its own.
+    for rid, parent in _REPARENT.get(work["id"], {}).items():
+        if rid not in by_id or parent not in root_set or rid not in root_set:
+            continue
+        parent_of[rid] = parent
+        root_set.discard(rid)
+        root_rows.remove(rid)
+    # Eyeball corrections (see `_EYEBALL`) go in first, so the rules that follow see
+    # the corrected text and have nothing left to change.
+    for rid, (old, new) in _EYEBALL.get(work["id"], {}).items():
+        word, definition = by_id.get(rid, ("", ""))
+        if definition and old in definition:
+            by_id[rid] = (word, definition.replace(old, new))
 
     def nearest_root(rid: int) -> int | None:
         """Walk up to the root a row belongs to — the database is not always flat:
@@ -2699,15 +3704,31 @@ def build_dictionary_units(work: dict, args: argparse.Namespace) -> list[dict]:
     # are one entry, so group the root rows by the root word and merge each group:
     # the first row is the note, the rest join it, and every derived form of the
     # group is nested beneath. (The rows are in the app's own order.)
-    groups: dict[str, list[int]] = {}
+    # Root rows sharing a word are usually one root in the print — `حرب` the verb
+    # (4457) and `حرب` the noun (4458) are one entry — but Wehr's homonym numbers mark
+    # genuinely different roots under the same spelling (`دك` 7024 `dakka u (dakk) to
+    # make flat…` and 7031 `<b>II</b> to provide … with a waist-band`). The number is
+    # lost in the digitisation, but the verb test survives it: Wehr starts every root
+    # with its verbs, so a verb-initial definition begins a new root while a noun after
+    # a verb continues the one before. So the merge runs over *consecutive* same-word
+    # rows and breaks at a verb — never collapsing a homonym number by a rule.
+    groups: list[tuple[str, list[int]]] = []
     for rid in sorted(root_rows):
-        groups.setdefault(by_id[rid][0], []).append(rid)
+        # Keyed on the *headword* the note is named from, not the `word` column: that
+        # column drops the hamza, so `رأب` (7631, "to mend") and `راب` (7701,
+        # "stepfather") both read `راب` and were being merged into one note despite
+        # being unrelated roots. The definition keeps the distinction.
+        word = _hw_headword(by_id[rid][1]) or by_id[rid][0]
+        if groups and groups[-1][0] == word and not _hw_starts_new_root(by_id[rid][1]):
+            groups[-1][1].append(rid)
+        else:
+            groups.append((word, [rid]))
     emit("step", name=work["title"], status="parsing", detail=f"{len(groups)} roots")
     prose = work.get("body") == "prose"
     prefix = work.get("note_prefix") or "HW"
     convention = work.get("convention") or DEFAULT_ROMANIZATION
     units: list[dict] = []
-    for n, (word, group) in enumerate(groups.items()):
+    for n, (word, group) in enumerate(groups):
         derived_ids = [d for rid in group for d in derived.get(rid, [])]
         derived_rows = [(d, by_id[d][0], by_id[d][1]) for d in derived_ids]
         # The group's first row with real content is the note; the others join it
@@ -2732,7 +3753,7 @@ def build_dictionary_units(work: dict, args: argparse.Namespace) -> list[dict]:
             # named after a derived term.
             main = group[0]
             word_ar = (_hw_prose_headword if prose else _hw_headword)(by_id[main][1]) or by_id[main][0]
-            roman = _hw_root_romanization(word_ar, derived_rows, convention)
+            roman = _hw_fix_kaf(_hw_root_romanization(word_ar, derived_rows, convention), convention)
             root = {"id": main, "arabic": word_ar, "roman": roman, "verb_form": False}
             if prose:
                 root["paragraphs"] = []
@@ -2774,9 +3795,217 @@ def build_dictionary_units(work: dict, args: argparse.Namespace) -> list[dict]:
     return _hw_letter_index(units, convention) + units
 
 
+# ── Turath.io (book/TOC/page) ────────────────────────────────────────────────
+#
+# `files.turath.io/books-v3/<id>.json` is one whole-book JSON whose keys are Arabic
+# diacritics. The facts that matter (verified on single- and multi-volume books):
+#   * `headings[i].page` is a 1-based **index into `pages`**, not a printed page.
+#   * `page_map[j]` is "<vol>,<printed page>", aligned with `pages[j]`.
+#   * `<span data-type="title" id=toc-N>` marks heading N's position; a few
+#     headings have no span, so fall back to the logical page.
+#   * `page_headings` (U+065B) is unusable here (its values are a running index).
+
+_TURATH_META, _TURATH_INDEXES = "\u064B", "\u0658"
+_TURATH_VOLUMES, _TURATH_HEADINGS, _TURATH_PAGE_MAP = "\u0659", "\u065A", "\u065D"
+_TURATH_TITLE = re.compile(
+    r'<span[^>]*\bdata-type="title"[^>]*\bid=["\']?toc-(\d+)["\']?[^>]*>(.*?)</span>',
+    re.DOTALL | re.I,
+)
+# A chapter file name is capped at a word boundary; the full heading stays in the
+# note's `title` (and the hub link's alias), so nothing is lost.
+_TURATH_MAX_BASE = 60
+
+
+def _turath_decode(raw: dict) -> dict:
+    meta = raw.get(_TURATH_META, {}) or {}
+    idx = raw.get(_TURATH_INDEXES, {}) or {}
+    return {
+        "meta": {
+            "id": meta.get("\u064C"),
+            "name": meta.get("\u064D", ""),
+            "cat_id": meta.get("\u064E"),
+            "author_id": meta.get("\u064F"),
+            "details": meta.get("\u0651", ""),
+            "date_built": meta.get("\u0656"),
+        },
+        "volumes": [str(v) for v in (idx.get(_TURATH_VOLUMES) or ["1"])],
+        "headings": idx.get(_TURATH_HEADINGS) or [],
+        "page_map": idx.get(_TURATH_PAGE_MAP) or [],
+        "pages": [{"vol": str(p.get("vol", "1")), "page": p.get("page"),
+                   "text": p.get("text", "")}
+                  for p in raw.get("pages", [])],
+    }
+
+
+def _turath_trim(text: str) -> str:
+    """Cap a file-name stem at a word boundary (the full title is kept separately)."""
+    if len(text) <= _TURATH_MAX_BASE:
+        return text
+    cut = text[:_TURATH_MAX_BASE].rsplit(" ", 1)[0].rstrip(" ،:؛-")
+    return cut or text[:_TURATH_MAX_BASE]
+
+
+def _turath_page(text: str, headings: list[dict], section_level: int,
+                 drop: set[int]) -> str:
+    """A page's HTML as markdown, with `toc-N` spans as H2/H3 headings.
+
+    `drop` holds the section's own heading: the note title already carries it, so
+    its inline anchor vanishes. Deeper anchors become headings that can never
+    collide with the `#### p. N` page marks.
+    """
+    out: list[str] = []
+    pos = 0
+    for m in _TURATH_TITLE.finditer(text):
+        out.append(text[pos:m.start()])
+        pos = m.end()
+        try:
+            idx = int(m.group(1)) - 1
+        except ValueError:
+            continue
+        if idx in drop:
+            continue
+        level = int(headings[idx]["level"]) if 0 <= idx < len(headings) else section_level + 1
+        hashes = "#" * min(max(level - section_level + 1, 2), 3)
+        out.append(f"\n\n{hashes} {m.group(2).strip()}\n\n")
+    out.append(text[pos:])
+
+    body = html.unescape(re.sub(r"<[^>]+>", "", "".join(out)))
+    # Qur'an quotes get the vault's marker; bracketed sūra:āya refs become links.
+    body = re.sub(r"﴿(.+?)﴾", lambda m: f"*﴿{m.group(1)}﴾{{.quran-quote}}*",
+                  body, flags=re.DOTALL)
+    body = link_verse_citations(body)
+    paragraphs = [re.sub(r"\s+", " ", p).strip() for p in re.split(r"\n\s*\n", body)]
+    paragraphs = [re.sub(r"\s*\n\s*", " ", p) for p in paragraphs if p.strip()]
+    return smart_quotes("\n\n".join(paragraphs))
+
+
+def _turath_span(blocks: list[dict], multi: bool) -> str:
+    if not blocks:
+        return ""
+    a, b = blocks[0], blocks[-1]
+    if multi:
+        left, right = f"{a['vol']}:{a['page']}", f"{b['vol']}:{b['page']}"
+    else:
+        left, right = str(a["page"]), str(b["page"])
+    return f"p. {left}" if left == right else f"p. {left}–{right}"
+
+
+def build_turath_units(work: dict, args: argparse.Namespace) -> list[dict]:
+    """One chapter per TOC heading at `section_level`; a volume index per volume."""
+    url = COLLECTIONS["turath"]["data"].format(id=work["id"])
+    emit("step", name=work["title"], status="downloading", detail="whole book")
+    book = _turath_decode(fetch_json(url, cache=not args.no_cache))
+    # Turath rebuilds each book file, so its `date_built` is the update signal;
+    # the volume count drives the hub's volume-index layer.
+    work["date_built"] = book["meta"].get("date_built")
+    work["volumes"] = len(book["volumes"])
+    headings, pages, page_map = book["headings"], book["pages"], book["page_map"]
+    volumes = book["volumes"]
+    multi = len(volumes) > 1
+
+    def loc(j: int) -> dict:
+        if j < len(page_map) and "," in page_map[j]:
+            vol, pg = page_map[j].split(",", 1)
+            return {"vol": vol, "page": int(pg)}
+        return {"vol": pages[j]["vol"], "page": pages[j]["page"]}
+
+    if not headings:
+        return _turath_by_volume(book, multi)
+
+    levels = [int(h["level"]) for h in headings]
+    level = min(max(int(work.get("section_level", 1)), min(levels)), max(levels))
+    starts = [(i, int(headings[i]["page"]) - 1) for i, h in enumerate(headings)
+              if int(h["level"]) == level]
+    chapters: list[dict] = []
+    for n, (head, start) in enumerate(starts, start=1):
+        end = starts[n][1] - 1 if n < len(starts) else len(pages) - 1
+        blocks = []
+        for j in range(start, end + 1):
+            text = pages[j]["text"]
+            if j == start and n > 1:
+                # A page may close one chapter and open the next; keep the part
+                # that follows this chapter's own anchor.
+                m = next((mm for mm in _TURATH_TITLE.finditer(text)
+                          if int(mm.group(1)) - 1 == head), None)
+                if m:
+                    text = text[m.start():]
+            body = _turath_page(text, headings, level, {head})
+            if body.strip():
+                where = loc(j)
+                blocks.append({"vol": where["vol"], "page": where["page"], "body": body})
+        if not blocks:
+            continue
+        title_ar = smart_quotes(headings[head]["title"]).strip()
+        base = f"{n:03d} {_turath_trim(title_ar)}"
+        chapters.append({
+            "kind": "book", "id": str(n), "base": base,
+            "title": title_ar, "arabic": title_ar,
+            "level": level, "volume": blocks[0]["vol"], "volume_end": blocks[-1]["vol"],
+            "page_from": blocks[0]["page"], "page_to": blocks[-1]["page"],
+            "span": _turath_span(blocks, multi), "pages": blocks,
+        })
+        if len(chapters) % 10 == 0:
+            emit("step", name=work["title"], status="parsing",
+                 detail=f"{len(chapters)} sections")
+    return _turath_volumes(chapters, volumes, work)
+
+
+def _turath_by_volume(book: dict, multi: bool) -> list[dict]:
+    """No TOC: one chapter per volume, so the work still has linkable content."""
+    chapters = []
+    for n, vol in enumerate(book["volumes"], start=1):
+        blocks = []
+        for j, p in enumerate(book["pages"]):
+            if p["vol"] != vol:
+                continue
+            body = _turath_page(p["text"], [], 1, set())
+            if body.strip():
+                pm = (book["page_map"][j].split(",")
+                      if j < len(book["page_map"]) else [vol, p["page"]])
+                blocks.append({"vol": pm[0] or vol, "page": int(pm[1]), "body": body})
+        if blocks:
+            chapters.append({"kind": "book", "id": str(n), "base": f"{n:03d} المجلد {vol}",
+                             "title": f"المجلد {vol}", "arabic": f"المجلد {vol}",
+                             "level": 1, "volume": vol, "volume_end": vol,
+                             "page_from": blocks[0]["page"], "page_to": blocks[-1]["page"],
+                             "span": _turath_span(blocks, multi), "pages": blocks})
+    return chapters
+
+
+def _turath_volumes(chapters: list[dict], volumes: list[str], work: dict) -> list[dict]:
+    """Prepend one volume-index note per volume for a multi-volume work.
+
+    A chapter is filed under the volume it *starts* in; it points `up` to that
+    volume note through `section_page` (the field a dictionary uses for its
+    letter pages), and the volume note points up to the work hub.
+    """
+    if len(volumes) <= 1:
+        return chapters
+    vol_units = []
+    for v in volumes:
+        chs = [c for c in chapters if c["volume"] == v]
+        span = ""
+        if chs:
+            a, b = chs[0], chs[-1]
+            left = f"{a['volume']}:{a['page_from']}"
+            right = f"{b['volume_end']}:{b['page_to']}"
+            span = f"p. {left}" if left == right else f"p. {left}–{right}"
+        vol_units.append({
+            "kind": "book-volume", "id": v, "base": f"{int(v):03d} المجلد {v}",
+            "title": f"المجلد {v}", "arabic": f"المجلد {v}", "span": span,
+            "chapters": [{"base": c["base"], "title": c["title"], "span": c["span"]}
+                         for c in chs],
+        })
+    stem = {u["id"]: f"{work['dir']} - {u['base']}" for u in vol_units}
+    for c in chapters:
+        c["section_page"] = stem.get(c["volume"], "")
+    return vol_units + chapters
+
+
 def work_model(work: dict, units: list[dict], created: str, layout: str) -> dict:
     """Assemble the render model handed to the plugin's templates."""
     is_hadith = work["collection"] == "hadith"
+    is_book = work["collection"] == "turath"
     return {
         "schema": MODEL_SCHEMA.get(work["collection"], BASE_MODEL_SCHEMA),
         "generated": created,
@@ -2813,6 +4042,7 @@ def work_model(work: dict, units: list[dict], created: str, layout: str) -> dict
             "author": work.get("author", ""),
             "kind": ("dict" if work["collection"] == "dictionary"
                      else "hadith" if is_hadith
+                     else "book" if is_book
                      else "quran" if work["collection"] == "quran-text"
                      else "surah"),
             # A dictionary's body shape (`grid` senses or `prose` paragraphs) and
@@ -2826,9 +4056,17 @@ def work_model(work: dict, units: list[dict], created: str, layout: str) -> dict
             # `wehr`, `full`) — so a note records which convention it is in.
             "convention": work.get("convention", DEFAULT_ROMANIZATION),
             "unit_label": ("Roots" if work["collection"] == "dictionary"
-                           else "Chapters" if is_hadith
+                           else "Chapters" if is_hadith or is_book
                            else "Sūrahs"),
             "layout": layout,
+            # A book work's volume count and the TOC level that defines a chapter;
+            # its hub lists volumes when there is more than one.
+            "volumes": int(work.get("volumes", 1)),
+            "section_level": int(work.get("section_level", 1)),
+            # Turath's own build date, used by the upstream update check.
+            "date_built": work.get("date_built", 0),
+            # Every category MOC this work belongs to (Turath + its type).
+            "mocs": list(work.get("mocs") or ([work["moc"]] if work.get("moc") else [])),
         },
         "units": units,
     }
@@ -2838,7 +4076,8 @@ def work_model(work: dict, units: list[dict], created: str, layout: str) -> dict
 
 def cmd_list(args: argparse.Namespace) -> int:
     overrides = load_overrides()
-    works = list(all_works(overrides).values())
+    works = list(all_works(
+        overrides, preserve_installed=not getattr(args, "fresh_dirs", False)).values())
     if args.collection:
         works = [w for w in works if w["collection"] == args.collection]
     if args.language:
@@ -2902,6 +4141,8 @@ def cmd_fetch(args: argparse.Namespace) -> int:
             units = build_qul_units(work, table, wanted_surahs, args)
         elif work["collection"] == "dictionary":
             units = build_dictionary_units(work, args)
+        elif work["collection"] == "turath":
+            units = build_turath_units(work, args)
         else:
             units = build_surah_units(work, table, wanted_surahs, args)
         work["repository_updated"] = repo_updated(work)
@@ -2986,6 +4227,10 @@ def build_parser() -> argparse.ArgumentParser:
     lp.add_argument("--collection", choices=list(COLLECTIONS))
     lp.add_argument("--language", default=None, help="Filter by language code (e.g. ar, en, fr, fa).")
     lp.add_argument("--json", action="store_true", help="Emit JSON instead of a table.")
+    lp.add_argument("--fresh-dirs", action="store_true",
+                    help="Compute the names the current scheme would give, ignoring "
+                         "folders already recorded for installed works (used by the "
+                         "plugin's naming migration).")
     lp.set_defaults(func=cmd_list)
 
     fp = sub.add_parser("fetch", help="Download a work and write its render model JSON.")

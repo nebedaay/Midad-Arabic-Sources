@@ -59,6 +59,14 @@
 
 <% } -%>
 <% } -%>
+<% } else if (unit.kind === 'book') { -%>
+<% const multi = (work.volumes || 1) > 1; -%>
+<% for (const p of unit.pages) { -%>
+#### p. <%= multi ? `${p.vol}:${p.page}` : p.page %>
+
+<%~ p.body %>
+
+<% } -%>
 <% } else { -%>
 <% for (const b of unit.blocks) { -%>
 # <%= b.number %>
@@ -79,6 +87,18 @@ A dictionary has too many roots to list here, so they are indexed by first lette
 - <%= wikilink(u.note_stem, u.title || u.base) %> — <%= u.roots.length %>
 <% } -%>
 
+<% } else if (work.kind === 'book') { -%>
+<% if ((work.volumes || 1) > 1) { -%>
+<% for (const u of units.filter(u => u.kind === 'book-volume')) { -%>
+- <%= wikilink(u.note_stem || `${work.dir} - ${u.base}`, u.title || u.base) %><% if (u.chapters && u.chapters.length) { %> — <%= u.chapters.length %> chapter<%= u.chapters.length === 1 ? '' : 's' %><% } %>
+<% } -%>
+
+<% } else { -%>
+<% for (const u of units.filter(u => u.kind === 'book')) { -%>
+- <%= wikilink(u.note_stem || `${work.dir} - ${u.base}`, u.title || u.base) %><% if (u.span) { %> — <%= u.span %><% } %>
+<% } -%>
+
+<% } -%>
 <% } else { -%>
 ## <%= work.unit_label %>
 

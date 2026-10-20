@@ -7,6 +7,21 @@ The plugin was built for research on Islam and Sufism — Qurʾān commentaries,
 > [!note]
 > This plugin is **desktop only**. It runs local Python scripts and reads files outside the vault.
 
+## Documentation
+
+The full guides are in [`docs/`](./docs/); this README is a summary. Every page is also bundled into the plugin and readable in-app with the command **Open documentation** (or from **Settings → Midad Arabic Sources → Documentation**).
+
+- [Setup](./docs/setup.md) — install, first run, the folder layout, and where state lives.
+- [Dependencies](./docs/dependencies.md) — Python, CAMeL Tools, a Gemini key, and the resident transliteration server.
+- [Transliteration](./docs/transliteration.md) — commands, engines, the romanization options, the lexicon, and LLM romanization.
+- [Transcription](./docs/transcription.md) — the Gemini OCR pipeline, post-processing, status, and reprocessing.
+- [Translation](./docs/translation.md) — translating a finished transcription.
+- [Document import](./docs/document-import.md) — collections, the Manage text sources dialogue, naming, and updates.
+- [Templates](./docs/templates.md) — the ETA templates and the render-model variable reference.
+- [Zotero](./docs/zotero.md) — Local / Web / CSL-JSON export, update-in-place, and auto-sync.
+- [Commands](./docs/commands.md) — every command, grouped by function.
+- [Troubleshooting](./docs/troubleshooting.md) — the common errors and how to fix them.
+
 ## What it does
 
 ### Transliteration
@@ -16,22 +31,25 @@ The rule-based/LLM romanizer talks to a resident Python service (CAMeL), so Obsi
 - **Transliterate selection to clipboard** — romanize the selection (or current line) to the clipboard.
 - **Transliterate note to new note** — romanize a whole note or selection into a sibling note.
 - **Check transliteration server** — report loaded engines and available LLM providers.
-- **Start transliteration server** / **Stop transliteration server** — launch or stop `transliterate-server.py` without the CLI.
+- **Start transliteration server** / **Stop transliteration server** — launch or stop the service without a terminal.
 
-Settings cover the server URL and script, the engine (`bert` / `mle` / `none`), sun-letter assimilation, case endings, name mode, final dotless yāʾ, and an LLM provider (Gemini / DeepSeek) with an optional per-request key.
+Settings cover the server URL and script, the engine (`bert` / `mle` / `none`), sun-letter assimilation, case endings, name mode, final dotless yāʾ, and an LLM provider (Gemini / DeepSeek) with an optional per-request key. See [Transliteration](./docs/transliteration.md).
 
 ### Transcription and translation (scanned PDFs)
 
-A Gemini pipeline turns a literature item’s PDFs into page-separated Arabic markdown (and translations), with local post-processing for Qur’ān quotes, poetry callouts, footnotes, and tashkīl. Run it from a `@citekey` note.
+A Gemini pipeline turns a literature item’s PDFs into page-separated Arabic markdown (and translations), with local post-processing for Qurʾān quotes, poetry callouts, footnotes, and tashkīl. Run it from a `@citekey` note.
 
-- **Transcribe this item's PDF file(s)** — burst to page PDFs, OCR via Gemini batch mode, post-process.
-- **Translate this item's transcription(s)** — translate an existing transcription.
+- **Transcribe this item’s PDF file(s)** — burst to page PDFs, OCR via Gemini batch mode, post-process.
+- **Translate this item’s transcription(s)** — translate an existing transcription.
+- **Prompt dropdown** in both dialogs — choose a named prompt, or edit, copy, and delete prompts for texts the built-in one does not suit.
 - **Reprocess from archive…** — re-run post-processing from an archived batch without resubmitting.
 - **Check transcription pipeline**, **Show pipeline status**, **Open last pipeline log** — status and diagnostics (non-modal corner panel).
 
+See [Transcription](./docs/transcription.md) and [Translation](./docs/translation.md).
+
 ### Text sources (born-digital corpora)
 
-A catalog-driven importer pulls classical texts from public repositories into your vault, one note per sūra or chapter, with full frontmatter and links back to the Qur’ān text.
+A catalog-driven importer pulls classical texts from public repositories into your vault, one note per sūra, chapter, or dictionary root, with full frontmatter and links back to the Qurʾān text.
 
 - **Manage text sources…** — a two-pane dialogue (install/uninstall, or send references to Zotero) with a genre sidebar, a repository list, and one clickable row per work.
 - **Copy import templates to vault** — copy the editable ETA templates into your vault.
@@ -39,15 +57,25 @@ A catalog-driven importer pulls classical texts from public repositories into yo
 - **Check imported sources** — find works whose notes or cached model are missing.
 - **Check for source updates** — ask the repositories whether a text changed upstream.
 
-Collections currently wired in: Qurʾān commentaries (tafsīr) from `spa5k/tafsir_api` and the Qurʾānic Universal Library; Qurʾān translations from `fawazahmed0/quran-api`; ḥadīth collections from `AhmedBaset/hadith-json`; the Qurʾān in its riwāyāt from `risan/quran-json`; and two dictionaries, Hans Wehr’s *Dictionary of Modern Written Arabic* and Lane’s *An Arabic-English Lexicon* (both read from their SQLite editions, one note per root). Imports are cached, and re-rendering never overwrites your edits: generated content sits in a managed region and only template-declared frontmatter properties are reconciled.
+Collections currently wired in: Qurʾān commentaries (tafsīr) from `spa5k/tafsir_api` and the Qurʾānic Universal Library; Qurʾān translations from `fawazahmed0/quran-api`; ḥadīth collections from `AhmedBaset/hadith-json`; the Qurʾān in its riwāyāt from `risan/quran-json`; two dictionaries, Hans Wehr’s *Dictionary of Modern Written Arabic* and Lane’s *An Arabic-English Lexicon* (both read from their SQLite editions, one note per root); and classical books from [Turath.io](https://app.turath.io) (one note per TOC chapter, a volume index per volume, two category MOCs — `Turath` and the work type). Imports are cached, and re-rendering never overwrites your edits: generated content sits in a managed region and only template-declared frontmatter properties are reconciled. See [Document import](./docs/document-import.md) and [Templates](./docs/templates.md).
 
 ### Zotero export
 
-Installed works can be sent to Zotero as `book` items, each tagged **Midad Arabic Sources** and filed in a collection of that name. Settings choose the method — **Local API** (the Zotero running on `:23119`), **Web API** (key + library id), or **CSL-JSON** (writes a file for a manual File → Import). Already-exported items are updated in place rather than duplicated.
+Installed works can be sent to Zotero as `book` items, each tagged **Midad Arabic Sources** and filed in a collection of that name. Settings choose the method — **Local API** (the Zotero running on `:23119`), **Web API** (key + library id), or **CSL-JSON** (writes a file for a manual File → Import). Already-exported items are updated in place rather than duplicated. See [Zotero](./docs/zotero.md).
+
+## Requirements
+
+- **Obsidian 1.13** or later.
+- **Python 3** with `PyMuPDF` (`fitz`), `requests`, and `google-genai`. The plugin finds a usable interpreter automatically and lets you pin one in settings.
+- **CAMeL Tools** for the transliteration engine, with its model data.
+- A **Gemini API key** for transcription, translation, and optional LLM romanization.
+- **Zotero** (optional) for sending imported works to your library.
+
+See [Dependencies](./docs/dependencies.md) for the exact install lines.
 
 ## Install
 
-The plugin is not yet in the community directory. Install it with **BRAT**, or by hand.
+The plugin is not yet in the community directory.
 
 ### Via BRAT
 
@@ -57,14 +85,7 @@ The plugin is not yet in the community directory. Install it with **BRAT**, or b
 
 ### Manual
 
-Download `main.js`, `manifest.json`, and `styles.css` from the [latest release](https://github.com/nebedaay/Midad-Arabic-Sources/releases) and copy them into `.obsidian/plugins/midad-arabic-sources/` in your vault, then enable the plugin in **Settings → Community plugins**.
-
-## Requirements
-
-- **Python 3** with `PyMuPDF` (`fitz`), `requests`, and `google-genai`. The plugin finds a usable interpreter automatically and lets you pin one in settings.
-- A **Gemini API key** for transcription, translation, and optional LLM romanization. Set it in the plugin settings (it is passed to the pipeline) or in your shell environment.
-- **Zotero** (optional) for sending imported works to your library.
-- The transliteration service downloads its model on first use and needs network access to do so.
+Download `main.js`, `manifest.json`, and `styles.css` from the [latest release](https://github.com/nebedaay/Midad-Arabic-Sources/releases) and copy them into `.obsidian/plugins/midad-arabic-sources/` in your vault, then enable the plugin in **Settings → Community plugins**. The plugin extracts its Python scripts and import templates into that folder on load.
 
 ## Network use and file access
 
@@ -72,7 +93,7 @@ Core importing and rendering use only the repositories you import from. The foll
 
 | Feature | Contacts | Why |
 | --- | --- | --- |
-| Text source import | The public repositories listed above (GitHub, `qul.tarteel.ai`) | Downloads the source texts you choose to import. |
+| Text source import | The public repositories listed above (GitHub, `qul.tarteel.ai`, `turath.io`) | Downloads the source texts you choose to import. |
 | Transliteration | `transliterate-server.py` on `127.0.0.1` | Romanizes Arabic. Optionally calls Gemini or DeepSeek when LLM mode is on. |
 | Transcription / translation | The Gemini API | OCRs and translates scanned PDFs you submit. |
 | Zotero export | Your local Zotero (`127.0.0.1:23119`) or `api.zotero.org` | Reads and writes the bibliographic items you export. |
@@ -82,9 +103,7 @@ Core importing and rendering use only the repositories you import from. The foll
 
 ## How it works
 
-The importer is **acquisition only**: it downloads a work’s source, normalises it into a language-neutral *render model*, and renders that model into notes with **ETA templates** — the same template language used by [ScholarWeft](https://github.com/nebedaay/ScholarWeft). Regenerating a note never overwrites your edits. A content-hash timeline decides whether a template change affects notes, and a two-stage check asks each repository whether a text changed upstream.
-
-The plugin ships its Python scripts, ETA templates, and CSS under `midad-arabic-sources-import-templates/` and `scripts/`, so it is self-contained.
+The importer is **acquisition only**: it downloads a work’s source, normalises it into a language-neutral *render model*, and renders that model into notes with **ETA templates** — the same template language used by [ScholarWeft](https://github.com/nebedaay/ScholarWeft). Regenerating a note never overwrites your edits. A content-hash timeline decides whether a template change affects notes, and a two-stage check asks each repository whether a text changed upstream. The plugin ships its Python scripts, ETA templates, and CSS inside `main.js`, so a release is self-contained.
 
 ## Building from source
 
@@ -99,7 +118,7 @@ Copy `main.js`, `manifest.json`, and `styles.css` into `.obsidian/plugins/midad-
 
 ## Credits
 
-Midad Arabic Sources’ ETA templating, managed-region merge, and note conventions follow **[ScholarWeft](https://github.com/nebedaay/ScholarWeft)**, which pioneered them. The importer draws on the public corpora of [spa5k/tafsir_api](https://github.com/spa5k/tafsir_api), the [Qurʾānic Universal Library](https://qul.tarteel.ai/), [fawazahmed0/quran-api](https://github.com/fawazahmed0/quran-api), [AhmedBaset/hadith-json](https://github.com/AhmedBaset/hadith-json), [risan/quran-json](https://github.com/risan/quran-json), and GibreelAbdullah’s [Hans Wehr](https://github.com/GibreelAbdullah/HansWehrDictionary) and [Lane](https://github.com/GibreelAbdullah/LaneLexicon) dictionary editions. Transliteration uses [CAMeL Tools](https://github.com/CAMeL-Lab/camel_tools).
+Midad Arabic Sources’ ETA templating, managed-region merge, and note conventions follow **[ScholarWeft](https://github.com/nebedaay/ScholarWeft)**, which pioneered them. The importer draws on the public corpora of [spa5k/tafsir_api](https://github.com/spa5k/tafsir_api), the [Qurʾānic Universal Library](https://qul.tarteel.ai/), [fawazahmed0/quran-api](https://github.com/fawazahmed0/quran-api), [AhmedBaset/hadith-json](https://github.com/AhmedBaset/hadith-json), [risan/quran-json](https://github.com/risan/quran-json), [Turath.io](https://app.turath.io), and GibreelAbdullah’s [Hans Wehr](https://github.com/GibreelAbdullah/HansWehrDictionary) and [Lane](https://github.com/GibreelAbdullah/LaneLexicon) dictionary editions. Transliteration uses [CAMeL Tools](https://github.com/CAMeL-Lab/camel_tools).
 
 ## License
 

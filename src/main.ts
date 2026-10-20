@@ -5,6 +5,7 @@ import * as os from "os";
 import { promisify } from "util";
 import {
 	App,
+	ButtonComponent,
 	Editor,
 	MarkdownView,
 	Modal,
@@ -12,6 +13,8 @@ import {
 	Plugin,
 	PluginSettingTab,
 	Setting,
+	SettingDefinitionItem,
+	TAbstractFile,
 	TFile,
 	TextComponent,
 	normalizePath,
@@ -39,6 +42,7 @@ import {
 	templateChangedAt,
 } from "./sourceImport/history";
 import { BUNDLED_ASSETS } from "./assets.generated";
+import { openDocs, getDocs } from "./docs";
 
 // ── External tool resolution (mirrors ScholarWeft's tools.ts) ────────────────
 // Electron's renderer does not inherit the shell PATH, so we probe candidates
@@ -106,7 +110,7 @@ function inferVolumeJS(name: string): number | null {
 
 type Engine = "bert" | "mle" | "none";
 type DotlessYa = "maqsura" | "ya";
-type LlmProvider = "gemini" | "deepseek";
+type LlmProvider = "gemini" | "deepseek" | "openai";
 
 interface ArabicSupportSettings {
 	serverUrl: string;
@@ -123,6 +127,7 @@ interface ArabicSupportSettings {
 	llmProvider: LlmProvider;
 	llmModel: string;
 	llmApiKey: string;
+	llmBaseUrl: string;
 	// Gemini transcription/translation pipeline
 	pythonPath: string;
 	pipelineScript: string;
@@ -224,6 +229,25 @@ interface PipelineState {
 	[k: string]: unknown;
 }
 
+/** The two prompt kinds: one list for OCR, one for translation. */
+type PromptKind = "transcription" | "translation";
+
+/** One named prompt in a `.midad-arabic-sources/*-prompts.json` file. */
+interface PromptEntry {
+	name: string;
+	text: string;
+	/** The built-in "Default prompt": it can be edited but not deleted. */
+	builtin?: boolean;
+	/** True once the user has edited the built-in default, so it is not auto-refreshed. */
+	modified?: boolean;
+}
+
+/** The prompt file's shape. */
+interface PromptFile {
+	version: number;
+	prompts: PromptEntry[];
+}
+
 /** A creator in the work model: a name string or a `{first,last}` / `{name}` object. */
 type CreatorValue =
 	| string
@@ -301,6 +325,10 @@ interface SourceStat {
 	notes?: number;
 	/** The model schema at the last render, so a stale model is still noticed. */
 	schema?: number;
+	/** The *render* version this work was last rendered with (see below). */
+	render?: number;
+	/** Note path → hash of the content last rendered there (see `contentHash`). */
+	units?: Record<string, string>;
 }
 
 /**
@@ -332,14 +360,34 @@ const SOURCE_CATALOG_SCHEMA = 2;
  * it per collection means one collection's change never triggers a corpus-wide
  * re-fetch: a collection absent here keeps its cached models.
  *
- * `dictionary` → 3: the leading-parenthesis fix, the verb-form look-ahead, the
- * engine fallback, the gemination completion, and `title`/`section_page`.
+ * `dictionary` → 6: the leading-parenthesis fix, the verb-form look-ahead, the
+ * engine fallback, the gemination completion, `title`/`section_page`, and
+ * dropping the generated form-label parenthetical (`<b>III</b> (اَاَخَذَ)`).
  * Bump only the affected entries, and in step with `MODEL_SCHEMA` in
  * `scripts/text-source-import.py`.
  */
 const COLLECTION_MODEL_SCHEMA: Record<string, number> = {
-	dictionary: 4,
+	dictionary: 6,
 };
+
+/**
+ * The version at which each collection's *rendering* last changed — the plugin's
+ * own code, not the template and not the model.
+ *
+ * Templates carry their own hashes and models carry their mtimes, so both of
+ * those are already noticed. What was untracked is a change to how this plugin
+ * turns a model into notes (naming, pruning, link forms). Bumping a collection
+ * here makes its works stale, and they re-render in full on the next maintenance
+ * pass — scoped to that collection, so a change to how dictionaries render never
+ * drags the tafsīrs or ḥadīth along with it. Bump it only when the *rendered
+ * output* changes, not for every edit.
+ */
+const COLLECTION_RENDER_VERSION: Record<string, number> = {};
+
+/** The render version a work of this collection must have been rendered at. */
+function requiredRenderVersion(collection: string): number {
+	return COLLECTION_RENDER_VERSION[collection] ?? 0;
+}
 /** The schema every model was written at before per-collection tracking. */
 const BASE_MODEL_SCHEMA = 1;
 
@@ -361,6 +409,18 @@ const SOURCE_TEMPLATE_KIND: Record<string, string> = {
 	quran: "quran",
 	dictionary: "dict",
 	dictionaryIndex: "dict-index",
+	book: "book",
+	bookVolume: "book-volume",
+};
+
+const DEFAULT_PROMPT_NAME = "Default prompt";
+const PROMPT_FILES: Record<PromptKind, string> = {
+	transcription: ".midad-arabic-sources/transcription-prompts.json",
+	translation: ".midad-arabic-sources/translation-prompts.json",
+};
+const PROMPT_KIND_LABEL: Record<PromptKind, string> = {
+	transcription: "transcription",
+	translation: "translation",
 };
 
 const DEFAULT_SETTINGS: ArabicSupportSettings = {
@@ -376,6 +436,7 @@ const DEFAULT_SETTINGS: ArabicSupportSettings = {
 	llmProvider: "gemini",
 	llmModel: "gemini-3.5-flash-lite",
 	llmApiKey: "",
+	llmBaseUrl: "",
 	pythonPath: "",
 	pipelineScript: "scripts/midad-arabic-sources-pipeline.py",
 	geminiApiKey: "",
@@ -406,6 +467,14 @@ export default class ArabicSupportPlugin extends Plugin {
 	/** Guards the automatic Zotero sync against overlapping runs. */
 	zoteroSyncRunning = false;
 	zoteroSyncAgain = false;
+	/** Set by the Stop button/command; checked per note by a source render. */
+	sourceCancelled = false;
+	/** The current source operation; a newer one invalidates the old one. */
+	sourceOperationId = 0;
+	sourceOperationActive = false;
+	sourceOperationKind: "explicit" | "auto" | null = null;
+	/** The Python process currently acquiring sources, if any. */
+	activeSourceProc: ReturnType<typeof spawn> | null = null;
 
 	async onload() {
 		await this.loadSettings();
@@ -456,32 +525,9 @@ export default class ArabicSupportPlugin extends Plugin {
 		});
 
 		this.addCommand({
-			id: "check-transliteration-server",
-			name: "Check transliteration server",
-			callback: async () => {
-				const health = await this.health();
-				if (!health) {
-					new Notice(`Transliteration server not reachable at ${this.settings.serverUrl}.`);
-					return;
-				}
-				const engines = health.engines_loaded?.join(", ") || "none loaded yet";
-				const providers = health.providers
-					? Object.entries(health.providers).filter(([, v]) => v).map(([k]) => k).join(", ") || "none"
-					: "unknown";
-				new Notice(`Server OK. Engines: ${engines}. LLM providers (env): ${providers}.`);
-			},
-		});
-
-		this.addCommand({
-			id: "start-transliteration-server",
-			name: "Start transliteration server",
-			callback: async () => { await this.startTransliterationServer(); },
-		});
-
-		this.addCommand({
-			id: "stop-transliteration-server",
-			name: "Stop transliteration server",
-			callback: async () => { await this.stopTransliterationServer(); },
+			id: "transliteration-server",
+			name: "Transliteration server…",
+			callback: () => { new TransliterationServerModal(this.app, this).open(); },
 		});
 
 		this.addCommand({
@@ -535,6 +581,12 @@ export default class ArabicSupportPlugin extends Plugin {
 		});
 
 		this.addCommand({
+			id: "add-turath-work-by-url",
+			name: "Add Turath work by URL…",
+			callback: () => { new TurathUrlModal(this.app, this).open(); },
+		});
+
+		this.addCommand({
 			id: "copy-import-templates",
 			name: "Copy import templates to vault",
 			callback: async () => { await this.copyImportTemplates(); },
@@ -545,6 +597,31 @@ export default class ArabicSupportPlugin extends Plugin {
 			name: "Re-render imported sources",
 			callback: async () => { await this.rerenderAllSources(); },
 		});
+
+		this.addCommand({
+			id: "stop-source-operation",
+			name: "Stop source import or render",
+			callback: () => { this.cancelSourceOperation(); },
+		});
+
+		this.addCommand({
+			id: "rerender-this-source",
+			name: "Re-render this source",
+			callback: async () => { await this.rerenderCurrentSource(); },
+		});
+
+		// The same, from a note's own right-click menu, so it is reachable where you
+		// are looking. The item only appears for a note that belongs to a source.
+		this.registerEvent(this.app.workspace.on("file-menu", (menu, file) => {
+			void (async () => {
+				const work = await this.workForPath(file.path);
+				if (!work) return;
+				menu.addItem((item) => item
+					.setTitle("Re-render this source")
+					.setIcon("refresh-cw")
+					.onClick(() => { void this.rerenderCurrentSource(file); }));
+			})();
+		}));
 
 		this.addCommand({
 			id: "apply-template-changes",
@@ -559,6 +636,12 @@ export default class ArabicSupportPlugin extends Plugin {
 			id: "redownload-sources",
 			name: "Re-download imported sources (rebuild models)",
 			callback: async () => { await this.redownloadSources(); },
+		});
+
+		this.addCommand({
+			id: "migrate-source-naming",
+			name: "Migrate imported sources to the current naming scheme",
+			callback: async () => { await this.migrateSourceNaming(); },
 		});
 
 		this.addCommand({
@@ -598,6 +681,12 @@ export default class ArabicSupportPlugin extends Plugin {
 			callback: async () => { await this.sendActiveSource(); },
 		});
 
+		this.addCommand({
+			id: "open-documentation",
+			name: "Open documentation",
+			callback: () => { openDocs(this.app); },
+		});
+
 		// Auto-maintain: restore anything incomplete and re-render stale notes.
 		// (The template hashes are recorded inside maintainSources, so the pass
 		// that notices a change is also the one that applies it.)
@@ -622,6 +711,14 @@ export default class ArabicSupportPlugin extends Plugin {
 	}
 
 	onunload(): void {
+		// Invalidate this instance's source operation before a re-enable creates a
+		// new one: the old render loop checks the generation per note, and the
+		// importer subprocess is killed, so two instances cannot write together.
+		this.sourceCancelled = true;
+		this.sourceOperationId += 1;
+		this.sourceOperationActive = false;
+		this.sourceOperationKind = null;
+		try { this.activeSourceProc?.kill("SIGTERM"); } catch { /* already gone */ }
 		this.statusPanels.forEach((p) => p.destroy());
 		this.statusPanels = [];
 	}
@@ -649,6 +746,7 @@ export default class ArabicSupportPlugin extends Plugin {
 		if (!vault) return;
 		const base = this.manifest.dir ?? `${this.app.vault.configDir}/plugins/midad-arabic-sources`;
 		for (const asset of BUNDLED_ASSETS) {
+			if (asset.extract === false) continue;
 			try {
 				const dest = `${vault}/${base}/${asset.path}`;
 				if (fs.existsSync(dest) && fs.readFileSync(dest, "utf8") === asset.content) continue;
@@ -670,6 +768,24 @@ export default class ArabicSupportPlugin extends Plugin {
 			this.pythonPromise = findPython3("", ["fitz", "requests", "google.genai"]).then((p) => p ?? "python3");
 		}
 		return this.pythonPromise;
+	}
+
+	serverPythonPromise: Promise<string> | null = null;
+
+	/**
+	 * The interpreter that can import CAMeL, for the transliteration server. It is
+	 * resolved the same way as the pipeline's Python (ScholarWeft's `findPython3`:
+	 * configured path, then PATH, then the installer venv, conda/anaconda, pyenv,
+	 * Homebrew, distro), but probed on `camel_tools` rather than the PDF deps.
+	 */
+	resolveServerPython(): Promise<string> {
+		const configured = this.settings.pythonPath ?? "";
+		if (configured.trim()) return Promise.resolve(configured.trim());
+		if (this.serverPythonPromise == null) {
+			this.serverPythonPromise = findPython3("", ["camel_tools"])
+				.then((p) => p ?? this.resolvePython());
+		}
+		return this.serverPythonPromise;
 	}
 
 	/** PDF paths ScholarWeft has already resolved for a citekey, if any. */
@@ -745,6 +861,11 @@ export default class ArabicSupportPlugin extends Plugin {
 					...(this.settings.geminiApiKey ? { GEMINI_API_KEY: this.settings.geminiApiKey } : {}),
 				},
 			});
+			// Only the source importer is a cancellable source operation; a
+			// transcription/translation job must not be killed by a source stop.
+			const isSourceScript = scriptRel === this.settings.sourceImportScript
+				|| /text-source-import\.py$/.test(scriptRel);
+			if (isSourceScript) this.activeSourceProc = proc;
 			let buf = "";
 			const handle = (chunk: Buffer) => {
 				buf += chunk.toString();
@@ -763,8 +884,12 @@ export default class ArabicSupportPlugin extends Plugin {
 			};
 			proc.stdout.on("data", handle);
 			proc.stderr.on("data", handle);
-			proc.on("close", (code: number) => resolve({ code: code ?? 0, lines }));
+			proc.on("close", (code: number) => {
+				if (this.activeSourceProc === proc) this.activeSourceProc = null;
+				resolve({ code: code ?? 0, lines });
+			});
 			proc.on("error", (e: Error) => {
+				if (this.activeSourceProc === proc) this.activeSourceProc = null;
 				onEvent({ event: "error", message: String(e) });
 				resolve({ code: 1, lines });
 			});
@@ -789,6 +914,53 @@ export default class ArabicSupportPlugin extends Plugin {
 			console.error("[midad-arabic-sources] pipeline", args, { code, lines });
 		}
 		return result;
+	}
+
+	/**
+	 * Start a source operation. If one is still running, invalidate it first: the
+	 * old loops check their generation before every note and stop, so a plugin
+	 * update or a new install never leaves two renders writing the same notes.
+	 */
+	beginSourceOperation(kind: "explicit" | "auto" = "explicit"): number | null {
+		if (this.sourceOperationActive) {
+			// A background pass must not interrupt something the user started;
+			// it will simply run on its next cadence. A new explicit operation,
+			// or another automatic pass, supersedes the old one.
+			if (kind === "auto" && this.sourceOperationKind === "explicit") return null;
+			this.cancelSourceOperation();
+		}
+		this.sourceCancelled = false;
+		this.sourceOperationId += 1;
+		this.sourceOperationActive = true;
+		this.sourceOperationKind = kind;
+		return this.sourceOperationId;
+	}
+
+	/** Whether the operation `id` has been stopped or superseded. */
+	isSourceCancelled(id: number): boolean {
+		return this.sourceCancelled || id !== this.sourceOperationId;
+	}
+
+	/** Release an operation only if it is still the current one. */
+	endSourceOperation(id: number): void {
+		if (id === this.sourceOperationId) {
+			this.sourceOperationActive = false;
+			this.sourceOperationKind = null;
+		}
+	}
+
+	/**
+	 * Stop the current source import/render. The render loop checks the flag
+	 * before every note, and a running acquisition subprocess is killed; the
+	 * work is left uninstalled, so installing again resumes from the model.
+	 */
+	cancelSourceOperation(): void {
+		this.sourceCancelled = true;
+		this.sourceOperationId += 1;   // supersede the running operation
+		this.sourceOperationActive = false;
+		this.sourceOperationKind = null;
+		try { this.activeSourceProc?.kill("SIGTERM"); } catch { /* already gone */ }
+		new Notice("Stopping source operation…");
 	}
 
 	async runWithProgress(title: string, args: string[], scriptRel?: string): Promise<PipelineResult> {
@@ -865,6 +1037,107 @@ export default class ArabicSupportPlugin extends Plugin {
 		}
 	}
 
+	/** Built-in prompt text, fetched once per session. */
+	promptDefaults: Record<PromptKind, string> | null = null;
+
+	/** Ask the pipeline for the built-in prompts (single source: midad_prompts.py). */
+	async loadDefaultPrompts(): Promise<Record<PromptKind, string> | null> {
+		if (this.promptDefaults) return this.promptDefaults;
+		const result = await this.pipelineResult(["default-prompts"]);
+		const transcription = typeof result?.transcription === "string" ? result.transcription : "";
+		const translation = typeof result?.translation === "string" ? result.translation : "";
+		if (!transcription || !translation) return null;
+		this.promptDefaults = { transcription, translation };
+		return this.promptDefaults;
+	}
+
+	promptPath(kind: PromptKind): string {
+		return normalizePath(PROMPT_FILES[kind]);
+	}
+
+	async savePromptSet(kind: PromptKind, prompts: PromptEntry[]): Promise<void> {
+		const dir = normalizePath(".midad-arabic-sources");
+		try {
+			if (!(await this.app.vault.adapter.exists(dir))) await this.app.vault.adapter.mkdir(dir);
+		} catch { /* the pipeline may already have created it */ }
+		const data: PromptFile = { version: 1, prompts };
+		await this.app.vault.adapter.write(this.promptPath(kind), JSON.stringify(data, null, 2) + "\n");
+	}
+
+	/**
+	 * Read a prompt list, seeding it from the built-in default on first use. An
+	 * unmodified built-in default is refreshed from midad_prompts.py, so a plugin
+	 * update can improve it without overwriting a user's edits.
+	 */
+	async loadPromptSet(kind: PromptKind): Promise<PromptEntry[]> {
+		const path = this.promptPath(kind);
+		let prompts: PromptEntry[] = [];
+		let fileExists = false;
+		try {
+			fileExists = await this.app.vault.adapter.exists(path);
+			if (fileExists) {
+				const parsed = JSON.parse(await this.app.vault.adapter.read(path)) as PromptFile;
+				if (Array.isArray(parsed?.prompts)) {
+					prompts = parsed.prompts
+						.filter((p): p is PromptEntry => !!p && typeof p.name === "string" && typeof p.text === "string")
+						.map((p) => ({ ...p }));
+				}
+			}
+		} catch (e) {
+			console.error("[midad-arabic-sources] prompt file", kind, e);
+			new Notice(`Could not read the ${PROMPT_KIND_LABEL[kind]} prompts file; it will be recreated.`);
+			prompts = [];
+		}
+
+		// Keep dropdown values unique and ignore blank entries.
+		const seen = new Set<string>();
+		prompts = prompts.filter((p) => {
+			const name = p.name.trim();
+			if (!name || seen.has(name)) return false;
+			seen.add(name);
+			return true;
+		});
+
+		const builtin = prompts.find((p) => p.builtin);
+		const needDefaults = !builtin || !builtin.modified;
+		const defaults = needDefaults ? await this.loadDefaultPrompts() : null;
+		const defaultText = defaults?.[kind] ?? "";
+		let changed = !fileExists;
+
+		if (!builtin) {
+			if (!defaultText) throw new Error(`Could not load the built-in ${PROMPT_KIND_LABEL[kind]} prompt.`);
+			prompts.unshift({ name: DEFAULT_PROMPT_NAME, text: defaultText, builtin: true });
+			changed = true;
+		} else if (defaultText && !builtin.modified && builtin.text !== defaultText) {
+			builtin.text = defaultText;
+			changed = true;
+		}
+		const defaultEntry = prompts.find((p) => p.builtin);
+		if (defaultEntry && !defaultEntry.text.trim() && !defaultText) {
+			throw new Error(`Could not load the built-in ${PROMPT_KIND_LABEL[kind]} prompt.`);
+		}
+		if (defaultEntry && defaultEntry.name !== DEFAULT_PROMPT_NAME) {
+			defaultEntry.name = DEFAULT_PROMPT_NAME;
+			changed = true;
+		}
+
+		if (changed) await this.savePromptSet(kind, prompts);
+		return prompts;
+	}
+
+	/** Write the chosen prompt where the pipeline's submit script can read it. */
+	writePromptFile(kind: PromptKind, text: string): string | null {
+		try {
+			const path = this.jobPath(`Prompt ${PROMPT_KIND_LABEL[kind]}`, "txt");
+			fs.writeFileSync(path, text, "utf8");
+			return path;
+		} catch (e) {
+			console.error("[midad-arabic-sources] prompt file", kind, e);
+			new Notice("Could not write the prompt file — see the developer console.");
+			return null;
+		}
+	}
+
 	async openTranscribe() {
 		const item = this.activeItem();
 		if (!item) { new Notice("Open a literature note (@citekey) first."); return; }
@@ -881,7 +1154,15 @@ export default class ArabicSupportPlugin extends Plugin {
 			}
 		}
 		if (!pdfs.length) { new Notice("No PDF attachments found for this item."); return; }
-		new TranscribeModal(this.app, this, item.citekey, pdfs).open();
+		let prompts: PromptEntry[];
+		try {
+			prompts = await this.loadPromptSet("transcription");
+		} catch (e) {
+			console.error("[midad-arabic-sources] transcription prompts", e);
+			new Notice("Could not load the transcription prompts — see the developer console.");
+			return;
+		}
+		new TranscribeModal(this.app, this, item.citekey, pdfs, prompts).open();
 	}
 
 	async openTranslate() {
@@ -890,7 +1171,15 @@ export default class ArabicSupportPlugin extends Plugin {
 		if (!this.ensureApiKey()) return;
 		const notes = ((await this.pipelineResult(["list-transcriptions", item.path]))?.notes ?? []) as unknown as PipelineNote[];
 		const pdfs = (await this.pipelineResult(["list-pdfs", item.path]))?.pdfs ?? [];
-		new TranslateModal(this.app, this, item.citekey, notes, pdfs).open();
+		let prompts: PromptEntry[];
+		try {
+			prompts = await this.loadPromptSet("translation");
+		} catch (e) {
+			console.error("[midad-arabic-sources] translation prompts", e);
+			new Notice("Could not load the translation prompts — see the developer console.");
+			return;
+		}
+		new TranslateModal(this.app, this, item.citekey, notes, pdfs, prompts).open();
 	}
 
 	async openReprocess() {
@@ -899,13 +1188,119 @@ export default class ArabicSupportPlugin extends Plugin {
 	}
 
 	/** Ask the importer script for its catalogue of available works. */
-	async listSources(): Promise<SourceWork[]> {
+	async listSources(freshDirs = false): Promise<SourceWork[]> {
 		let works: SourceWork[] = [];
-		const { code, lines } = await this.runScript(this.settings.sourceImportScript, ["list", "--json"], (ev) => {
+		const args = ["list", "--json", ...(freshDirs ? ["--fresh-dirs"] : [])];
+		const { code, lines } = await this.runScript(this.settings.sourceImportScript, args, (ev) => {
 			if (ev.event === "works") works = ev.works as SourceWork[];
 		});
 		if (!works.length) console.error("[midad-arabic-sources] source list", { code, lines });
 		return works;
+	}
+
+	// ── User-added Turath works (a URL list) ─────────────────────────────────
+
+	customWorksPath(): string {
+		return normalizePath(".midad-arabic-sources/turath-custom-works.json");
+	}
+
+	async loadCustomWorks(): Promise<TurathCustomWork[]> {
+		try {
+			const text = await this.app.vault.adapter.read(this.customWorksPath());
+			const data = JSON.parse(text) as TurathCustomWork[] | { works?: TurathCustomWork[] };
+			const rows = Array.isArray(data) ? data : data.works;
+			return Array.isArray(rows) ? rows.filter((w) => w && w.id) : [];
+		} catch {
+			return [];
+		}
+	}
+
+	async saveCustomWorks(works: TurathCustomWork[]): Promise<void> {
+		await this.app.vault.adapter.write(this.customWorksPath(), JSON.stringify({ works }, null, 2));
+		this.sourceCatalog = null; // the catalogue now differs
+	}
+
+	/** The numeric id from a Turath URL, or from a bare id; '' if neither. */
+	parseTurathId(input: string): string {
+		const text = String(input || "").trim();
+		const m = text.match(/\/book\/(\d+)/i) || text.match(/^(\d+)$/);
+		return m ? m[1] : "";
+	}
+
+	/** Fetch a book's metadata and add it to the user's list. */
+	/** Ask the resident server to romanize a title or name (best effort). */
+	async romanizeName(text: string): Promise<string> {
+		const value = String(text || "").trim();
+		if (!value) return "";
+		try {
+			const res = await requestUrl({
+				url: this.baseUrl() + "/transliterate",
+				method: "POST",
+				contentType: "application/json",
+				body: JSON.stringify({ text: value, engine: "bert", name: true, standalone: true, citation: true }),
+			});
+			const out = (res.json as { romanized?: string })?.romanized;
+			return typeof out === "string" ? out.trim() : "";
+		} catch {
+			return "";
+		}
+	}
+
+	/** Read a book's metadata and build a provisional entry (not saved yet). */
+	async previewTurathWork(input: string): Promise<TurathCustomWork | null> {
+		const id = this.parseTurathId(input);
+		if (!id) {
+			new Notice("Paste a Turath book URL (or its numeric ID).");
+			return null;
+		}
+		let meta: { name?: string; info?: string; cat_id?: number } | undefined;
+		try {
+			const res = await requestUrl({ url: `https://api.turath.io/book?id=${id}&include=indexes&ver=3`, method: "GET" });
+			meta = (res.json as { meta?: { name?: string; info?: string; cat_id?: number } })?.meta;
+		} catch (e) {
+			new Notice(`Could not fetch Turath book ${id}: ${e instanceof Error ? e.message : e}`);
+			return null;
+		}
+		if (!meta?.name) {
+			new Notice(`Turath book ${id} was not found (or has no metadata).`);
+			return null;
+		}
+		const cat = Number(meta.cat_id ?? 0);
+		const type = TURATH_CAT_TYPES[cat] ?? "other";
+		const authorAr = this.authorFromInfo(meta.info);
+		const [titleRoman, authorRoman] = await Promise.all([
+			this.romanizeName(meta.name),
+			this.romanizeName(authorAr),
+		]);
+		return {
+			id,
+			title: titleRoman ? sentenceCaseTitle(titleRoman) : meta.name,
+			arabic: meta.name,
+			author: authorRoman || authorAr,
+			type,
+			genres: genresForCat(cat, type),
+			url: `https://app.turath.io/book/${id}`,
+		};
+	}
+
+	async saveTurathWork(work: TurathCustomWork): Promise<void> {
+		const list = await this.loadCustomWorks();
+		const i = list.findIndex((w) => String(w.id) === work.id);
+		if (i >= 0) list[i] = work;
+		else list.push(work);
+		await this.saveCustomWorks(list);
+		new Notice(`Added “${work.title}”. Open Manage text sources to install it.`);
+	}
+
+	async removeTurathWork(id: string): Promise<void> {
+		await this.saveCustomWorks((await this.loadCustomWorks()).filter((w) => String(w.id) !== String(id)));
+	}
+
+	/** The author line from Turath's `info` (`المؤلف: …`), without the dates. */
+	authorFromInfo(info: string | undefined): string {
+		const m = String(info || "").match(/(?:المؤلف|تأليف)\s*[:：]\s*(.+)/);
+		if (!m) return "";
+		return m[1].replace(/\s*\(ت.*$/, "").trim().replace(/^[-–—\s]+|[-–—\s]+$/g, "");
 	}
 
 	/**
@@ -1793,12 +2188,17 @@ export default class ArabicSupportPlugin extends Plugin {
 		const outRoot = this.settings.sourceImportRoot.trim() || "_7 Sources";
 		const dir = String(work.dir ?? "");
 		const title = String(work.title ?? "");
-		if (!dir || !title || dir === title) return;
+		const key = this.workKey(work);
+		if (!dir || !title || !key || dir === title) return;
 		const adapter = this.app.vault.adapter;
 		const hub = normalizePath(`${outRoot}/${title}.md`);
 		try {
 			if (!(await adapter.exists(hub))) return;
-			if (!(await adapter.read(hub)).includes("text-source")) return;
+			const content = await adapter.read(hub);
+			if (!content.includes("text-source")) return;
+			// Only prune a folder this work used to own. Two editions can share a
+			// `title`, so a same-named hub may belong to another work.
+			if (!content.includes(`mas-key: ${key}`) && !content.includes(`mas-key: "${key}"`)) return;
 			await adapter.remove(hub);
 			const folder = normalizePath(`${outRoot}/${title}`);
 			if (await adapter.exists(folder)) await adapter.rmdir(folder, true);
@@ -1843,7 +2243,9 @@ export default class ArabicSupportPlugin extends Plugin {
 		const installed = works.filter((w) => this.workStatus(w) === "installed");
 		const today = new Date().toISOString().slice(0, 10);
 		const written = await renderMocs(this.app, templates, installed, outRoot, today, this.settings.sourceMocParent.trim() || "Sources", true);
-		const mocNames = [...new Set(installed.map((w) => (typeof w.moc === "string" ? w.moc : "")).filter(Boolean))].sort();
+		const mocNames = [...new Set(installed.flatMap((w) => (
+			Array.isArray(w.mocs) ? (w.mocs as string[]) : (typeof w.moc === "string" ? [w.moc] : [])
+		)))].filter(Boolean).sort();
 		const parentPath = await this.updateSourceParent(templates, mocNames, today);
 		if (parentPath) written.push(parentPath);
 		return written;
@@ -1920,12 +2322,15 @@ export default class ArabicSupportPlugin extends Plugin {
 	}
 
 	/** Reinstall a work by re-fetching (cached) and re-rendering it. */
-	async reinstallSource(work: JsonObject): Promise<void> {
-		await this.importSources([`${work.collection}:${work.id}`]);
+	async reinstallSource(work: JsonObject, kind: "explicit" | "auto" = "explicit"): Promise<void> {
+		await this.importSources([`${work.collection}:${work.id}`], false, undefined, kind);
 	}
 
 	/** Ask the source repositories whether any imported work has changed upstream. */
-	async checkSourceUpdates(): Promise<string[]> {
+	async checkSourceUpdates(kind: "explicit" | "auto" = "explicit"): Promise<string[]> {
+		const op = this.beginSourceOperation(kind);
+		if (op === null) return [];
+		try {
 		const manifest = await this.loadSourceManifest();
 		const pending = await this.loadPendingDeletions();
 		const keys = new Set<string>();
@@ -1939,6 +2344,7 @@ export default class ArabicSupportPlugin extends Plugin {
 		const args = ["check-updates"];
 		for (const k of keys) args.push("--key", k);
 		const result = await this.runWithProgress("Checking for updates", args, this.settings.sourceImportScript);
+		if (this.isSourceCancelled(op)) return [];
 		const changed: string[] = result?.changed ?? [];
 		const dateOnly: string[] = result?.date_only ?? [];
 		if (!changed.length && !dateOnly.length) {
@@ -1946,12 +2352,16 @@ export default class ArabicSupportPlugin extends Plugin {
 			return [];
 		}
 		// Repository moved but the text did not: refresh the property from the model.
-		if (dateOnly.length) await this.renderWithProgress(dateOnly, false, "Refreshing source details");
+		if (dateOnly.length) await this.renderWithProgress(dateOnly, false, "Refreshing source details", op);
+		if (this.isSourceCancelled(op)) return [];
 		if (changed.length) {
 			new Notice(`Text changed in ${changed.length} work(s); updating…`);
-			await this.importSources(changed, true);
+			await this.importSources(changed, true, op);
 		}
 		return changed;
+		} finally {
+			this.endSourceOperation(op);
+		}
 	}
 
 	/**
@@ -1972,12 +2382,13 @@ export default class ArabicSupportPlugin extends Plugin {
 		const name = String(needs.title || needs.name || needs.key);
 		for (;;) {
 			if (await this.health()) return false; // the service is running
-			const choice = await new Promise<"retry" | "skip" | "cancel">((resolve) => {
+			const choice = await new Promise<"start" | "skip" | "cancel">((resolve) => {
 				new TransliterationUnavailableModal(this.app, name, resolve).open();
 			});
 			if (choice === "skip") return true;
 			if (choice === "cancel") return null;
-			// "Try again" → re-check whether the service has come up.
+			// "Start server" → start it here, then re-check in the loop.
+			await this.startTransliterationServer();
 		}
 	}
 
@@ -1995,7 +2406,7 @@ export default class ArabicSupportPlugin extends Plugin {
 		try {
 			await this.app.vault.adapter.write(path, JSON.stringify({ at: Date.now() }));
 		} catch { /* ignore */ }
-		await this.checkSourceUpdates();
+		await this.checkSourceUpdates("auto");
 	}
 
 	bundledTemplateDir(): string {
@@ -2015,11 +2426,17 @@ export default class ArabicSupportPlugin extends Plugin {
 	}
 
 	/** Acquire the chosen works, then render their models into the vault. */
-	async importSources(keys: string[], refresh = false): Promise<void> {
+	async importSources(keys: string[], refresh = false, operationId?: number,
+		kind: "explicit" | "auto" = "explicit"): Promise<void> {
 		if (!keys.length) {
 			new Notice("Select at least one source.");
 			return;
 		}
+		const op = operationId ?? this.beginSourceOperation(kind);
+		if (op === null) return;
+		const owns = operationId === undefined;
+		try {
+		void this.maybeWarnEngineFallback();
 		// (Re)installing clears any half-finished removal flag for these keys.
 		await this.unmarkPendingDeletion(...keys);
 		// The first riwāya ever installed becomes the canonical one, permanently.
@@ -2049,13 +2466,25 @@ export default class ArabicSupportPlugin extends Plugin {
 			args,
 			this.settings.sourceImportScript
 		);
+		if (this.isSourceCancelled(op)) {
+			new Notice("Stopped. The work is not installed; install it again to resume.");
+			return;
+		}
 		const models: string[] = result?.models ?? [];
 		if (!models.length) {
 			new Notice("No models were produced — see the pipeline status.");
 			return;
 		}
-		const written = await this.renderWithProgress(models, false, "Rendering notes");
+		const written = await this.renderWithProgress(models, false, "Rendering notes", op);
+		if (this.isSourceCancelled(op)) {
+			new Notice("Stopped. Partial notes remain; install again to finish.");
+			return;
+		}
 		new Notice(`Rendered ${written.length} notes.`);
+		void this.maybeWarnEngineFallback();
+		} finally {
+			if (owns) this.endSourceOperation(op);
+		}
 	}
 
 	/**
@@ -2064,8 +2493,18 @@ export default class ArabicSupportPlugin extends Plugin {
 	 * re-render is silent and its end is impossible to detect. Every background
 	 * render goes through here, so nothing large ever runs without a report.
 	 */
-	async renderWithProgress(modelPaths: string[], force: boolean, title: string): Promise<string[]> {
+	async renderWithProgress(modelPaths: string[], force: boolean, title: string,
+		operationId?: number, kind: "explicit" | "auto" = "explicit"): Promise<string[]> {
+		const op = operationId ?? this.beginSourceOperation(kind);
+		if (op === null) return [];
+		const owns = operationId === undefined;
 		const progress = new Notice(`${title}…`, 0);
+		const stop = progress.messageEl.createEl("button", { text: "Stop" });
+		stop.addEventListener("click", () => {
+			stop.disabled = true;
+			progress.setMessage(`${title}: stopping…`);
+			this.cancelSourceOperation();
+		});
 		// Cumulative file count: `step` restarts at each work, so the previous
 		// work's total is banked when the work changes.
 		let filesDone = 0;
@@ -2089,13 +2528,15 @@ export default class ArabicSupportPlugin extends Plugin {
 				];
 				if (left > 0) parts.push(`${left} work${left === 1 ? "" : "s"} left`);
 				progress.setMessage(`${title}: ${parts.join(" — ")}`);
-			});
+			}, () => this.isSourceCancelled(op));
 		} finally {
 			progress.hide();
+			if (owns) this.endSourceOperation(op);
 		}
 	}
 
-	async renderModels(modelPaths: string[], force = false, onProgress?: (p: RenderProgress) => void): Promise<string[]> {
+	async renderModels(modelPaths: string[], force = false, onProgress?: (p: RenderProgress) => void,
+		shouldCancel?: () => boolean): Promise<string[]> {
 		const vault = this.vaultPath();
 		const userFolder = this.settings.sourceTemplateFolder.trim() || null;
 		let templates: TemplateSet;
@@ -2146,6 +2587,7 @@ export default class ArabicSupportPlugin extends Plugin {
 		const pubs = await this.loadPublicationMap();
 		const stats = await this.loadSourceStats();
 		for (let i = 0; i < batch.length; i++) {
+			if (shouldCancel?.()) break;
 			const model = batch[i];
 			// Hand the templates the researched bibliographic details, if any — plus
 			// the combined `mas-note` text, so the note holds everything the Zotero
@@ -2157,15 +2599,26 @@ export default class ArabicSupportPlugin extends Plugin {
 				onProgress?.({ index: i, total: batch.length, work, step, steps });
 			emit(0, 0);
 			try {
-				const w = await renderModelToVault(this.app, templates, model, outRoot, force, emit);
+				const seen = new Map(Object.entries(stats[this.workKey(model.work)]?.units ?? {}));
+				const w = await renderModelToVault(this.app, templates, model, outRoot, force, emit,
+					undefined, seen, shouldCancel);
 				written.push(...w);
 				// A full render brings every template the work uses up to date.
 				const key = this.workKey(model.work);
 				const now = Date.now();
 				const rendered: Record<string, number> = { ...(stats[key]?.rendered ?? {}) };
 				for (const tkey of this.templateKeysFor(String(model.work.collection ?? ""))) rendered[tkey] = now;
-				stats[key] = { ...stats[key], rendered, notes: w.length, schema: Number(model.schema ?? 0) };
+				stats[key] = {
+					...stats[key], rendered, units: Object.fromEntries(seen),
+					// The total, not the number just rewritten: this is the baseline the
+					// completeness check compares against, and most notes are skipped.
+					notes: expectedNotePaths(model, outRoot, canonicalRoot, canonicalId).length,
+					schema: Number(model.schema ?? 0),
+					render: requiredRenderVersion(String(model.work.collection ?? "")),
+				};
 			} catch (e) {
+				// A user's Stop is not a failure: leave the work uninstalled and stop.
+				if (shouldCancel?.()) break;
 				// One unusable model must not abort the whole batch: a template/model
 				// mismatch used to kill a re-render, leaving only a flashed notice.
 				console.error("[midad-arabic-sources] render failed", this.workKey(model.work), e);
@@ -2174,6 +2627,9 @@ export default class ArabicSupportPlugin extends Plugin {
 			await this.pruneRenamedFolder(model.work);
 		}
 		await this.saveSourceStats(stats);
+		// A stopped render leaves the MOCs and Zotero as they were; the next pass
+		// finishes the work. Rebuilding them now would be more writes after a stop.
+		if (shouldCancel?.()) return written;
 		// Category MOCs and the parent note reflect exactly what is installed;
 		// a manifest keeps a work listed even if its cached model is removed.
 		written.push(...(await this.refreshSourcesIndex()));
@@ -2378,7 +2834,149 @@ export default class ArabicSupportPlugin extends Plugin {
 		await this.importSources(keys);
 	}
 
+	/**
+	 * Rename every installed work's folder, hub, and unit files to the current
+	 * naming scheme (repository-qualified; a work flagged `unique` keeps its bare
+	 * name). Files move *before* the re-render, so the re-render merges into the
+	 * moved notes and user content outside the managed region survives.
+	 *
+	 * `adapter.rename` is used rather than `fileManager.renameFile`: the latter
+	 * rewrites every inbound link on each of thousands of renames, which is very
+	 * slow; the single re-render afterwards rewrites the managed links instead.
+	 */
+	async migrateSourceNaming(): Promise<void> {
+		const adapter = this.app.vault.adapter;
+		const canonicalId = this.resolveCanonicalQuran();
+
+		let catalogue: SourceWork[];
+		try {
+			catalogue = await this.listSources(true);
+		} catch (e) {
+			new Notice(`Could not read the catalogue: ${e instanceof Error ? e.message : e}`);
+			return;
+		}
+		const targets = new Map(catalogue.map((w) => [w.key, w.dir]));
+
+		const manifest = await this.loadSourceManifest();
+		const pending = await this.loadPendingDeletions();
+		const migrated: string[] = [];
+		const models: string[] = [];
+		const problems: string[] = [];
+		const notice = new Notice("Checking source names…", 0);
+		try {
+			for (const work of manifest) {
+				if (this.workStatus(work) !== "installed" || pending.has(this.workKey(work))) continue;
+				const key = this.workKey(work);
+				const oldDir = String(work.dir ?? "");
+				const newDir = String(targets.get(key) ?? "");
+				if (!oldDir || !newDir || oldDir === newDir) continue;
+
+				const modelRel = normalizePath(`.midad-arabic-sources/source-models/${work.collection}/${work.id}.json`);
+				let text: string;
+				try {
+					text = await adapter.read(modelRel);
+				} catch {
+					problems.push(`${key}: model missing`);
+					continue;
+				}
+				let model: SourceModel;
+				try {
+					model = JSON.parse(text) as SourceModel;
+				} catch {
+					problems.push(`${key}: model unreadable`);
+					continue;
+				}
+
+				try {
+					await this.moveWorkFiles(work, model, oldDir, newDir, canonicalId);
+				} catch (e) {
+					problems.push(`${key}: ${e instanceof Error ? e.message : e}`);
+					continue;
+				}
+				model.work.dir = newDir;
+				await adapter.write(modelRel, JSON.stringify(model));
+				work.dir = newDir;
+				migrated.push(key);
+				models.push(`${this.vaultPath()}/${modelRel}`);
+				notice.setMessage(`Renaming sources: ${migrated.length} moved — ${newDir}`);
+			}
+		} finally {
+			notice.hide();
+		}
+
+		if (migrated.length) {
+			await this.saveSourceManifest(manifest);
+			await this.renderWithProgress(models, false, "Renaming imported sources");
+		}
+		const summary = migrated.length
+			? `Renamed ${migrated.length} source(s) and re-rendered their notes.`
+			: "No source folders needed renaming.";
+		new Notice(problems.length ? `${summary} Problems: ${problems.join("; ")}` : summary);
+	}
+
+	/** Move one work's hub, folder, and prefixed unit files. Throws if a target exists. */
+	async moveWorkFiles(
+		work: JsonObject,
+		model: SourceModel,
+		oldDir: string,
+		newDir: string,
+		canonicalId: string
+	): Promise<void> {
+		const outRoot = this.settings.sourceImportRoot.trim() || "_7 Sources";
+		const adapter = this.app.vault.adapter;
+		const oldHub = normalizePath(`${outRoot}/${oldDir}.md`);
+		const newHub = normalizePath(`${outRoot}/${newDir}.md`);
+		const oldFolder = normalizePath(`${outRoot}/${oldDir}`);
+		const newFolder = normalizePath(`${outRoot}/${newDir}`);
+
+		if ((await adapter.exists(newHub)) || (await adapter.exists(newFolder))) {
+			throw new Error(`“${newDir}” already exists`);
+		}
+		if (await adapter.exists(oldHub)) await adapter.rename(oldHub, newHub);
+		if (await adapter.exists(oldFolder)) await adapter.rename(oldFolder, newFolder);
+
+		// Dictionary roots and canonical-riwāya sūras keep unprefixed names: the
+		// folder move carries the dictionary roots, and canonical sūras live in
+		// their own root. Every other unit is `<dir> - <base>.md`.
+		const isDict = work.collection === "dictionary";
+		const isCanonical = work.collection === "quran-text" && String(work.id) === canonicalId;
+		if (isDict || isCanonical || !(await adapter.exists(newFolder))) return;
+		for (const unit of model.units) {
+			const base = String(unit.base ?? "");
+			if (!base) continue;
+			const from = normalizePath(`${newFolder}/${oldDir} - ${base}.md`);
+			const to = normalizePath(`${newFolder}/${newDir} - ${base}.md`);
+			if (from !== to && (await adapter.exists(from))) await adapter.rename(from, to);
+		}
+	}
+
 	/** Re-render every cached model (run after editing a template). */
+	/**
+	 * Re-render only the source the open note belongs to — whether that note is the
+	 * work's hub or any note under it. Handy after a model is rebuilt for one work:
+	 * the rest of the corpus is left alone.
+	 */
+	async rerenderCurrentSource(file?: TAbstractFile | null): Promise<void> {
+		const target = file ?? this.app.workspace.getActiveFile();
+		if (!target) {
+			new Notice("Open a note that belongs to an imported source first.");
+			return;
+		}
+		const work = await this.workForPath(target.path);
+		if (!work) {
+			new Notice("That note does not belong to an imported source.");
+			return;
+		}
+		const rel = normalizePath(`.midad-arabic-sources/source-models/${work.collection}/${work.id}.json`);
+		if (!(await this.app.vault.adapter.exists(rel))) {
+			new Notice("That source has no cached model — install it again from Manage text sources.");
+			return;
+		}
+		const label = String(work.title ?? work.dir ?? work.id);
+		await this.renderWithProgress([`${this.vaultPath()}/${rel}`], true, `Re-rendering ${label}`);
+		new Notice(`Re-rendered ${label}.`);
+	}
+
 	async rerenderAllSources(): Promise<string[]> {
 		const root = `${this.vaultPath()}/.midad-arabic-sources/source-models`;
 		const models: string[] = [];
@@ -2416,6 +3014,7 @@ export default class ArabicSupportPlugin extends Plugin {
 			hadith: ["hadith"],
 			"quran-text": ["quran"],
 			dictionary: ["dictionary", "dictionaryIndex"],
+			turath: ["book", "bookVolume"],
 		};
 		return ["hub", ...(unit[collection] ?? ["source"])];
 	}
@@ -2430,6 +3029,8 @@ export default class ArabicSupportPlugin extends Plugin {
 			quran: hashString(t.quran),
 			dictionary: hashString(t.dictionary),
 			dictionaryIndex: hashString(t.dictionaryIndex),
+			book: hashString(t.book),
+			bookVolume: hashString(t.bookVolume),
 			hub: hashString(t.hub),
 			moc: hashString(t.moc),
 			sources: hashString(t.sources),
@@ -2494,7 +3095,7 @@ export default class ArabicSupportPlugin extends Plugin {
 	 * template re-renders only the roots. A scoped render always rewrites the hub
 	 * too, because its `updated` is the work's staleness watermark.
 	 */
-	async findStaleSourceWorks(): Promise<Array<{ work: JsonObject; kinds: Set<string> }>> {
+	async findStaleSourceWorks(): Promise<Array<{ work: JsonObject; kinds: Set<string> | null }>> {
 		const store = await this.loadSourceHashes();
 		const manifest = await this.loadSourceManifest();
 		const pending = await this.loadPendingDeletions();
@@ -2526,6 +3127,28 @@ export default class ArabicSupportPlugin extends Plugin {
 				const kind = SOURCE_TEMPLATE_KIND[key];
 				if (kind) kinds.add(kind);
 			}
+			// A model rebuilt since this work was last rendered means its notes are out
+			// of date even though no template or source changed — the acquisition code
+			// was fixed, and the notes still carry the old names or wording. Compare the
+			// model file's own mtime with the newest render watermark we hold, and treat
+			// it as a *full* render (null), not a scoped one: every note may be affected.
+			// A change to how this collection is *rendered* (see
+			// COLLECTION_RENDER_VERSION) is a full render too, scoped to the collection.
+			if ((stat?.render ?? 0) < requiredRenderVersion(String(work.collection ?? ""))) {
+				out.push({ work, kinds: null });
+				continue;
+			}
+			const modelRel = normalizePath(`.midad-arabic-sources/source-models/${work.collection}/${work.id}.json`);
+			const modelStat = await this.app.vault.adapter.stat(modelRel).catch((): null => null);
+			const renderedAt = hasRendered ? Math.max(0, ...Object.values(rendered ?? {})) : legacyMs;
+			// Only when we actually know when this work was last rendered. A work with
+			// neither a render watermark nor a dated hub note would otherwise be older
+			// than *any* model file and be re-rendered on every pass, which is the
+			// opposite of the careful scoping this check exists for.
+			if (renderedAt > 0 && modelStat && modelStat.mtime > 0 && modelStat.mtime > renderedAt) {
+				out.push({ work, kinds: null });
+				continue;
+			}
 			if (!kinds.size && !stale("hub")) continue; // nothing stale
 			out.push({ work, kinds });
 		}
@@ -2537,14 +3160,18 @@ export default class ArabicSupportPlugin extends Plugin {
 	 * changed (`kinds: null` means a full render). Reads only the affected works'
 	 * models — never the whole corpus.
 	 */
-	async renderStaleScoped(items: Array<{ work: JsonObject; kinds: Set<string> | null }>): Promise<void> {
+	async renderStaleScoped(items: Array<{ work: JsonObject; kinds: Set<string> | null }>,
+		kind: "explicit" | "auto" = "auto"): Promise<void> {
 		if (!items.length) return;
+		const op = this.beginSourceOperation(kind);
+		if (op === null) return;
 		const userFolder = this.settings.sourceTemplateFolder.trim() || null;
 		let templates: TemplateSet;
 		try {
 			templates = await loadTemplates(this.app, this.bundledTemplateDir(), userFolder);
 		} catch (e) {
 			new Notice(`Import templates could not be loaded: ${e instanceof Error ? e.message : e}`);
+			this.endSourceOperation(op);
 			return;
 		}
 		const outRoot = this.settings.sourceImportRoot.trim() || "_7 Sources";
@@ -2552,9 +3179,16 @@ export default class ArabicSupportPlugin extends Plugin {
 		const canonicalRoot = this.settings.canonicalQuranFolder.trim() || `${outRoot}/Quran`;
 		const stats = await this.loadSourceStats();
 		const notice = new Notice("Updating imported sources…", 0);
+		const stop = notice.messageEl.createEl("button", { text: "Stop" });
+		stop.addEventListener("click", () => {
+			stop.disabled = true;
+			notice.setMessage("Updating imported sources: stopping…");
+			this.cancelSourceOperation();
+		});
 		let done = 0;
 		try {
 			for (const it of items) {
+				if (this.isSourceCancelled(op)) break;
 				const label = String(it.work.title ?? it.work.dir ?? it.work.id);
 				const nth = `${++done}/${items.length}`;
 				notice.setMessage(`Updating imported sources: ${nth} — ${label}`);
@@ -2576,7 +3210,9 @@ export default class ArabicSupportPlugin extends Plugin {
 						const pct = steps ? Math.floor((step / steps) * 100) : 0;
 						notice.setMessage(`Updating imported sources: ${nth} — ${label} — ${step}/${steps} notes (${pct}%)`);
 					};
-					await renderModelToVault(this.app, templates, model, outRoot, false, onStep, it.kinds ?? undefined);
+					const seen = new Map(Object.entries(stats[key]?.units ?? {}));
+					await renderModelToVault(this.app, templates, model, outRoot, false, onStep,
+						it.kinds ?? undefined, seen, () => this.isSourceCancelled(op));
 					// Record which templates this render brought up to date. A scoped
 					// render marks only the rendered kinds (plus the hub); a full render
 					// (kinds === null) marks every template the work uses. On the first
@@ -2593,14 +3229,25 @@ export default class ArabicSupportPlugin extends Plugin {
 						const kind = SOURCE_TEMPLATE_KIND[tkey];
 						if (it.kinds === null || (kind && it.kinds.has(kind))) rendered[tkey] = now;
 					}
-					stats[key] = { ...stats[key], rendered, notes: expectedNotePaths(model, outRoot, canonicalRoot, canonicalId).length, schema: Number(model.schema ?? 0) };
+					stats[key] = {
+						...stats[key],
+						rendered,
+						units: Object.fromEntries(seen),
+						notes: expectedNotePaths(model, outRoot, canonicalRoot, canonicalId).length,
+						schema: Number(model.schema ?? 0),
+						render: requiredRenderVersion(String(model.work.collection ?? "")),
+					};
 				} catch (e) {
+					if (this.isSourceCancelled(op)) break;
 					console.error("[midad-arabic-sources] scoped render", it.work.key, e);
 				}
 			}
 		} finally {
 			notice.hide();
 			await this.saveSourceStats(stats);
+			const cancelled = this.isSourceCancelled(op);
+			this.endSourceOperation(op);
+			if (cancelled) new Notice("Stopped updating sources.");
 		}
 	}
 
@@ -2610,12 +3257,12 @@ export default class ArabicSupportPlugin extends Plugin {
 	 * affects. Cheap (unaffected works are not read), so it is safe to call from
 	 * the poll and the command as well as from maintainSources.
 	 */
-	async applyTemplateChanges(): Promise<number> {
+	async applyTemplateChanges(kind: "explicit" | "auto" = "explicit"): Promise<number> {
 		const changedKeys = await this.recordSourceTemplate();
 		const stale = await this.findStaleSourceWorks();
 		const indexDirty = changedKeys.some((k) => k === "moc" || k === "sources");
 		if (!stale.length && !indexDirty) return 0;
-		await this.renderStaleScoped(stale.map((s) => ({ work: s.work, kinds: s.kinds })));
+		await this.renderStaleScoped(stale.map((s) => ({ work: s.work, kinds: s.kinds })), kind);
 		if (indexDirty) await this.refreshSourcesIndex();
 		return stale.length;
 	}
@@ -2636,13 +3283,32 @@ export default class ArabicSupportPlugin extends Plugin {
 			const hashes = await this.sourceTemplateHashes();
 			const store = await this.loadSourceHashes();
 			const changed = Object.entries(hashes).some(([k, h]) => h && store.templates[k]?.hash !== h);
-			if (changed) await this.applyTemplateChanges();
+			if (changed) await this.applyTemplateChanges("auto");
 		} catch { /* templates unavailable */ } finally {
 			this.templateCheckRunning = false;
 		}
 	}
 
+	/** Set while a maintenance pass is running, so a reload cannot stack a second. */
+	private maintenanceInFlight = false;
+	/** Set while the update-consent prompt is open, for the same reason. */
+	private awaitingSourceConsent = false;
+
 	async maintainSources(): Promise<void> {
+		// Two passes at once re-fetch and re-render the same works, competing for the
+		// transliteration service and writing the same notes over each other — a reload
+		// while a pass was still running used to start exactly that duplicate. The pass
+		// is self-healing, so skipping one loses nothing: the next one picks it up.
+		if (this.maintenanceInFlight || this.awaitingSourceConsent) return;
+		this.maintenanceInFlight = true;
+		try {
+			await this.maintainSourcesOnce();
+		} finally {
+			this.maintenanceInFlight = false;
+		}
+	}
+
+	async maintainSourcesOnce(): Promise<void> {
 		// Finish any interrupted removal first, and never restore such a work —
 		// the user already asked for it gone, so it does not prompt.
 		for (const w of await this.findPendingDeletions()) {
@@ -2673,14 +3339,14 @@ export default class ArabicSupportPlugin extends Plugin {
 					continue;
 				}
 				try {
-					await this.reinstallSource(it.work);
+					await this.reinstallSource(it.work, "auto");
 				} catch (e) {
 					console.error("[midad-arabic-sources] restore", it.work.key, e);
 				}
 			}
 			// Stale works: only the unit kinds whose template changed, plus the hub.
 			for (const s of stale) rerender.push({ work: s.work, kinds: s.kinds });
-			await this.renderStaleScoped(rerender);
+			await this.renderStaleScoped(rerender, "auto");
 			if (indexDirty) await this.refreshSourcesIndex();
 		};
 		if (this.settings.autoUpdateSourceTemplates === true) {
@@ -2688,15 +3354,22 @@ export default class ArabicSupportPlugin extends Plugin {
 		} else if (this.settings.autoUpdateSourceTemplates === false) {
 			return;
 		} else {
+			// Hold the guard while the prompt is open, so another pass cannot stack
+			// behind it and ask the same question twice.
+			this.awaitingSourceConsent = true;
 			new SourceTemplateUpdateConsentModal(this.app, incomplete.length + stale.length + (indexDirty ? 1 : 0), (choice) => {
 				void (async () => {
-					if (choice === "yes") {
-						this.settings.autoUpdateSourceTemplates = true;
-						await this.saveSettings();
-						await apply();
-					} else if (choice === "no") {
-						this.settings.autoUpdateSourceTemplates = false;
-						await this.saveSettings();
+					try {
+						if (choice === "yes") {
+							this.settings.autoUpdateSourceTemplates = true;
+							await this.saveSettings();
+							await apply();
+						} else if (choice === "no") {
+							this.settings.autoUpdateSourceTemplates = false;
+							await this.saveSettings();
+						}
+					} finally {
+						this.awaitingSourceConsent = false;
 					}
 				})();
 			}).open();
@@ -2714,6 +3387,7 @@ export default class ArabicSupportPlugin extends Plugin {
 				body.model = this.settings.llmModel;
 				body.keep_case = opts.fullVocalization;
 				body.name = this.settings.nameMode;
+				if (this.settings.llmBaseUrl) body.base_url = this.settings.llmBaseUrl;
 				if (this.settings.llmApiKey) body.api_key = this.settings.llmApiKey;
 			} else {
 				body.engine = this.settings.engine;
@@ -2770,13 +3444,51 @@ export default class ArabicSupportPlugin extends Plugin {
 		}
 	}
 
-	async health(): Promise<{ engines_loaded?: string[]; providers?: Record<string, boolean> } | null> {
+	async health(): Promise<{ pid?: number; engines_loaded?: string[]; engines_actual?: Record<string, string>; providers?: Record<string, boolean> } | null> {
 		try {
 			const res = await requestUrl({ url: this.baseUrl() + "/health", method: "GET" });
-			return res.json as { engines_loaded?: string[]; providers?: Record<string, boolean> } | null;
+			return res.json as { pid?: number; engines_loaded?: string[]; engines_actual?: Record<string, string>; providers?: Record<string, boolean> } | null;
 		} catch {
 			return null;
 		}
+	}
+
+	/** True once we have told the user the server fell back from bert to mle. */
+	engineFallbackWarned = false;
+
+	/**
+	 * If bert was requested but the server is actually running on mle (bert could
+	 * not load — no `transformers` or no model data), say so once, with the fix.
+	 */
+	async maybeWarnEngineFallback(): Promise<void> {
+		if (this.engineFallbackWarned) return;
+		const actual = (await this.health())?.engines_actual;
+		if (!actual || !actual.bert || actual.bert === "bert") return;
+		this.engineFallbackWarned = true;
+		new Notice(
+			"Transliteration is using the MLE engine because BERT could not be loaded. " +
+			"For best results, install `transformers` and the BERT model data " +
+			"(`camel_data -i disambig-bert-unfactored-msa`), then restart the transliteration server.",
+			15000,
+		);
+	}
+
+	/** One line describing the resident server, plus the action it calls for. */
+	async serverStatusSummary(): Promise<{ running: boolean; action: "start" | "stop"; text: string }> {
+		const h = await this.health();
+		if (!h) {
+			return { running: false, action: "start", text: `Not running at ${this.settings.serverUrl}.` };
+		}
+		const engines = h.engines_loaded?.join(", ") || "none loaded yet";
+		const actual = h.engines_actual ?? {};
+		const fallback = actual.bert && actual.bert !== "bert" ? ` — bert unavailable, running ${actual.bert}` : "";
+		const providers = h.providers
+			? Object.entries(h.providers).filter(([, v]) => v).map(([k]) => k).join(", ") || "none"
+			: "unknown";
+		return {
+			running: true, action: "stop",
+			text: `Running at ${this.settings.serverUrl}. Engines: ${engines}${fallback}. LLM providers: ${providers}.`,
+		};
 	}
 
 	translitServerPid: number | null = null;
@@ -2789,7 +3501,10 @@ export default class ArabicSupportPlugin extends Plugin {
 		}
 		const vault = this.vaultPath();
 		const script = this.resolveScript(this.settings.transliterationServerScript || "scripts/transliterate-server.py");
-		const python = (this.settings.pythonPath ?? "").trim() || "python3";
+		// Resolve an interpreter that can import CAMeL (configured path first, then
+		// the same candidates ScholarWeft probes). Using bare `python3` here is what
+		// made a GUI-launched process miss a conda install.
+		const python = await this.resolveServerPython();
 		let port = "8756";
 		try { port = new URL(this.settings.serverUrl).port || "8756"; } catch { /* ignore */ }
 		const logPath = `${vault}/tmp/transliterate-server.log`;
@@ -2814,31 +3529,57 @@ export default class ArabicSupportPlugin extends Plugin {
 				await new Promise((resolve) => window.setTimeout(resolve, 1000));
 				if (await this.health()) {
 					new Notice("Transliteration server started.");
+					await this.maybeWarnEngineFallback();
 					return;
 				}
 			}
-			new Notice(`Server did not become ready. See ${logPath}.`);
+			let tail = "";
+			try {
+				tail = fs.readFileSync(logPath, "utf8").trim().split("\n").slice(-4).join("\n");
+			} catch { /* ignore */ }
+			new Notice(
+				"The transliteration server did not start."
+					+ (tail ? `\n\n${tail}` : "")
+					+ "\n\nIf it mentions a missing module, set the Python path under Transliteration → Python path.",
+				20000,
+			);
 		} finally {
 			loading.hide();
 		}
 	}
 
-	/** Stop the transliteration service we started, or one matching the script name. */
+	/** Stop the transliteration service we started, or one matching the script path. */
 	async stopTransliterationServer(): Promise<void> {
-		if (this.translitServerPid != null) {
+		// Prefer the PID we spawned; otherwise ask the server for its own PID. This
+		// avoids `pkill`-by-name, which would also kill a server another window or a
+		// terminal started.
+		let pid = this.translitServerPid;
+		if (pid == null) {
+			const reported = (await this.health())?.pid;
+			if (typeof reported === "number") pid = reported;
+		}
+		let found = true;
+		if (pid != null) {
 			try {
-				process.kill(-this.translitServerPid);
+				process.kill(-pid);
 			} catch {
-				try { process.kill(this.translitServerPid); } catch { /* ignore */ }
+				try { process.kill(pid); } catch { /* already gone */ }
 			}
 			this.translitServerPid = null;
-			new Notice("Transliteration server stopped.");
-			return;
+		} else {
+			// Last resort: match this plugin's resolved script path, not a bare name.
+			const script = this.resolveScript(this.settings.transliterationServerScript || "scripts/transliterate-server.py");
+			found = await new Promise<boolean>((resolve) => {
+				execFile("pkill", ["-f", script], (err: unknown) => resolve(!err));
+			});
 		}
-		const name = (this.settings.transliterationServerScript || "transliterate-server.py").split("/").pop();
-		execFile("pkill", ["-f", String(name)], (err: unknown) => {
-			new Notice(err ? "No running transliteration server found." : "Transliteration server stopped.");
-		});
+		// Wait for the port to close, so a caller's status refresh sees it down
+		// (the kill is asynchronous; refreshing immediately would still look "up").
+		for (let i = 0; i < 20; i++) {
+			if (!(await this.health())) break;
+			await new Promise((resolve) => window.setTimeout(resolve, 150));
+		}
+		new Notice(found ? "Transliteration server stopped." : "No running transliteration server found.");
 	}
 
 	baseUrl(): string {
@@ -2873,6 +3614,47 @@ export default class ArabicSupportPlugin extends Plugin {
 
 	async saveSettings() {
 		await this.saveData(this.settings);
+	}
+}
+
+/** Start or stop the resident transliteration server, with its current status. */
+class TransliterationServerModal extends Modal {
+	plugin: ArabicSupportPlugin;
+	private statusEl!: HTMLElement;
+	private button: ButtonComponent | null = null;
+	private running = false;
+
+	constructor(app: App, plugin: ArabicSupportPlugin) {
+		super(app);
+		this.plugin = plugin;
+	}
+
+	onOpen(): void {
+		this.contentEl.createEl("h2", { text: "Transliteration server" });
+		this.statusEl = this.contentEl.createEl("p", { text: "Checking…" });
+		new Setting(this.contentEl).addButton((button) => {
+			this.button = button;
+			button.onClick(async () => {
+				button.setDisabled(true);
+				if (this.running) await this.plugin.stopTransliterationServer();
+				else await this.plugin.startTransliterationServer();
+				button.setDisabled(false);
+				await this.refresh();
+				await this.plugin.maybeWarnEngineFallback();
+			});
+		});
+		void this.refresh();
+	}
+
+	async refresh(): Promise<void> {
+		const status = await this.plugin.serverStatusSummary();
+		this.running = status.running;
+		this.statusEl.setText(status.text);
+		this.button?.setButtonText(status.running ? "Stop server" : "Start server");
+	}
+
+	onClose(): void {
+		this.contentEl.empty();
 	}
 }
 
@@ -3000,372 +3782,363 @@ class LexiconModal extends Modal {
 
 class ArabicSupportSettingTab extends PluginSettingTab {
 	plugin: ArabicSupportPlugin;
+	/** The one-shot local-Zotero probe has run (see probeZotero). */
+	private zoteroProbed = false;
 
 	constructor(app: App, plugin: ArabicSupportPlugin) {
 		super(app, plugin);
 		this.plugin = plugin;
 	}
 
-	display(): void {
-		const { containerEl } = this;
-		containerEl.empty();
+	/**
+	 * Read a control's value. The tri-state "Update notes when templates change"
+	 * setting is stored as `boolean | undefined` but shown as a dropdown.
+	 */
+	getControlValue(key: string): unknown {
+		if (key === "autoUpdateSourceTemplates") {
+			const v = this.plugin.settings.autoUpdateSourceTemplates;
+			return v === true ? "yes" : v === false ? "no" : "ask";
+		}
+		return (this.plugin.settings as unknown as Record<string, unknown>)[key];
+	}
 
-		new Setting(containerEl)
-			.setName("Server URL")
-			.setDesc("Address of the resident transliteration service.")
-			.addText((text) =>
-				text.setValue(this.plugin.settings.serverUrl).onChange(async (value) => {
-					this.plugin.settings.serverUrl = value.trim();
-					await this.plugin.saveSettings();
-				})
-			);
+	async setControlValue(key: string, value: unknown): Promise<void> {
+		const settings = this.plugin.settings as unknown as Record<string, unknown>;
+		if (key === "autoUpdateSourceTemplates") {
+			settings[key] = value === "ask" ? undefined : value === "yes";
+		} else {
+			settings[key] = value;
+		}
+		// A new interpreter invalidates the cached probe result.
+		if (key === "pythonPath") {
+			this.plugin.pythonPromise = null;
+			this.plugin.serverPythonPromise = null;
+		}
+		await this.plugin.saveSettings();
+		// Re-evaluate the rows whose visibility depends on this value.
+		if (key === "zoteroExport" || key === "zoteroMethod") this.refreshDomState();
+		if (key === "zoteroAutoCreate" && value === true) void this.plugin.autoSyncZotero();
+	}
 
-		new Setting(containerEl)
-			.setName("Server script")
-			.setDesc("Path (relative to the vault) of transliterate-server.py, used by the start/stop commands.")
-			.addText((text) =>
-				text.setValue(this.plugin.settings.transliterationServerScript).onChange(async (value) => {
-					this.plugin.settings.transliterationServerScript = value.trim();
-					await this.plugin.saveSettings();
-				})
-			);
+	/** Fill the library ID from a running local Zotero, then refresh the rows. */
+	async detectZotero(): Promise<void> {
+		const found = await this.plugin.detectZoteroLocal();
+		if (!found) {
+			new Notice("No local Zotero found on port 23119.");
+			return;
+		}
+		this.plugin.settings.zoteroLibraryId = String(found.libraryId);
+		this.plugin.settings.zoteroServerId = found.serverId;
+		await this.plugin.saveSettings();
+		this.update();
+		new Notice(`Local Zotero: library ${found.libraryId}.`);
+	}
 
-		new Setting(containerEl)
-			.setName("Engine")
-			.setDesc("BERT: best for unvocalized prose. MLE: faster, rougher. None: no CAMeL; fully vocalized text only.")
-			.addDropdown((drop) =>
-				drop
-					.addOptions({ bert: "bert", mle: "mle", none: "none" })
-					.setValue(this.plugin.settings.engine)
-					.onChange(async (value) => {
-						this.plugin.settings.engine = value as Engine;
-						await this.plugin.saveSettings();
-					})
-			);
-
-		new Setting(containerEl)
-			.setName("Sun-letter assimilation")
-			.setDesc("Assimilate the article before sun letters (off means invariant al-).")
-			.addToggle((toggle) =>
-				toggle.setValue(this.plugin.settings.sunLetters).onChange(async (value) => {
-					this.plugin.settings.sunLetters = value;
-					await this.plugin.saveSettings();
-				})
-			);
-
-		new Setting(containerEl)
-			.setName("Keep case endings")
-			.setDesc("Retain noun/adjective case endings and tanwīn (used automatically inside Qur’an spans).")
-			.addToggle((toggle) =>
-				toggle.setValue(this.plugin.settings.keepCase).onChange(async (value) => {
-					this.plugin.settings.keepCase = value;
-					await this.plugin.saveSettings();
-				})
-			);
-
-		new Setting(containerEl)
-			.setName("Name mode")
-			.setDesc("Capitalize each substantive word (for author/editor name fields).")
-			.addToggle((toggle) =>
-				toggle.setValue(this.plugin.settings.nameMode).onChange(async (value) => {
-					this.plugin.settings.nameMode = value;
-					await this.plugin.saveSettings();
-				})
-			);
-
-		new Setting(containerEl)
-			.setName("Final dotless yāʾ")
-			.setDesc("How to read a final dotless yāʾ (ى).")
-			.addDropdown((drop) =>
-				drop
-					.addOptions({ maqsura: "alif maqṣūra (ā)", ya: "let the analysis choose" })
-					.setValue(this.plugin.settings.dotlessYa)
-					.onChange(async (value) => {
-						this.plugin.settings.dotlessYa = value as DotlessYa;
-						await this.plugin.saveSettings();
-					})
-			);
-
-		new Setting(containerEl).setName("LLM romanization").setHeading();
-
-		new Setting(containerEl)
-			.setName("Provider")
-			.setDesc("Used when “Use LLM” is checked in the transliterate modal.")
-			.addDropdown((drop) =>
-				drop
-					.addOptions({ gemini: "Gemini", deepseek: "DeepSeek" })
-					.setValue(this.plugin.settings.llmProvider)
-					.onChange(async (value) => {
-						this.plugin.settings.llmProvider = value as LlmProvider;
-						await this.plugin.saveSettings();
-					})
-			);
-
-		new Setting(containerEl)
-			.setName("Model")
-			.setDesc("Model name for the selected provider.")
-			.addText((text) =>
-				text.setValue(this.plugin.settings.llmModel).onChange(async (value) => {
-					this.plugin.settings.llmModel = value.trim();
-					await this.plugin.saveSettings();
-				})
-			);
-
-		new Setting(containerEl)
-			.setName("API key")
-			.setDesc("Optional. Used only if the server process has no GEMINI_API_KEY/GOOGLE_API_KEY.")
-			.addText((text) => {
-				text.setValue(this.plugin.settings.llmApiKey).onChange(async (value) => {
-					this.plugin.settings.llmApiKey = value.trim();
-					await this.plugin.saveSettings();
-				});
-				text.inputEl.type = "password";
-			});
-
-		new Setting(containerEl).setName("Transcription & translation pipeline").setHeading();
-
-		new Setting(containerEl)
-			.setName("Python executable")
-			.setDesc("Python used to run the Gemini batch pipeline scripts. Leave blank to auto-detect.")
-			.addText((text) =>
-				text.setPlaceholder("Auto-detect").setValue(this.plugin.settings.pythonPath).onChange(async (value) => {
-					this.plugin.settings.pythonPath = value.trim();
-					this.plugin.pythonPromise = null;
-					await this.plugin.saveSettings();
-				})
-			);
-
-		new Setting(containerEl)
-			.setName("Pipeline script")
-			.setDesc("Path (relative to the vault) of the Midad Arabic Sources pipeline orchestrator.")
-			.addText((text) =>
-				text.setValue(this.plugin.settings.pipelineScript).onChange(async (value) => {
-					this.plugin.settings.pipelineScript = value.trim();
-					await this.plugin.saveSettings();
-				})
-			);
-
-		new Setting(containerEl)
-			.setName("Gemini API key")
-			.setDesc("Passed to the pipeline as GEMINI_API_KEY. Needed when Obsidian was launched without shell environment variables.")
-			.addText((text) => {
-				text.setValue(this.plugin.settings.geminiApiKey).onChange(async (value) => {
-					this.plugin.settings.geminiApiKey = value.trim();
-					await this.plugin.saveSettings();
-				});
-				text.inputEl.type = "password";
-			});
-
-		new Setting(containerEl).setName("Text source importer").setHeading();
-
-		new Setting(containerEl)
-			.setName("Importer script")
-			.setDesc("Path (relative to the vault) of the catalog-driven importer script.")
-			.addText((text) =>
-				text.setValue(this.plugin.settings.sourceImportScript).onChange(async (value) => {
-					this.plugin.settings.sourceImportScript = value.trim();
-					await this.plugin.saveSettings();
-				})
-			);
-
-		new Setting(containerEl)
-			.setName("Import destination")
-			.setDesc("Folder imported works are written under (one subfolder per work).")
-			.addText((text) =>
-				text.setValue(this.plugin.settings.sourceImportRoot).onChange(async (value) => {
-					this.plugin.settings.sourceImportRoot = value.trim();
-					await this.plugin.saveSettings();
-				})
-			);
-
-		new Setting(containerEl)
-			.setName("Template folder")
-			.setDesc("Vault folder holding your edited import templates (blank = bundled defaults). Use “Copy import templates to vault”.")
-			.addText((text) =>
-				text.setPlaceholder("Templates").setValue(this.plugin.settings.sourceTemplateFolder).onChange(async (value) => {
-					this.plugin.settings.sourceTemplateFolder = value.trim();
-					await this.plugin.saveSettings();
-				})
-			);
-
-		new Setting(containerEl)
-			.setName("Canonical Qurʾān riwāya")
-			.setDesc("Riwāya whose sūra notes are unprefixed (the main reference). Set once, to the first riwāya you install; edit here to switch. Qurʾān citation linking in source notes requires Ḥafṣ (hafs): almost all source texts quote the Ḥafṣ reading, so citations cannot be matched against another riwāya.")
-			.addText((text) =>
-				text.setPlaceholder("Ḥafṣ").setValue(this.plugin.settings.canonicalQuranRiwāya).onChange(async (value) => {
-					this.plugin.settings.canonicalQuranRiwāya = value.trim();
-					await this.plugin.saveSettings();
-				})
-			);
-
-		new Setting(containerEl)
-			.setName("Canonical Qurʾān folder")
-			.setDesc("Vault folder that holds the canonical riwāya's sūra notes.")
-			.addText((text) =>
-				text.setValue(this.plugin.settings.canonicalQuranFolder).onChange(async (value) => {
-					this.plugin.settings.canonicalQuranFolder = value.trim();
-					await this.plugin.saveSettings();
-				})
-			);
-
-		new Setting(containerEl)
-			.setName("Sources parent note")
-			.setDesc("Top-level note every category MOC points up to. The plugin lists each category in its managed region, reusing your existing note if one exists.")
-			.addText((text) =>
-				text.setPlaceholder("Sources").setValue(this.plugin.settings.sourceMocParent).onChange(async (value) => {
-					this.plugin.settings.sourceMocParent = value.trim();
-					await this.plugin.saveSettings();
-				})
-			);
-
-		new Setting(containerEl)
-			.setName("Update notes when templates change")
-			.setDesc("Re-render imported source notes automatically when an import template changes.")
-			.addDropdown((drop) =>
-				drop
-					.addOptions({ ask: "Ask", yes: "Always", no: "Never" })
-					.setValue(
-						this.plugin.settings.autoUpdateSourceTemplates === true
-							? "yes"
-							: this.plugin.settings.autoUpdateSourceTemplates === false
-								? "no"
-								: "ask"
-					)
-					.onChange(async (value) => {
-						this.plugin.settings.autoUpdateSourceTemplates =
-							value === "ask" ? undefined : value === "yes";
-						await this.plugin.saveSettings();
-					})
-			);
-
-		new Setting(containerEl)
-			.setName("Check repositories every … days")
-			.setDesc("How often to ask the repositories whether an imported text changed (0 = only on the command).")
-			.addText((text) =>
-				text.setPlaceholder("7").setValue(String(this.plugin.settings.sourceUpdateCheckDays ?? 7)).onChange(async (value) => {
-					const n = parseInt(value.trim(), 10);
-					this.plugin.settings.sourceUpdateCheckDays = Number.isFinite(n) ? n : 7;
-					await this.plugin.saveSettings();
-				})
-			);
-
-		// ── Zotero export ────────────────────────────────────────────────────
-		new Setting(containerEl).setName("Zotero export").setHeading();
-
-		let methodSetting: Setting;
-		let keySetting: Setting;
-		let libSetting: Setting;
-		let detectSetting: Setting;
-		let autoUpdateSetting: Setting;
-		let autoCreateSetting: Setting;
-		const refreshZotero = () => {
-			const on = this.plugin.settings.zoteroExport;
-			const web = this.plugin.settings.zoteroMethod === "web";
-			methodSetting.settingEl.style.display = on ? "" : "none";
-			keySetting.settingEl.style.display = on && web ? "" : "none";
-			libSetting.settingEl.style.display = on && web ? "" : "none";
-			detectSetting.settingEl.style.display = on && web ? "" : "none";
-			autoUpdateSetting.settingEl.style.display = on ? "" : "none";
-			autoCreateSetting.settingEl.style.display = on ? "" : "none";
-		};
-
-		new Setting(containerEl)
-			.setName("Enable Zotero export")
-			.setDesc("Adds a command that sends imported sources to Zotero.")
-			.addToggle((t) =>
-				t.setValue(this.plugin.settings.zoteroExport).onChange(async (v) => {
-					this.plugin.settings.zoteroExport = v;
-					await this.plugin.saveSettings();
-					refreshZotero();
-				})
-			);
-
-		autoUpdateSetting = new Setting(containerEl)
-			.setName("Keep Zotero items up to date")
-			.setDesc("Re-send an already-exported item whenever its bibliographic fields change — after a re-fetch, or an edit to the publication map. Items update in place; a plain template re-render changes nothing.")
-			.addToggle((t) =>
-				t.setValue(this.plugin.settings.zoteroAutoUpdate === true).onChange(async (v) => {
-					this.plugin.settings.zoteroAutoUpdate = v;
-					await this.plugin.saveSettings();
-				})
-			);
-
-		autoCreateSetting = new Setting(containerEl)
-			.setName("Create Zotero items for all sources")
-			.setDesc("Send every installed source to Zotero automatically, without asking; an item you deleted there is recreated.")
-			.addToggle((t) =>
-				t.setValue(this.plugin.settings.zoteroAutoCreate === true).onChange(async (v) => {
-					this.plugin.settings.zoteroAutoCreate = v;
-					await this.plugin.saveSettings();
-					if (v) void this.plugin.autoSyncZotero();
-				})
-			);
-
-		methodSetting = new Setting(containerEl)
-			.setName("Method")
-			.setDesc("Local API writes to the Zotero on this computer; Web API writes to your online library; CSL-JSON downloads a file you import by hand.")
-			.addDropdown((d) =>
-				d
-					.addOptions({
-						local: "Local API (this computer)",
-						web: "Web API (zotero.org)",
-						csl: "CSL-JSON file (manual import)",
-					})
-					.setValue(this.plugin.settings.zoteroMethod)
-					.onChange(async (v) => {
-						this.plugin.settings.zoteroMethod = v as "local" | "web" | "csl";
-						await this.plugin.saveSettings();
-						refreshZotero();
-					})
-			);
-
-		libSetting = new Setting(containerEl)
-			.setName("Zotero library ID")
-			.setDesc("Detected from the local Zotero when it is running; otherwise enter your numeric user (or group) ID.")
-			.addText((t) =>
-				t.setPlaceholder("649").setValue(this.plugin.settings.zoteroLibraryId).onChange(async (v) => {
-					this.plugin.settings.zoteroLibraryId = v.trim();
-					await this.plugin.saveSettings();
-				})
-			);
-
-		keySetting = new Setting(containerEl)
-			.setName("Zotero web API key")
-			.setDesc("From Zotero.org/settings/keys, with write access. Stored in this vault's plugin data.")
-			.addText((t) =>
-				t.setValue(this.plugin.settings.zoteroApiKey).onChange(async (v: string) => {
-					this.plugin.settings.zoteroApiKey = v.trim();
-					await this.plugin.saveSettings();
-				})
-			);
-
-		detectSetting = new Setting(containerEl)
-			.setName("Detect local Zotero")
-			.setDesc("Fill the library ID from a running local Zotero.")
-			.addButton((b) =>
-				b.setButtonText("Detect").onClick(async () => {
-					const found = await this.plugin.detectZoteroLocal();
-					if (!found) {
-						new Notice("No local Zotero found on port 23119.");
-						return;
-					}
-					this.plugin.settings.zoteroLibraryId = String(found.libraryId);
-					this.plugin.settings.zoteroServerId = found.serverId;
-					await this.plugin.saveSettings();
-					const input = libSetting.settingEl.querySelector("input");
-					if (input) input.value = String(found.libraryId);
-					new Notice(`Local Zotero: library ${found.libraryId}.`);
-				})
-			);
-
-		refreshZotero();
+	/**
+	 * Probe the local Zotero once (when the settings are first shown), filling the
+	 * library ID if Zotero is running and none is stored. The Detect button does
+	 * the same on demand; this just spares the user the click.
+	 */
+	private probeZotero(): void {
+		if (this.zoteroProbed) return;
+		this.zoteroProbed = true;
 		void this.plugin.detectZoteroLocal().then(async (found) => {
-			if (found && !this.plugin.settings.zoteroLibraryId) {
-				this.plugin.settings.zoteroLibraryId = String(found.libraryId);
-				this.plugin.settings.zoteroServerId = found.serverId;
-				await this.plugin.saveSettings();
-			}
+			if (!found || this.plugin.settings.zoteroLibraryId) return;
+			this.plugin.settings.zoteroLibraryId = String(found.libraryId);
+			this.plugin.settings.zoteroServerId = found.serverId;
+			await this.plugin.saveSettings();
+			this.update();
 		});
+	}
+
+	/**
+	 * The settings, grouped into one section per function. Declarative, so the
+	 * sections appear in Obsidian's settings search (1.13+).
+	 */
+	getSettingDefinitions(): SettingDefinitionItem[] {
+		this.probeZotero();
+		const zoteroOn = () => this.plugin.settings.zoteroExport;
+		const zoteroWeb = () => zoteroOn() && this.plugin.settings.zoteroMethod === "web";
+		const password = (get: () => string, set: (v: string) => void) =>
+			(setting: Setting) => {
+				setting.addText((text) => {
+					text.setValue(get()).onChange(async (value) => {
+						set(value.trim());
+						await this.plugin.saveSettings();
+					});
+					text.inputEl.type = "password";
+				});
+			};
+		const doc = (label: string, file: string, desc: string) => ({
+			name: label,
+			desc,
+			action: () => { openDocs(this.app, file); },
+		});
+
+		return [
+			{
+				type: "page",
+				name: "Transliteration",
+				desc: "Romanize Arabic: the resident server, the engine, and the naming options.",
+				items: [
+					{
+						name: "Transliteration server",
+						render: (setting: Setting) => {
+							const status = setting.descEl.createDiv({ text: "Checking…" });
+							let running = false;
+							setting.addButton((button) => {
+								const refresh = async () => {
+									const s = await this.plugin.serverStatusSummary();
+									running = s.running;
+									status.setText(s.text);
+									button.setButtonText(s.running ? "Stop server" : "Start server");
+								};
+								button.onClick(async () => {
+									button.setDisabled(true);
+									if (running) await this.plugin.stopTransliterationServer();
+									else await this.plugin.startTransliterationServer();
+									button.setDisabled(false);
+									await refresh();
+									await this.plugin.maybeWarnEngineFallback();
+								});
+								void refresh();
+							});
+						},
+					},
+					{
+						name: "Server URL",
+						desc: "Address of the resident transliteration service.",
+						control: { type: "text", key: "serverUrl", placeholder: "http://127.0.0.1:8756" },
+					},
+					{
+						name: "Server script",
+						desc: "Path (relative to the vault) of transliterate-server.py, used by the start/stop commands.",
+						control: { type: "text", key: "transliterationServerScript" },
+					},
+					{
+						name: "Engine",
+						desc: "BERT (default): best for unvocalized prose; this is what the plugin is tuned for. MLE: opt-in only, rougher on classical text, and requires the calima MLE data. None: no CAMeL; fully vocalized text only.",
+						control: { type: "dropdown", key: "engine", options: { bert: "bert", mle: "mle", none: "none" } },
+					},
+					{
+						name: "Sun-letter assimilation",
+						desc: "Assimilate the article before sun letters (off means invariant al-).",
+						control: { type: "toggle", key: "sunLetters" },
+					},
+					{
+						name: "Keep case endings",
+						desc: "Retain noun/adjective case endings and tanwīn (used automatically inside Qur’an spans).",
+						control: { type: "toggle", key: "keepCase" },
+					},
+					{
+						name: "Name mode",
+						desc: "Capitalize each substantive word (for author/editor name fields).",
+						control: { type: "toggle", key: "nameMode" },
+					},
+					{
+						name: "Final dotless yāʾ",
+						desc: "How to read a final dotless yāʾ (ى).",
+						control: {
+							type: "dropdown",
+							key: "dotlessYa",
+							options: { maqsura: "alif maqṣūra (ā)", ya: "let the analysis choose" },
+						},
+					},
+					{
+						type: "page",
+						name: "LLM romanization",
+						desc: "Used when “Use LLM” is checked in the transliterate dialog.",
+						items: [
+							{
+								name: "Provider",
+								desc: "The API to call for LLM romanization. OpenAI-compatible covers OpenAI, OpenRouter, Groq, and local servers.",
+								control: {
+									type: "dropdown",
+									key: "llmProvider",
+									options: { gemini: "Gemini", deepseek: "DeepSeek", openai: "OpenAI-compatible" },
+								},
+							},
+							{
+								name: "Model",
+								desc: "Model name for the selected provider (for OpenAI-compatible: e.g. gpt-4o-mini, or your local model name).",
+								control: { type: "text", key: "llmModel" },
+							},
+							{
+								name: "Base URL",
+								desc: "OpenAI-compatible only: the API endpoint, e.g. https://api.openai.com/v1 or http://localhost:11434/v1. Empty uses the server's OPENAI_BASE_URL.",
+								control: { type: "text", key: "llmBaseUrl" },
+							},
+							{
+								name: "API key",
+								desc: "Optional. Used only if the server process has no key in its environment.",
+								render: password(
+									() => this.plugin.settings.llmApiKey,
+									(v) => { this.plugin.settings.llmApiKey = v; }
+								),
+							},
+						],
+					},
+					doc("Transliteration guide", "transliteration.md", "Commands, engines, the server, the lexicon, and LLM romanization."),
+				],
+			},
+			{
+				type: "page",
+				name: "Transcription and translation",
+				desc: "The Gemini OCR and translation pipeline for scanned PDFs.",
+				items: [
+					{
+						name: "Python executable",
+						desc: "Python used to run the Gemini batch pipeline scripts. Leave blank to auto-detect.",
+						control: { type: "text", key: "pythonPath", placeholder: "Auto-detect" },
+					},
+					{
+						name: "Pipeline script",
+						desc: "Path (relative to the vault) of the Midad Arabic Sources pipeline orchestrator.",
+						control: { type: "text", key: "pipelineScript" },
+					},
+					{
+						name: "Gemini API key",
+						desc: "Passed to the pipeline as GEMINI_API_KEY. Needed when Obsidian was launched without shell environment variables.",
+						render: password(
+							() => this.plugin.settings.geminiApiKey,
+							(v) => { this.plugin.settings.geminiApiKey = v; }
+						),
+					},
+					doc("Transcription guide", "transcription.md", "The Gemini OCR pipeline, its post-processing, status, and reprocessing."),
+					doc("Translation guide", "translation.md", "Translating a finished transcription."),
+				],
+			},
+			{
+				type: "page",
+				name: "Document import",
+				desc: "Install, name, and maintain imported text sources.",
+				items: [
+					{
+						name: "Importer script",
+						desc: "Path (relative to the vault) of the catalog-driven importer script.",
+						control: { type: "text", key: "sourceImportScript" },
+					},
+					{
+						name: "Import destination",
+						desc: "Folder imported works are written under (one subfolder per work).",
+						control: { type: "text", key: "sourceImportRoot" },
+					},
+					{
+						name: "Template folder",
+						desc: "Vault folder holding your edited import templates (blank = bundled defaults). Use “Copy import templates to vault”.",
+						control: { type: "text", key: "sourceTemplateFolder", placeholder: "Templates" },
+					},
+					{
+						name: "Canonical Qurʾān riwāya",
+						desc: "Riwāya whose sūra notes are unprefixed (the main reference). Set once, to the first riwāya you install; edit here to switch. Qurʾān citation linking in source notes requires Ḥafṣ (hafs): almost all source texts quote the Ḥafṣ reading, so citations cannot be matched against another riwāya.",
+						control: { type: "text", key: "canonicalQuranRiwāya", placeholder: "Ḥafṣ" },
+					},
+					{
+						name: "Canonical Qurʾān folder",
+						desc: "Vault folder that holds the canonical riwāya’s sūra notes.",
+						control: { type: "text", key: "canonicalQuranFolder" },
+					},
+					{
+						name: "Sources parent note",
+						desc: "Top-level note every category MOC points up to. The plugin lists each category in its managed region, reusing your existing note if one exists.",
+						control: { type: "text", key: "sourceMocParent", placeholder: "Sources" },
+					},
+					{
+						name: "Update notes when templates change",
+						desc: "Re-render imported source notes automatically when an import template changes.",
+						control: {
+							type: "dropdown",
+							key: "autoUpdateSourceTemplates",
+							options: { ask: "Ask", yes: "Always", no: "Never" },
+						},
+					},
+					{
+						name: "Check repositories every … days",
+						desc: "How often to ask the repositories whether an imported text changed (0 = only on the command).",
+						control: { type: "number", key: "sourceUpdateCheckDays", defaultValue: 7, placeholder: "7", min: 0 },
+					},
+					doc("Document import guide", "document-import.md", "Collections, the Manage text sources dialogue, naming, and updates."),
+					doc("Templates guide", "templates.md", "The ETA templates and the render-model reference."),
+				],
+			},
+			{
+				type: "page",
+				name: "Zotero",
+				desc: "Send imported works to your Zotero library, and keep them up to date.",
+				items: [
+					{
+						name: "Enable Zotero export",
+						desc: "Adds commands that send imported sources to Zotero.",
+						control: { type: "toggle", key: "zoteroExport" },
+					},
+					{
+						name: "Method",
+						desc: "Local API writes to the Zotero on this computer; Web API writes to your online library; CSL-JSON downloads a file you import by hand.",
+						visible: zoteroOn,
+						control: {
+							type: "dropdown",
+							key: "zoteroMethod",
+							options: {
+								local: "Local API (this computer)",
+								web: "Web API (zotero.org)",
+								csl: "CSL-JSON file (manual import)",
+							},
+						},
+					},
+					{
+						name: "Zotero library ID",
+						desc: "Detected from the local Zotero when it is running; otherwise enter your numeric user (or group) ID.",
+						visible: zoteroWeb,
+						control: { type: "text", key: "zoteroLibraryId", placeholder: "649" },
+					},
+					{
+						name: "Zotero web API key",
+						desc: "From Zotero.org/settings/keys, with write access. Stored in this vault’s plugin data.",
+						visible: zoteroWeb,
+						render: password(
+							() => this.plugin.settings.zoteroApiKey,
+							(v) => { this.plugin.settings.zoteroApiKey = v; }
+						),
+					},
+					{
+						name: "Detect local Zotero",
+						desc: "Fill the library ID from a running local Zotero.",
+						visible: zoteroWeb,
+						action: () => { void this.detectZotero(); },
+					},
+					{
+						name: "Keep Zotero items up to date",
+						desc: "Re-send an already-exported item whenever its bibliographic fields change — after a re-fetch, or an edit to the publication map. Items update in place; a plain template re-render changes nothing.",
+						visible: zoteroOn,
+						control: { type: "toggle", key: "zoteroAutoUpdate" },
+					},
+					{
+						name: "Create Zotero items for all sources",
+						desc: "Send every installed source to Zotero automatically, without asking; an item you deleted there is recreated.",
+						visible: zoteroOn,
+						control: { type: "toggle", key: "zoteroAutoCreate" },
+					},
+					doc("Zotero guide", "zotero.md", "Methods, the collection and tag, update-in-place, and the publication map."),
+				],
+			},
+			{
+				type: "page",
+				name: "Documentation",
+				desc: "Read the plugin's guides in Obsidian.",
+				items: [
+					{
+						name: "Open documentation",
+						desc: "Read the plugin's guides in Obsidian.",
+						action: () => { openDocs(this.app); },
+					},
+					...getDocs().map((entry) => ({
+						name: entry.title,
+						desc: entry.name === "README.md" ? "The plugin at a glance." : `docs/${entry.name}`,
+						action: () => { openDocs(this.app, entry.name); },
+					})),
+				],
+			},
+		];
 	}
 }
 
@@ -3615,17 +4388,262 @@ class ResumeModal extends Modal {
 	}
 }
 
+/** A unique display name for a copied prompt. */
+function uniquePromptName(base: string, entries: PromptEntry[]): string {
+	const taken = new Set(entries.map((e) => e.name));
+	if (!taken.has(base)) return base;
+	for (let i = 2; ; i++) {
+		const candidate = `${base} ${i}`;
+		if (!taken.has(candidate)) return candidate;
+	}
+}
+
+/**
+ * The prompt dropdown plus its action buttons, shared by the transcription and
+ * translation dialogs. It owns the "Select all"/"Select none" buttons too, so
+ * the dropdown sits to their left as one row.
+ */
+class PromptPicker {
+	plugin: ArabicSupportPlugin;
+	kind: PromptKind;
+	containerEl: HTMLElement;
+	entries: PromptEntry[];
+	selectedName: string;
+	onSelectAll?: () => void;
+	onSelectNone?: () => void;
+	deleteButton: ButtonComponent | null = null;
+
+	constructor(
+		plugin: ArabicSupportPlugin,
+		kind: PromptKind,
+		containerEl: HTMLElement,
+		entries: PromptEntry[],
+		opts: { onSelectAll?: () => void; onSelectNone?: () => void } = {}
+	) {
+		this.plugin = plugin;
+		this.kind = kind;
+		this.containerEl = containerEl;
+		this.entries = entries;
+		this.onSelectAll = opts.onSelectAll;
+		this.onSelectNone = opts.onSelectNone;
+		const builtin = entries.find((e) => e.builtin);
+		this.selectedName = builtin?.name ?? entries[0]?.name ?? "";
+		this.render();
+	}
+
+	selectedEntry(): PromptEntry | null {
+		return this.entries.find((e) => e.name === this.selectedName) ?? this.entries[0] ?? null;
+	}
+
+	render(): void {
+		this.containerEl.empty();
+
+		const row = new Setting(this.containerEl).setName("Prompt");
+		row.addDropdown((dd) => {
+			for (const p of this.entries) dd.addOption(p.name, p.name);
+			dd.setValue(this.selectedName);
+			dd.onChange((value) => {
+				this.selectedName = value;
+				this.updateDeleteButton();
+			});
+		});
+		row.addButton((b) => b.setButtonText("Select all").onClick(() => this.onSelectAll?.()));
+		row.addButton((b) => b.setButtonText("Select none").onClick(() => this.onSelectNone?.()));
+
+		const actions = new Setting(this.containerEl).setName("Manage prompts");
+		actions.addButton((b) => b.setButtonText("Modify selected").onClick(() => this.openEditor("edit")));
+		actions.addButton((b) =>
+			b.setButtonText("Create a new prompt from selected").onClick(() => this.openEditor("new"))
+		);
+		actions.addButton((b) => {
+			this.deleteButton = b;
+			b.setButtonText("Delete selected prompt").onClick(() => {
+				void this.deleteSelected().catch((e) => {
+					console.error("[midad-arabic-sources] delete prompt", e);
+					new Notice("Could not delete the prompt — see the developer console.");
+				});
+			});
+		});
+		this.updateDeleteButton();
+	}
+
+	updateDeleteButton(): void {
+		this.deleteButton?.setDisabled(this.selectedEntry()?.builtin === true);
+	}
+
+	private openEditor(mode: "edit" | "new"): void {
+		const source = this.selectedEntry();
+		if (!source) return;
+		const initialName =
+			mode === "new" ? uniquePromptName(`${source.name} copy`, this.entries) : source.name;
+		new PromptEditorModal(this.plugin, this.kind, mode, source, initialName, async (savedName) => {
+			this.entries = await this.plugin.loadPromptSet(this.kind);
+			this.selectedName = this.entries.some((e) => e.name === savedName)
+				? savedName
+				: this.entries.find((e) => e.builtin)?.name ?? this.entries[0]?.name ?? "";
+			this.render();
+		}).open();
+	}
+
+	private async deleteSelected(): Promise<void> {
+		const entry = this.selectedEntry();
+		if (!entry || entry.builtin) return;
+		const entries = await this.plugin.loadPromptSet(this.kind);
+		const remaining = entries.filter((e) => e.name !== entry.name);
+		await this.plugin.savePromptSet(this.kind, remaining);
+		this.entries = remaining;
+		this.selectedName = remaining.find((e) => e.builtin)?.name ?? remaining[0]?.name ?? "";
+		this.render();
+		new Notice(`Deleted prompt “${entry.name}”.`);
+	}
+}
+
+/** The large editor for a prompt's name and system instruction. */
+class PromptEditorModal extends Modal {
+	plugin: ArabicSupportPlugin;
+	kind: PromptKind;
+	mode: "edit" | "new";
+	source: PromptEntry;
+	originalName: string;
+	onSaved: (name: string) => void | Promise<void>;
+	name: string;
+	text: string;
+
+	constructor(
+		plugin: ArabicSupportPlugin,
+		kind: PromptKind,
+		mode: "edit" | "new",
+		source: PromptEntry,
+		initialName: string,
+		onSaved: (name: string) => void | Promise<void>
+	) {
+		super(plugin.app);
+		this.plugin = plugin;
+		this.kind = kind;
+		this.mode = mode;
+		this.source = source;
+		this.originalName = source.name;
+		this.onSaved = onSaved;
+		this.name = initialName;
+		this.text = source.text;
+	}
+
+	onOpen(): void {
+		this.modalEl.addClass("mas-prompt-editor-modal");
+		const { contentEl } = this;
+		const kindLabel = PROMPT_KIND_LABEL[this.kind];
+		contentEl.createEl("h3", {
+			text: this.mode === "new" ? `New ${kindLabel} prompt` : `Edit ${kindLabel} prompt`,
+		});
+		contentEl.createEl("p", {
+			text:
+				this.mode === "edit" && this.source.builtin
+					? "This is the built-in default. Save updates it in place (its name stays “Default prompt”); Save as keeps it and adds a copy under the name above. It cannot be deleted."
+					: "Save replaces this prompt; Save as adds a copy under the name above.",
+		});
+		contentEl.createEl("p", {
+			text: `The text below is appended to the pipeline's built-in page-formatting and ${kindLabel} instructions. Describe the document and any text-specific handling here.`,
+		});
+
+		new Setting(contentEl)
+			.setName("Name")
+			.addText((t) => {
+				t.setValue(this.name).onChange((v) => (this.name = v));
+				t.inputEl.setCssStyles({ width: "100%" });
+			});
+
+		const textarea = contentEl.createEl("textarea");
+		textarea.value = this.text;
+		textarea.spellcheck = false;
+		textarea.setCssStyles({
+			width: "100%",
+			minHeight: "48vh",
+			resize: "vertical",
+			fontFamily: "var(--font-monospace)",
+			fontSize: "var(--font-ui-smaller)",
+			lineHeight: "1.45",
+		});
+		textarea.addEventListener("input", () => (this.text = textarea.value));
+
+		new Setting(contentEl)
+			.addButton((b) =>
+				b.setButtonText("Save").setCta().onClick(() => {
+					void this.save(false).catch((e) => {
+						console.error("[midad-arabic-sources] save prompt", e);
+						new Notice("Could not save the prompt — see the developer console.");
+					});
+				})
+			)
+			.addButton((b) =>
+				b.setButtonText("Save as").onClick(() => {
+					void this.save(true).catch((e) => {
+						console.error("[midad-arabic-sources] save prompt copy", e);
+						new Notice("Could not save the prompt — see the developer console.");
+					});
+				})
+			)
+			.addButton((b) => b.setButtonText("Cancel").onClick(() => this.close()));
+	}
+
+	async save(asCopy: boolean): Promise<void> {
+		const name = this.name.trim();
+		if (!name) { new Notice("Enter a prompt name."); return; }
+		if (!this.text.trim()) { new Notice("The prompt cannot be empty."); return; }
+		if (asCopy && this.mode === "edit" && name === this.originalName) {
+			new Notice("Enter a different name in the name field to save a copy.");
+			return;
+		}
+
+		const entries = await this.plugin.loadPromptSet(this.kind);
+		const existing = entries.find((e) => e.name === name);
+
+		if (this.mode === "edit" && !asCopy) {
+			const target = entries.find((e) => e.name === this.originalName);
+			if (!target) { new Notice("This prompt no longer exists."); return; }
+			if (!target.builtin && name !== this.originalName && existing) {
+				new Notice(`A prompt named “${name}” already exists.`);
+				return;
+			}
+			target.text = this.text;
+			if (target.builtin) {
+				target.name = DEFAULT_PROMPT_NAME;
+				target.modified = true;
+			} else {
+				target.name = name;
+			}
+			await this.plugin.savePromptSet(this.kind, entries);
+			await this.onSaved(target.name);
+		} else {
+			if (existing) {
+				new Notice(`A prompt named “${name}” already exists.`);
+				return;
+			}
+			entries.push({ name, text: this.text });
+			await this.plugin.savePromptSet(this.kind, entries);
+			await this.onSaved(name);
+		}
+		this.close();
+	}
+
+	onClose(): void {
+		this.contentEl.empty();
+	}
+}
+
 class TranscribeModal extends Modal {
 	plugin: ArabicSupportPlugin;
 	citekey: string;
 	pdfs: PipelinePdf[];
+	prompts: PromptEntry[];
 	checks: Array<{ pdf: PipelinePdf; el: HTMLInputElement; vol: TextComponent }> = [];
+	picker!: PromptPicker;
 
-	constructor(app: App, plugin: ArabicSupportPlugin, citekey: string, pdfs: PipelinePdf[]) {
+	constructor(app: App, plugin: ArabicSupportPlugin, citekey: string, pdfs: PipelinePdf[], prompts: PromptEntry[]) {
 		super(app);
 		this.plugin = plugin;
 		this.citekey = citekey;
 		this.pdfs = pdfs;
+		this.prompts = prompts;
 	}
 
 	onOpen(): void {
@@ -3635,13 +4653,11 @@ class TranscribeModal extends Modal {
 			text: "Choose the PDF file(s) to transcribe. The volume is inferred from the filename and can be edited.",
 		});
 
-		new Setting(contentEl)
-			.addButton((b) =>
-				b.setButtonText("Select all").onClick(() => this.checks.forEach((c) => (c.el.checked = !c.el.disabled)))
-			)
-			.addButton((b) =>
-				b.setButtonText("Select none").onClick(() => this.checks.forEach((c) => (c.el.checked = false)))
-			);
+		const promptRow = contentEl.createDiv();
+		this.picker = new PromptPicker(this.plugin, "transcription", promptRow, this.prompts, {
+			onSelectAll: () => this.checks.forEach((c) => (c.el.checked = !c.el.disabled)),
+			onSelectNone: () => this.checks.forEach((c) => (c.el.checked = false)),
+		});
 
 		for (const pdf of this.pdfs) {
 			const row = contentEl.createDiv();
@@ -3664,11 +4680,16 @@ class TranscribeModal extends Modal {
 				.onClick(async () => {
 					const chosen = this.checks.filter((c) => c.el.checked);
 					if (!chosen.length) { new Notice("Select at least one PDF."); return; }
+					const prompt = this.picker.selectedEntry();
+					if (!prompt) { new Notice("Select a prompt."); return; }
 					const args = ["transcribe", "--citekey", this.citekey];
 					for (const c of chosen) {
 						const v = c.vol.getValue().trim();
 						args.push("--pdf", v ? `${c.pdf.path}::${v}` : c.pdf.path);
 					}
+					const promptFile = this.plugin.writePromptFile("transcription", prompt.text);
+					if (!promptFile) return;
+					args.push("--prompt-file", promptFile);
 					this.close();
 					await this.plugin.runWithProgress("Transcribing", args);
 				})
@@ -3685,33 +4706,35 @@ class TranslateModal extends Modal {
 	citekey: string;
 	notes: PipelineNote[];
 	pdfs: PipelinePdf[];
+	prompts: PromptEntry[];
 	checks: Array<{ note: PipelineNote; el: HTMLInputElement }> = [];
 	volume = "";
+	picker!: PromptPicker;
 
-	constructor(app: App, plugin: ArabicSupportPlugin, citekey: string, notes: PipelineNote[], pdfs: PipelinePdf[]) {
+	constructor(app: App, plugin: ArabicSupportPlugin, citekey: string, notes: PipelineNote[], pdfs: PipelinePdf[], prompts: PromptEntry[]) {
 		super(app);
 		this.plugin = plugin;
 		this.citekey = citekey;
 		this.notes = notes;
 		this.pdfs = pdfs;
+		this.prompts = prompts;
 	}
 
 	onOpen(): void {
 		const { contentEl } = this;
 		contentEl.createEl("h3", { text: `Translate — @${this.citekey}` });
 
+		const promptRow = contentEl.createDiv();
+		this.picker = new PromptPicker(this.plugin, "translation", promptRow, this.prompts, {
+			onSelectAll: () => this.checks.forEach((c) => (c.el.checked = true)),
+			onSelectNone: () => this.checks.forEach((c) => (c.el.checked = false)),
+		});
+
 		const transcriptions = this.notes.filter((n) => n.type === "transcription");
 		if (!transcriptions.length) {
 			contentEl.createEl("p", { text: "No transcription exists yet. Run “transcribe this item's PDF file(s)” first." });
 		} else {
 			contentEl.createEl("p", { text: "Choose the transcription(s) to translate." });
-			new Setting(contentEl)
-				.addButton((b) =>
-					b.setButtonText("Select all").onClick(() => this.checks.forEach((c) => (c.el.checked = true)))
-				)
-				.addButton((b) =>
-					b.setButtonText("Select none").onClick(() => this.checks.forEach((c) => (c.el.checked = false)))
-				);
 			for (const n of transcriptions) {
 				const row = contentEl.createDiv();
 				const cb = row.createEl("input");
@@ -3742,9 +4765,14 @@ class TranslateModal extends Modal {
 				.onClick(async () => {
 					const chosen = this.checks.filter((c) => c.el.checked).map((c) => c.note.path);
 					if (!chosen.length) { new Notice("Select at least one transcription."); return; }
+					const prompt = this.picker.selectedEntry();
+					if (!prompt) { new Notice("Select a prompt."); return; }
 					const args = ["translate", "--citekey", this.citekey];
 					for (const p of chosen) args.push("--source", p);
 					if (this.volume) args.push("--volume", this.volume);
+					const promptFile = this.plugin.writePromptFile("translation", prompt.text);
+					if (!promptFile) return;
+					args.push("--prompt-file", promptFile);
 					this.close();
 					await this.plugin.runWithProgress("Translating", args);
 				})
@@ -3909,10 +4937,10 @@ class ReconcileSourcesModal extends Modal {
  */
 class TransliterationUnavailableModal extends Modal {
 	sourceName: string;
-	resolve: (choice: "retry" | "skip" | "cancel") => void;
+	resolve: (choice: "start" | "skip" | "cancel") => void;
 	answered = false;
 
-	constructor(app: App, sourceName: string, resolve: (choice: "retry" | "skip" | "cancel") => void) {
+	constructor(app: App, sourceName: string, resolve: (choice: "start" | "skip" | "cancel") => void) {
 		super(app);
 		this.sourceName = sourceName;
 		this.resolve = resolve;
@@ -3922,14 +4950,13 @@ class TransliterationUnavailableModal extends Modal {
 		this.titleEl.setText("Transliteration unavailable");
 		this.contentEl.createEl("p", {
 			text: `This source, ${this.sourceName}, requires transliteration to render, but the `
-				+ "transliteration server is not running. Would you like to start the server before "
-				+ "rendering this source, or would you like to proceed with simpler transliteration?",
+				+ "transliteration server is not running. Start it now, or proceed without transliteration.",
 		});
 		const footer = new Setting(this.contentEl);
 		footer.addButton((b) =>
-			b.setButtonText("Try again").setCta().onClick(() => {
+			b.setButtonText("Start server").setCta().onClick(async () => {
 				this.answered = true;
-				this.resolve("retry");
+				this.resolve("start");
 				this.close();
 			})
 		);
@@ -3952,8 +4979,12 @@ interface SourceWork {
 	key: string;
 	collection: string;
 	collection_label: string;
-	/** The topic/genre this work belongs to (collections can share one). */
+	/** The primary topic/genre this work belongs to (collections can share one). */
 	genre?: string;
+	/** Every topic/genre it belongs to (a work may sit in more than one kind). */
+	genres?: string[];
+	/** A longer descriptive title, shown under the main one. */
+	subtitle?: string;
 	/** The repository the text is drawn from (for the column + sidebar). */
 	repository?: string;
 	/** True when some entries are named by transliterating their Arabic. */
@@ -3984,8 +5015,108 @@ const GENRE_LABELS: Record<string, string> = {
 	tafsir: "Tafsīr",
 	quran: "Translations",
 	hadith: "Ḥadīth",
+	"hadith-commentary": "Ḥadīth commentary",
 	"quran-text": "Qurʾān text",
+	dictionary: "Dictionaries",
+	fiqh: "Fiqh",
+	usul: "Uṣūl al-Fiqh",
+	aqida: "Doctrine (ʿaqīda)",
+	theology: "Theology",
+	tarikh: "Tārīkh",
+	biography: "Biography (rijāl)",
+	language: "Language (lugha)",
+	lexicography: "Lexicography",
+	grammar: "Grammar (naḥw and ṣarf)",
+	rhetoric: "Rhetoric",
+	adab: "Adab",
+	linguistics: "Linguistics",
+	maqasid: "Maqāṣid",
+	"quran-sciences": "ʿUlūm al-Qurʾān",
+	other: "Other",
 };
+
+/** The genre keys a work belongs to (older works carry only `genre`). */
+function workGenres(w: SourceWork): string[] {
+	if (Array.isArray(w.genres) && w.genres.length) return w.genres.map(normalizeGenre);
+	return [normalizeGenre(w.genre || "other")];
+}
+
+/** A readable label for a genre key. */
+function genreLabelOf(g: string): string {
+	return GENRE_LABELS[g] || g.replace(/-/g, " ");
+}
+
+/** A user-added Turath work, persisted in `turath-custom-works.json`. */
+interface TurathCustomWork {
+	id: string;
+	title: string;
+	arabic: string;
+	author: string;
+	type: string;
+	genres: string[];
+	subtitle?: string;
+	url: string;
+}
+
+/** Turath category id → our genre key (used for works added by URL). */
+const TURATH_CAT_TYPES: Record<number, string> = {
+	1: "aqida", 3: "tafsir", 4: "quran-sciences", 6: "hadith", 7: "hadith",
+	11: "usul", 14: "fiqh", 15: "fiqh", 16: "fiqh", 17: "fiqh", 18: "fiqh",
+	19: "fiqh", 20: "fiqh", 21: "fiqh", 22: "fiqh", 23: "adab", 24: "tarikh",
+	25: "tarikh", 26: "biography", 27: "tarikh", 28: "tarikh", 29: "language",
+	30: "language", 31: "language", 32: "adab", 33: "language", 34: "adab",
+	35: "language", 36: "other", 37: "other", 38: "other", 39: "other", 40: "other",
+};
+
+/** Finer genres implied by a Turath category (defaults to the broad type). */
+function genresForCat(cat: number, type: string): string[] {
+	if (cat === 30) return ["language", "lexicography", "dictionary"];
+	if (cat === 31) return ["language", "grammar"];
+	if (cat === 35) return ["language", "rhetoric"];
+	if (cat === 26) return ["biography"];
+	if (cat === 32) return ["adab"];
+	return [type];
+}
+
+/** Proper-name stems that stay capitalised in a sentence-cased title. */
+const TITLE_PROPER = new Set([
+	"ibn", "abī", "abū", "bint", "banū",
+	"ṭabarī", "qurṭubī", "kathīr", "zamakhsharī", "rāzī", "andalusī", "suyūṭī", "maḥallī",
+	"jalālayn", "shinqīṭī", "qāsimī", "saʿdī", "bukārī", "bukhari", "muslim", "dāwūd", "tirmidhī",
+	"mājah", "mālik", "aḥmad", "ḥanbal", "ḥajar", "ʿasqalānī", "nawawī", "qudāma", "shāfiʿī",
+	"kāsānī", "marghīnānī", "rushd", "buhūtī", "qayrawānī", "akhḍarī", "qudūrī", "ḥaḍramī",
+	"thaʿlabī", "ājurrūm", "ḥājib", "khalīl", "kharashī", "ḥaṭṭāb", "mawwāq", "ʿulaysh",
+	"bilʿālam", "sībawayh", "jāḥiẓ", "manẓūr", "fīrūzābādī", "jawharī", "fāris", "qutayba",
+	"jurjānī", "mizzī", "dhahabī", "khallikān", "saʿd", "ziriklī", "athīr", "taymiyya",
+	"ʿizz", "ashʿarī", "ājurrī", "marwazī", "sarakhsī", "juwaynī", "shāṭibī", "qayyim",
+	"jawziyya", "qurʾān", "qur’ān", "qur'ān", "allāh", "raḥmān", "bārī", "ʿarab", "ʿarabiyya",
+	"nawawiyya", "qayrawāniyya", "ḥaḍramiyya", "ājurrūmiyya", "mālikī", "ḥanafī", "ḥanbalī",
+	"baghdādī", "qazwīnī", "sijistānī", "nasāʾī", "dārimī", "tibrīzī", "dihlawī",
+	"jalīl", "khaldūn", "zahrī", "ṭaḥāwiyya", "wāsiṭiyya",
+]);
+
+/** Fold the former split grammar keys into the combined category. */
+function normalizeGenre(g: string): string {
+	return g === "grammar-syntax" || g === "grammar-inflection" ? "grammar" : g;
+}
+
+/**
+ * Sentence case for a romanized non-English title: the first word and proper
+ * nouns are capitalised, everything else is lowercased (the article stays
+ * `al-`). English titles keep their own casing and should not pass through here.
+ */
+function sentenceCaseTitle(text: string): string {
+	const cap = (s: string): string => (s ? s.charAt(0).toUpperCase() + s.slice(1) : s);
+	return String(text || "").trim().split(/\s+/).map((tok, i) => {
+		const bare = tok.toLowerCase().replace(/^[^\p{L}]+|[^\p{L}]+$/gu, "");
+		const stem = bare.replace(/^al-/, "");
+		if (TITLE_PROPER.has(stem)) {
+			return /^al-/i.test(tok) ? "al-" + cap(tok.slice(3)) : cap(tok);
+		}
+		if (i === 0) return /^al-/i.test(tok) ? "al-" + cap(tok.slice(3)) : cap(tok);
+		return tok.toLowerCase();
+	}).join(" ");
+}
 
 /** A response header, matched case-insensitively (Obsidian keeps the sent case). */
 function header(resp: { headers?: Record<string, string> }, name: string): string {
@@ -4003,6 +5134,91 @@ function header(resp: { headers?: Record<string, string> }, name: string): strin
  * works are installed, newly unchecked installed works are removed. Reinstalling
  * a corrupt item is just uncheck + Apply, then check + Apply.
  */
+/** The "add by URL" form and the user's list; shared by the tab and the command. */
+function buildUrlAdder(plugin: ArabicSupportPlugin, container: HTMLElement): void {
+	container.createEl("p", {
+		text: "Paste a Turath book URL (or its numeric ID). The plugin reads its metadata and offers a provisional romanization you can edit before adding.",
+	});
+	let inputEl!: HTMLInputElement;
+	let titleEl!: HTMLInputElement;
+	let authorEl!: HTMLInputElement;
+	let pending: TurathCustomWork | null = null;
+	const preview = container.createDiv();
+	preview.classList.add("mas-manage__hidden");
+	const listEl = container.createDiv();
+
+	const renderList = async (): Promise<void> => {
+		listEl.empty();
+		listEl.createEl("h3", { text: "Your list" });
+		const works = await plugin.loadCustomWorks();
+		if (!works.length) {
+			listEl.createEl("p", { text: "No works added yet." });
+			return;
+		}
+		for (const w of works) {
+			new Setting(listEl)
+				.setName(w.title || w.arabic || w.id)
+				.setDesc(w.author ? `${w.author} — ${w.url}` : w.url)
+				.addButton((b) => b.setButtonText("Remove").setDestructive().onClick(async () => {
+					await plugin.removeTurathWork(w.id);
+					await renderList();
+				}));
+		}
+	};
+
+	const pull = async (): Promise<void> => {
+		const work = await plugin.previewTurathWork(inputEl.value);
+		if (!work) return;
+		pending = work;
+		titleEl.value = work.title;
+		authorEl.value = work.author;
+		preview.classList.remove("mas-manage__hidden");
+	};
+
+	new Setting(container)
+		.addText((text) => {
+			inputEl = text.inputEl;
+			text.setPlaceholder("https://app.turath.io/book/95864");
+			text.inputEl.addEventListener("keydown", (ev) => {
+				if (ev.key === "Enter") { ev.preventDefault(); void pull(); }
+			});
+		})
+		.addButton((b) => b.setButtonText("Fetch").setCta().onClick(() => void pull()));
+
+	new Setting(preview).setName("Title (romanized)").addText((text) => { titleEl = text.inputEl; });
+	new Setting(preview).setName("Author (romanized)").addText((text) => { authorEl = text.inputEl; });
+	new Setting(preview).addButton((b) => b.setButtonText("Add to list").onClick(async () => {
+		if (!pending) return;
+		pending.title = titleEl.value.trim() || pending.title;
+		pending.author = authorEl.value.trim() || pending.author;
+		await plugin.saveTurathWork(pending);
+		pending = null;
+		inputEl.value = "";
+		preview.classList.add("mas-manage__hidden");
+		await renderList();
+	}));
+	void renderList();
+}
+
+/** Add Turath works by URL; the list lives in `turath-custom-works.json`. */
+class TurathUrlModal extends Modal {
+	plugin: ArabicSupportPlugin;
+
+	constructor(app: App, plugin: ArabicSupportPlugin) {
+		super(app);
+		this.plugin = plugin;
+	}
+
+	onOpen(): void {
+		this.titleEl.setText("Add Turath works by URL");
+		buildUrlAdder(this.plugin, this.contentEl);
+	}
+
+	onClose(): void {
+		this.contentEl.empty();
+	}
+}
+
 class ManageSourcesModal extends Modal {
 	plugin: ArabicSupportPlugin;
 	works: SourceWork[];
@@ -4012,12 +5228,12 @@ class ManageSourcesModal extends Modal {
 	onReload?: () => void;
 	initial: Map<string, boolean>;
 	zoteroStatus: Map<string, string>;
-	rows: Array<{ work: SourceWork; el: HTMLElement; isInstalled: boolean; genre: string; repo: string; collection: string }> = [];
+	rows: Array<{ work: SourceWork; el: HTMLElement; isInstalled: boolean; genres: string[]; repo: string; collection: string }> = [];
 	headings: Map<string, HTMLElement> = new Map();
 	/** The works the user has highlighted; Apply acts on the difference. */
 	selected = new Set<string>();
 	show: "all" | "installed" | "not-installed";
-	mode: "manage" | "zotero" = "manage";
+	mode: "manage" | "zotero" | "url" = "manage";
 	activeGenres = new Set<string>();
 	offRepos = new Set<string>();
 	allSelected = false;
@@ -4049,6 +5265,7 @@ class ManageSourcesModal extends Modal {
 		const tabs = contentEl.createDiv({ cls: "mas-manage__tabs" });
 		const manageTab = tabs.createEl("button", { cls: "mas-manage__tab", text: "Install/uninstall sources" });
 		const zoteroTab = tabs.createEl("button", { cls: "mas-manage__tab", text: "Send references to Zotero" });
+		const urlTab = tabs.createEl("button", { cls: "mas-manage__tab", text: "Add by URL" });
 		const desc = contentEl.createEl("p", { cls: "mas-manage__desc" });
 
 		// ── Top bar: Show / search / language / reload ────────────────────────
@@ -4079,6 +5296,8 @@ class ManageSourcesModal extends Modal {
 				this.onReload?.();
 			};
 		}
+		const addByUrl = topbar.createEl("button", { text: "Add by URL…" });
+		addByUrl.title = "Add a Turath work by URL";
 
 		// ── Body: sidebar (kinds + repositories) + list pane ──────────────────
 		const body = contentEl.createDiv({ cls: "mas-manage__body" });
@@ -4089,10 +5308,11 @@ class ManageSourcesModal extends Modal {
 		const genres: string[] = [];
 		const genreLabel = new Map<string, string>();
 		for (const w of this.works) {
-			const g = w.genre || w.collection;
-			if (genreLabel.has(g)) continue;
-			genres.push(g);
-			genreLabel.set(g, GENRE_LABELS[g] || w.collection_label || g);
+			for (const g of workGenres(w)) {
+				if (genreLabel.has(g)) continue;
+				genres.push(g);
+				genreLabel.set(g, genreLabelOf(g));
+			}
 		}
 		for (const g of [...this.activeGenres]) if (!genreLabel.has(g)) this.activeGenres.delete(g);
 		for (const g of genres) {
@@ -4132,10 +5352,10 @@ class ManageSourcesModal extends Modal {
 		// ── The list: one clickable row per work (highlight = selected) ───────
 		const pane = body.createDiv({ cls: "mas-manage__pane" });
 		const list = pane.createDiv({ cls: "mas-manage__list" });
-		const COLS = "8ch minmax(110px,0.9fr) minmax(190px,1.8fr) minmax(120px,0.9fr) 76px 96px";
+		const COLS = "7ch minmax(90px,0.8fr) minmax(190px,1.8fr) minmax(100px,0.9fr) minmax(100px,0.8fr) 70px 90px";
 		const head = list.createDiv({ cls: "mas-manage__head" });
 		head.style.gridTemplateColumns = COLS;
-		for (const label of ["Lang", "Author", "Title", "Repository", "Size", "State"]) head.createSpan({ text: label });
+		for (const label of ["Lang", "Author", "Title", "Kind", "Repository", "Size", "State"]) head.createSpan({ text: label });
 
 		let lastCollection = "";
 		for (const w of this.works) {
@@ -4148,7 +5368,10 @@ class ManageSourcesModal extends Modal {
 			const isInstalled = this.installed.has(w.key);
 			row.createSpan({ cls: "mas-manage__lang", text: w.language.toUpperCase() });
 			row.createSpan({ text: w.author || "" });
-			row.createSpan({ text: w.title || w.name });
+			const titleCell = row.createDiv({ cls: "mas-manage__title" });
+			titleCell.createDiv({ cls: "mas-manage__title-main", text: w.title || w.name });
+			if (w.subtitle) titleCell.createDiv({ cls: "mas-manage__subtitle", text: w.subtitle });
+			row.createSpan({ cls: "mas-manage__kind", text: workGenres(w).map(genreLabelOf).join(", ") });
 			row.createSpan({ cls: "mas-manage__mut", text: w.repository || "" });
 			const known = this.sizes.get(w.key);
 			const size = row.createSpan({
@@ -4167,7 +5390,7 @@ class ManageSourcesModal extends Modal {
 			};
 			this.rows.push({
 				work: w, el: row, isInstalled,
-				genre: w.genre || w.collection,
+				genres: workGenres(w),
 				repo: w.repository || "Other",
 				collection: w.collection,
 			});
@@ -4195,7 +5418,7 @@ class ManageSourcesModal extends Modal {
 				const w = r.work;
 				const hay = `${w.title} ${w.name} ${w.author} ${w.id} ${w.repository || ""}`.toLowerCase();
 				const showOk = this.show === "all" || (this.show === "installed" ? r.isInstalled : !r.isInstalled);
-				const genreOk = !this.activeGenres.size || this.activeGenres.has(r.genre);
+				const genreOk = !this.activeGenres.size || r.genres.some((g) => this.activeGenres.has(g));
 				const repoOk = !this.offRepos.has(r.repo);
 				const visible = showOk && genreOk && repoOk && (!q || hay.includes(q)) && (!lg || w.language === lg);
 				r.el.classList.toggle("is-hidden", !visible);
@@ -4287,10 +5510,24 @@ class ManageSourcesModal extends Modal {
 			if (failed.length) console.error("[midad-arabic-sources] apply failures", failed);
 		};
 
-		const setMode = (m: "manage" | "zotero") => {
+		const urlPane = contentEl.createDiv({ cls: "mas-manage__urlpane" });
+		urlPane.classList.add("mas-manage__hidden");
+		buildUrlAdder(this.plugin, urlPane);
+
+		const setMode = (m: "manage" | "zotero" | "url") => {
+			const prev = this.mode;
 			this.mode = m;
+			const isUrl = m === "url";
 			manageTab.classList.toggle("is-active", m === "manage");
 			zoteroTab.classList.toggle("is-active", m === "zotero");
+			urlTab.classList.toggle("is-active", isUrl);
+			topbar.classList.toggle("mas-manage__hidden", isUrl);
+			body.classList.toggle("mas-manage__hidden", isUrl);
+			urlPane.classList.toggle("mas-manage__hidden", !isUrl);
+			if (isUrl) {
+				desc.setText("Add a Turath work by URL. Your current selections are kept while you are here.");
+				return;
+			}
 			desc.setText(m === "manage"
 				? "Selected works are kept installed; deselect one to remove it. Apply installs the newly selected and removes the newly deselected."
 				: "Select the sources to send; new and changed entries start selected. Only installed sources are listed.");
@@ -4302,19 +5539,24 @@ class ManageSourcesModal extends Modal {
 				showSel.value = "installed";
 			}
 			showSel.disabled = m === "zotero";
-			// Manage selects what is installed; Zotero selects what needs sending.
-			this.selected = new Set(
-				this.works
-					.filter((w) => (m === "manage"
-						? this.initial.get(w.key) === true
-						: this.installed.has(w.key) && this.zoteroStatus.get(w.key) !== "current"))
-					.map((w) => w.key)
-			);
+			// Coming back from the URL tab keeps whatever the user had selected;
+			// switching between manage and Zotero still resets as before.
+			if (prev !== "url" || m === "zotero") {
+				this.selected = new Set(
+					this.works
+						.filter((w) => (m === "manage"
+							? this.initial.get(w.key) === true
+							: this.installed.has(w.key) && this.zoteroStatus.get(w.key) !== "current"))
+						.map((w) => w.key)
+				);
+			}
 			this.refreshSelection();
 			this.updateFilter();
 		};
 		manageTab.onclick = () => setMode("manage");
 		zoteroTab.onclick = () => setMode("zotero");
+		urlTab.onclick = () => setMode("url");
+		addByUrl.onclick = () => setMode("url");
 		setMode(this.mode);
 	}
 

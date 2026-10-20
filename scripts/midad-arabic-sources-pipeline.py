@@ -14,9 +14,10 @@ Subcommands:
     list-pdfs <note.md>
     list-transcriptions <note.md>
     list-archive
+    default-prompts
     migrate-archive
-    transcribe --citekey CK [--pdf PATH ...] [--volume N] [--pages N]
-    translate  --citekey CK [--source PATH ...] [--volume N]
+    transcribe --citekey CK [--pdf PATH ...] [--volume N] [--pages N] [--prompt-file PATH]
+    translate  --citekey CK [--source PATH ...] [--volume N] [--prompt-file PATH]
     reprocess  --zip PATH
 
 PDF resolution order (per the vault's ScholarWeft integration):
@@ -69,6 +70,7 @@ JOBS_DIR = CACHE / "jobs"
 
 _LOG_PATH = None
 _STATE_PATH = None
+_PROMPT_PATH = None
 
 
 def set_log(path):
@@ -83,6 +85,12 @@ def set_state(path):
     if path:
         _STATE_PATH = Path(path)
         _STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
+
+
+def set_prompt(path):
+    global _PROMPT_PATH
+    if path:
+        _PROMPT_PATH = Path(path)
 
 
 def save_state(**fields):
@@ -113,8 +121,8 @@ def _pid_alive(pid) -> bool:
 
 
 def _cleanup_job_files():
-    """Remove this job's log/state once it has completed successfully."""
-    for p in (_LOG_PATH, _STATE_PATH):
+    """Remove this job's log/state/prompt file once it has completed successfully."""
+    for p in (_LOG_PATH, _STATE_PATH, _PROMPT_PATH):
         if p:
             try:
                 Path(p).unlink(missing_ok=True)
@@ -370,6 +378,21 @@ def cmd_list_archive(args) -> int:
     return 0
 
 
+def cmd_default_prompts(args) -> int:
+    """Emit the built-in prompts so the plugin can seed/refresh its prompt JSON."""
+    try:
+        sys.path.insert(0, str(SCRIPTS))
+        from midad_prompts import DEFAULT_TRANSCRIPTION_PROMPT, DEFAULT_TRANSLATION_PROMPT
+        emit("result", result={
+            "transcription": DEFAULT_TRANSCRIPTION_PROMPT,
+            "translation": DEFAULT_TRANSLATION_PROMPT,
+        })
+        return 0
+    except Exception as e:
+        fail(f"Could not read the built-in prompts: {e}")
+        return 1
+
+
 def cmd_migrate_archive(args) -> int:
     ARCHIVE_DIR.mkdir(parents=True, exist_ok=True)
     moved = 0
@@ -440,9 +463,13 @@ def cmd_transcribe(args) -> int:
 
         save_state(stage="submitting", status="running", doc_type="transcription",
                    pid=os.getpid(), citekey=citekey, pdf=str(pdf), volume=volume,
-                   work_dir=str(work), log=str(_LOG_PATH) if _LOG_PATH else "")
+                   work_dir=str(work), log=str(_LOG_PATH) if _LOG_PATH else "",
+                   prompt_file=str(args.prompt_file) if getattr(args, "prompt_file", None) else "")
         step("transcribe", "start", f"{pdf.name}" + (f" (vol. {volume})" if volume else ""))
-        if run_script("transcription-batch-submit.py", [str(pdf), "--work-dir", str(work)]):
+        submit_args = [str(pdf), "--work-dir", str(work)]
+        if getattr(args, "prompt_file", None):
+            submit_args += ["--prompt-file", str(args.prompt_file)]
+        if run_script("transcription-batch-submit.py", submit_args):
             save_state(stage="error", status="error")
             step("transcribe", "error", pdf.name); continue
 
@@ -450,7 +477,10 @@ def cmd_transcribe(args) -> int:
         run_script("transcription-process-raw.py", [str(batch_txt), "--poll", str(POLL_SECONDS)])
         if not raw.exists():
             step("hallucinations", "start", "re-OCRing flagged pages")
-            run_script("transcription-process-raw.py", [str(batch_txt), "--fix"])
+            fix_args = [str(batch_txt), "--fix"]
+            if getattr(args, "prompt_file", None):
+                fix_args += ["--prompt-file", str(args.prompt_file)]
+            run_script("transcription-process-raw.py", fix_args)
 
         if not processed.exists() or processed.stat().st_mtime < raw.stat().st_mtime:
             run_script("transcription-postprocess.py", [str(raw), str(processed)])
@@ -477,7 +507,8 @@ def _resume_transcription(st: dict) -> int:
     work = Path(st.get("work_dir") or Path(pdf).parent)
     batch_txt = work / f"{stem}.batch.txt"
     if not batch_txt.exists():
-        return cmd_transcribe(argparse.Namespace(citekey=citekey, pdf=[pdf], volume=volume, pages=None))
+        return cmd_transcribe(argparse.Namespace(citekey=citekey, pdf=[pdf], volume=volume,
+                                                pages=None, prompt_file=st.get("prompt_file") or None))
 
     mv = load_module("transcription-translation-move-to-vault.py")
     raw = work / f"{stem}-raw.md"
@@ -485,7 +516,10 @@ def _resume_transcription(st: dict) -> int:
     save_state(stage="resuming", status="running")
     run_script("transcription-process-raw.py", [str(batch_txt), "--poll", str(POLL_SECONDS)])
     if not raw.exists():
-        run_script("transcription-process-raw.py", [str(batch_txt), "--fix"])
+        fix_args = [str(batch_txt), "--fix"]
+        if st.get("prompt_file"):
+            fix_args += ["--prompt-file", str(st["prompt_file"])]
+        run_script("transcription-process-raw.py", fix_args)
     if not processed.exists() or processed.stat().st_mtime < raw.stat().st_mtime:
         run_script("transcription-postprocess.py", [str(raw), str(processed)])
     dest = mv.write_note(_strip_yaml(processed.read_text(encoding="utf-8")), citekey,
@@ -506,6 +540,8 @@ def cmd_resume(args) -> int:
     set_state(state_path)
     if st.get("log"):
         set_log(st["log"])
+    if st.get("prompt_file"):
+        set_prompt(st["prompt_file"])
     if st.get("pid") and _pid_alive(st["pid"]):
         fail(f"Job is still running (pid {st['pid']}).")
         return 1
@@ -532,7 +568,10 @@ def cmd_translate(args) -> int:
     for src in sources:
         src = Path(src)
         step("translate", "start", src.name)
-        if run_script("translate-batch-submit.py", [str(src)]):
+        submit_args = [str(src)]
+        if getattr(args, "prompt_file", None):
+            submit_args += ["--prompt-file", str(args.prompt_file)]
+        if run_script("translate-batch-submit.py", submit_args):
             step("translate", "error", src.name); continue
         txt = src.parent / f"{src.stem}.translate.txt"
         run_script("translate-batch-process.py", [str(txt), "--poll", str(POLL_SECONDS)])
@@ -562,6 +601,7 @@ def main() -> int:
     p = sub.add_parser("list-pdfs"); p.add_argument("note"); p.set_defaults(func=cmd_list_pdfs)
     p = sub.add_parser("list-transcriptions"); p.add_argument("note"); p.set_defaults(func=cmd_list_transcriptions)
     sub.add_parser("list-archive").set_defaults(func=cmd_list_archive)
+    sub.add_parser("default-prompts").set_defaults(func=cmd_default_prompts)
     sub.add_parser("migrate-archive").set_defaults(func=cmd_migrate_archive)
 
     p = sub.add_parser("transcribe")
@@ -569,6 +609,7 @@ def main() -> int:
     p.add_argument("--pdf", action="append")
     p.add_argument("--volume", type=int)
     p.add_argument("--pages", type=int)
+    p.add_argument("--prompt-file")
     p.add_argument("--log")
     p.add_argument("--state")
     p.set_defaults(func=cmd_transcribe)
@@ -577,6 +618,7 @@ def main() -> int:
     p.add_argument("--citekey", required=True)
     p.add_argument("--source", action="append")
     p.add_argument("--volume", type=int)
+    p.add_argument("--prompt-file")
     p.set_defaults(func=cmd_translate)
 
     p = sub.add_parser("reprocess"); p.add_argument("--zip", required=True); p.set_defaults(func=cmd_reprocess)
@@ -588,6 +630,8 @@ def main() -> int:
         set_log(args.log)
     if getattr(args, "state", None):
         set_state(args.state)
+    if getattr(args, "prompt_file", None):
+        set_prompt(args.prompt_file)
     try:
         rc = args.func(args)
     except KeyboardInterrupt:

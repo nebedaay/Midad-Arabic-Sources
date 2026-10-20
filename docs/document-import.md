@@ -1,0 +1,59 @@
+# Document import (text sources)
+
+The importer pulls born-digital Arabic texts from public repositories into your vault, one note per sūra, chapter, or dictionary root, with full frontmatter and links back to the Qurʾān text. It is catalog-driven, so more repositories and genres can be wired in over time.
+
+## Manage text sources
+
+**Manage text sources…** opens a two-pane dialogue with two tabs.
+
+Under the tabs sit the collection description and a top bar: a **Show** filter (All / Installed / Not installed), a **filter box**, a **language** select, a ↻ reload button, and **Add by URL…**. On the left are **Kinds of sources** (toggle buttons, one per genre — Tafsīr, Ḥadīth, Fiqh, Uṣūl al-Fiqh, Doctrine (ʿaqīda), Tārīkh, Biography (rijāl), Language (lugha), Lexicography, Grammar (naḥw and ṣarf), Rhetoric, Adab, Dictionaries, and more; none selected means all) and **Repositories** (a selectable list). A work can sit in more than one kind (e.g. a ḥadīth commentary is both Ḥadīth and Ḥadīth commentary). The right pane lists one clickable row per work — Language, Author, Title (with its subtitle beneath), Kind, Repository, Size, State — and the row is highlighted when selected, with no checkboxes.
+
+- In the **install/uninstall** tab, installed works start selected; deselecting one marks it for removal. There is no Select All, because there are far too many works to act on at once.
+- In the **Send references to Zotero** tab, a single **Select All/None** toggle selects, then clears, the visible installed works. See [Zotero export](./zotero.md).
+
+The catalogue of available works is cached: per session and on disk (`.midad-arabic-sources/source-catalog.json`, 7 days). Opening the dialogue serves the cache immediately and refreshes it in the background when it is stale; the ↻ button forces a fresh listing.
+
+## Adding a work by URL
+
+Turath has far more books than any catalogue can list. **Add by URL** (a tab in the manage dialog, or the **Add Turath work by URL…** command) takes a link such as `https://app.turath.io/book/95864` (or just the numeric id), reads the book's metadata from Turath's API, and offers a **provisional romanization** in two editable fields — **Title (romanized)** and **Author (romanized)**. The title is sentence-cased for a non-English work (first word and proper nouns capitalised); review it before adding. **Add to list** stores the entry in `.midad-arabic-sources/turath-custom-works.json`; the tab lists everything you have added, with a **Remove** button, and keeps your current selections while you are in it. Added works then appear in the catalogue like any other — choose their kinds, install them, re-render them. The JSON entry carries the id, Roman title, Arabic title, author, type, genres, and URL; edit it directly if you want a different title or kind.
+
+## Collections
+
+- **Qurʾān commentaries (tafsīr)** — `spa5k/tafsir_api` (a mirror of quran.com / altafsir.com): about 60 Arabic and 13 English commentaries (al-Jalālayn, al-Ṭabarī, al-Qurṭubī, al-Baghawī, Ibn Kathīr, al-Saʿdī, al-Muyassar, al-Kashshāf, and more).
+- **Qurʾān commentaries (QUL)** — the Qurʾānic Universal Library (`qul.tarteel.ai`): 111 further tafsīrs across Arabic and 30+ languages. Keyless, fetched one sūra at a time; shares the **Tafsīr Sources** MOC with the spa5k collection.
+- **Qurʾān translations** — `fawazahmed0/quran-api`: 50+ English translations.
+- **Ḥadīth collections** — `AhmedBaset/hadith-json`: 17 collections (Bukhārī, Muslim, Abū Dāwūd, Tirmidhī, Nasāʾī, Ibn Mājah, Mālik, Aḥmad, and the forties), Arabic and English.
+- **Qurʾān texts (riwāyāt)** — `risan/quran-json`: Warsh, Qālūn, al-Dūrī, Shuʿbah, al-Sūsī, plus canonical Ḥafṣ.
+- **Dictionaries** — Hans Wehr’s *Dictionary of Modern Written Arabic* and Lane’s *An Arabic-English Lexicon*, both read from their SQLite editions (one note per root).
+- **Classical texts (Turath.io)** — the public API covering ~8,500 books across fiqh, uṣūl, ʿaqīda, ḥadīth commentary, tārīkh, adab, and language. One note per table-of-contents heading, with the source’s pages preserved as `#### p. N` markers.
+
+## Commands
+
+- **Manage text sources…** — install, uninstall, or send to Zotero.
+- **Copy import templates to vault** — copy the editable ETA templates into your vault so you can change how notes render. See [Templates](./templates.md).
+- **Re-render imported sources** — regenerate every note from its cached model; a prompt asks first when a template change is involved.
+- **Re-render this source** — the same for one work, from its note or its right-click menu.
+- **Apply template changes to imported sources** — apply any detected template change on demand (the plugin also polls for changes when auto-update is on).
+- **Re-download imported sources (rebuild models)** — fetch the source JSON again and rebuild every model, for when a repository changes its format.
+- **Migrate imported sources to the current naming scheme** — one-off; moves works that predate the repository-qualifier convention to the current folder and file names.
+- **Check imported sources** — find works whose notes or cached model are missing and offer to restore them.
+- **Check for source updates** — ask each repository whether a text changed upstream (also on the **Check repositories every … days** cadence, default 7).
+
+## Re-rendering and your edits
+
+Regenerating a note never overwrites your work. Generated content lives inside a managed region (`<span class="mas-managed">…</span>`), and only template-declared frontmatter properties are reconciled. Everything else — including a `related:` property you edited — is preserved. See [Templates](./templates.md) for how the merge strategies work.
+
+## Naming and provenance
+
+Every work’s folder and hub carry a **repository qualifier** in parentheses (`Tafsīr al-Ṭabarī (tafsir_api)`, `al-Arbaʿūn al-Nawawiyya (turath.io)`), so two editions of the same work can be installed side by side. A work known to exist only once across the imported repositories (the two dictionaries) is flagged `unique` and keeps its bare folder name. `title:` and the MOC/hub link aliases stay clean.
+
+Every generated page carries `repository`, `license-attribution`, and `repository-updated` properties, and `[[Midad Arabic Sources]]` in its `up`, so the whole corpus is traceable to its source and to the plugin that imported it.
+
+## Where things go
+
+- **Notes**: under the **Import destination** (`_7 Sources` by default), one folder per work.
+- **Cached source JSON**: `.midad-arabic-sources/cache/text-sources/`.
+- **Render models**: `.midad-arabic-sources/source-models/<collection>/<id>.json`.
+- **Manifest**: `.midad-arabic-sources/source-imports.json` — the authoritative list of works and their status.
+
+Removing a work is a **hard delete** of its cached model and notes (not a trash move); the source JSON stays cached, so re-installing is quick.

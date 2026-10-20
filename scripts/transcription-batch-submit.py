@@ -19,53 +19,30 @@ from pathlib import Path
 from google import genai
 from google.genai import types
 
+# The built-in prompt lives in midad_prompts.py so the plugin can seed and refresh
+# its "Default prompt" from the same text, and the general rules stay hardcoded.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from midad_prompts import build_transcription_prompt  # noqa: E402
+
 VAULT = Path(os.environ.get("OBSIDIAN_VAULT", os.path.expanduser("~/Documents/Obsidian Vault")))
 API_KEY = os.environ.get("GEMINI_API_KEY", os.environ.get("GOOGLE_API_KEY", ""))
 # Fix non-ASCII characters that sometimes creep into API keys (e.g. non-breaking hyphen)
 API_KEY = API_KEY.replace("\u2011", "-").encode("ascii", errors="replace").decode("ascii")
 
-SYSTEM_PROMPT = (
-    "You are an expert editor specializing in classical Arabic literature. "
-    "OCR and transcribe the provided page of an Arabic book directly into clean, strict Obsidian Markdown. "
-    "Do not add, remove, reorder, or guess at text. Reproduce the tashkīl that is present in the source; do not invent tashkīl.\n\n"
+SYSTEM_PROMPT = build_transcription_prompt()
 
-    "PAGE HEADING\n"
-    "- Begin the page with the PRINTED page number as a level-4 heading, in Western digits: '#### p. 12'. "
-    "For an unnumbered page use '#### Cover', '#### Copyright page', '#### Title page', etc.; if the number cannot be read use '#### p. ?'.\n"
-    "- Do NOT output the PDF/file page number, the input filename, or a '---' separator; the pipeline adds those.\n"
-    "- On a cover or title page, render the title as '# Title', the subtitle or author as '## ...', and the remaining cover text as plain paragraphs.\n\n"
 
-    "BLOCKS\n"
-    "- Put exactly one empty line between every block element (page heading, headings, paragraphs, poetry, footnotes).\n"
-    "- Keep each body paragraph on a single line, with no internal line breaks.\n"
-    "- Format chapter headings (often bold or centred in the original) as '### Title'.\n"
-    "- Format italics with *asterisks*, not _underscores_.\n\n"
-
-    "POETRY\n"
-    "- Treat consecutive poetry lines as one block, with NO blank lines between them.\n"
-    "- Format each couplet on one line exactly as '* hemistich 1%%hemistich 2' (leading asterisk and space, the two hemistiches joined by '%%').\n"
-    "- A line with a single hemistich: '* hemistich'.\n"
-    "- The leading '* ' and the '%%' marker are used ONLY for poetry, never for italics or list bullets.\n\n"
-
-    "QUR'AN QUOTES\n"
-    "- Put every Qur'an verse or fragment between ornate parentheses wrapped in asterisks, like this: '*\uFD3Fverse text\uFD3E*'.\n"
-    "- Mark a quote even when it is only a word or two, and even when the source does not set it off with quotation marks.\n"
-    "- Do NOT add sura:verse references or wikilinks, and do not add tashkīl to Qur'an quotes; "
-    "post-processing adds the reference, the wikilink, and the tashkīl.\n"
-    "- If the page ends mid-quote (opening bracket but no closing bracket), end the span with '*' and no closing bracket. "
-    "If the page begins with a quote continuation (closing bracket but no opening bracket), start the span with '*' and no opening bracket.\n"
-    "- Do NOT use ornate parentheses for hadith or other non-Qur'anic quotations; use regular parentheses or the quotation marks used in the source.\n\n"
-
-    "FOOTNOTES\n"
-    "- Put footnotes at the end of the page body, after a line containing only '***'.\n"
-    "- Format each footnote as its own list item '- N – text' (using the printed footnote number and an en dash), one per line; "
-    "a footnote continuation line begins with '- '.\n\n"
-
-    "ACCURACY\n"
-    "- Do not loop or repeat text if characters are blurry.\n"
-    "- Check the result before returning: if it is implausibly long for a single page (for example, more than 800 words) "
-    "or highly repetitive, discard it and transcribe the page once more."
-)
+def read_prompt(path: str | None) -> str | None:
+    """The selected text-specific prompt, or None to use the built-in default."""
+    if path:
+        try:
+            text = Path(path).read_text(encoding="utf-8").strip()
+            if text:
+                return text
+            print(f"WARNING: prompt file is empty: {path}; using the built-in prompt.")
+        except Exception as e:
+            print(f"WARNING: could not read prompt file {path}: {e}; using the built-in prompt.")
+    return None
 
 
 def burst_pdf(pdf_path: Path, pages_dir: Path):
@@ -139,7 +116,7 @@ def upload_pages(pages_dir: Path, client: genai.Client) -> list:
     return uploaded
 
 
-def build_jsonl(uploaded: list, jsonl_path: Path):
+def build_jsonl(uploaded: list, jsonl_path: Path, system_prompt: str = SYSTEM_PROMPT):
     """Build the batch request JSONL."""
     with open(jsonl_path, "w", encoding="utf-8") as f:
         for item in uploaded:
@@ -147,12 +124,12 @@ def build_jsonl(uploaded: list, jsonl_path: Path):
                 "key": item["local_name"],
                 "request": {
                     "model": "models/gemini-3.5-flash-lite",
-                    "system_instruction": {"parts": [{"text": SYSTEM_PROMPT}]},
+                    "system_instruction": {"parts": [{"text": system_prompt}]},
                     "contents": [{
                         "role": "user",
                         "parts": [
                             {"file_data": {"file_uri": item["uri"], "mime_type": item["mime_type"]}},
-                            {"text": "OCR this Arabic PDF document page and output it as structural Markdown."}
+                            {"text": "OCR this PDF document page and output it as structural Markdown."}
                         ]
                     }]
                 }
@@ -189,7 +166,7 @@ def submit_batch(jsonl_path: Path, client: genai.Client, pdf_stem: str) -> str:
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("Usage: python3 gemini-batch-submit.py input.pdf")
+        print("Usage: python3 transcription-batch-submit.py input.pdf [--work-dir DIR] [--prompt-file PATH]")
         sys.exit(1)
     
     pdf_path = Path(sys.argv[1]).resolve()
@@ -203,6 +180,13 @@ if __name__ == "__main__":
         if idx + 1 < len(sys.argv):
             work_dir = Path(sys.argv[idx + 1]).expanduser()
     work_dir.mkdir(parents=True, exist_ok=True)
+
+    prompt_file = None
+    if "--prompt-file" in sys.argv:
+        idx = sys.argv.index("--prompt-file")
+        if idx + 1 < len(sys.argv):
+            prompt_file = sys.argv[idx + 1]
+    system_prompt = build_transcription_prompt(read_prompt(prompt_file))
 
     stem = pdf_path.stem
     pages_dir = work_dir / f"{stem}-pages"
@@ -225,7 +209,7 @@ if __name__ == "__main__":
     
     # 3. Build JSONL
     print(f"\nBuilding batch JSONL...")
-    build_jsonl(uploaded, jsonl_path)
+    build_jsonl(uploaded, jsonl_path, system_prompt)
     
     # 4. Submit batch
     print(f"\nSubmitting batch job...")

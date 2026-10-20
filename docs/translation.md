@@ -1,0 +1,20 @@
+# Translation
+
+**Translate this item’s transcription(s)** turns a finished Arabic transcription into an English translation, one page per page, using the same Gemini pipeline.
+
+Run it from a `@citekey` note. A dialog lists that item’s transcriptions (all checked by default) plus any PDFs it found; deselect the ones you do not want, optionally set a **Volume** number, and click **Translate**.
+
+- The translation is submitted as a Gemini batch job and written to `_2 Bibliographic notes/Arabic translations/` as `@<citekey> - translation.md` (or `… - translation vol. N.md`).
+- A translation mirrors its transcription note’s aliases and is linked from it, so the two sit side by side.
+- The batch is archived under `.midad-arabic-sources/archive/`, so it can be reprocessed later.
+- The same progress panel and log apply as for [transcription](./transcription.md).
+
+## Prompts
+
+The dialog has the same **Prompt** controls as transcription: a dropdown beside **Select all** / **Select none**, with **Modify selected**, **Create a new prompt from selected**, and **Delete selected prompt**. Prompts live in `.midad-arabic-sources/translation-prompts.json`, and the selected prompt is sent as the batch job's system instruction. **Default prompt** can be edited but not deleted.
+
+The editor holds only the **text-specific** part. The pipeline appends it to the shared, hardcoded format contract (page headings, `---` separators, blank lines, no hard wrapping) and the general translation rules (structure, poetry, footnotes, italics and quotes). The default text-specific part names the source language, the target language, Qur'an-quote formatting, and IJMES transliteration.
+
+There is no separate “re-translate selected pages” command yet; re-running **Translate this item’s transcription(s)** on a transcription replaces its translation. Page-level re-translation is on the roadmap.
+
+Translation needs the same prerequisites as transcription: a **Gemini API key** and Python 3 with `google-genai`, `requests`, and `pymupdf` — see [Dependencies](./dependencies.md).

@@ -9,7 +9,7 @@
 # <%= s.name %>
 
 <% for (const w of s.works) { -%>
-- [[<%= w.dir %>]]
+- <%= wikilink(w.dir, w.title) %>
 <% } -%>
 
 <% } -%>

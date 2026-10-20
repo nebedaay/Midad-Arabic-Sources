@@ -106,12 +106,10 @@
 }
 
 
-/* The dictionary definition callout (`mas-dictionary-definition`). The older
-   `hans-wehr-definition` name is kept as an alias so notes not yet re-rendered
-   still style; re-rendering renames the callout. */
-.callout[data-callout="mas-dictionary-definition"],
-.callout[data-callout="hans-wehr-definition"] {
+/* The dictionary definition callout. */
+.callout[data-callout="mas-dictionary-definition"] {
     --callout-color: 150, 150, 120;
+    border: none;
     .callout-title {
         display: none;
     }
@@ -134,6 +132,7 @@
                text in (`.markdown-rendered :dir(rtl)`), so the whole subtree is
                reset here, not just the `li`. Arabic still gets the Arabic face
                from the family list, which is applied per character. */
+            direction: ltr;
             font-size: var(--font-text-size);
             background: #ffffeebb;
             vertical-align: top;
@@ -413,7 +412,7 @@ Displaying Qur'an sūras in the Qur'an vault
    literature notes" modal: a filter sidebar on the left, a selectable list on
    the right. Rows are highlighted when selected (no checkboxes). */
 .mas-manage-modal {
-    width: min(1040px, 94vw);
+    width: min(1240px, 96vw);
     height: min(85vh, 820px);
     display: flex;
     flex-direction: column;
@@ -461,6 +460,7 @@ Displaying Qur'an sūras in the Qur'an vault
 }
 .mas-manage__searchrow {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     gap: var(--size-4-2);
     margin-bottom: var(--size-4-2);
@@ -552,10 +552,20 @@ Displaying Qur'an sūras in the Qur'an vault
 .mas-manage__list {
     flex: 1 1 auto;
     min-height: 0;
-    overflow-y: auto;
+    overflow: auto;
     border: 1px solid var(--background-modifier-border);
     border-radius: var(--radius-s);
     padding: var(--size-4-1);
+}
+.mas-manage__head,
+.mas-manage__row {
+    min-width: 900px;
+}
+.mas-manage__urlpane {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    padding: var(--size-4-2);
 }
 .mas-manage__head {
     display: grid;
@@ -589,13 +599,26 @@ Displaying Qur'an sūras in the Qur'an vault
     background: var(--background-modifier-active-hover);
 }
 .mas-manage__row.is-hidden,
-.mas-manage__collection.is-hidden {
+.mas-manage__collection.is-hidden,
+.mas-manage__hidden {
     display: none;
 }
 .mas-manage__lang,
 .mas-manage__mut {
     color: var(--text-muted);
     font-size: var(--font-ui-smaller);
+}
+.mas-manage__title {
+    min-width: 0;
+}
+.mas-manage__title-main {
+    white-space: normal;
+}
+.mas-manage__subtitle,
+.mas-manage__kind {
+    color: var(--text-muted);
+    font-size: var(--font-ui-smaller);
+    white-space: normal;
 }
 .mas-manage__size {
     color: var(--text-muted);
@@ -604,6 +627,7 @@ Displaying Qur'an sūras in the Qur'an vault
 }
 .mas-manage__foot {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     justify-content: space-between;
     gap: var(--size-4-2);
@@ -619,4 +643,75 @@ Displaying Qur'an sūras in the Qur'an vault
 }
 .mas-manage__actions .mas-manage__toggle.is-hidden {
     display: none;
+}
+
+/* ── Prompt editor modal ──────────────────────────────────────────────────────
+   A wide editor for a transcription/translation system prompt. The textarea
+   carries its own sizing inline; this only widens the modal. */
+.modal.mas-prompt-editor-modal {
+    width: min(900px, 94vw);
+    max-width: min(900px, 94vw);
+}
+
+/* ── In-app documentation modal ───────────────────────────────────────────────
+   A ScholarWeft-style docs browser: a navigation list on the left, a rendered
+   markdown pane on the right. The docs are bundled into main.js (see
+   gen-assets.mjs and src/docs.ts). */
+.mas-docs-modal {
+    max-width: min(1200px, 94vw);
+}
+
+/* The width is set on the modal element itself (contentEl is inside it). */
+.modal.mas-docs-modal {
+    width: min(1200px, 94vw);
+    max-width: min(1200px, 94vw);
+}
+
+.mas-docs-wrap {
+    display: flex;
+    gap: 16px;
+    height: 70vh;
+    margin-top: 6px;
+}
+
+.mas-docs-nav {
+    flex: 0 0 210px;
+    overflow-y: auto;
+    border-right: 1px solid var(--background-modifier-border);
+    padding-right: 10px;
+}
+
+.mas-docs-nav-item {
+    display: block;
+    padding: 4px 8px;
+    margin: 1px 0;
+    border-radius: var(--radius-s);
+    cursor: pointer;
+    color: var(--text-muted);
+    font-size: var(--font-ui-small);
+}
+
+.mas-docs-nav-item:hover {
+    background-color: var(--background-modifier-hover);
+    color: var(--text-normal);
+}
+
+.mas-docs-nav-item.is-active {
+    background-color: var(--interactive-accent);
+    color: var(--text-on-accent);
+}
+
+.mas-docs-body {
+    flex: 1 1 auto;
+    overflow-y: auto;
+    padding-right: 8px;
+}
+
+.mas-docs-gh {
+    font-size: var(--font-ui-smaller);
+    margin-bottom: 6px;
+}
+
+.mas-docs-content img {
+    max-width: 100%;
 }

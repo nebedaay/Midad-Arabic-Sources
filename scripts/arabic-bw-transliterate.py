@@ -134,15 +134,40 @@ bw_map = CharMapper.builtin_mapper('ar2bw')
 
 
 def load_disambiguator(engine):
-    """Load the diacritization engine. Heavy imports happen here, not at import time."""
+    """Load the diacritization engine (see `load_disambiguator_result`)."""
+    return load_disambiguator_result(engine)[0]
+
+
+def load_disambiguator_result(engine):
+    """Return `(disambiguator, actual_engine)`.
+
+    `bert` is the engine we want; `mle` is a safety net. bert needs the
+    `transformers` package and its model data (downloaded from Hugging Face on
+    first use), so on a machine without them it cannot load at all — in which case
+    we fall back to the lighter MLE engine, tell the user how to get bert, and
+    report `mle` as the engine actually used (so the plugin can surface it).
+    """
     if engine == 'mle':
         from camel_tools.disambig.mle import MLEDisambiguator
-        return MLEDisambiguator.pretrained('calima-msa-r13')
+        return MLEDisambiguator.pretrained('calima-msa-r13'), 'mle'
+    if engine == 'none':
+        return None, 'none'
 
-    from camel_tools.disambig.bert import BERTUnfactoredDisambiguator
-    from transformers import logging as tlog
-    tlog.set_verbosity_error()
-    return BERTUnfactoredDisambiguator.pretrained()
+    try:
+        from camel_tools.disambig.bert import BERTUnfactoredDisambiguator
+        from transformers import logging as tlog
+        tlog.set_verbosity_error()
+        return BERTUnfactoredDisambiguator.pretrained(), 'bert'
+    except Exception as exc:  # noqa: BLE001 - transformers/model data missing
+        print(
+            f'NOTE: bert is unavailable ({exc}); proceeding with MLE, which is '
+            'rougher on classical text. For best results, install `transformers` '
+            'and the BERT model data (`camel_data -i disambig-bert-unfactored-msa`) '
+            'so bert can be used.',
+            file=sys.stderr,
+        )
+        from camel_tools.disambig.mle import MLEDisambiguator
+        return MLEDisambiguator.pretrained('calima-msa-r13'), 'mle'
 
 
 _ANALYZER = None
@@ -927,6 +952,8 @@ def server_romanize(text, args):
     }
     if args.model:
         payload['model'] = args.model
+    if getattr(args, 'base_url', None):
+        payload['base_url'] = args.base_url
     if args.api_key:
         payload['api_key'] = args.api_key
     request = urllib.request.Request(
@@ -982,8 +1009,9 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('-text', help='Arabic text (if omitted, read interactively)')
     ap.add_argument('--engine', choices=('bert', 'mle', 'none'), default='bert',
-                    help='diacritization engine: bert (default), mle (faster startup), '
-                         'none (skip CAMeL; fully vocalized input only)')
+                    help='diacritization engine: bert (default), none (skip CAMeL; fully '
+                         'vocalized input only), mle (opt-in, rougher; requires the calima '
+                         'MLE data)')
     ap.add_argument('--sun-letters', action='store_true')
     ap.add_argument('--debug', action='store_true')
     ap.add_argument('--keep-case', action='store_true', help='Keep case endings')
@@ -998,9 +1026,12 @@ def main():
                     help='ignore the server and run the engine in this process')
     ap.add_argument('--llm', action='store_true',
                     help='romanize with the LLM endpoint (server) instead of the rule engine')
-    ap.add_argument('--provider', choices=('gemini', 'deepseek'), default='gemini')
+    ap.add_argument('--provider', choices=('gemini', 'deepseek', 'openai'), default='gemini',
+                    help='LLM provider; "openai" is any OpenAI-compatible endpoint')
     ap.add_argument('--model', default=None, help='LLM model (server default if omitted)')
     ap.add_argument('--translate', action='store_true', help='also print an English translation')
+    ap.add_argument('--base-url', default=None,
+                    help='base URL for the openai provider (else the server OPENAI_BASE_URL)')
     ap.add_argument('--api-key', default=None, help='API key for the LLM (else the server environment)')
     args = ap.parse_args()
 
@@ -1122,7 +1153,11 @@ def transliterate_stem(seg_ar, a, disambig, i, args, has_article, vocalized, for
     bw = bw_map.map_string(seg_ar)
     # A word-initial shadda is idghām with the previous word, never part of the word
     bw = re.sub(r'^([^aiuFNKo~])([aiuFNKo]*)~', r'\1\2', bw)
-    if not keep_case and not defective and case_ending_stripped(a):
+    # A word read as a citation form keeps a *verb's* final inflection (kataba,
+    # battaka) but not a noun's case ending (baḥr, not baḥrun) — `args.citation`
+    # asks for that even when the source's tashkīl is complete, which otherwise
+    # forces `keep_case` on and preserves the ending.
+    if not defective and case_ending_stripped(a) and (not keep_case or getattr(args, 'citation', False)):
         # drop the final case vowel and -un/-in; keep -an (fathatan) by default
         bw = re.sub(r'[aiuNKo]+$', '', bw)
     if re.search(r'p[aiuFNKo]*$', bw):

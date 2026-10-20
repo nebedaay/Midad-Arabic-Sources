@@ -381,6 +381,22 @@ up:
         import json, google.genai as genai, google.genai.types as types
         client = genai.Client(api_key=API_KEY)
         lines = [l for l in open(jsonl_path) if l.strip()]
+
+        # The same selected prompt the batch used, so a re-OCR'd page keeps the
+        # custom format instead of falling back to the built-in assumptions.
+        # The prompt file holds only the text-specific part; the shared format
+        # and OCR rules are composed in midad_prompts.py.
+        user_prompt = None
+        if "--prompt-file" in sys.argv:
+            idx = sys.argv.index("--prompt-file")
+            if idx + 1 < len(sys.argv):
+                try:
+                    user_prompt = Path(sys.argv[idx + 1]).read_text(encoding="utf-8").strip() or None
+                except Exception as e:
+                    print(f"  WARNING: could not read prompt file: {e}")
+        sys.path.insert(0, str(SCRIPTS))
+        from midad_prompts import build_transcription_prompt
+        system_prompt = build_transcription_prompt(user_prompt)
         
         # Find previous JSONL (same stem without " - try X" suffix)
         prev_jsonl = None
@@ -472,17 +488,21 @@ up:
                     file = client.files.upload(file=str(pdf_path), config=types.UploadFileConfig(display_name=key, mime_type='application/pdf'))
                     # Sync re-OCR of a single page. Kept deliberately short to
                     # discourage reordering; 2.5 Flash is used because Flash-Lite
-                    # is not always available for synchronous calls.
+                    # is not always available for synchronous calls. The selected
+                    # prompt, when one was supplied, is used as the system
+                    # instruction so a custom format survives the retry.
                     sync_prompt = (
-                        "OCR this Arabic page and output clean markdown. Transcribe every word in "
+                        "OCR this page and output clean markdown. Transcribe every word in "
                         "EXACT order, left to right, top to bottom. DO NOT reorder, add, omit, or "
-                        "guess at text. Put \uFD3F before any Qur'an text and \uFD3E after it. "
-                        "Keep each paragraph on one line."
+                        "guess at text. Keep each paragraph on one line."
                     )
-                    response = client.models.generate_content(
-                        model='models/gemini-2.5-flash',
-                        contents=[sync_prompt, types.Part.from_uri(file_uri=file.uri, mime_type='application/pdf')],
-                    )
+                    kwargs = {
+                        "model": "models/gemini-2.5-flash",
+                        "contents": [sync_prompt, types.Part.from_uri(file_uri=file.uri, mime_type="application/pdf")],
+                    }
+                    if system_prompt:
+                        kwargs["config"] = types.GenerateContentConfig(system_instruction=system_prompt)
+                    response = client.models.generate_content(**kwargs)
                     new_text = getattr(response, 'text', '') or ''
                     data.setdefault('response', {})
                     data['response']['candidates'] = [{'content': {'parts': [{'text': new_text}]}}]

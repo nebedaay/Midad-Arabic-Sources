@@ -25,6 +25,8 @@ export interface TemplateSet {
 	quran: string;
 	dictionary: string;
 	dictionaryIndex: string;
+	book: string;
+	bookVolume: string;
 	hub: string;
 	moc: string;
 	sources: string;
@@ -59,6 +61,8 @@ export const TEMPLATE_FILES: Record<keyof TemplateSet, string> = {
 	quran: "quran-note.eta.md",
 	dictionary: "dictionary-note.eta.md",
 	dictionaryIndex: "dictionary-index.eta.md",
+	book: "book-note.eta.md",
+	bookVolume: "book-volume.eta.md",
 	hub: "hub.eta.md",
 	moc: "moc.eta.md",
 	sources: "sources.eta.md",
@@ -111,6 +115,8 @@ export function renderUnit(engine: SourceTemplateEngine, templates: TemplateSet,
 		: unit.kind === "quran" ? templates.quran
 		: unit.kind === "dict" ? templates.dictionary
 		: unit.kind === "dict-index" ? templates.dictionaryIndex
+		: unit.kind === "book" ? templates.book
+		: unit.kind === "book-volume" ? templates.bookVolume
 		: templates.source;
 	return renderTemplate(engine, tpl, {
 		work: model.work,
@@ -224,6 +230,23 @@ export async function writeMerged(app: App, path: string, out: RenderOutput, for
 }
 
 /**
+ * A hash of a rendered note, ignoring the one property that changes every time.
+ *
+ * `updated` is rewritten on every render, so counting it would make every note look
+ * changed. Everything else in the render is a function of the model and the
+ * templates, which is exactly what we want to compare.
+ */
+export function contentHash(content: string): string {
+	const stable = content.replace(/^updated:.*$/gm, "");
+	let h = 0x811c9dc5;
+	for (let i = 0; i < stable.length; i++) {
+		h ^= stable.charCodeAt(i);
+		h = Math.imul(h, 0x01000193);
+	}
+	return (h >>> 0).toString(16);
+}
+
+/**
  * Render one model's units and hub (the category MOCs are handled separately).
  * When `onlyKinds` is set, only units of those kinds are rewritten — a change to
  * the dictionary letter-index template, say, no longer rewrites the 50,000 root
@@ -237,7 +260,11 @@ export async function renderModelToVault(
 	outRoot: string,
 	force = false,
 	onStep?: (done: number, total: number) => void,
-	onlyKinds?: Set<string>
+	onlyKinds?: Set<string>,
+	/** Note path → hash of the content last rendered there, updated in place. */
+	seen?: Map<string, string>,
+	/** Checked before every note, so a long dictionary render can be stopped. */
+	shouldCancel?: () => boolean
 ): Promise<string[]> {
 	const engine = makeEngine();
 	const dir = model.work.dir as string;
@@ -251,6 +278,7 @@ export async function renderModelToVault(
 	const steps = singleUnit && !isQuranText ? 1 : todo.length + 1;
 	let done = 0;
 	const tick = () => onStep?.(++done, steps);
+	if (shouldCancel?.()) throw new Error("Source render cancelled");
 
 	// One source of truth for each unit's note name: the same `note_stem` is used
 	// for the file AND for every link to it (the hub lists `unit.note_stem`), so a
@@ -262,6 +290,11 @@ export async function renderModelToVault(
 		const base = String(unit.base);
 		unit.note_stem = (isCanonical || dictRoot) ? base : `${dir} - ${base}`;
 		unit.note_folder = isCanonical && canonicalRoot ? canonicalRoot : folder;
+		// A book volume note lists its chapters; give each the same authoritative
+		// stem the chapter note itself is written under.
+		for (const ch of (unit.chapters as Array<JsonObject> | undefined) ?? []) {
+			ch.note_stem = `${dir} - ${String(ch.base)}`;
+		}
 	}
 
 	if (singleUnit && !isQuranText) {
@@ -271,8 +304,20 @@ export async function renderModelToVault(
 		await ensureFolder(app, folder);
 		if (isCanonical && canonicalRoot) await ensureFolder(app, canonicalRoot);
 		for (const unit of todo) {
+			if (shouldCancel?.()) throw new Error("Source render cancelled");
 			const path = `${unit.note_folder}/${unit.note_stem}.md`;
-			await writeMerged(app, path, renderUnit(engine, templates, model, unit), force);
+			const content = renderUnit(engine, templates, model, unit);
+			const hash = contentHash(content.content);
+			// Unchanged since we last rendered it: `writeMerged` would read the note,
+			// merge it and find nothing substantive to change. Skipping the read as
+			// well is what makes a re-render of a 7,000-note work take seconds
+			// rather than the better part of an hour.
+			if (!force && seen?.get(path) === hash) {
+				tick();
+				continue;
+			}
+			await writeMerged(app, path, content, force);
+			seen?.set(path, hash);
 			written.push(path);
 			// Remove the opposite naming variant so switching canonical is clean.
 			if (isQuranText) {
@@ -291,12 +336,17 @@ export async function renderModelToVault(
 			const stale = new RegExp(`^${prefix} \\d+ `);
 			for (const f of await listMarkdown(app, folder)) {
 				const base = f.split("/").pop() ?? "";
-				if (stale.test(base) && !keep.has(base)) await deleteNote(app, f);
+				if (stale.test(base) && !keep.has(base)) {
+					await deleteNote(app, f);
+					seen?.delete(f);
+				}
 			}
 		}
 	}
 	const hubPath = `${outRoot}/${dir}.md`;
-	await writeMerged(app, hubPath, renderHub(engine, templates, model, isQuranText ? undefined : singleUnit), force);
+	const hubContent = renderHub(engine, templates, model, isQuranText ? undefined : singleUnit);
+	await writeMerged(app, hubPath, hubContent, force);
+	seen?.set(hubPath, contentHash(hubContent.content));
 	written.push(hubPath);
 	tick();
 	return written;
@@ -324,6 +374,9 @@ export async function renderModelHub(
 		const dictRoot = model.work.collection === "dictionary" && unit.kind === "dict";
 		const base = String(unit.base);
 		unit.note_stem = (isCanonical || dictRoot) ? base : `${dir} - ${base}`;
+		for (const ch of (unit.chapters as Array<JsonObject> | undefined) ?? []) {
+			ch.note_stem = `${dir} - ${String(ch.base)}`;
+		}
 	}
 	const singleUnit = model.units.length === 1 ? model.units[0] : undefined;
 	const hubPath = `${outRoot}/${dir}.md`;
@@ -348,14 +401,17 @@ export async function renderMocs(
 	const engine = makeEngine();
 	const groups = new Map<string, Array<JsonObject>>();
 	for (const w of works) {
-		const moc = w.moc as string | undefined;
-		if (!moc) continue;
-		let arr = groups.get(moc);
-		if (!arr) {
-			arr = [];
-			groups.set(moc, arr);
+		// A work can belong to more than one category MOC (Turath + its type).
+		const listed = (w.mocs as string[] | undefined) ?? (w.moc ? [String(w.moc)] : []);
+		for (const moc of listed) {
+			if (!moc) continue;
+			let arr = groups.get(moc);
+			if (!arr) {
+				arr = [];
+				groups.set(moc, arr);
+			}
+			arr.push(w);
 		}
-		arr.push(w);
 	}
 	const written: string[] = [];
 	for (const [moc, group] of groups) {

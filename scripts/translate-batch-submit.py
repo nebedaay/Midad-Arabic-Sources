@@ -12,6 +12,11 @@ import re
 import sys
 from pathlib import Path
 
+# The built-in prompt lives in midad_prompts.py so the plugin can seed and refresh
+# its "Default prompt" from the same text, and the general rules stay hardcoded.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from midad_prompts import build_translation_prompt  # noqa: E402
+
 VAULT = Path(os.environ.get("OBSIDIAN_VAULT", os.path.expanduser("~/Documents/Obsidian Vault")))
 
 API_KEY = os.environ.get("GEMINI_API_KEY", os.environ.get("GOOGLE_API_KEY", ""))
@@ -28,38 +33,20 @@ MODEL = "models/gemini-3.5-flash-lite"
 _QO = "\uFD3E"
 _QC = "\uFD3F"
 
-TRANSLATION_PROMPT = (
-    "Translate the Arabic text below into scholarly, nuanced, and complete English, "
-    "making the output markdown as complete and as close as possible to the original in "
-    "format, structure, and meaning. Output only the English translation, not the Arabic. "
-    "If the text contains quotes from other languages such as Persian, translate those as well. \n\n"
-    "STRUCTURE (critical):\n"
-    "- Keep every heading (#, ##, ###, ####) exactly where it is in the input.\n"
-    "- The input uses '---' on its own line as a page separator, always immediately "
-    "before a '#### p. N' heading. Keep every '---' exactly; never drop, move, merge, "
-    "or invent one.\n"
-    "- Put exactly one blank line between every block element (headings, paragraphs, "
-    "callouts, and '---' separators).\n\n"
-    "POETRY: in the input document, poetry is in '>[!arabic-poetry]' callouts, with two hemistiches "
-    "per stanza. Do not reproduce the callout. Output each couplet on one line as "
-    "'* hemistich1%%hemistich2', and a single hemistich as '* hemistich'. The leading "
-    "'*' must be followed by a space, and '%%' separates the two hemistiches. Never use "
-    "these detached markers for ordinary italics or any other purpose.\n\n"
-    "FOOTNOTES: preserve footnote callouts exactly as they appear in the input, including "
-    "the label '>[!arabic-footnotes]' and the '>-' list structure. Do not rename them.\n\n"
-    f"QUR'AN QUOTES: wrap each quote as *{_QO}translated text{_QC}{{.quran-quote}}* (sura:verse), "
-    f"adding '(sura:verse)' only if known. Use exactly these brackets: open with {_QO} and close "
-    f"with {_QC} — do not copy or mirror the bracket orientation from the Arabic input. The ornate "
-    "brackets and the {.quran-quote} class must both be inside the italic asterisks, and the class "
-    "must never be placed after the closing '*'.\n\n"
-    "INTERPOLATIONS: use (parentheses), never [square brackets].\n\n"
-    "ITALICS: use *asterisks*, never underscores. QUOTES: use curly single and double "
-    "quotes/apostrophes, never straight quotes.\n\n"
-    "TRANSLITERATION (IJMES): macrons for long vowels (ā, ū, ī); dots under emphatics "
-    "(ḥ, ṣ, ḍ, ṭ, ẓ); ʿ for ʿayn; ʾ for hamza; no initial hamza (al-Islām); no final 'h' "
-    "for tāʾ marbūṭa; ẓ = ظ, ṣ = ص, ḍ = ض, ḥ = ح, ṭ = ط, th = ث, j = ج, sh = ش, kh = خ.\n\n"
-    "Do not hard-wrap lines: every paragraph and every footnote is a single line."
-)
+TRANSLATION_PROMPT = build_translation_prompt()
+
+
+def read_prompt(path: str | None) -> str | None:
+    """The selected text-specific prompt, or None to use the built-in default."""
+    if path:
+        try:
+            text = Path(path).read_text(encoding="utf-8").strip()
+            if text:
+                return text
+            print(f"WARNING: prompt file is empty: {path}; using the built-in prompt.")
+        except Exception as e:
+            print(f"WARNING: could not read prompt file {path}: {e}; using the built-in prompt.")
+    return None
 
 def split_pages(content: str) -> list[str]:
     """Split markdown into page chunks at #### headers, preserving order."""
@@ -79,13 +66,23 @@ def split_pages(content: str) -> list[str]:
     return pages
 
 def main():
-    if len(sys.argv) < 2:
-        print("Usage: python3 translate-batch-submit.py <transcription.md>")
+    argv = list(sys.argv[1:])
+    prompt_file = None
+    if "--prompt-file" in argv:
+        idx = argv.index("--prompt-file")
+        if idx + 1 < len(argv):
+            prompt_file = argv[idx + 1]
+        del argv[idx:idx + 2]
+
+    if not argv:
+        print("Usage: python3 translate-batch-submit.py <transcription.md> [--prompt-file PATH]")
         sys.exit(1)
     
-    filepath = Path(sys.argv[1]).resolve()
+    filepath = Path(argv[0]).resolve()
     if not filepath.exists():
         print(f"ERROR: {filepath} not found"); sys.exit(1)
+
+    system_prompt = build_translation_prompt(read_prompt(prompt_file))
     
     content = filepath.read_text(encoding="utf-8")
     
@@ -126,7 +123,7 @@ def main():
                 "key": key,
                 "request": {
                     "model": MODEL,
-                    "system_instruction": {"parts": [{"text": TRANSLATION_PROMPT}]},
+                    "system_instruction": {"parts": [{"text": system_prompt}]},
                     "contents": [{
                         "role": "user",
                         "parts": [{"text": batch_text}]

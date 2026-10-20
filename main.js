@@ -41,7 +41,7 @@ var fs2 = __toModule(require("fs"));
 var http = __toModule(require("http"));
 var os = __toModule(require("os"));
 var import_util = __toModule(require("util"));
-var import_obsidian2 = __toModule(require("obsidian"));
+var import_obsidian3 = __toModule(require("obsidian"));
 
 // src/sourceImport/render.ts
 var import_obsidian = __toModule(require("obsidian"));
@@ -923,6 +923,8 @@ var TEMPLATE_FILES = {
   quran: "quran-note.eta.md",
   dictionary: "dictionary-note.eta.md",
   dictionaryIndex: "dictionary-index.eta.md",
+  book: "book-note.eta.md",
+  bookVolume: "book-volume.eta.md",
   hub: "hub.eta.md",
   moc: "moc.eta.md",
   sources: "sources.eta.md"
@@ -968,7 +970,7 @@ function renderTemplate(engine, tpl, data) {
   return { content, specs };
 }
 function renderUnit(engine, templates, model, unit) {
-  const tpl = unit.kind === "hadith" ? templates.hadith : unit.kind === "quran" ? templates.quran : unit.kind === "dict" ? templates.dictionary : unit.kind === "dict-index" ? templates.dictionaryIndex : templates.source;
+  const tpl = unit.kind === "hadith" ? templates.hadith : unit.kind === "quran" ? templates.quran : unit.kind === "dict" ? templates.dictionary : unit.kind === "dict-index" ? templates.dictionaryIndex : unit.kind === "book" ? templates.book : unit.kind === "book-volume" ? templates.bookVolume : templates.source;
   return renderTemplate(engine, tpl, {
     work: model.work,
     unit,
@@ -1064,8 +1066,17 @@ async function writeMerged(app, path2, out, force = false, replaceUnmanaged = tr
   if (force || substantiveContentDiffers(existing, merged))
     await writeNote(app, path2, merged);
 }
-async function renderModelToVault(app, templates, model, outRoot, force = false, onStep, onlyKinds) {
-  var _a;
+function contentHash(content) {
+  const stable = content.replace(/^updated:.*$/gm, "");
+  let h = 2166136261;
+  for (let i = 0; i < stable.length; i++) {
+    h ^= stable.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return (h >>> 0).toString(16);
+}
+async function renderModelToVault(app, templates, model, outRoot, force = false, onStep, onlyKinds, seen, shouldCancel) {
+  var _a, _b;
   const engine = makeEngine();
   const dir = model.work.dir;
   const folder = `${outRoot}/${dir}`;
@@ -1078,11 +1089,16 @@ async function renderModelToVault(app, templates, model, outRoot, force = false,
   const steps = singleUnit && !isQuranText ? 1 : todo.length + 1;
   let done = 0;
   const tick = () => onStep == null ? void 0 : onStep(++done, steps);
+  if (shouldCancel == null ? void 0 : shouldCancel())
+    throw new Error("Source render cancelled");
   for (const unit of model.units) {
     const dictRoot = model.work.collection === "dictionary" && unit.kind === "dict";
     const base = String(unit.base);
     unit.note_stem = isCanonical || dictRoot ? base : `${dir} - ${base}`;
     unit.note_folder = isCanonical && canonicalRoot ? canonicalRoot : folder;
+    for (const ch of (_a = unit.chapters) != null ? _a : []) {
+      ch.note_stem = `${dir} - ${String(ch.base)}`;
+    }
   }
   if (singleUnit && !isQuranText) {
     await deleteNote(app, `${folder}/${dir} - ${singleUnit.base}.md`);
@@ -1091,8 +1107,17 @@ async function renderModelToVault(app, templates, model, outRoot, force = false,
     if (isCanonical && canonicalRoot)
       await ensureFolder(app, canonicalRoot);
     for (const unit of todo) {
+      if (shouldCancel == null ? void 0 : shouldCancel())
+        throw new Error("Source render cancelled");
       const path2 = `${unit.note_folder}/${unit.note_stem}.md`;
-      await writeMerged(app, path2, renderUnit(engine, templates, model, unit), force);
+      const content = renderUnit(engine, templates, model, unit);
+      const hash = contentHash(content.content);
+      if (!force && (seen == null ? void 0 : seen.get(path2)) === hash) {
+        tick();
+        continue;
+      }
+      await writeMerged(app, path2, content, force);
+      seen == null ? void 0 : seen.set(path2, hash);
       written.push(path2);
       if (isQuranText) {
         const alt = isCanonical ? `${folder}/${dir} - ${unit.base}.md` : `${folder}/${unit.base}.md`;
@@ -1105,31 +1130,38 @@ async function renderModelToVault(app, templates, model, outRoot, force = false,
       const prefix = String(model.work.note_prefix || "HW").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
       const stale = new RegExp(`^${prefix} \\d+ `);
       for (const f of await listMarkdown(app, folder)) {
-        const base = (_a = f.split("/").pop()) != null ? _a : "";
-        if (stale.test(base) && !keep.has(base))
+        const base = (_b = f.split("/").pop()) != null ? _b : "";
+        if (stale.test(base) && !keep.has(base)) {
           await deleteNote(app, f);
+          seen == null ? void 0 : seen.delete(f);
+        }
       }
     }
   }
   const hubPath = `${outRoot}/${dir}.md`;
-  await writeMerged(app, hubPath, renderHub(engine, templates, model, isQuranText ? void 0 : singleUnit), force);
+  const hubContent = renderHub(engine, templates, model, isQuranText ? void 0 : singleUnit);
+  await writeMerged(app, hubPath, hubContent, force);
+  seen == null ? void 0 : seen.set(hubPath, contentHash(hubContent.content));
   written.push(hubPath);
   tick();
   return written;
 }
 async function renderMocs(app, templates, works, outRoot, generated, parent, force = false) {
+  var _a;
   const engine = makeEngine();
   const groups = new Map();
   for (const w of works) {
-    const moc = w.moc;
-    if (!moc)
-      continue;
-    let arr = groups.get(moc);
-    if (!arr) {
-      arr = [];
-      groups.set(moc, arr);
+    const listed = (_a = w.mocs) != null ? _a : w.moc ? [String(w.moc)] : [];
+    for (const moc of listed) {
+      if (!moc)
+        continue;
+      let arr = groups.get(moc);
+      if (!arr) {
+        arr = [];
+        groups.set(moc, arr);
+      }
+      arr.push(w);
     }
-    arr.push(w);
   }
   const written = [];
   for (const [moc, group] of groups) {
@@ -1184,10 +1216,12 @@ function templateChangedAt(store, key) {
 
 // src/assets.generated.ts
 var BUNDLED_ASSETS = [
+  { path: "midad-arabic-sources-import-templates/book-note.eta.md", content: "<% start_YAML(); -%>\n<% add_property('document-type', '[[text-source]]'); -%>\n<% add_property('created', generated); -%>\n<% add_property('updated', updated()); -%>\n<% add_property('mas-up', [unit.section_page ? wikilink(unit.section_page) : null, wikilink(work.dir), '[[Midad Arabic Sources]]'].filter(Boolean)); -%>\n<% add_property('related', [], { force: true, merge: 'keep' }); -%>\n<% add_property('title', unit.title || unit.base); -%>\n<% if (work.short) { add_property('shorttitle', work.short); } -%>\n<% if (work.authors && work.authors.length) { add_property('authors', work.authors.map(a => wikilink(a))); } -%>\n<% if (work.translators && work.translators.length) { add_property('translators', work.translators.map(a => wikilink(a))); } -%>\n<% if (work.language_links.length > 1) { add_property('language', work.language_links.map(l => wikilink(l))); } else { add_property('language', wikilink(work.language_links[0])); } -%>\n<% add_property('aliases', work.aliases.map(a => `${a} - ${unit.base}`)); -%>\n<% add_property('cssclasses', [work.cssclass], { quote: 'never' }); -%>\n<%~ end_YAML() %>\n<span class=\"mas-managed\">mas-managed</span>\n\n<% const multi = (work.volumes || 1) > 1; -%>\n<% for (const p of unit.pages) { -%>\n#### p. <%= multi ? `${p.vol}:${p.page}` : p.page %>\n\n<%~ p.body %>\n\n<% } -%>\n<% if (!unit.pages || !unit.pages.length) { -%>\n> [!missing-data] No text was found for this section in the source.\n\n<% } -%>\n<span class=\"mas-managed\">/mas-managed</span>\n" },
+  { path: "midad-arabic-sources-import-templates/book-volume.eta.md", content: "<% start_YAML(); -%>\n<% add_property('document-type', '[[text-source]]'); -%>\n<% add_property('created', generated); -%>\n<% add_property('updated', updated()); -%>\n<% add_property('mas-up', [wikilink(work.dir), '[[Midad Arabic Sources]]']); -%>\n<% add_property('related', [], { force: true, merge: 'keep' }); -%>\n<% add_property('title', unit.title || unit.base); -%>\n<% if (work.authors && work.authors.length) { add_property('authors', work.authors.map(a => wikilink(a))); } -%>\n<% if (work.language_links.length > 1) { add_property('language', work.language_links.map(l => wikilink(l))); } else { add_property('language', wikilink(work.language_links[0])); } -%>\n<% add_property('aliases', work.aliases.map(a => `${a} - ${unit.base}`)); -%>\n<% add_property('cssclasses', [work.cssclass], { quote: 'never' }); -%>\n<%~ end_YAML() %>\n<span class=\"mas-managed\">mas-managed</span>\n\n# <%= unit.title %>\n\n<% for (const c of (unit.chapters || [])) { -%>\n- <%= wikilink(c.note_stem || `${work.dir} - ${c.base}`, c.title) %><% if (c.span) { %> \u2014 <%= c.span %><% } %>\n<% } -%>\n<span class=\"mas-managed\">/mas-managed</span>\n" },
   { path: "midad-arabic-sources-import-templates/dictionary-index.eta.md", content: "<% start_YAML(); -%>\n<% add_property('document-type', '[[text-source]]'); -%>\n<% add_property('created', generated); -%>\n<% add_property('updated', updated()); -%>\n<% add_property('mas-up', [wikilink(work.dir), '[[Midad Arabic Sources]]']); -%>\n<% add_property('related', [], { force: true, merge: 'keep' }); -%>\n<% add_property('title', unit.title || unit.base); -%>\n<% add_property('language', wikilink('Arabic')); -%>\n<% add_property('aliases', []); -%>\n<% add_property('cssclasses', [work.cssclass], { quote: 'never' }); -%>\n<%~ end_YAML() %>\n<span class=\"mas-managed\">mas-managed</span>\n\n# <%= unit.base %>\n\n<% for (const r of unit.roots) { -%>\n- <%= wikilink(r.base, r.title || `${r.arabic} ${r.roman}`) %>\n<% } -%>\n\n<span class=\"mas-managed\">/mas-managed</span>\n" },
   { path: "midad-arabic-sources-import-templates/dictionary-note.eta.md", content: "<% const isProse = work.body === 'prose'; -%>\n<% start_YAML(); -%>\n<% add_property('document-type', '[[text-source]]'); -%>\n<% add_property('created', generated); -%>\n<% add_property('updated', updated()); -%>\n<% add_property('mas-up', [unit.section_page ? wikilink(unit.section_page) : null, wikilink(work.dir), '[[Midad Arabic Sources]]'].filter(Boolean)); -%>\n<% add_property('related', [], { force: true, merge: 'keep' }); -%>\n<% add_property('title', unit.title || `${unit.root.arabic} ${unit.root.roman}`); -%>\n<% add_property('term-ar', unit.root.arabic); -%>\n<% add_property('term', unit.root.roman); -%>\n<% add_property(`${(work.note_prefix || 'HW').toLowerCase()}-id`, unit.id); -%>\n<% add_property('language', wikilink('Arabic')); -%>\n<% add_property('aliases', [`${work.note_prefix || 'HW'} ${unit.root.arabic}`, `${work.note_prefix || 'HW'} ${unit.root.roman}`]); -%>\n<% add_property('cssclasses', [work.cssclass, isProse ? 'mas-prose' : null].filter(Boolean), { quote: 'never' }); -%>\n<%~ end_YAML() %>\n<span class=\"mas-managed\">mas-managed</span>\n\n<% const rowsOf = (e) => (e.bullets || e.lines || []); -%>\n<% const isBullets = (e) => Array.isArray(e.bullets); -%>\n<% const defBlock = (e) => ['> [!mas-dictionary-definition]', ...rowsOf(e).map((b, i) => `> - ${i === 0 && isBullets(e) ? `<span class=\"mas-hw\">${b}</span>` : b}`)].join('\\n'); -%>\n<% const bodyOf = (e) => isProse ? (e.paragraphs || []).join('\\n\\n') : defBlock(e); -%>\n<% const headingOf = (e, level) => `${'#'.repeat(level)} ${e.roman ? `*${e.roman}* ` : ''}(${e.arabic}) ^${e.id}`; -%>\n<% const blocks = [headingOf(unit.root, 1)]; -%>\n<% if (bodyOf(unit.root)) blocks.push(bodyOf(unit.root)); -%>\n<% if (unit.root.supplement) blocks.push('# Supplement'); -%>\n<% let suppShown = !!unit.root.supplement; -%>\n<% for (const e of unit.entries) { -%>\n<% if (e.supplement && !suppShown) { blocks.push('# Supplement'); suppShown = true; } -%>\n<% blocks.push(headingOf(e, 2)); -%>\n<% if (bodyOf(e)) blocks.push(bodyOf(e)); -%>\n<% } -%>\n<%~ blocks.join('\\n\\n') %>\n\n<span class=\"mas-managed\">/mas-managed</span>\n" },
   { path: "midad-arabic-sources-import-templates/hadith-note.eta.md", content: "<% start_YAML(); -%>\n<% add_property('document-type', '[[text-source]]'); -%>\n<% add_property('created', generated); -%>\n<% add_property('updated', updated()); -%>\n<% add_property('mas-up', [unit.section_page ? wikilink(unit.section_page) : null, wikilink(work.dir), '[[Midad Arabic Sources]]'].filter(Boolean)); -%>\n<% add_property('related', [], { force: true, merge: 'keep' }); -%>\n<% add_property('title', unit.title || unit.base); -%>\n<% if (work.authors && work.authors.length) { add_property('authors', work.authors.map(a => wikilink(a))); } -%>\n<% if (work.translators && work.translators.length) { add_property('translators', work.translators.map(a => wikilink(a))); } -%>\n<% if (work.language_links.length > 1) { add_property('language', work.language_links.map(l => wikilink(l))); } else { add_property('language', wikilink(work.language_links[0])); } -%>\n<% add_property('aliases', work.aliases.map(a => `${a} - ${unit.base}`)); -%>\n<% add_property('cssclasses', [work.cssclass], { quote: 'never' }); -%>\n<%~ end_YAML() %>\n<span class=\"mas-managed\">mas-managed</span>\n\n<% for (const h of unit.hadiths) { -%>\n# <%= h.number %>\n\n<% if (bilingual === 'table') { -%>\n| \u0627\u0644\u0639\u0631\u0628\u064A\u0629 | English |\n| --- | --- |\n| <%~ h.arabic.replace(/\\n+/g, '<br>') %> | <%~ h.english.replace(/\\n+/g, '<br>') %> |\n\n<% } else { -%>\n<% if (h.narrator) { -%>\n**<%~ h.narrator %>**\n\n<% } -%>\n<%~ h.english %>\n\n<%~ h.arabic %>\n\n<% } -%>\n<% } -%>\n<% if (!unit.hadiths || !unit.hadiths.length) { -%>\n> [!missing-data] No hadiths were found for this chapter in the source.\n\n<% } -%>\n<span class=\"mas-managed\">/mas-managed</span>\n" },
-  { path: "midad-arabic-sources-import-templates/hub.eta.md", content: "<% start_YAML(); -%>\n<% add_property('document-type', '[[text-source]]'); -%>\n<% add_property('created', generated); -%>\n<% add_property('updated', updated()); -%>\n<% add_property('mas-up', [...work.up, '[[Midad Arabic Sources]]']); -%>\n<% add_property('related', [], { force: true, merge: 'keep' }); -%>\n<% add_property('title', work.title); -%>\n<% const pub = work.publication || {}; -%>\n<% const person = (a) => (typeof a === 'string' ? a : (a.name || [a.first, a.last].filter(Boolean).join(' '))); -%>\n<% const pubAuthors = (pub.authors && pub.authors.length) ? pub.authors : (work.authors || []); -%>\n<% const pubTranslators = (pub.translators && pub.translators.length) ? pub.translators : (work.translators || []); -%>\n<% const pubEditors = pub.editors || []; -%>\n<% add_property('item-type', 'book'); -%>\n<% if (pubAuthors.length) { add_property('authors', pubAuthors.map(a => wikilink(person(a)))); } -%>\n<% if (pubTranslators.length) { add_property('translators', pubTranslators.map(a => wikilink(person(a)))); } -%>\n<% if (pubEditors.length) { add_property('editors', pubEditors.map(a => wikilink(person(a)))); } -%>\n<% if (pub.publisher) { add_property('publisher', wikilink(pub.publisher)); } -%>\n<% if (pub.place) { add_property('place', pub.place); } -%>\n<% if (pub.date) { add_property('year', wikilink(String(pub.date).slice(0, 4))); } -%>\n<% if (pub.edition) { add_property('edition', pub.edition); } -%>\n<% if (pub.mas_note) { add_property('mas-note', pub.mas_note); } -%>\n<% add_property('mas-key', work.key); -%>\n<% if (work.language_links.length > 1) { add_property('language', work.language_links.map(l => wikilink(l))); } else { add_property('language', wikilink(work.language_links[0])); } -%>\n<% if (work.repo) { add_property('repository', `[${work.repo_name || work.repo}](${work.repo})`); } -%>\n<% if (work.source) { add_property('source', `[${work.source_name || work.source}](${work.source})`); } -%>\n<% if (work.license_attribution) { add_property('license-attribution', work.license_attribution); } -%>\n<% if (work.repository_updated) { add_property('repository-updated', work.repository_updated); } -%>\n<% add_property('aliases', work.aliases); -%>\n<% add_property('cssclasses', [], { merge: 'replace' }); -%>\n<%~ end_YAML() %>\n<span class=\"mas-managed\">mas-managed</span>\n\n<% if (!unit) { -%>\n# <%= work.title %>\n\n<% } -%>\n<% if (work.author) { -%>\n*<%~ work.author %>*\n\n<% } -%>\n<% if (unit) { -%>\n<% if (unit.kind === 'hadith') { -%>\n<% for (const h of unit.hadiths) { -%>\n# <%= h.number %>\n\n<% if (bilingual === 'table') { -%>\n| \u0627\u0644\u0639\u0631\u0628\u064A\u0629 | English |\n| --- | --- |\n| <%~ h.arabic.replace(/\\n+/g, '<br>') %> | <%~ h.english.replace(/\\n+/g, '<br>') %> |\n\n<% } else { -%>\n<% if (h.narrator) { -%>\n**<%~ h.narrator %>**\n\n<% } -%>\n<%~ h.english %>\n\n<%~ h.arabic %>\n\n<% } -%>\n<% } -%>\n<% } else { -%>\n<% for (const b of unit.blocks) { -%>\n# <%= b.number %>\n\n## <%= b.ref %>\n\n<%~ b.body %>\n\n<% } -%>\n<% } -%>\n<% } else if (work.kind === 'dict') { -%>\n## Roots\n\n<% const letters = units.filter(u => u.kind === 'dict-index'); -%>\nA dictionary has too many roots to list here, so they are indexed by first letter. Each note also carries `term-ar`, `term`, and a `<%= work.note_prefix || 'HW' %> \u2026` alias, so search works too.\n\n<% for (const u of letters) { -%>\n- <%= wikilink(u.note_stem, u.title || u.base) %> \u2014 <%= u.roots.length %>\n<% } -%>\n\n<% } else { -%>\n## <%= work.unit_label %>\n\n<% for (const u of units) { -%>\n- <%= wikilink(u.note_stem || (work.unit_prefix ? `${work.unit_prefix} - ${u.base}` : u.base), u.title || u.base) %>\n<% } -%>\n\n<% } -%>\n<span class=\"mas-managed\">/mas-managed</span>\n" },
+  { path: "midad-arabic-sources-import-templates/hub.eta.md", content: "<% start_YAML(); -%>\n<% add_property('document-type', '[[text-source]]'); -%>\n<% add_property('created', generated); -%>\n<% add_property('updated', updated()); -%>\n<% add_property('mas-up', [...work.up, '[[Midad Arabic Sources]]']); -%>\n<% add_property('related', [], { force: true, merge: 'keep' }); -%>\n<% add_property('title', work.title); -%>\n<% const pub = work.publication || {}; -%>\n<% const person = (a) => (typeof a === 'string' ? a : (a.name || [a.first, a.last].filter(Boolean).join(' '))); -%>\n<% const pubAuthors = (pub.authors && pub.authors.length) ? pub.authors : (work.authors || []); -%>\n<% const pubTranslators = (pub.translators && pub.translators.length) ? pub.translators : (work.translators || []); -%>\n<% const pubEditors = pub.editors || []; -%>\n<% add_property('item-type', 'book'); -%>\n<% if (pubAuthors.length) { add_property('authors', pubAuthors.map(a => wikilink(person(a)))); } -%>\n<% if (pubTranslators.length) { add_property('translators', pubTranslators.map(a => wikilink(person(a)))); } -%>\n<% if (pubEditors.length) { add_property('editors', pubEditors.map(a => wikilink(person(a)))); } -%>\n<% if (pub.publisher) { add_property('publisher', wikilink(pub.publisher)); } -%>\n<% if (pub.place) { add_property('place', pub.place); } -%>\n<% if (pub.date) { add_property('year', wikilink(String(pub.date).slice(0, 4))); } -%>\n<% if (pub.edition) { add_property('edition', pub.edition); } -%>\n<% if (pub.mas_note) { add_property('mas-note', pub.mas_note); } -%>\n<% add_property('mas-key', work.key); -%>\n<% if (work.language_links.length > 1) { add_property('language', work.language_links.map(l => wikilink(l))); } else { add_property('language', wikilink(work.language_links[0])); } -%>\n<% if (work.repo) { add_property('repository', `[${work.repo_name || work.repo}](${work.repo})`); } -%>\n<% if (work.source) { add_property('source', `[${work.source_name || work.source}](${work.source})`); } -%>\n<% if (work.license_attribution) { add_property('license-attribution', work.license_attribution); } -%>\n<% if (work.repository_updated) { add_property('repository-updated', work.repository_updated); } -%>\n<% add_property('aliases', work.aliases); -%>\n<% add_property('cssclasses', [], { merge: 'replace' }); -%>\n<%~ end_YAML() %>\n<span class=\"mas-managed\">mas-managed</span>\n\n<% if (!unit) { -%>\n# <%= work.title %>\n\n<% } -%>\n<% if (work.author) { -%>\n*<%~ work.author %>*\n\n<% } -%>\n<% if (unit) { -%>\n<% if (unit.kind === 'hadith') { -%>\n<% for (const h of unit.hadiths) { -%>\n# <%= h.number %>\n\n<% if (bilingual === 'table') { -%>\n| \u0627\u0644\u0639\u0631\u0628\u064A\u0629 | English |\n| --- | --- |\n| <%~ h.arabic.replace(/\\n+/g, '<br>') %> | <%~ h.english.replace(/\\n+/g, '<br>') %> |\n\n<% } else { -%>\n<% if (h.narrator) { -%>\n**<%~ h.narrator %>**\n\n<% } -%>\n<%~ h.english %>\n\n<%~ h.arabic %>\n\n<% } -%>\n<% } -%>\n<% } else if (unit.kind === 'book') { -%>\n<% const multi = (work.volumes || 1) > 1; -%>\n<% for (const p of unit.pages) { -%>\n#### p. <%= multi ? `${p.vol}:${p.page}` : p.page %>\n\n<%~ p.body %>\n\n<% } -%>\n<% } else { -%>\n<% for (const b of unit.blocks) { -%>\n# <%= b.number %>\n\n## <%= b.ref %>\n\n<%~ b.body %>\n\n<% } -%>\n<% } -%>\n<% } else if (work.kind === 'dict') { -%>\n## Roots\n\n<% const letters = units.filter(u => u.kind === 'dict-index'); -%>\nA dictionary has too many roots to list here, so they are indexed by first letter. Each note also carries `term-ar`, `term`, and a `<%= work.note_prefix || 'HW' %> \u2026` alias, so search works too.\n\n<% for (const u of letters) { -%>\n- <%= wikilink(u.note_stem, u.title || u.base) %> \u2014 <%= u.roots.length %>\n<% } -%>\n\n<% } else if (work.kind === 'book') { -%>\n<% if ((work.volumes || 1) > 1) { -%>\n<% for (const u of units.filter(u => u.kind === 'book-volume')) { -%>\n- <%= wikilink(u.note_stem || `${work.dir} - ${u.base}`, u.title || u.base) %><% if (u.chapters && u.chapters.length) { %> \u2014 <%= u.chapters.length %> chapter<%= u.chapters.length === 1 ? '' : 's' %><% } %>\n<% } -%>\n\n<% } else { -%>\n<% for (const u of units.filter(u => u.kind === 'book')) { -%>\n- <%= wikilink(u.note_stem || `${work.dir} - ${u.base}`, u.title || u.base) %><% if (u.span) { %> \u2014 <%= u.span %><% } %>\n<% } -%>\n\n<% } -%>\n<% } else { -%>\n## <%= work.unit_label %>\n\n<% for (const u of units) { -%>\n- <%= wikilink(u.note_stem || (work.unit_prefix ? `${work.unit_prefix} - ${u.base}` : u.base), u.title || u.base) %>\n<% } -%>\n\n<% } -%>\n<span class=\"mas-managed\">/mas-managed</span>\n" },
   { path: "midad-arabic-sources-import-templates/moc.eta.md", content: `<% start_YAML(); -%>
 <% add_property('created', generated, { merge: 'keep' }); -%>
 <% add_property('mas-up', [wikilink(parent), '[[Midad Arabic Sources]]']); -%>
@@ -1199,7 +1233,7 @@ var BUNDLED_ASSETS = [
 # <%= s.name %>
 
 <% for (const w of s.works) { -%>
-- [[<%= w.dir %>]]
+- <%= wikilink(w.dir, w.title) %>
 <% } -%>
 
 <% } -%>
@@ -1489,15 +1523,40 @@ bw_map = CharMapper.builtin_mapper('ar2bw')
 
 
 def load_disambiguator(engine):
-    """Load the diacritization engine. Heavy imports happen here, not at import time."""
+    """Load the diacritization engine (see \`load_disambiguator_result\`)."""
+    return load_disambiguator_result(engine)[0]
+
+
+def load_disambiguator_result(engine):
+    """Return \`(disambiguator, actual_engine)\`.
+
+    \`bert\` is the engine we want; \`mle\` is a safety net. bert needs the
+    \`transformers\` package and its model data (downloaded from Hugging Face on
+    first use), so on a machine without them it cannot load at all \u2014 in which case
+    we fall back to the lighter MLE engine, tell the user how to get bert, and
+    report \`mle\` as the engine actually used (so the plugin can surface it).
+    """
     if engine == 'mle':
         from camel_tools.disambig.mle import MLEDisambiguator
-        return MLEDisambiguator.pretrained('calima-msa-r13')
+        return MLEDisambiguator.pretrained('calima-msa-r13'), 'mle'
+    if engine == 'none':
+        return None, 'none'
 
-    from camel_tools.disambig.bert import BERTUnfactoredDisambiguator
-    from transformers import logging as tlog
-    tlog.set_verbosity_error()
-    return BERTUnfactoredDisambiguator.pretrained()
+    try:
+        from camel_tools.disambig.bert import BERTUnfactoredDisambiguator
+        from transformers import logging as tlog
+        tlog.set_verbosity_error()
+        return BERTUnfactoredDisambiguator.pretrained(), 'bert'
+    except Exception as exc:  # noqa: BLE001 - transformers/model data missing
+        print(
+            f'NOTE: bert is unavailable ({exc}); proceeding with MLE, which is '
+            'rougher on classical text. For best results, install \`transformers\` '
+            'and the BERT model data (\`camel_data -i disambig-bert-unfactored-msa\`) '
+            'so bert can be used.',
+            file=sys.stderr,
+        )
+        from camel_tools.disambig.mle import MLEDisambiguator
+        return MLEDisambiguator.pretrained('calima-msa-r13'), 'mle'
 
 
 _ANALYZER = None
@@ -2282,6 +2341,8 @@ def server_romanize(text, args):
     }
     if args.model:
         payload['model'] = args.model
+    if getattr(args, 'base_url', None):
+        payload['base_url'] = args.base_url
     if args.api_key:
         payload['api_key'] = args.api_key
     request = urllib.request.Request(
@@ -2337,8 +2398,9 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('-text', help='Arabic text (if omitted, read interactively)')
     ap.add_argument('--engine', choices=('bert', 'mle', 'none'), default='bert',
-                    help='diacritization engine: bert (default), mle (faster startup), '
-                         'none (skip CAMeL; fully vocalized input only)')
+                    help='diacritization engine: bert (default), none (skip CAMeL; fully '
+                         'vocalized input only), mle (opt-in, rougher; requires the calima '
+                         'MLE data)')
     ap.add_argument('--sun-letters', action='store_true')
     ap.add_argument('--debug', action='store_true')
     ap.add_argument('--keep-case', action='store_true', help='Keep case endings')
@@ -2353,9 +2415,12 @@ def main():
                     help='ignore the server and run the engine in this process')
     ap.add_argument('--llm', action='store_true',
                     help='romanize with the LLM endpoint (server) instead of the rule engine')
-    ap.add_argument('--provider', choices=('gemini', 'deepseek'), default='gemini')
+    ap.add_argument('--provider', choices=('gemini', 'deepseek', 'openai'), default='gemini',
+                    help='LLM provider; "openai" is any OpenAI-compatible endpoint')
     ap.add_argument('--model', default=None, help='LLM model (server default if omitted)')
     ap.add_argument('--translate', action='store_true', help='also print an English translation')
+    ap.add_argument('--base-url', default=None,
+                    help='base URL for the openai provider (else the server OPENAI_BASE_URL)')
     ap.add_argument('--api-key', default=None, help='API key for the LLM (else the server environment)')
     args = ap.parse_args()
 
@@ -2477,7 +2542,11 @@ def transliterate_stem(seg_ar, a, disambig, i, args, has_article, vocalized, for
     bw = bw_map.map_string(seg_ar)
     # A word-initial shadda is idgh\u0101m with the previous word, never part of the word
     bw = re.sub(r'^([^aiuFNKo~])([aiuFNKo]*)~', r'\\1\\2', bw)
-    if not keep_case and not defective and case_ending_stripped(a):
+    # A word read as a citation form keeps a *verb's* final inflection (kataba,
+    # battaka) but not a noun's case ending (ba\u1E25r, not ba\u1E25run) \u2014 \`args.citation\`
+    # asks for that even when the source's tashk\u012Bl is complete, which otherwise
+    # forces \`keep_case\` on and preserves the ending.
+    if not defective and case_ending_stripped(a) and (not keep_case or getattr(args, 'citation', False)):
         # drop the final case vowel and -un/-in; keep -an (fathatan) by default
         bw = re.sub(r'[aiuNKo]+$', '', bw)
     if re.search(r'p[aiuFNKo]*$', bw):
@@ -2776,7 +2845,122 @@ def transliterate_document(text, disambiguator, args, final_pausal=True):
 if __name__ == '__main__':
     main()
 ` },
-  { path: "scripts/arabic-support-pipeline.py", content: `#!/usr/bin/env python3
+  { path: "scripts/archive-batch-files.py", content: `#!/usr/bin/env python3
+"""
+Archive the intermediate .txt/.json files for one volume into a single zip.
+
+Usage:
+  python3 scripts/archive-batch-files.py <batch.txt> [--dest DIR] [--remove]
+
+<batch.txt> is either "<stem>.batch.txt" (a transcription) or
+"<stem>.translate.txt" (a translation).  The archive is named
+  <citekey> - transcription - vol. N files.zip
+  <citekey> - translation   - vol. N files.zip
+(or without " - vol. N" for a single-volume work) and written to the dedicated
+archive folder, by default:
+  AI OS/Arabic Transcriptions/Arabic OCR archive
+
+Only the txt/json intermediates are archived (not the page PDFs, raw.md or the
+finished note).  --remove deletes the loose originals after zipping.
+"""
+import re
+import sys
+import zipfile
+from pathlib import Path
+
+VAULT = Path("/Users/josephhill/Documents/Obsidian Vault")
+ARCHIVE_DIR = VAULT / ".midad-arabic-sources" / "archive"
+
+# Intermediate files per document type (page PDFs deliberately excluded).
+INTERMEDIATES = {
+    "transcription": ["{stem}.batch.txt", "{stem}.batch.jsonl", "{stem}-output.jsonl"],
+    "translation": ["{stem}.translate.txt", "{stem}.translate.jsonl", "{stem}.translate-output.jsonl"],
+}
+
+
+def vault_stem(stem: str):
+    """Return (citekey, volume) parsed from a batch stem."""
+    m = re.match(r'(@\\S+)', stem)
+    citekey = m.group(1) if m else stem
+    vm = re.search(r'\\b(?:vol|v)\\.\\s*(\\d+)\\b', stem, re.I)
+    return citekey, (int(vm.group(1)) if vm else None)
+
+
+def archive_name(stem: str, doc_type: str, citekey: str = None, volume: int = None) -> str:
+    if citekey is None or volume is None:
+        ck, vol = vault_stem(stem)
+        citekey = citekey or ck
+        volume = volume if volume is not None else vol
+    if volume:
+        return f"{citekey} - {doc_type} - vol. {volume} files.zip"
+    return f"{citekey} - {doc_type} files.zip"
+
+
+def main():
+    if len(sys.argv) < 2:
+        print("Usage: python3 scripts/archive-batch-files.py <batch.txt> [--dest DIR] [--remove]")
+        sys.exit(1)
+
+    batch_file = Path(sys.argv[1]).resolve()
+    if not batch_file.exists():
+        print(f"ERROR: {batch_file} not found")
+        sys.exit(1)
+
+    name = batch_file.name
+    if name.endswith(".batch.txt"):
+        doc_type, stem = "transcription", name[:-len(".batch.txt")]
+    elif name.endswith(".translate.txt"):
+        doc_type, stem = "translation", name[:-len(".translate.txt")]
+    else:
+        print("ERROR: expected <stem>.batch.txt or <stem>.translate.txt")
+        sys.exit(1)
+
+    dest_dir = ARCHIVE_DIR
+    if "--dest" in sys.argv:
+        idx = sys.argv.index("--dest")
+        if idx + 1 < len(sys.argv):
+            dest_dir = Path(sys.argv[idx + 1]).expanduser()
+    dest_dir.mkdir(parents=True, exist_ok=True)
+
+    citekey = None
+    if "--citekey" in sys.argv:
+        idx = sys.argv.index("--citekey")
+        if idx + 1 < len(sys.argv):
+            citekey = sys.argv[idx + 1]
+    volume = None
+    if "--volume" in sys.argv:
+        idx = sys.argv.index("--volume")
+        if idx + 1 < len(sys.argv):
+            volume = int(sys.argv[idx + 1])
+
+    files = [batch_file.parent / pat.format(stem=stem) for pat in INTERMEDIATES[doc_type]]
+    files = [f for f in files if f.exists()]
+    if not files:
+        print(f"ERROR: no intermediate files found next to {batch_file.name}")
+        sys.exit(1)
+
+    zip_path = dest_dir / archive_name(stem, doc_type, citekey, volume)
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as z:
+        for f in files:
+            z.write(f, arcname=f.name)
+
+    print(f"Archived {len(files)} file(s) -> {zip_path}")
+    for f in files:
+        print(f"  {f.name}")
+
+    if "--remove" in sys.argv:
+        for f in files:
+            f.unlink()
+        print(f"Removed {len(files)} original file(s)")
+
+
+if __name__ == "__main__":
+    main()
+` },
+  { path: "scripts/audit-parents.py", content: '#!/usr/bin/env python3\n"""List Wehr rows the digitisation marks as roots but that belong under another root.\n\nWehr files a derived form under its root, and the digitisation\'s `IS_ROOT` flag\nusually agrees \u2014 but not always: `\u0645\u062A\u0623\u062E\u0631` (\u0645\u064F\u062A\u064E\u0623\u064E\u062E\u0650\u0651\u0631) is marked as a root of its own,\nparented to itself, while the rest of the family (\u0622\u062E\u0631, \u062A\u0623\u062E\u064A\u0631, \u0645\u0624\u062E\u0631 \u2026) hangs off\n`\u0627\u062E\u0631`. The letters cannot tell us that: the distinction is morphological (`\u0645\u062A\u0623\u062E\u0631` is\n\u0645 + \u062A + \u0623\u062E\u0631), so a containment test matches thousands of legitimate roots.\n\nWhat *is* precise is a participle or noun of place/instrument marked as a root: a\nword that is `\u0645` + another root\'s own word, whose transliteration begins `ma`/`mi`/\n`mu`. Those are proposed here for review; the confirmed ones go in `_REPARENT` in\n`text-source-import.py`, keyed by the source row id.\n\n    python3 scripts/audit-parents.py            # list candidates\n    python3 scripts/audit-parents.py --json     # machine-readable\n"""\n\nfrom __future__ import annotations\n\nimport argparse\nimport json\nimport re\nimport sqlite3\nimport sys\nfrom pathlib import Path\n\nsys.path.insert(0, str(Path(__file__).resolve().parent))\nimport importlib.util\n\n_spec = importlib.util.spec_from_file_location(\n    "text_source_import", str(Path(__file__).resolve().parent / "text-source-import.py")\n)\ntsi = importlib.util.module_from_spec(_spec)\n_spec.loader.exec_module(tsi)\n\nDB = (\n    tsi.CACHE_DIR\n    / "https_github.com_GibreelAbdullah_HansWehrDictionary_releases_latest_download_hanswehr.sqlite"\n)\n# A transliteration of a participle or a noun of place/instrument begins with `m`\n# and a short vowel, which is what distinguishes it from a root that merely starts\n# with a \u0645 (`\u0645\u0644\u0643` to possess, `\u0645\u0627\u0644` wealth).\n_MA_ROMAN = re.compile(r"^m[aiu]")\n# A root entry lists the root\'s own forms (`<b>II</b> (\u0627\u064E\u062E\u064E\u0651\u0631\u064E) to delay`, `IV`, \u2026);\n# a derived form is a single entry with no form marker. That is the content signal\n# that separates `\u0627\u062E\u0631` (a root, whatever its word looks like) from `\u0645\u062A\u0623\u062E\u0631`.\n# Derivational prefixes: a form-V participle (\u0645\u062A), a form-X ma\u1E63dar (\u0627\u0633\u062A), a participle\n# or noun of place (\u0645), a form-II/V verb (\u062A).\n_PREFIXES = ("\u0645\u0633\u062A", "\u0645\u062A", "\u0627\u0633\u062A", "\u0627\u0646", "\u0645", "\u062A")\n_FORM_MARKER = re.compile(r"<b>\\s*(?:I|II|III|IV|V|VI|VII|VIII|IX|X)\\s*</b>", re.I)\n\n\ndef candidates() -> list[dict]:\n    """Rows a term was inadvertently split from the entry before them.\n\n    The condition is adjacency *and* direction. Wehr lists a root and then its\n    derivatives, and the digitisation usually follows; when it slips, the split row\n    is marked as a root of its own, parented to itself, and sits immediately after\n    the entry it belongs to \u2014 179 `\u0645\u062A\u0627\u062E\u0631` right after 167 `\u0627\u062E\u0631` and its children\n    (168\u2013178). So: the row is a root, and its word is the word of the root listed\n    just before it plus a derivational prefix.\n\n    That rules out the two ways the morphological test went wrong: `\u0645\u0631\u0627\u0628 -> \u0631\u0627\u0628`\n    (the "parent" comes *later* than its child) and `\u0645\u0627\u0631\u0634 -> \u0627\u0631\u0634` (20,000 ids apart\n    and unrelated). What it cannot rule out is a root that genuinely begins with a\n    prefix-like letter, which is why the definition is reported alongside \u2014 a root\n    entry lists the root\'s own forms (`<b>II</b> \u2026`), a split-off derivative does\n    not.\n    """\n    conn = sqlite3.connect(f"file:{DB}?mode=ro", uri=True)\n    try:\n        rows = list(conn.execute("SELECT id, word, definition, is_root, parent_id FROM DICTIONARY"))\n    finally:\n        conn.close()\n    roots = [(rid, word) for rid, word, _d, is_root, _p in rows if is_root]\n    previous: dict[int, tuple[int, str]] = {}\n    for (a, wa), (b, _wb) in zip(roots, roots[1:]):\n        previous[b] = (a, wa)\n    out: list[dict] = []\n    for rid, word, definition, is_root, _p in rows:\n        if not is_root or rid not in previous:\n            continue\n        pid, pword = previous[rid]\n        if not pword:\n            continue\n        prefix = next((pre for pre in _PREFIXES if word == pre + pword), None)\n        if not prefix:\n            continue\n        out.append(\n            {\n                "id": rid,\n                "word": word,\n                "under": pword,\n                "under_id": pid,\n                "prefix": prefix,\n                "lists_root_forms": bool(_FORM_MARKER.search(definition or "")),\n                "roman": tsi._hw_extract_romanization(definition or ""),\n                "definition": (definition or "")[:70],\n            }\n        )\n    return out\n\n\ndef main() -> int:\n    ap = argparse.ArgumentParser(description=__doc__)\n    ap.add_argument("--json", action="store_true", help="emit JSON instead of a table")\n    args = ap.parse_args()\n    found = candidates()\n    if args.json:\n        print(json.dumps(found, ensure_ascii=False, indent=1))\n        return 0\n    print(f"{len(found)} candidate(s): a term split from the entry before it\\n")\n    for c in found:\n        warn = "  <-- definition lists root forms, review" if c["lists_root_forms"] else ""\n        print(f"  {c[\'id\']:>6}  {c[\'word\']:<11} = {c[\'prefix\']} + {c[\'under\']:<8} ({c[\'under_id\']}){warn}")\n    return 0\n\n\nif __name__ == "__main__":\n    sys.exit(main())\n' },
+  { path: "scripts/hanswehr-fodt-align.py", content: '#!/usr/bin/env python3\n"""Align the app\'s Hans-Wehr SQLite rows to the FODT paragraphs they came from.\n\nThe plugin reads `GibreelAbdullah/HansWehrDictionary`\'s SQLite, but Wehr\'s text\noriginates in `muhammad-abdurrahman/hans-wehr-fodt-parser`\'s `hanswehr.xml`\n(MIT), which keeps what the app conversion dropped: the **homonym number** Wehr\nprints before the Arabic term (`2\u0628\u0646\u0643` beside `3\u0645\u0628\u0646\u0643`) and the **diptote marker**\nhe prints as a superscript after the romanization (`makka2`). To build a\nFODT-derived model and still reuse the corrections keyed by the app\'s row ids\n(`_EYEBALL`, `_REPARENT`), the two have to be joined **by content** \u2014 their ids\nare different spaces (`\u0645\u0644` 179 agrees early; by `\u0628\u0646\u0643` the app\'s 2188 is the\nXML\'s 2225).\n\nThe two files are *almost* in the same order \u2014 a root is occasionally listed\ndifferently (`\u062F\u0627\u0633` sits after `\u062F\u0627\u0631` in the FODT, before it in the app) \u2014 and the\njoin is exact once the app\'s markup is normalised away:\n\n  * the app strips the leading homonym digit and the diptote superscript, so\n    digits are ignored;\n  * the app rebuilds the print\'s form labels as `<b>III</b>` and adds generated\n    vocalised parentheticals (`III (\u062D\u064E\u0627\u0631\u064E\u0628\u064E)`) that the FODT does not carry;\n  * the two digitisation runs disagree on curly vs straight quotes.\n\nEverything else \u2014 harakat, tatweel, whitespace \u2014 is folded too, because the two\nruns of the same scan dotted their letters differently.\n\nUsage\n-----\n    python3 scripts/hanswehr-fodt-align.py                 # summary + proof table\n    python3 scripts/hanswehr-fodt-align.py --drift         # the unmatched rows\n    python3 scripts/hanswehr-fodt-align.py --json          # full id map\n"""\n\nfrom __future__ import annotations\n\nimport argparse\nimport difflib\nimport json\nimport re\nimport sqlite3\nimport sys\nimport unicodedata\nfrom collections import defaultdict\nfrom pathlib import Path\n\nsys.path.insert(0, str(Path(__file__).resolve().parent))\nimport importlib.util\n\n_spec = importlib.util.spec_from_file_location(\n    "text_source_import", str(Path(__file__).resolve().parent / "text-source-import.py")\n)\ntsi = importlib.util.module_from_spec(_spec)\n_spec.loader.exec_module(tsi)\n\nFODT_URL = (\n    "https://raw.githubusercontent.com/muhammad-abdurrahman/"\n    "hans-wehr-fodt-parser/master/hanswehr.xml"\n)\nAPP_DB_URL = (\n    "https://github.com/GibreelAbdullah/HansWehrDictionary/releases/latest/download/"\n    "hanswehr.sqlite"\n)\n\n\ndef _cache_path(url: str) -> Path:\n    return tsi.CACHE_DIR / re.sub(r"[^\\w.-]+", "_", url)[-180:]\n\n\nFODT_PATH = _cache_path(FODT_URL)\nAPP_DB_PATH = _cache_path(APP_DB_URL)\n\n# Namespaces of the FODT (OpenDocument flat XML).\n_NS = {\n    "office": "urn:oasis:names:tc:opendocument:xmlns:office:1.0",\n    "style": "urn:oasis:names:tc:opendocument:xmlns:style:1.0",\n    "text": "urn:oasis:names:tc:opendocument:xmlns:text:1.0",\n    "fo": "urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0",\n}\n_T = "{%s}" % _NS["text"]\n_S = "{%s}" % _NS["style"]\n_FO = "{%s}" % _NS["fo"]\n\n# \u2500\u2500 Normalisation (the content key the two runs of the scan agree on) \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n\n_HARAKAT = re.compile(r"[\\u064b-\\u0652\\u0670\\u0640]")  # tanw\u012Bn, short vowels, tatweel\n_QUOTES = {\n    0x2018: "\'", 0x2019: "\'", 0x201B: "\'", 0x02BC: "\'", 0x0060: "\'", 0x00B4: "\'",\n    0x201C: \'"\', 0x201D: \'"\',\n}\n_DIGITS = re.compile(r"[0-9\\u0660-\\u0669]+")\n# The app\'s generated vocalised form after a roman-numeral label (`III (\u062D\u064E\u0627\u0631\u064E\u0628\u064E)`),\n# which the FODT does not carry.\n_VOCALISED = re.compile(r"\\b([IVX]+)\\s*\\([\\u0600-\\u06ff\\u0750-\\u077f\\u064b-\\u0652\\s]+\\)")\n\n\ndef norm_text(text: str, *, app: bool = False) -> str:\n    """The fold both sides reduce to, so the same paragraph reads the same."""\n    text = re.sub(r"<[^>]+>", "", text)\n    if app:\n        text = _VOCALISED.sub(r"\\1", text)\n    text = unicodedata.normalize("NFC", text)\n    text = _HARAKAT.sub("", text)\n    text = text.translate(_QUOTES)\n    text = _DIGITS.sub("", text)\n    return re.sub(r"\\s+", " ", text).strip()\n\n\n# \u2500\u2500 Reading the FODT \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n\ndef _style_levels(root) -> dict[str, float]:\n    """Paragraph style \u2192 its indentation, `fo:margin-left` + `fo:text-indent`.\n\n    That sum is the whole of the app\'s `is_root` rule: `0.0` is unindented (a\n    root), anything above it is a continuation.\n    """\n    levels: dict[str, float] = {}\n    for style in root.iter(_S + "style"):\n        props = style.find(_S + "paragraph-properties")\n        if props is None:\n            continue\n        margin = props.get(_FO + "margin-left")\n        indent = props.get(_FO + "text-indent")\n        if margin is None:\n            continue\n\n        def inches(value: str | None) -> float:\n            return float((value or "0").replace("in", "")) if value else 0.0\n\n        levels[style.get(_S + "name")] = round(inches(margin) + inches(indent), 4)\n    return levels\n\n\ndef _superscript_styles(root) -> set[str]:\n    sup: set[str] = set()\n    for style in root.iter(_S + "style"):\n        props = style.find(_S + "text-properties")\n        if props is not None and props.get(_S + "text-position", "").startswith("super"):\n            sup.add(style.get(_S + "name"))\n    return sup\n\n\ndef _highlight_styles(root) -> set[str]:\n    """Styles carrying a background colour \u2014 the conversion\'s printed page numbers.\n\n    LibreOffice writes the colour as `fo:background-color`, not\n    `style:background-color`; testing only the latter left every page number in\n    the text (`\u0627\u0628\u0631\u064A\u0632 pure gold 1`).\n    """\n    marked: set[str] = set()\n    for style in root.iter(_S + "style"):\n        props = style.find(_S + "text-properties")\n        if props is not None and (props.get(_S + "background-color")\n                                  or props.get(_FO + "background-color")):\n            marked.add(style.get(_S + "name"))\n    return marked\n\n\n# Filled by `read_fodt`, so consumers do not have to re-parse the document.\nSUP_STYLES: set[str] = set()\nPAGE_STYLES: set[str] = set()\n\n\ndef _runs(paragraph) -> list[tuple[str, str | None]]:\n    """The paragraph\'s text as (text, style-name) runs, in document order."""\n    out: list[tuple[str, str | None]] = []\n\n    def walk(el, style: str | None = None) -> None:\n        if el.tag == _T + "span":\n            style = el.get(_T + "style-name")\n        if el.text:\n            out.append((el.text, style))\n        for child in el:\n            walk(child, style)\n            if child.tail:\n                out.append((child.tail, style))\n\n    walk(paragraph)\n    return out\n\n\ndef read_fodt(path: Path | None = None) -> list[dict]:\n    """One entry per `text:p`, in the book\'s order, id = 1-based paragraph index."""\n    path = path or FODT_PATH\n    try:\n        from lxml import etree  # type: ignore\n        root = etree.parse(str(path), etree.XMLParser(recover=True, huge_tree=True)).getroot()\n        paragraphs = root.xpath("//text:p", namespaces={"text": _NS["text"]})\n    except ImportError:  # the stdlib parser recovers the same malformed tags\n        import xml.etree.ElementTree as ET\n        root = ET.parse(str(path)).getroot()\n        paragraphs = list(root.iter(_T + "p"))\n    global SUP_STYLES, PAGE_STYLES\n    levels = _style_levels(root)\n    sup = _superscript_styles(root)\n    SUP_STYLES = sup\n    PAGE_STYLES = _highlight_styles(root)\n    out: list[dict] = []\n    for i, paragraph in enumerate(paragraphs, start=1):\n        style = paragraph.get(_T + "style-name")\n        level = levels.get(style, 0.0)\n        runs = _runs(paragraph)\n        text = "".join(t for t, _ in runs)\n        out.append({\n            "id": i,\n            "style": style,\n            "level": level,\n            "root": level == 0.0,\n            "text": text,\n            "runs": runs,\n            "homonym": _homonym(runs, sup),\n            "diptotes": _diptotes(runs, sup),\n        })\n    return out\n\n\ndef _digit_run(text: str) -> int | None:\n    stripped = text.strip()\n    return int(stripped) if stripped.isdigit() and stripped.isascii() else None\n\n\ndef _homonym(runs: list[tuple[str, str | None]], sup: set[str]) -> int | None:\n    """Wehr\'s small number *before* the Arabic term, separating homonyms.\n\n    Normally a superscript run (`1 \u062E\u0627\u0631`, `2\u0628\u0646\u0643`); a bare one occurs too, so a\n    leading digit is accepted when it directly precedes the Arabic \u2014 never a\n    sense enumeration (`2. from \u2026`) or the conversion\'s `1` for `l`.\n    """\n    for text, style in runs:\n        if not text.strip():\n            continue\n        if style in sup and (value := _digit_run(text)) is not None:\n            return value\n        break  # the first real run is not a superscript number\n    match = re.match(r"^\\s*(\\d+)(?=\\s*[\\u0600-\\u06ff])", "".join(t for t, _ in runs))\n    return int(match.group(1)) if match else None\n\n\ndef _diptotes(runs: list[tuple[str, str | None]], sup: set[str]) -> list[dict]:\n    """The superscript numbers *after* a romanization \u2014 the diptote marker."""\n    out: list[dict] = []\n    previous = ""\n    for text, style in runs:\n        if style in sup and (value := _digit_run(text)) is not None:\n            if previous and previous[-1].isascii() and previous[-1].isalpha():\n                out.append({"value": value, "after": previous[-24:]})\n        if text.strip():\n            previous = text\n    return out\n\n\n# \u2500\u2500 Reading the app SQLite \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n\ndef read_app(path: Path | None = None) -> list[dict]:\n    path = path or APP_DB_PATH\n    conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)\n    try:\n        table = "entries"\n        names = {str(r[0]).lower() for r in conn.execute(\n            "SELECT name FROM sqlite_master WHERE type IN (\'table\',\'view\')")}\n        if "entries" not in names:\n            table = "dictionary"\n        rows = conn.execute(\n            f"SELECT id, word, definition, is_root, parent_id FROM {table} ORDER BY id")\n        return [\n            {"id": rid, "word": word or "", "definition": definition or "",\n             "is_root": bool(is_root), "parent_id": parent}\n            for rid, word, definition, is_root, parent in rows\n        ]\n    finally:\n        conn.close()\n\n\n# \u2500\u2500 The join \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n\n_ARABIC = re.compile(r"[\\u0600-\\u06ff]+")\n# Folded away when matching headwords: the hamza seat (`\u0623` `\u0625` `\u0622` \u2192 `\u0627`), the\n# t\u0101\u02BE marb\u016B\u1E6Da, and the hollow roots the app writes with their w\u0101w/y\u0101\u02BE (`\u0627\u0648\u062F` for\n# `\u0622\u062F`), which the two runs spell differently.\n_SEATS = str.maketrans({"\u0623": "\u0627", "\u0625": "\u0627", "\u0622": "\u0627", "\u0671": "\u0627", "\u0629": "\u0647",\n                        "\u0649": "\u064A", "\u0626": "\u064A", "\u0624": "\u0648"})\n\n\ndef headword(text: str) -> str:\n    """The entry\'s first Arabic run, after the homonym number and any root aside.\n\n    Wehr\'s hollow roots print the root in parentheses \u2014 `\u0622\u0628 (\u0627\u0648\u0628) \u0101ba u \u2026` in the\n    app, and with the aside moved to the front in the FODT (`1(\u0627\u0648\u0628) \u0622\u0628 \u0101ba u \u2026`)\n    \u2014 so a parenthesised group cannot be mistaken for the headword.\n    """\n    plain = re.sub(r"\\([^)]*\\)", " ", _DIGITS.sub(" ", text))\n    match = _ARABIC.search(plain)\n    return match.group(0) if match else ""\n\n\ndef folded_head(text: str) -> str:\n    head = headword(text)\n    return _HARAKAT.sub("", head).translate(_SEATS)\n\n\ndef weakless_head(text: str) -> str:\n    """The headword with its weak letters dropped \u2014 a root\'s own radicals.\n\n    `\u0646\u064A\u0644` and `\u0646\u0627\u0644` (the same root listed under two spellings) both reduce to\n    `nl`, while `\u0646\u0643\u0628` and `\u0646\u062E\u0628` stay apart, so this is the guard that keeps an\n    identical romanization (`nakaba`) from joining two different roots.\n    """\n    return folded_head(text).translate(str.maketrans("", "", "\u0627\u0648\u064A\u0621"))\n\n\n_ROMAN = re.compile(r"[A-Za-z\\u00c0-\\u024f\\u1e00-\\u1eff\\u02bc\\u02bf\\u2018\\u2019\\u02be\']+")\n\n\ndef roman_head(text: str) -> str:\n    """The entry\'s romanization \u2014 the first Latin run after the Arabic headword.\n\n    Two paragraphs that share both headword and romanization are the same entry\n    even when the conversion mangled one body, so this settles the match where\n    the text alone cannot.\n    """\n    match = _ROMAN.search(re.sub(r"\\([^)]*\\)", " ", _DIGITS.sub(" ", text)))\n    return match.group(0).translate(_QUOTES).lower() if match else ""\n\n\n_SIM_WINDOW = 400  # compare the head of a paragraph; entries differ early, not late\n\n\ndef _similarity(left: str, right: str) -> float:\n    """How alike two folded paragraphs are.\n\n    Also scored **prefix-wise**, because the two digitisation runs do not agree\n    on where an entry ends: the FODT sometimes keeps the entry after it in the\n    same paragraph (`\u0645\u0639\u062A\u0631\u0641 \u0628\u0647 \u2026 authorized \u0647 \'ariqa \u2026`), which the app split into\n    two rows, so the app\'s row is only the head of the FODT paragraph.\n    """\n    if left == right:\n        return 1.0\n    if not left or not right:\n        return 0.0\n    a, b = left[:_SIM_WINDOW], right[:_SIM_WINDOW]\n    best = difflib.SequenceMatcher(None, a, b).ratio()\n    short, long_ = (a, b) if len(a) <= len(b) else (b, a)\n    # A one-line letter heading (`\u0627`) must not score 1.0 as the prefix of a long\n    # entry, so the prefix comparison needs a real entry\'s worth of text.\n    if len(short) >= 16 and len(long_) > len(short) + 8:\n        best = max(best, difflib.SequenceMatcher(None, short, long_[:len(short)]).ratio())\n    return best\n\n\ndef align(app: list[dict], fodt: list[dict]) -> tuple[dict[int, int], dict]:\n    """Map each app row id to its FODT paragraph id, by content.\n\n    Exact folded-text hits are taken in the two files\' shared order, but the\n    order is **not** assumed globally: the two runs of the scan occasionally\n    order a root differently (`\u062F\u0627\u0633` sits after `\u062F\u0627\u0631` in the FODT, before it in\n    the app), so when no later paragraph carries the key the nearest one does.\n    The rows left over (a few hundred, where the runs spell the text\n    differently) are matched by headword, then by similarity in a local window.\n    """\n    app_keys = [norm_text(row["definition"], app=True) for row in app]\n    fodt_keys = [norm_text(p["text"]) for p in fodt]\n    positions: dict[str, list[int]] = defaultdict(list)\n    head_index: dict[str, list[int]] = defaultdict(list)\n    roman_index: dict[str, list[int]] = defaultdict(list)\n    for i, para in enumerate(fodt, start=1):\n        if fodt_keys[i - 1]:\n            positions[fodt_keys[i - 1]].append(i)\n        head = folded_head(para["text"])\n        if head:\n            head_index[head].append(i)\n        roman = roman_head(para["text"])\n        if roman:\n            roman_index[roman].append(i)\n\n    matched: dict[int, int] = {}\n    last = 0\n    for i, row in enumerate(app):\n        key = app_keys[i]\n        choices = positions.get(key)\n        if choices:\n            later = [x for x in choices if x > last]\n            x = later[0] if later else min(choices, key=lambda c: abs(c - last))\n            matched[i] = x\n            last = x\n            continue\n        head = folded_head(row["definition"])\n        roman = roman_head(row["definition"])\n        near = set(head_index.get(head, ()))\n        # A one- or two-letter romanization (`see`, `al`, `b`) is a function word,\n        # not a headword, and would match half the book.\n        if len(roman) >= 4:\n            near |= set(roman_index.get(roman, ()))\n        if near:\n            candidates = {x + d for x in near for d in (-2, -1, 0, 1, 2)\n                          if 1 <= x + d <= len(fodt)}\n        else:\n            candidates = set(range(max(1, last - 120), min(len(fodt), last + 320) + 1))\n        best, best_score = None, 0.0\n        for x in candidates:\n            score = _similarity(fodt_keys[x - 1], key)\n            para = fodt[x - 1]\n            # The same romanization (and headword) is the same entry even when\n            # one run mangled the body \u2014 the app\'s row is then the readable copy.\n            same_radicals = weakless_head(para["text"]) == weakless_head(row["definition"])\n            if len(roman) >= 4 and roman_head(para["text"]) == roman and same_radicals:\n                score = max(score, 0.9)\n            elif head and folded_head(para["text"]) == head:\n                score = max(score, 0.5)\n            if score > best_score:\n                best, best_score = x, score\n        # Near candidates carry a headword or romanization, so a weaker score\n        # suffices; a blind window match must look like the same text.\n        floor = 0.5 if near else 0.8\n        if best is not None and best_score > floor:\n            matched[i] = best\n            last = best\n\n    used = {x - 1 for x in matched.values()}\n    xs = [matched[i] for i in sorted(matched)]\n    stats = {\n        "app_rows": len(app),\n        "fodt_paragraphs": len(fodt),\n        "matched": len(matched),\n        "app_unmatched": [app[i]["id"] for i in range(len(app)) if i not in matched],\n        "fodt_unmatched": [p["id"] for i, p in enumerate(fodt) if i not in used],\n        "monotonic": all(a < b for a, b in zip(xs, xs[1:])),\n    }\n    return {app[i]["id"]: x for i, x in matched.items()}, stats\n\n\n# \u2500\u2500 Reporting \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n\nPROOF_IDS = (179, 951, 2188, 2189, 2190, 4457, 4458, 7024, 7031, 7631, 7701)\n\n\ndef _first_word(text: str) -> str:\n    plain = _DIGITS.sub(" ", text).strip()\n    return (plain.split(" ", 1)[0] if plain else "")[:14]\n\n\ndef _proof(app: list[dict], fodt: list[dict], mapping: dict[int, int]) -> None:\n    by_id = {row["id"]: row for row in app}\n    print(f"{\'app id\':>6} {\'fodt id\':>7}  {\'app word\':<9} {\'FODT headword\':<15} "\n          f"{\'hom\':>3} {\'dip\':>3} {\'lvl\':>5}  app-root")\n    for rid in PROOF_IDS:\n        row = by_id.get(rid)\n        if row is None:\n            continue\n        xid = mapping.get(rid)\n        if xid is None:\n            print(f"{rid:>6} {\'\u2014\':>7}  {row[\'word\']:<9}  -- no FODT match --")\n            continue\n        para = fodt[xid - 1]\n        hom = str(para["homonym"]) if para["homonym"] is not None else "\xB7"\n        dip = ",".join(str(d["value"]) for d in para["diptotes"]) or "\xB7"\n        print(f"{rid:>6} {xid:>7}  {row[\'word\']:<9} {_first_word(para[\'text\']):<15} "\n              f"{hom:>3} {dip:>3} {para[\'level\']:>5}  "\n              f"{\'root\' if row[\'is_root\'] else \'-\'}")\n\n\ndef _cell(text: str) -> str:\n    return re.sub(r"\\s+", " ", text).replace("\\t", " ").strip()\n\n\ndef export(out: Path, app: list[dict], fodt: list[dict],\n           mapping: dict[int, int], stats: dict) -> None:\n    """Write the artefacts a person can open: the map, both sides, and the drift."""\n    out.mkdir(parents=True, exist_ok=True)\n    by_id = {row["id"]: row for row in app}\n\n    (out / "app-fodt-map.json").write_text(\n        json.dumps({str(k): v for k, v in sorted(mapping.items())},\n                   ensure_ascii=False, indent=1),\n        encoding="utf-8")\n\n    with (out / "alignment.tsv").open("w", encoding="utf-8") as fh:\n        fh.write("app_id\\tfodt_id\\tapp_word\\tfodt_headword\\thomonym\\tdiptote\\t"\n                 "level\\tfodt_root\\tapp_root\\tsimilarity\\tapp_definition_head\\n")\n        for rid, xid in sorted(mapping.items()):\n            row, para = by_id[rid], fodt[xid - 1]\n            dip = ",".join(str(d["value"]) for d in para["diptotes"])\n            sim = _similarity(norm_text(row["definition"], app=True),\n                              norm_text(para["text"]))\n            fh.write("\\t".join([\n                str(rid), str(xid), _cell(row["word"]), _cell(headword(para["text"])),\n                "" if para["homonym"] is None else str(para["homonym"]), dip,\n                str(para["level"]), "1" if para["root"] else "0",\n                "1" if row["is_root"] else "0", f"{sim:.3f}",\n                _cell(row["definition"])[:120],\n            ]) + "\\n")\n\n    with (out / "fodt-paragraphs.tsv").open("w", encoding="utf-8") as fh:\n        fh.write("fodt_id\\tlevel\\troot\\thomonym\\tdiptote\\ttext\\n")\n        for para in fodt:\n            dip = ",".join(str(d["value"]) for d in para["diptotes"])\n            fh.write("\\t".join([\n                str(para["id"]), str(para["level"]), "1" if para["root"] else "0",\n                "" if para["homonym"] is None else str(para["homonym"]), dip,\n                _cell(para["text"]),\n            ]) + "\\n")\n\n    with (out / "app-rows-without-fodt.tsv").open("w", encoding="utf-8") as fh:\n        fh.write("app_id\\tword\\tis_root\\tparent_id\\tdefinition\\n")\n        for rid in stats["app_unmatched"]:\n            row = by_id[rid]\n            fh.write("\\t".join([str(rid), _cell(row["word"]), "1" if row["is_root"] else "0",\n                                str(row["parent_id"]), _cell(row["definition"])]) + "\\n")\n\n    used = set(mapping.values())\n    with (out / "fodt-paragraphs-without-app.tsv").open("w", encoding="utf-8") as fh:\n        fh.write("fodt_id\\tlevel\\troot\\theadword\\ttext\\n")\n        for para in fodt:\n            if para["id"] in used:\n                continue\n            fh.write("\\t".join([str(para["id"]), str(para["level"]),\n                                "1" if para["root"] else "0", _cell(headword(para["text"])),\n                                _cell(para["text"])]) + "\\n")\n\n    (out / "README.md").write_text(\n        "---\\n"\n        "created: 2026-10-19\\n"\n        "up:\\n"\n        \'  - "[[AI gen]]"\\n\'\n        "aliases:\\n"\n        "---\\n\\n"\n        "# Hans Wehr FODT alignment artefacts\\n\\n"\n        "Generated by `src/midad-arabic-sources/scripts/hanswehr-fodt-align.py --export`.\\n\\n"\n        "The FODT itself is cached at\\n"\n        "`.midad-arabic-sources/cache/text-sources/https_raw.githubusercontent.com_muhammad-abdurrahman_hans-wehr-fodt-parser_master_hanswehr.xml`.\\n\\n"\n        "- `app-fodt-map.json` \u2014 app SQLite row id \u2192 FODT paragraph id.\\n"\n        "- `alignment.tsv` \u2014 one row per joined entry, with the recovered homonym and diptote numbers, the indentation level, and a similarity score.\\n"\n        "- `fodt-paragraphs.tsv` \u2014 every FODT paragraph (25,069), level 0.0 marked as a root, with its numbers and full text.\\n"\n        "- `app-rows-without-fodt.tsv` \u2014 the 62 SQLite rows the FODT does not contain.\\n"\n        "- `fodt-paragraphs-without-app.tsv` \u2014 FODT paragraphs no SQLite row maps to (blanks, letter headings, continuation fragments and reordered roots).\\n",\n        encoding="utf-8")\n\n\ndef main() -> int:\n    ap = argparse.ArgumentParser(description=__doc__)\n    ap.add_argument("--json", action="store_true", help="print the full app\u2192fodt id map")\n    ap.add_argument("--drift", action="store_true", help="list rows with no FODT match")\n    ap.add_argument("--export", metavar="DIR", type=Path,\n                    help="write the map and both sides as TSV/JSON to DIR")\n    args = ap.parse_args()\n\n    for path, url in ((FODT_PATH, FODT_URL), (APP_DB_PATH, APP_DB_URL)):\n        if not path.exists():\n            print(f"missing cache file: {path}\\n  fetch {url}", file=sys.stderr)\n            return 1\n\n    fodt = read_fodt()\n    app = read_app()\n    mapping, stats = align(app, fodt)\n\n    print(f"FODT paragraphs        {stats[\'fodt_paragraphs\']:,}  (hanswehr.xml)")\n    print(f"app SQLite rows        {stats[\'app_rows\']:,}  (hanswehr.sqlite)")\n    print(f"joined                 {stats[\'matched\']:,} "\n          f"({stats[\'matched\'] / stats[\'app_rows\'] * 100:.2f}% of app rows)")\n    print(f"app rows with no FODT  {len(stats[\'app_unmatched\']):,}")\n    def _starts_arabic(text: str) -> bool:\n        return bool(text.strip()) and "\\u0600" <= text.strip()[0] <= "\\u06ff"\n\n    unused = [fodt[x - 1] for x in stats["fodt_unmatched"]]\n    blank = sum(1 for p in unused if not p["text"].strip())\n    fragments = sum(1 for p in unused if p["text"].strip() and not _starts_arabic(p["text"]))\n    letters = sum(1 for p in unused\n                  if _starts_arabic(p["text"]) and len(headword(p["text"])) == 1)\n    print(f"FODT paragraphs not in app  {len(unused):,}"\n          f"  ({blank} blank, {letters} letter headings, {fragments} continuation fragments)")\n    print(f"order preserved        {stats.get(\'monotonic\', True)}")\n    if not stats.get("monotonic"):\n        print("  (a few roots are listed in a different order in each file)")\n    roots = sum(1 for p in fodt if p["root"])\n    homo = sum(1 for p in fodt if p["homonym"] is not None)\n    dipt = sum(1 for p in fodt if p["diptotes"])\n    print(f"FODT level 0.0 (roots) {roots:,}   leading homonym number {homo:,}   diptote marker {dipt:,}")\n    print()\n    _proof(app, fodt, mapping)\n\n    if args.export:\n        export(args.export, app, fodt, mapping, stats)\n        print(f"\\nwrote artefacts to {args.export}")\n    if args.drift:\n        by_id = {row["id"]: row for row in app}\n        print("\\napp rows with no FODT paragraph:")\n        for rid in stats["app_unmatched"]:\n            print(f"  {rid:>6}  {by_id[rid][\'definition\'][:88]}")\n    if args.json:\n        print(json.dumps({str(k): v for k, v in sorted(mapping.items())},\n                         ensure_ascii=False, indent=1))\n    return 0\n\n\nif __name__ == "__main__":\n    sys.exit(main())\n' },
+  { path: "scripts/hanswehr-fodt-json.py", content: '#!/usr/bin/env python3\n"""Turn the Hans Wehr FODT into the dictionary JSON the plugin should read.\n\nThe app\'s SQLite threw away two things the book prints \u2014 Wehr\'s **homonym\nnumber** (before the Arabic term) and the **diptote marker** (a superscript after\nthe romanization) \u2014 and it also rebuilt the text with markup. This converter\nkeeps what the FODT actually encodes:\n\n  * one record per `text:p`, in the book\'s order, `id` = the paragraph index;\n  * `level` = `fo:margin-left` + `fo:text-indent` (0.0 is unindented = a root);\n  * `is_root` = `level == 0.0` \u2014 what the book shows, not a correction;\n  * `homonym` = the superscript number before the Arabic term;\n  * the diptote stays where it is printed, as `<sup>2</sup>` after the term;\n  * `root_id` = the root the entry is filed under. Usually the nearest\n    unindented paragraph before it, but `_REPARENT` (translated from the app\'s\n    ids through the content alignment) undoes the digitisation\'s splits.\n\nThe 62 entries the FODT lost are carried over from the app\'s SQLite and marked\n`source: "app-supplement"`. Their parentage follows the book\'s own divisions,\nnot the app\'s adjacency: page 466 has one root (`\u0161arufa`), entries under \u0634\u0631\u0639\nbefore it, and the \u0634\u0631\u0642 root after it (the app had nested the \u0645\u0634\u0631\u0642 group under\n\u0634\u0631\u0641 by adjacency).\n\n    python3 scripts/hanswehr-fodt-json.py --out ../../tmp/hanswehr-fodt\n"""\n\nfrom __future__ import annotations\n\nimport argparse\nimport hashlib\nimport importlib.util\nimport json\nimport re\nimport sys\nfrom collections import defaultdict\nfrom pathlib import Path\n\nHERE = Path(__file__).resolve().parent\nsys.path.insert(0, str(HERE))\n\n\ndef _load(name: str, filename: str):\n    spec = importlib.util.spec_from_file_location(name, HERE / filename)\n    module = importlib.util.module_from_spec(spec)\n    spec.loader.exec_module(module)\n    return module\n\n\nhfa = _load("hanswehr_fodt_align", "hanswehr-fodt-align.py")\ntsi = hfa.tsi\n\n# The style sets are discovered by `read_fodt` (T71/T72/T74 are superscript in\n# this document; T83 is the cyan highlight around the printed page numbers).\n# `SUPPLEMENT_ID_BASE` keeps the hand-restored rows out of the FODT\'s id range.\nSUPPLEMENT_ID_BASE = 100_000\n\n\ndef supplement_id(app_id: int) -> int:\n    return SUPPLEMENT_ID_BASE + app_id\n\nWORK = {\n    "id": "hanswehr-fodt",\n    "title": "Hans Wehr Dictionary (FODT)",\n    "arabic": "\u0645\u0639\u062C\u0645 \u0647\u0627\u0646\u0633 \u06A4\u064A\u0631",\n    "author": "Hans Wehr",\n    "editor": "J Milton Cowan",\n    "source": "https://github.com/muhammad-abdurrahman/hans-wehr-fodt-parser",\n    "note_prefix": "HWF",\n    "body": "grid",\n    "convention": "wehr",\n    "unique": True,\n    "license_attribution": "Text: Hans Wehr, A Dictionary of Modern Written Arabic, "\n                           "ed. J Milton Cowan. Digitisation: muhammad-abdurrahman/"\n                           "hans-wehr-fodt-parser (MIT, code only).",\n}\n\n# \u2500\u2500 Print-only entries, absent from both digitizations \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n#\n# A word the OCR missed is missing from the FODT *and* from the app\'s SQLite\n# (both descend from the same scan). These are curated from the print. A\n# suffixed id (`26a`) keeps the parent association and gives the entry its own\n# bookmark target (`^26a`) without shifting any FODT paragraph id; `order` puts\n# it where the print has it (`26.5` sorts between 26 and 27).\nPRINT_SUPPLEMENTS: list[dict] = [\n    {\n        "id": "26a",\n        "root_id": 26,\n        "word": "\u0627\u0628\u0631\u064A\u0632\u064A",\n        "definition": "\u0627\u0628\u0631\u064A\u0632\u064A ibr\u012Bz\u012B golden, of pure gold",\n        "order": 26.5,\n        "note": "print p. 1, after \u0627\u0628\u0631\u064A\u0632 ibr\u012Bz",\n    },\n]\n\n# \u2500\u2500 The manual supplement, parented by the book\'s divisions \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n#\n# The FODT lost a block around the page-467 mark. The app restored 62 entries by\n# hand in 2021; its `parent_id` follows the *row order* in places (the \u0645\u0634\u0631\u0642\n# group ended up under \u0634\u0631\u0641). These overrides settle the roots the book shows:\n# entries under \u0634\u0631\u0639 before \u0161arufa (page 466), \u0161arufa its own root, and the \u0634\u0631\u0642\n# root (page 467) taking \u0634\u0631\u0648\u0642 and the \u0645\u0634\u0631\u0642 group.\n_SUPPLEMENT_PARENT: dict[int, int] = {}\nfor _rid in range(11273, 11294):      # \u0634\u0631\u0639\u0649 \u2026 \u0645\u0634\u062A\u0631\u0639, under \u0634\u0631\u0639 11271\n    _SUPPLEMENT_PARENT[_rid] = 11271\nfor _rid in range(11295, 11312):      # \u0634\u0631\u0641 \u2026 \u0645\u0633\u062A\u0634\u0631\u0641, under \u0161arufa 11294\n    _SUPPLEMENT_PARENT[_rid] = 11294\nfor _rid in range(11313, 11328):      # \u0634\u0631\u0642 \u2026 \u0645\u0633\u062A\u0634\u0631\u0642, under \u0634\u0631\u0642 11312\n    _SUPPLEMENT_PARENT[_rid] = 11312\nfor _rid in range(22462, 22469):      # \u0646\u0642\u064A\u0631\u0629 \u2026 \u0646\u0627\u0642\u0631\u0629, under \u0646\u0642\u0631 22453\n    _SUPPLEMENT_PARENT[_rid] = 22453\nfor _rid in range(22565, 22569):      # \u0646\u0642\u0649 \u2026 \u0645\u0646\u062A\u0642, under \u0646\u0642\u0648 22561\n    _SUPPLEMENT_PARENT[_rid] = 22561\nfor _rid in range(22571, 22572):      # \u0646\u0643\u0628 (noun), under \u0646\u0643\u0628 22570\n    _SUPPLEMENT_PARENT[_rid] = 22570\nfor _rid in range(5283, 5293):        # \u062D\u0645\u0648 \u2026 \u062D\u0627\u0645, under \u062D\u0645\u064A 5282\n    _SUPPLEMENT_PARENT[_rid] = 5282\nfor _rid in range(19204, 19208):      # \u0643\u0646\u064A\u0629 \u2026 \u0645\u0643\u0646\u0649, under \u0643\u0646\u0648 19203\n    _SUPPLEMENT_PARENT[_rid] = 19203\nfor _rid in range(19757, 19760):      # \u0645\u0644\u0627\u0634\u0627\u0629 \u2026 \u0645\u062A\u0644\u0627\u0634, under \u0644\u0634\u0649 19756\n    _SUPPLEMENT_PARENT[_rid] = 19756\n\n\ndef _is_digits(text: str) -> bool:\n    return bool(text.strip()) and text.strip().isascii() and text.strip().isdigit()\n\n\ndef clean_definition(paragraph: dict) -> str:\n    """The paragraph as the app would carry it, but with the book\'s numbers kept.\n\n    The leading homonym is removed (it becomes the `homonym` field) and the\n    printed page numbers (cyan highlight) are dropped; every superscript digit\n    after a Latin word becomes `<sup>N</sup>`, where it stands.\n    """\n    out: list[str] = []\n    seen_text = False\n    after_latin = False\n    for text, style in paragraph["runs"]:\n        if style in hfa.PAGE_STYLES:\n            continue\n        if style in hfa.SUP_STYLES and _is_digits(text):\n            if not seen_text and paragraph["homonym"] is not None:\n                continue                      # the leading homonym number\n            if after_latin:\n                out.append(f"<sup>{text.strip()}</sup>")\n                after_latin = False\n                continue\n        out.append(text)\n        stripped = text.rstrip()\n        if stripped:\n            seen_text = True\n            after_latin = bool(re.search(r"[A-Za-z\\u00c0-\\u024f\\u1e00-\\u1eff]$", stripped))\n    text = re.sub(r"[ \\t]+", " ", "".join(out)).strip()\n    return text\n\n\ndef _nearest_root(paragraphs: list[dict]) -> dict[int, int]:\n    """Each paragraph\'s containing root by the book\'s indentation alone."""\n    root_of: dict[int, int] = {}\n    current = 0\n    for para in paragraphs:\n        if para["root"]:\n            current = para["id"]\n        root_of[para["id"]] = current or para["id"]\n    return root_of\n\n\ndef _app_root(app_by_id: dict[int, dict], rid: int) -> int:\n    seen: set[int] = set()\n    while rid in app_by_id and rid not in seen:\n        seen.add(rid)\n        row = app_by_id[rid]\n        if row["is_root"] or row["parent_id"] == rid:\n            return rid\n        rid = row["parent_id"]\n    return rid\n\n\ndef build_entries() -> tuple[list[dict], dict, list[dict]]:\n    fodt = hfa.read_fodt()\n    app = hfa.read_app()\n    app_by_id = {row["id"]: row for row in app}\n    mapping, stats = hfa.align(app, fodt)\n\n    # The app\'s two correction tables, translated to FODT paragraph ids.\n    reparent = {mapping[a]: mapping[p] for a, p in tsi._REPARENT["hanswehr"].items()\n                if a in mapping and p in mapping}\n    eyeball = {mapping[r]: pair for r, pair in tsi._EYEBALL["hanswehr"].items()\n               if r in mapping}\n\n    # The style sum is the book\'s indentation, but the conversion sometimes\n    # indents a root (\u0634\u0631\u0639 on p. 467) or flattens a derivative; the app\'s later\n    # root corrections are the better hierarchy. Keep both: `is_root` is what\n    # the FODT says, `app_root` what the corrected app says, and `root_id` is\n    # resolved from the latter. (The 296 promotions and 31 demotions are a\n    # correction table to extract once the FODT pipeline no longer reads the app.)\n    app_root = {xid: app_by_id[rid]["is_root"] for rid, xid in mapping.items()}\n    rootish: dict[int, bool] = {}\n    for para in fodt:\n        rootish[para["id"]] = app_root.get(para["id"], para["root"])\n    base_root: dict[int, int] = {}\n    current = 0\n    for para in fodt:\n        rid = para["id"]\n        if rootish[rid]:\n            current = rid\n        base_root[rid] = current or rid\n\n    entries: list[dict] = []\n    for para in fodt:\n        rid = para["id"]\n        definition = clean_definition(para)\n        if rid in eyeball:\n            old, new = eyeball[rid]\n            definition = definition.replace(old, new)\n        root_id = base_root[rid]\n        if rid in reparent:\n            root_id = reparent[rid]      # the digitisation split; Wehr files it here\n        entries.append({\n            "id": rid,\n            "word": hfa.headword(definition),\n            "root_id": root_id,\n            "is_root": para["root"],\n            "app_root": app_root.get(rid),\n            "level": para["level"],\n            "homonym": para["homonym"],\n            "definition": definition,\n            "source": "fodt",\n        })\n\n    # \u2500\u2500 The 62 rows the FODT lost, under the roots the book gives them \u2500\u2500\u2500\u2500\u2500\u2500\n    by_id = {e["id"]: e for e in entries}\n    supplement_ids = stats["app_unmatched"]\n    supplement_roots: set[int] = set()\n    for rid in supplement_ids:\n        aroot = _SUPPLEMENT_PARENT.get(rid) or _app_root(app_by_id, rid)\n        if aroot in supplement_roots:\n            continue\n        if aroot in mapping:\n            # The root itself is in the FODT (\u0634\u0631\u0639, \u0646\u0642\u0631, \u0646\u0642\u0648 \u2026): attach to it.\n            continue\n        supplement_roots.add(aroot)\n\n    # Move FODT paragraphs the app files under a restored root (\u0634\u0631\u0648\u0642 under \u0634\u0631\u0642).\n    moved = 0\n    for rid, xid in mapping.items():\n        aroot = _SUPPLEMENT_PARENT.get(rid) or _app_root(app_by_id, rid)\n        if aroot in supplement_roots and xid in by_id:\n            by_id[xid]["root_id"] = supplement_id(aroot)\n            moved += 1\n\n    for rid in supplement_ids:\n        aroot = _SUPPLEMENT_PARENT.get(rid) or _app_root(app_by_id, rid)\n        root_id = mapping.get(aroot, supplement_id(aroot))\n        row = app_by_id[rid]\n        entries.append({\n            "id": supplement_id(rid),\n            "app_id": rid,\n            "word": hfa.headword(row["definition"]),\n            "root_id": root_id,\n            "is_root": row["is_root"],\n            "level": 0.0 if row["is_root"] else 1.0,\n            "homonym": None,\n            "definition": row["definition"],\n            "source": "app-supplement",\n        })\n\n    for item in PRINT_SUPPLEMENTS:\n        entries.append({\n            "id": item["id"],\n            "root_id": item["root_id"],\n            "word": item["word"],\n            "is_root": False,\n            "app_root": None,\n            "level": 1.0,\n            "homonym": None,\n            "definition": item["definition"],\n            "source": "print-supplement",\n            "order": item["order"],\n            "note": item.get("note", ""),\n        })\n\n    meta = {\n        "fodt_sha256": hashlib.sha256(hfa.FODT_PATH.read_bytes()).hexdigest(),\n        "fodt_paragraphs": len(fodt),\n        "app_rows": len(app),\n        "aligned": stats["matched"],\n        "supplement_rows": len(supplement_ids),\n        "supplement_roots": sorted(supplement_roots),\n        "moved_under_supplement": moved,\n        "reparented": len(reparent),\n        "print_supplement_rows": len(PRINT_SUPPLEMENTS),\n    }\n    return entries, meta, app, mapping\n\n\ndef _book_order(entries: list[dict], mapping: dict[int, int]) -> dict[int | str, float]:\n    """A single order for FODT and supplement rows, in the book\'s sequence.\n\n    A print supplement carries an explicit `order` (`26.5`, between 26 and 27);\n    an app supplement keeps its app id; an FODT row takes its aligned app id when\n    it has one, so `\u0634\u0631\u0648\u0642` (FODT 11342, app 11316) sorts after the app\'s \u0634\u0631\u0642 rows\n    rather than after all the FODT ids.\n    """\n    reverse = {xid: rid for rid, xid in mapping.items()}\n    out: dict[int | str, float] = {}\n    for e in entries:\n        if "order" in e:\n            out[e["id"]] = float(e["order"])\n        elif e["source"] == "app-supplement":\n            out[e["id"]] = float(e["app_id"])\n        else:\n            out[e["id"]] = float(reverse.get(e["id"], e["id"]))\n    return out\n\n\ndef build_units(entries: list[dict], mapping: dict[int, int],\n                work: dict | None = None) -> list[dict]:\n    """The plugin\'s dictionary units, built with the existing `_hw_*` machinery."""\n    cfg = work or WORK\n    order = _book_order(entries, mapping)\n    by_root: dict[int, list[dict]] = defaultdict(list)\n    for entry in entries:\n        by_root[entry["root_id"]].append(entry)\n    roots = sorted((e for e in entries if e["root_id"] == e["id"]),\n                   key=lambda e: order[e["id"]])\n    convention = cfg.get("convention", WORK["convention"])\n    prefix = cfg.get("note_prefix", WORK["note_prefix"])\n    title = cfg.get("dir") or cfg.get("title") or WORK["title"]\n\n    groups: list[list[dict]] = []\n    for root in roots:\n        if (groups and groups[-1][0]["word"] == root["word"]\n                and groups[-1][0]["homonym"] == root["homonym"]\n                and not tsi._hw_starts_new_root(root["definition"])):\n            groups[-1].append(root)\n        else:\n            groups.append([root])\n\n    units: list[dict] = []\n    for n, group in enumerate(groups):\n        if n and n % 500 == 0:\n            print(f"  roots {n}/{len(groups)}", file=sys.stderr, flush=True)\n        root_ids = {r["id"] for r in group}\n        derived = sorted((e for rid in root_ids for e in by_root.get(rid, [])\n                          if e["id"] != e["root_id"]),\n                         key=lambda e: order[e["id"]])\n        derived_rows = [(e["id"], e["word"], e["definition"]) for e in derived]\n        root = None\n        sections: list[dict] = []\n        for record in group:\n            entry = tsi._hw_root_entry(record["id"], record["word"], record["definition"],\n                                       derived_rows, prose=False, convention=convention)\n            if entry is None:\n                continue\n            entry.update(homonym=record["homonym"], level=record["level"],\n                         source=record["source"], book_root=record["is_root"])\n            if root is None:\n                root = entry\n            else:\n                sections.append(entry)\n        if root is None:\n            continue\n        entries_out = list(sections)\n        for record in derived:\n            entry = tsi._hw_derived_entry(record["id"], record["word"],\n                                          record["definition"], prose=False,\n                                          convention=convention)\n            if entry is None:\n                continue\n            entry.update(homonym=record["homonym"], level=record["level"],\n                         source=record["source"], book_root=record["is_root"])\n            entries_out.append(entry)\n        if not entries_out and not root.get("bullets"):\n            continue\n        base_id = root["id"]\n        if root.get("source") == "app-supplement" and base_id >= SUPPLEMENT_ID_BASE:\n            base_id = f"S{base_id - SUPPLEMENT_ID_BASE}"\n        units.append({\n            "kind": "dict",\n            "id": root["id"],\n            "base": tsi._hw_note_base({**root, "id": base_id}, prefix),\n            "title": f"{root[\'arabic\']} {root[\'roman\']}",\n            "section_page": None,   # filled after the letter pages exist\n            "root": root,\n            "entries": entries_out,\n        })\n\n    indexed = tsi._hw_letter_index(units, convention)\n    stem = {u["id"]: f"{title} - {u[\'base\']}" for u in indexed}\n    for unit in units:\n        letter = tsi._hw_letter_of(unit["root"]["arabic"])\n        unit["section_page"] = stem.get(letter, "")\n    return indexed + units\n\n\ndef build_model(entries: list[dict], meta: dict, mapping: dict[int, int]) -> dict:\n    units = build_units(entries, mapping)\n    work = {\n        "key": f"dictionary:{WORK[\'id\']}",\n        "collection": "dictionary",\n        "collection_label": "Dictionaries",\n        "id": WORK["id"],\n        "name": WORK["title"],\n        "title": WORK["title"],\n        "dir": WORK["title"],\n        "short": "",\n        "title_ar": WORK["arabic"],\n        "short_ar": "",\n        "authors": [WORK["author"]],\n        "translators": [],\n        "aliases": [WORK["title"], WORK["arabic"]],\n        "language": "ar",\n        "languages": ["ar"],\n        "language_links": ["Arabic"],\n        "cssclass": "dictionary",\n        "moc": "Dictionaries",\n        "moc_sections": ["Arabic Texts"],\n        "up": ["[[Dictionaries]]"],\n        "source": WORK["source"],\n        "license_attribution": WORK["license_attribution"],\n        "repository_updated": "2017-03-30",\n        "source_hash": meta["fodt_sha256"][:12],\n        "author": WORK["author"],\n        "body": WORK["body"],\n        "note_prefix": WORK["note_prefix"],\n        "supplement_from": 0,\n        "convention": WORK["convention"],\n        "volumes": 1,\n        "section_level": 1,\n        "date_built": 0,\n        "mocs": ["Dictionaries"],\n    }\n    return tsi.work_model(work, units, tsi.datetime.now().strftime("%Y-%m-%d"), "stacked")\n\n\ndef main() -> int:\n    ap = argparse.ArgumentParser(description=__doc__)\n    ap.add_argument("--out", type=Path, required=True, help="directory for dictionary.json")\n    ap.add_argument("--transliteration-server", default="http://127.0.0.1:8756",\n                    help="resident transliteration service (the model names roots that "\n                         "lack a source transliteration)")\n    ap.add_argument("--no-transliteration", action="store_true",\n                    help="never call the service; name such roots from their radicals")\n    args = ap.parse_args()\n\n    tsi._TRANS_SERVER = args.transliteration_server\n    tsi._TRANS_OFF = args.no_transliteration\n    entries, meta, _app, mapping = build_entries()\n    payload = {\n        "schema": 1,\n        "work": WORK,\n        "source": meta,\n        "entries": entries,\n    }\n    args.out.mkdir(parents=True, exist_ok=True)\n    path = args.out / "dictionary.json"\n    path.write_text(json.dumps(payload, ensure_ascii=False, indent=1), encoding="utf-8")\n\n    model = build_model(entries, meta, mapping)\n    model_path = args.out / "hanswehr-fodt.model.json"\n    model_path.write_text(json.dumps(model, ensure_ascii=False, indent=1), encoding="utf-8")\n\n    roots = sum(1 for e in entries if e["is_root"])\n    homonyms = sum(1 for e in entries if e["homonym"] is not None)\n    diptotes = sum(1 for e in entries if "<sup>" in e["definition"])\n    print(f"entries              {len(entries):,}")\n    print(f"roots (level 0.0)    {roots:,}")\n    print(f"homonym numbers      {homonyms:,}")\n    print(f"definitions with <sup> {diptotes:,}")\n    print(f"supplement rows      {meta[\'supplement_rows\']:,} "\n          f"({len(meta[\'supplement_roots\'])} restored roots)")\n    print(f"FODT rows re-parented {meta[\'moved_under_supplement\']:,}"\n          f" (under a restored root; plus {meta[\'reparented\']} `_REPARENT`)")\n    print(f"model units          {len(model[\'units\']):,} "\n          f"({sum(1 for u in model[\'units\'] if u[\'kind\'] == \'dict\'):,} roots)")\n    print(f"wrote {path}  ({path.stat().st_size / 1e6:.1f} MB)")\n    print(f"wrote {model_path}  ({model_path.stat().st_size / 1e6:.1f} MB)")\n    return 0\n\n\nif __name__ == "__main__":\n    sys.exit(main())\n' },
+  { path: "scripts/midad-arabic-sources-pipeline.py", content: `#!/usr/bin/env python3
 """
 Midad Arabic Sources pipeline orchestrator.
 
@@ -2792,9 +2976,10 @@ Subcommands:
     list-pdfs <note.md>
     list-transcriptions <note.md>
     list-archive
+    default-prompts
     migrate-archive
-    transcribe --citekey CK [--pdf PATH ...] [--volume N] [--pages N]
-    translate  --citekey CK [--source PATH ...] [--volume N]
+    transcribe --citekey CK [--pdf PATH ...] [--volume N] [--pages N] [--prompt-file PATH]
+    translate  --citekey CK [--source PATH ...] [--volume N] [--prompt-file PATH]
     reprocess  --zip PATH
 
 PDF resolution order (per the vault's ScholarWeft integration):
@@ -2847,6 +3032,7 @@ JOBS_DIR = CACHE / "jobs"
 
 _LOG_PATH = None
 _STATE_PATH = None
+_PROMPT_PATH = None
 
 
 def set_log(path):
@@ -2861,6 +3047,12 @@ def set_state(path):
     if path:
         _STATE_PATH = Path(path)
         _STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
+
+
+def set_prompt(path):
+    global _PROMPT_PATH
+    if path:
+        _PROMPT_PATH = Path(path)
 
 
 def save_state(**fields):
@@ -2891,8 +3083,8 @@ def _pid_alive(pid) -> bool:
 
 
 def _cleanup_job_files():
-    """Remove this job's log/state once it has completed successfully."""
-    for p in (_LOG_PATH, _STATE_PATH):
+    """Remove this job's log/state/prompt file once it has completed successfully."""
+    for p in (_LOG_PATH, _STATE_PATH, _PROMPT_PATH):
         if p:
             try:
                 Path(p).unlink(missing_ok=True)
@@ -3148,6 +3340,21 @@ def cmd_list_archive(args) -> int:
     return 0
 
 
+def cmd_default_prompts(args) -> int:
+    """Emit the built-in prompts so the plugin can seed/refresh its prompt JSON."""
+    try:
+        sys.path.insert(0, str(SCRIPTS))
+        from midad_prompts import DEFAULT_TRANSCRIPTION_PROMPT, DEFAULT_TRANSLATION_PROMPT
+        emit("result", result={
+            "transcription": DEFAULT_TRANSCRIPTION_PROMPT,
+            "translation": DEFAULT_TRANSLATION_PROMPT,
+        })
+        return 0
+    except Exception as e:
+        fail(f"Could not read the built-in prompts: {e}")
+        return 1
+
+
 def cmd_migrate_archive(args) -> int:
     ARCHIVE_DIR.mkdir(parents=True, exist_ok=True)
     moved = 0
@@ -3218,9 +3425,13 @@ def cmd_transcribe(args) -> int:
 
         save_state(stage="submitting", status="running", doc_type="transcription",
                    pid=os.getpid(), citekey=citekey, pdf=str(pdf), volume=volume,
-                   work_dir=str(work), log=str(_LOG_PATH) if _LOG_PATH else "")
+                   work_dir=str(work), log=str(_LOG_PATH) if _LOG_PATH else "",
+                   prompt_file=str(args.prompt_file) if getattr(args, "prompt_file", None) else "")
         step("transcribe", "start", f"{pdf.name}" + (f" (vol. {volume})" if volume else ""))
-        if run_script("transcription-batch-submit.py", [str(pdf), "--work-dir", str(work)]):
+        submit_args = [str(pdf), "--work-dir", str(work)]
+        if getattr(args, "prompt_file", None):
+            submit_args += ["--prompt-file", str(args.prompt_file)]
+        if run_script("transcription-batch-submit.py", submit_args):
             save_state(stage="error", status="error")
             step("transcribe", "error", pdf.name); continue
 
@@ -3228,7 +3439,10 @@ def cmd_transcribe(args) -> int:
         run_script("transcription-process-raw.py", [str(batch_txt), "--poll", str(POLL_SECONDS)])
         if not raw.exists():
             step("hallucinations", "start", "re-OCRing flagged pages")
-            run_script("transcription-process-raw.py", [str(batch_txt), "--fix"])
+            fix_args = [str(batch_txt), "--fix"]
+            if getattr(args, "prompt_file", None):
+                fix_args += ["--prompt-file", str(args.prompt_file)]
+            run_script("transcription-process-raw.py", fix_args)
 
         if not processed.exists() or processed.stat().st_mtime < raw.stat().st_mtime:
             run_script("transcription-postprocess.py", [str(raw), str(processed)])
@@ -3255,7 +3469,8 @@ def _resume_transcription(st: dict) -> int:
     work = Path(st.get("work_dir") or Path(pdf).parent)
     batch_txt = work / f"{stem}.batch.txt"
     if not batch_txt.exists():
-        return cmd_transcribe(argparse.Namespace(citekey=citekey, pdf=[pdf], volume=volume, pages=None))
+        return cmd_transcribe(argparse.Namespace(citekey=citekey, pdf=[pdf], volume=volume,
+                                                pages=None, prompt_file=st.get("prompt_file") or None))
 
     mv = load_module("transcription-translation-move-to-vault.py")
     raw = work / f"{stem}-raw.md"
@@ -3263,7 +3478,10 @@ def _resume_transcription(st: dict) -> int:
     save_state(stage="resuming", status="running")
     run_script("transcription-process-raw.py", [str(batch_txt), "--poll", str(POLL_SECONDS)])
     if not raw.exists():
-        run_script("transcription-process-raw.py", [str(batch_txt), "--fix"])
+        fix_args = [str(batch_txt), "--fix"]
+        if st.get("prompt_file"):
+            fix_args += ["--prompt-file", str(st["prompt_file"])]
+        run_script("transcription-process-raw.py", fix_args)
     if not processed.exists() or processed.stat().st_mtime < raw.stat().st_mtime:
         run_script("transcription-postprocess.py", [str(raw), str(processed)])
     dest = mv.write_note(_strip_yaml(processed.read_text(encoding="utf-8")), citekey,
@@ -3284,6 +3502,8 @@ def cmd_resume(args) -> int:
     set_state(state_path)
     if st.get("log"):
         set_log(st["log"])
+    if st.get("prompt_file"):
+        set_prompt(st["prompt_file"])
     if st.get("pid") and _pid_alive(st["pid"]):
         fail(f"Job is still running (pid {st['pid']}).")
         return 1
@@ -3310,7 +3530,10 @@ def cmd_translate(args) -> int:
     for src in sources:
         src = Path(src)
         step("translate", "start", src.name)
-        if run_script("translate-batch-submit.py", [str(src)]):
+        submit_args = [str(src)]
+        if getattr(args, "prompt_file", None):
+            submit_args += ["--prompt-file", str(args.prompt_file)]
+        if run_script("translate-batch-submit.py", submit_args):
             step("translate", "error", src.name); continue
         txt = src.parent / f"{src.stem}.translate.txt"
         run_script("translate-batch-process.py", [str(txt), "--poll", str(POLL_SECONDS)])
@@ -3340,6 +3563,7 @@ def main() -> int:
     p = sub.add_parser("list-pdfs"); p.add_argument("note"); p.set_defaults(func=cmd_list_pdfs)
     p = sub.add_parser("list-transcriptions"); p.add_argument("note"); p.set_defaults(func=cmd_list_transcriptions)
     sub.add_parser("list-archive").set_defaults(func=cmd_list_archive)
+    sub.add_parser("default-prompts").set_defaults(func=cmd_default_prompts)
     sub.add_parser("migrate-archive").set_defaults(func=cmd_migrate_archive)
 
     p = sub.add_parser("transcribe")
@@ -3347,6 +3571,7 @@ def main() -> int:
     p.add_argument("--pdf", action="append")
     p.add_argument("--volume", type=int)
     p.add_argument("--pages", type=int)
+    p.add_argument("--prompt-file")
     p.add_argument("--log")
     p.add_argument("--state")
     p.set_defaults(func=cmd_transcribe)
@@ -3355,6 +3580,7 @@ def main() -> int:
     p.add_argument("--citekey", required=True)
     p.add_argument("--source", action="append")
     p.add_argument("--volume", type=int)
+    p.add_argument("--prompt-file")
     p.set_defaults(func=cmd_translate)
 
     p = sub.add_parser("reprocess"); p.add_argument("--zip", required=True); p.set_defaults(func=cmd_reprocess)
@@ -3366,6 +3592,8 @@ def main() -> int:
         set_log(args.log)
     if getattr(args, "state", None):
         set_state(args.state)
+    if getattr(args, "prompt_file", None):
+        set_prompt(args.prompt_file)
     try:
         rc = args.func(args)
     except KeyboardInterrupt:
@@ -3382,117 +3610,134 @@ def main() -> int:
 if __name__ == "__main__":
     sys.exit(main())
 ` },
-  { path: "scripts/archive-batch-files.py", content: `#!/usr/bin/env python3
+  { path: "scripts/midad_prompts.py", content: `"""Built-in prompts for the Gemini transcription and translation pipeline.
+
+The plugin's prompt editor edits only the *text-specific* instruction stored in
+\`.midad-arabic-sources/<kind>-prompts.json\`. Each submit script composes the
+final system instruction in three layers:
+
+    SHARED_FORMAT_PROMPT          general page/output formatting, shared
+    TRANSCRIPTION_BASE_PROMPT     general OCR rules (or TRANSLATION_BASE_PROMPT)
+    TEXT-SPECIFIC INSTRUCTIONS    the user's description of this document
+
+That keeps page headings, \`---\` separators, blank lines, and the no-hard-wrap
+rule consistent across every text, while the user describes only the document
+in front of them.
+
+The plugin's \`default-prompts\` pipeline command returns the two
+\`DEFAULT_*_PROMPT\` strings, which are the text-specific defaults it seeds into
+the JSON files.
 """
-Archive the intermediate .txt/.json files for one volume into a single zip.
 
-Usage:
-  python3 scripts/archive-batch-files.py <batch.txt> [--dest DIR] [--remove]
+# ornate brackets used for Qur'an quotes: U+FD3E open, U+FD3F close
+_QO = "\\uFD3E"
+_QC = "\\uFD3F"
 
-<batch.txt> is either "<stem>.batch.txt" (a transcription) or
-"<stem>.translate.txt" (a translation).  The archive is named
-  <citekey> - transcription - vol. N files.zip
-  <citekey> - translation   - vol. N files.zip
-(or without " - vol. N" for a single-volume work) and written to the dedicated
-archive folder, by default:
-  AI OS/Arabic Transcriptions/Arabic OCR archive
+SHARED_FORMAT_PROMPT = (
+    "OUTPUT FORMAT (applies to every page, whatever the text)\\n"
+    "- Every page begins with a level-4 heading for its printed page number in Western digits: '#### p. 12'. "
+    "When transcribing, write that heading yourself; when translating, keep the input's heading exactly where it is. "
+    "For an unnumbered page use '#### Cover', '#### Copyright page', '#### Title page', etc.; if the number cannot be read use '#### p. ?'.\\n"
+    "- Pages are separated by a line containing only '---', with one blank line before and after it. "
+    "When transcribing, do not add a leading or trailing '---' around a single page; the pipeline inserts the separators between pages. "
+    "When translating, keep every '---' from the input exactly; never drop, move, merge, or invent one.\\n"
+    "- Put exactly one empty line between every block element (headings, paragraphs, poetry, callouts, footnotes, and '---' separators).\\n"
+    "- Do not output the PDF/file page number, the input filename, or any page separator other than '---'.\\n"
+    "- Keep every paragraph and every footnote on a single line; do not hard-wrap lines."
+)
 
-Only the txt/json intermediates are archived (not the page PDFs, raw.md or the
-finished note).  --remove deletes the loose originals after zipping.
-"""
-import re
-import sys
-import zipfile
-from pathlib import Path
+TRANSCRIPTION_BASE_PROMPT = (
+    "You are an expert transcriber and editor. OCR and transcribe the provided page directly into clean, strict Obsidian Markdown. "
+    "Do not add, remove, reorder, or guess at text. Reproduce the diacritics and orthography that are present in the source; do not invent them.\\n\\n"
 
-VAULT = Path("/Users/josephhill/Documents/Obsidian Vault")
-ARCHIVE_DIR = VAULT / ".midad-arabic-sources" / "archive"
+    "BLOCKS\\n"
+    "- Keep each body paragraph on a single line, with no internal line breaks.\\n"
+    "- Format chapter headings (often bold or centred in the original) as '### Title'.\\n"
+    "- Format italics with *asterisks*, not _underscores_.\\n"
+    "- On a cover or title page, render the title as '# Title', the subtitle or author as '## ...', and the remaining cover text as plain paragraphs.\\n\\n"
 
-# Intermediate files per document type (page PDFs deliberately excluded).
-INTERMEDIATES = {
-    "transcription": ["{stem}.batch.txt", "{stem}.batch.jsonl", "{stem}-output.jsonl"],
-    "translation": ["{stem}.translate.txt", "{stem}.translate.jsonl", "{stem}.translate-output.jsonl"],
-}
+    "POETRY\\n"
+    "- Treat consecutive poetry lines as one block, with NO blank lines between them.\\n"
+    "- Format each couplet on one line exactly as '* hemistich 1%%hemistich 2' (leading asterisk and space, the two hemistiches joined by '%%').\\n"
+    "- A line with a single hemistich: '* hemistich'.\\n"
+    "- The leading '* ' and the '%%' marker are used ONLY for poetry, never for italics or list bullets.\\n\\n"
 
+    "FOOTNOTES\\n"
+    "- Put footnotes at the end of the page body, after a line containing only '***'.\\n"
+    "- Format each footnote as its own list item '- N \u2013 text' (using the printed footnote number and an en dash), one per line; "
+    "a footnote continuation line begins with '- '.\\n\\n"
 
-def vault_stem(stem: str):
-    """Return (citekey, volume) parsed from a batch stem."""
-    m = re.match(r'(@\\S+)', stem)
-    citekey = m.group(1) if m else stem
-    vm = re.search(r'\\b(?:vol|v)\\.\\s*(\\d+)\\b', stem, re.I)
-    return citekey, (int(vm.group(1)) if vm else None)
+    "ACCURACY\\n"
+    "- Do not loop or repeat text if characters are blurry.\\n"
+    "- Check the result before returning: if it is implausibly long for a single page (for example, more than 800 words) "
+    "or highly repetitive, discard it and transcribe the page once more."
+)
 
+TRANSLATION_BASE_PROMPT = (
+    "You are an expert scholarly translator. Translate the text faithfully and output only the translation, not the source text.\\n\\n"
 
-def archive_name(stem: str, doc_type: str, citekey: str = None, volume: int = None) -> str:
-    if citekey is None or volume is None:
-        ck, vol = vault_stem(stem)
-        citekey = citekey or ck
-        volume = volume if volume is not None else vol
-    if volume:
-        return f"{citekey} - {doc_type} - vol. {volume} files.zip"
-    return f"{citekey} - {doc_type} files.zip"
+    "STRUCTURE\\n"
+    "- Keep every heading (#, ##, ###, ####) exactly where it is in the input.\\n"
+    "- Put exactly one blank line between every block element (headings, paragraphs, callouts, and '---' separators).\\n\\n"
 
+    "POETRY: in the input document, poetry is in '>[!arabic-poetry]' callouts, with two hemistiches per stanza. "
+    "Do not reproduce the callout. Output each couplet on one line as '* hemistich1%%hemistich2', "
+    "and a single hemistich as '* hemistich'. The leading '*' must be followed by a space, and '%%' separates the two hemistiches. "
+    "Never use these detached markers for ordinary italics or any other purpose.\\n\\n"
 
-def main():
-    if len(sys.argv) < 2:
-        print("Usage: python3 scripts/archive-batch-files.py <batch.txt> [--dest DIR] [--remove]")
-        sys.exit(1)
+    "FOOTNOTES: preserve footnote callouts exactly as they appear in the input, including the label '>[!arabic-footnotes]' "
+    "and the '>-' list structure. Do not rename them.\\n\\n"
 
-    batch_file = Path(sys.argv[1]).resolve()
-    if not batch_file.exists():
-        print(f"ERROR: {batch_file} not found")
-        sys.exit(1)
+    "INTERPOLATIONS: use (parentheses), never [square brackets].\\n\\n"
 
-    name = batch_file.name
-    if name.endswith(".batch.txt"):
-        doc_type, stem = "transcription", name[:-len(".batch.txt")]
-    elif name.endswith(".translate.txt"):
-        doc_type, stem = "translation", name[:-len(".translate.txt")]
-    else:
-        print("ERROR: expected <stem>.batch.txt or <stem>.translate.txt")
-        sys.exit(1)
+    "ITALICS: use *asterisks*, never underscores. QUOTES: use curly single and double quotes/apostrophes, never straight quotes."
+)
 
-    dest_dir = ARCHIVE_DIR
-    if "--dest" in sys.argv:
-        idx = sys.argv.index("--dest")
-        if idx + 1 < len(sys.argv):
-            dest_dir = Path(sys.argv[idx + 1]).expanduser()
-    dest_dir.mkdir(parents=True, exist_ok=True)
+DEFAULT_TRANSCRIPTION_PROMPT = (
+    "This is a page of a classical Arabic book. Transcribe the Arabic text exactly as printed and reproduce the tashk\u012Bl that is present in the source; do not invent tashk\u012Bl.\\n\\n"
+    "QUR'AN QUOTES\\n"
+    "- Put every Qur'an verse or fragment between ornate parentheses wrapped in asterisks, like this: '*\\uFD3Fverse text\\uFD3E*'.\\n"
+    "- Mark a quote even when it is only a word or two, and even when the source does not set it off with quotation marks.\\n"
+    "- Do NOT add sura:verse references or wikilinks, and do not add tashk\u012Bl to Qur'an quotes; "
+    "post-processing adds the reference, the wikilink, and the tashk\u012Bl.\\n"
+    "- If the page ends mid-quote (opening bracket but no closing bracket), end the span with '*' and no closing bracket. "
+    "If the page begins with a quote continuation (closing bracket but no opening bracket), start the span with '*' and no opening bracket.\\n"
+    "- Do NOT use ornate parentheses for hadith or other non-Qur'anic quotations; use regular parentheses or the quotation marks used in the source."
+)
 
-    citekey = None
-    if "--citekey" in sys.argv:
-        idx = sys.argv.index("--citekey")
-        if idx + 1 < len(sys.argv):
-            citekey = sys.argv[idx + 1]
-    volume = None
-    if "--volume" in sys.argv:
-        idx = sys.argv.index("--volume")
-        if idx + 1 < len(sys.argv):
-            volume = int(sys.argv[idx + 1])
-
-    files = [batch_file.parent / pat.format(stem=stem) for pat in INTERMEDIATES[doc_type]]
-    files = [f for f in files if f.exists()]
-    if not files:
-        print(f"ERROR: no intermediate files found next to {batch_file.name}")
-        sys.exit(1)
-
-    zip_path = dest_dir / archive_name(stem, doc_type, citekey, volume)
-    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as z:
-        for f in files:
-            z.write(f, arcname=f.name)
-
-    print(f"Archived {len(files)} file(s) -> {zip_path}")
-    for f in files:
-        print(f"  {f.name}")
-
-    if "--remove" in sys.argv:
-        for f in files:
-            f.unlink()
-        print(f"Removed {len(files)} original file(s)")
+DEFAULT_TRANSLATION_PROMPT = (
+    "This is a transcription of a classical Arabic book. Translate it into scholarly, nuanced, and complete English, "
+    "making the translation as complete and as close as possible to the original in meaning and register. "
+    "Output only the English translation, not the Arabic. "
+    "If the text contains quotes from other languages such as Persian, translate those as well.\\n\\n"
+    f"QUR'AN QUOTES: wrap each quote as *{_QO}translated text{_QC}{{.quran-quote}}* (sura:verse), "
+    f"adding '(sura:verse)' only if known. Use exactly these brackets: open with {_QO} and close with {_QC} \u2014 "
+    "do not copy or mirror the bracket orientation from the Arabic input. The ornate brackets and the {.quran-quote} class "
+    "must both be inside the italic asterisks, and the class must never be placed after the closing '*'.\\n\\n"
+    "TRANSLITERATION (IJMES): macrons for long vowels (\u0101, \u016B, \u012B); dots under emphatics (\u1E25, \u1E63, \u1E0D, \u1E6D, \u1E93); \u02BF for \u02BFayn; "
+    "\u02BE for hamza; no initial hamza (al-Isl\u0101m); no final 'h' for t\u0101\u02BE marb\u016B\u1E6Da; \u1E93 = \u0638, \u1E63 = \u0635, \u1E0D = \u0636, \u1E25 = \u062D, \u1E6D = \u0637, "
+    "th = \u062B, j = \u062C, sh = \u0634, kh = \u062E."
+)
 
 
-if __name__ == "__main__":
-    main()
+def build_transcription_prompt(user_prompt: str | None = None) -> str:
+    """Compose the hardcoded general rules with the text-specific part."""
+    specific = (user_prompt or "").strip() or DEFAULT_TRANSCRIPTION_PROMPT
+    return "\\n\\n".join([
+        SHARED_FORMAT_PROMPT,
+        TRANSCRIPTION_BASE_PROMPT,
+        "TEXT-SPECIFIC INSTRUCTIONS\\n" + specific,
+    ])
+
+
+def build_translation_prompt(user_prompt: str | None = None) -> str:
+    """Compose the hardcoded general rules with the text-specific part."""
+    specific = (user_prompt or "").strip() or DEFAULT_TRANSLATION_PROMPT
+    return "\\n\\n".join([
+        SHARED_FORMAT_PROMPT,
+        TRANSLATION_BASE_PROMPT,
+        "TEXT-SPECIFIC INSTRUCTIONS\\n" + specific,
+    ])
 ` },
   { path: "scripts/reprocess-batch-files.py", content: `#!/usr/bin/env python3
 """
@@ -3638,7 +3883,7 @@ def main():
 if __name__ == "__main__":
     main()
 ` },
-  { path: "scripts/text-source-import.py", content: '#!/usr/bin/env python3\n"""Acquire born-digital Arabic / English text corpora for the Obsidian vault.\n\nThis script does **acquisition only**. It downloads a work\'s source JSON (cached\nunder ``.midad-arabic-sources/``), normalises it into a language-neutral **render\nmodel**, and writes that model to\n``.midad-arabic-sources/source-models/<collection>/<id>.json``. The Midad Arabic Sources\nplugin turns the model into markdown with editable ETA templates.\n\nCollections currently configured:\n\n  tafsir  Qur\'\u0101n commentaries (Arabic originals + English translations)\n          catalog: spa5k/tafsir_api, mirroring quran.com / altafsir.com\n  quran   Qur\'\u0101n translations (English)\n          catalog: fawazahmed0/quran-api\n  hadith  \u1E24ad\u012Bth collections (Arabic + English, bundled)\n          catalog: AhmedBaset/hadith-json\n\nUsage\n-----\n    python3 text-source-import.py list [--collection tafsir] [--language ar] [--json]\n    python3 text-source-import.py fetch --key tafsir:ar-tafsir-al-jalalayn\n    python3 text-source-import.py fetch --key hadith:bukhari\n    python3 text-source-import.py fetch --key tafsir:ar-tafsir-al-jalalayn --surahs 1,112\n\nThe script prints JSON-lines events (``{"event": "..."}``) so the plugin can\nstream progress. Only the Python standard library is used.\n"""\n\nfrom __future__ import annotations\n\nimport argparse\nimport hashlib\nimport html\nimport json\nimport os\nimport re\nimport sqlite3\nimport sys\nimport time\nimport types\nimport unicodedata\nimport urllib.error\nimport urllib.request\nfrom datetime import datetime\nfrom pathlib import Path\n\n\n# \u2500\u2500 Paths \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n\ndef _find_vault() -> Path:\n    """Locate the vault root (env override, else nearest ancestor with .obsidian)."""\n    env = os.environ.get("OBSIDIAN_VAULT")\n    if env:\n        return Path(env)\n    here = Path(__file__).resolve()\n    for parent in [here.parent, *here.parents]:\n        if (parent / ".obsidian").is_dir():\n            return parent\n    return here.parent.parent\n\n\nVAULT = _find_vault()\nCACHE_DIR = VAULT / ".midad-arabic-sources" / "cache" / "text-sources"\nMODEL_DIR = VAULT / ".midad-arabic-sources" / "source-models"\nQURAN_DIR = VAULT / "_7 Sources" / "Quran"\n\n# Optional per-work title/author/dir overrides, keyed by "<collection>:<id>".\nOVERRIDES_FILE = VAULT / ".midad-arabic-sources" / "text-source-titles.json"\n\nDEFAULT_LAYOUT = "stacked"  # "stacked" | "table" (facing-page cells)\n\n# \u2500\u2500 Collections \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n#\n# Each collection declares:\n#   label        human-readable name for the modal / CLI\n#   catalog      URL of the catalog JSON\n#   data         URL template for one s\u016Brah ({id} = work id, {surah} = number)\n#   kind         "tafsir" (list catalog) or "translation" (dict catalog)\n#   languages    map of our codes ("ar"/"en") to catalog language strings\n#   shape        how a downloaded file is structured:\n#                  "ayah-list"  \u2192 [{text, ayah, surah}, \u2026] or {"ayahs": [\u2026]}\n#                  "chapter"    \u2192 {"chapter": [{chapter, verse, text}, \u2026]}\n\nCOLLECTIONS: dict[str, dict] = {\n    "tafsir": {\n        "label": "Qur\u02BE\u0101n commentaries (tafs\u012Br)",\n        "genre": "tafsir",\n        "repo_label": "spa5k/tafsir_api",\n        "catalog": "https://cdn.jsdelivr.net/gh/spa5k/tafsir_api@main/tafsir/editions.json",\n        "data": "https://cdn.jsdelivr.net/gh/spa5k/tafsir_api@main/tafsir/{id}/{surah}.json",\n        "kind": "tafsir",\n        "languages": {"ar": "arabic", "en": "english"},\n        "shape": "ayah-list",\n        "moc": "Tafs\u012Br Sources",\n        "cssclass": "tafsir",\n    },\n    "tafsir-qul": {\n        "label": "Qur\u02BE\u0101n commentaries (QUL)",\n        "genre": "tafsir",\n        "repo_label": "Qur\u02BE\u0101nic Universal Library",\n        "catalog": "https://qul.tarteel.ai/api/v1/resources/tafsirs",\n        # One request per s\u016Brah: {id} is the QUL resource id, {surah} the chapter,\n        # {count} its \u0101ya count. QUL expands a passage to every \u0101ya it covers, so\n        # the usual consecutive-dedupe folds a shared passage into a ranged block.\n        "data": "https://qul.tarteel.ai/api/v1/tafsirs/{id}/by_range?from={surah}:1&to={surah}:{count}",\n        "kind": "qul-tafsir",\n        "languages": {"ar": "arabic", "en": "english"},\n        "shape": "qul-tafsir",\n        "moc": "Tafs\u012Br Sources",\n        "cssclass": "tafsir",\n    },\n    "quran": {\n        "label": "Qur\u02BE\u0101n translations",\n        "genre": "quran",\n        "repo_label": "fawazahmed0/quran-api",\n        "catalog": "https://cdn.jsdelivr.net/gh/fawazahmed0/quran-api@1/editions.min.json",\n        "data": "https://cdn.jsdelivr.net/gh/fawazahmed0/quran-api@1/editions/{id}/{surah}.json",\n        "kind": "translation",\n        "languages": {"en": "english"},\n        "shape": "chapter",\n        "moc": "Qur\u02BE\u0101n Translations",\n        "cssclass": "quran",\n    },\n    "hadith": {\n        "label": "\u1E24ad\u012Bth collections",\n        "genre": "hadith",\n        "repo_label": "AhmedBaset/hadith-json",\n        "catalog": None,  # static list below\n        "data": "https://cdn.jsdelivr.net/gh/AhmedBaset/hadith-json@v1.2.0/db/by_book/{group}/{id}.json",\n        "kind": "hadith",\n        "languages": {"ar": "arabic", "en": "english"},\n        "shape": "hadith-book",\n        "moc": "\u1E24ad\u012Bth Sources",\n        "cssclass": "hadith",\n    },\n    "quran-text": {\n        "label": "Qur\u02BE\u0101n texts (riw\u0101y\u0101t)",\n        "genre": "quran-text",\n        "repo_label": "risan/quran-json",\n        "catalog": None,  # static list below\n        "data": "https://quran-json.risanb.com/text/{id}/chapters/{surah}.json",\n        "kind": "quran-text",\n        "languages": {"ar": "arabic"},\n        "shape": "risan",\n        "moc": "Qur\u02BE\u0101n (text)",\n        "cssclass": "quran",\n    },\n    "dictionary": {\n        "label": "Dictionaries",\n        "genre": "dictionary",\n        "repo_label": "GibreelAbdullah/HansWehrDictionary",\n        "catalog": None,  # static list below\n        "data": "https://github.com/GibreelAbdullah/HansWehrDictionary/releases/latest/download/hanswehr.sqlite",\n        "kind": "dictionary",\n        "languages": {"ar": "arabic"},\n        "shape": "sqlite",\n        "moc": "Dictionaries",\n        "cssclass": "dictionary",\n        # Entries whose source gives no transliteration are named by romanizing\n        # the bare root \u2014 that needs the transliteration service, so the plugin\n        # asks the user before rendering a collection that declares this.\n        "needs_transliteration": True,\n    },\n}\n\n# Static catalogue for lexicons distributed as SQLite. The importer downloads\n# the file and reads it with Python\'s own sqlite3 \u2014 no scraping, no JSON needed.\nDICTIONARIES: list[dict] = [\n    {\n        "id": "hanswehr",\n        "title": "Hans Wehr Dictionary",\n        "arabic": "\u0645\u0639\u062C\u0645 \u0647\u0627\u0646\u0633 \u06A4\u064A\u0631",\n        "author": "Hans Wehr",\n        "editor": "J Milton Cowan",\n        "source": "https://github.com/GibreelAbdullah/HansWehrDictionary",\n        "db": "https://github.com/GibreelAbdullah/HansWehrDictionary/releases/latest/download/hanswehr.sqlite",\n        "db_path": "assets/hanswehr.sqlite",\n        # `grid` = Wehr\'s label/content senses (a two-column callout); `prose` =\n        # Lane\'s English paragraphs. `note_prefix` labels a root note\'s file name\n        # and its `aliases:` \u2014 one per dictionary, so the two never collide.\n        "body": "grid",\n        "note_prefix": "HW",\n        # Wehr\'s own transliteration \u2014 the European Orientalist system its text\n        # uses (\u0161, \u1E6F, \u1E35, \u2026) \u2014 so an engine reading still matches the note\'s text.\n        "convention": "wehr",\n    },\n    {\n        "id": "lanelexicon",\n        "title": "Lane\'s Lexicon",\n        "arabic": "\u0645\u0639\u062C\u0645 \u0644\u064A\u0646",\n        "author": "Edward William Lane",\n        "editor": "",\n        "source": "https://github.com/GibreelAbdullah/LaneLexicon",\n        "db": "https://github.com/GibreelAbdullah/LaneLexicon/releases/latest/download/lanelexicon.sqlite",\n        "db_path": "assets/lanelexicon.sqlite",\n        # Lane\'s definitions are English prose (with <i>/<h3>/<center> markup) and\n        # carry no Latin transliteration, so the body renders as paragraphs and the\n        # names come from the transliteration service.\n        "body": "prose",\n        "note_prefix": "LL",\n        # Lane transliterates nothing itself, so its names follow the vault\'s own\n        # convention (no case endings, verb/pronoun/preposition endings kept, the\n        # two tanw\u012Bn exceptions).\n        "convention": "vault",\n        # The database folds the Supplement (Book II) into the Lexicon as one\n        # work: its rows are a suffix block in the scan\'s own numbering, from this\n        # id on (3,034 of 52,914 rows, 609 of them roots), attached under the\n        # corresponding Lexicon roots. A root note marks where they begin.\n        "supplement_from": 49881,\n    },\n]\n\n# \u0100ya counts (1..114), used to bound a QUL per-s\u016Brah request. The standard\n# K\u016Bfan count; an over-run is harmless (records group by their surah key), an\n# under-run would drop the tail, so a wrong entry is easy to spot and fix.\nSURAH_AYAHS: list[int] = [\n    7, 286, 200, 176, 120, 165, 206, 75, 129, 109, 123, 111, 43, 52, 99, 128,\n    111, 110, 98, 135, 112, 78, 118, 64, 77, 227, 93, 88, 69, 60, 34, 30, 73,\n    54, 45, 83, 182, 88, 75, 85, 54, 53, 89, 59, 37, 35, 38, 29, 18, 45, 60,\n    49, 62, 55, 78, 96, 29, 22, 24, 13, 14, 11, 11, 18, 12, 12, 30, 52, 52,\n    44, 28, 28, 20, 56, 40, 31, 50, 40, 46, 42, 29, 19, 36, 25, 22, 17, 19,\n    26, 30, 20, 15, 21, 11, 8, 8, 19, 5, 8, 8, 11, 11, 8, 3, 9, 5, 4, 7, 3,\n    6, 3, 5, 4, 5, 6,\n]\n\n# Static catalogue for the AhmedBaset/hadith-json repository (17 collections).\n# Titles are romanized to vault style; the Arabic titles are used in headings.\nHADITH_BOOKS: list[dict] = [\n    {"group": "the_9_books", "id": "bukhari", "title": "\u1E62a\u1E25\u012B\u1E25 al-Bukh\u0101r\u012B", "arabic": "\u0635\u062D\u064A\u062D \u0627\u0644\u0628\u062E\u0627\u0631\u064A", "author": "Mu\u1E25ammad b. Ism\u0101\u02BF\u012Bl al-Bukh\u0101r\u012B"},\n    {"group": "the_9_books", "id": "muslim", "title": "\u1E62a\u1E25\u012B\u1E25 Muslim", "arabic": "\u0635\u062D\u064A\u062D \u0645\u0633\u0644\u0645", "author": "Muslim b. al-\u1E24ajj\u0101j"},\n    {"group": "the_9_books", "id": "abudawud", "title": "Sunan Ab\u012B D\u0101w\u016Bd", "arabic": "\u0633\u0646\u0646 \u0623\u0628\u064A \u062F\u0627\u0648\u062F", "author": "Ab\u016B D\u0101w\u016Bd al-Sijist\u0101n\u012B"},\n    {"group": "the_9_books", "id": "tirmidhi", "title": "J\u0101mi\u02BF al-Tirmidh\u012B", "arabic": "\u062C\u0627\u0645\u0639 \u0627\u0644\u062A\u0631\u0645\u0630\u064A", "author": "Ab\u016B \u02BF\u012As\u0101 al-Tirmidh\u012B"},\n    {"group": "the_9_books", "id": "nasai", "title": "Sunan al-Nas\u0101\u02BE\u012B", "arabic": "\u0633\u0646\u0646 \u0627\u0644\u0646\u0633\u0627\u0626\u064A", "author": "A\u1E25mad b. Shu\u02BFayb al-Nas\u0101\u02BE\u012B"},\n    {"group": "the_9_books", "id": "ibnmajah", "title": "Sunan Ibn M\u0101jah", "arabic": "\u0633\u0646\u0646 \u0627\u0628\u0646 \u0645\u0627\u062C\u0647", "author": "Ibn M\u0101jah al-Qazw\u012Bn\u012B"},\n    {"group": "the_9_books", "id": "malik", "title": "Muwa\u1E6D\u1E6Da\u02BE M\u0101lik", "arabic": "\u0645\u0648\u0637\u0623 \u0645\u0627\u0644\u0643", "author": "M\u0101lik b. Anas"},\n    {"group": "the_9_books", "id": "ahmed", "title": "Musnad A\u1E25mad", "arabic": "\u0645\u0633\u0646\u062F \u0623\u062D\u0645\u062F", "author": "A\u1E25mad b. \u1E24anbal"},\n    {"group": "the_9_books", "id": "darimi", "title": "Sunan al-D\u0101rim\u012B", "arabic": "\u0633\u0646\u0646 \u0627\u0644\u062F\u0627\u0631\u0645\u064A", "author": "al-D\u0101rim\u012B"},\n    {"group": "other_books", "id": "riyad_assalihin", "title": "Riy\u0101\u1E0D al-\u1E62\u0101li\u1E25\u012Bn", "arabic": "\u0631\u064A\u0627\u0636 \u0627\u0644\u0635\u0627\u0644\u062D\u064A\u0646", "author": "Ya\u1E25y\u0101 al-Nawaw\u012B"},\n    {"group": "other_books", "id": "shamail_muhammadiyah", "title": "al-Sham\u0101\u02BEil al-Mu\u1E25ammadiyya", "arabic": "\u0627\u0644\u0634\u0645\u0627\u0626\u0644 \u0627\u0644\u0645\u062D\u0645\u062F\u064A\u0629", "author": "Ab\u016B \u02BF\u012As\u0101 al-Tirmidh\u012B"},\n    {"group": "other_books", "id": "bulugh_almaram", "title": "Bul\u016Bgh al-Mar\u0101m", "arabic": "\u0628\u0644\u0648\u063A \u0627\u0644\u0645\u0631\u0627\u0645", "author": "Ibn \u1E24ajar al-\u02BFAsqal\u0101n\u012B"},\n    {"group": "other_books", "id": "aladab_almufrad", "title": "al-Adab al-Mufrad", "arabic": "\u0627\u0644\u0623\u062F\u0628 \u0627\u0644\u0645\u0641\u0631\u062F", "author": "Mu\u1E25ammad b. Ism\u0101\u02BF\u012Bl al-Bukh\u0101r\u012B"},\n    {"group": "other_books", "id": "mishkat_almasabih", "title": "Mishk\u0101t al-Ma\u1E63\u0101b\u012B\u1E25", "arabic": "\u0645\u0634\u0643\u0627\u0629 \u0627\u0644\u0645\u0635\u0627\u0628\u064A\u062D", "author": "Mu\u1E25ammad b. \u02BFAbdall\u0101h al-Kha\u1E6D\u012Bb al-Tibr\u012Bz\u012B"},\n    {"group": "forties", "id": "nawawi40", "title": "al-Arba\u02BF\u016Bn al-Nawawiyya", "arabic": "\u0627\u0644\u0623\u0631\u0628\u0639\u0648\u0646 \u0627\u0644\u0646\u0648\u0648\u064A\u0629", "author": "Ya\u1E25y\u0101 al-Nawaw\u012B"},\n    {"group": "forties", "id": "qudsi40", "title": "al-Arba\u02BF\u016Bn al-Qudsiyya", "arabic": "\u0627\u0644\u0623\u0631\u0628\u0639\u0648\u0646 \u0627\u0644\u0642\u062F\u0633\u064A\u0629", "author": ""},\n    {"group": "forties", "id": "shahwaliullah40", "title": "Arba\u02BF\u016Bn Sh\u0101h Wal\u012B All\u0101h", "arabic": "\u0623\u0631\u0628\u0639\u0648\u0646 \u0627\u0644\u0634\u0627\u0647 \u0648\u0644\u064A \u0627\u0644\u0644\u0647", "author": "Sh\u0101h Wal\u012B All\u0101h al-Dihlaw\u012B"},\n]\n\n# Static catalogue for the risan/quran-json riw\u0101ya texts. `source_id` is the\n# script id in that repository. The plugin decides which riw\u0101ya is canonical\n# (its s\u016Bra notes are unprefixed); the others get prefixed notes.\nQURAN_TEXTS: list[dict] = [\n    {"id": "hafs", "source_id": "uthmani", "title": "Qur\u02BE\u0101n (riw\u0101yat \u1E24af\u1E63)", "riwaya_ar": "\u0631\u0648\u0627\u064A\u0629 \u062D\u0641\u0635"},\n    {"id": "warsh", "source_id": "warsh", "title": "Qur\u02BE\u0101n (riw\u0101yat Warsh)", "riwaya_ar": "\u0631\u0648\u0627\u064A\u0629 \u0648\u0631\u0634"},\n    {"id": "qalun", "source_id": "qalun", "title": "Qur\u02BE\u0101n (riw\u0101yat Q\u0101l\u016Bn)", "riwaya_ar": "\u0631\u0648\u0627\u064A\u0629 \u0642\u0627\u0644\u0648\u0646"},\n    {"id": "duri", "source_id": "duri", "title": "Qur\u02BE\u0101n (riw\u0101yat al-D\u016Br\u012B)", "riwaya_ar": "\u0631\u0648\u0627\u064A\u0629 \u0627\u0644\u062F\u0648\u0631\u064A"},\n    {"id": "shubah", "source_id": "shubah", "title": "Qur\u02BE\u0101n (riw\u0101yat Shu\u02BFbah)", "riwaya_ar": "\u0631\u0648\u0627\u064A\u0629 \u0634\u0639\u0628\u0629"},\n    {"id": "susi", "source_id": "susi", "title": "Qur\u02BE\u0101n (riw\u0101yat al-S\u016Bs\u012B)", "riwaya_ar": "\u0631\u0648\u0627\u064A\u0629 \u0627\u0644\u0633\u0648\u0633\u064A"},\n]\n\n# Language code \u2192 English name. Extend freely; the importer derives the code\n# from a catalogue\'s language string and renders the English name in the vault.\nLANGUAGE_NAMES: dict[str, str] = {\n    "ar": "Arabic", "en": "English", "fr": "French", "fa": "Persian", "ur": "Urdu",\n    "tr": "Turkish", "id": "Indonesian", "ms": "Malay", "bn": "Bengali", "ru": "Russian",\n    "es": "Spanish", "de": "German", "it": "Italian", "nl": "Dutch", "pt": "Portuguese",\n    "sq": "Albanian", "bs": "Bosnian", "zh": "Chinese", "ja": "Japanese", "ko": "Korean",\n    "hi": "Hindi", "sw": "Swahili", "ha": "Hausa", "ff": "Fulah", "so": "Somali",\n    "th": "Thai", "vi": "Vietnamese", "ku": "Kurdish", "ps": "Pashto", "az": "Azerbaijani",\n    "uz": "Uzbek", "tt": "Tatar", "kk": "Kazakh", "ky": "Kyrgyz", "tg": "Tajik",\n    "sd": "Sindhi", "pa": "Punjabi", "ml": "Malayalam", "ta": "Tamil", "te": "Telugu",\n    "kn": "Kannada", "mr": "Marathi", "gu": "Gujarati", "ne": "Nepali", "si": "Sinhala",\n    "my": "Burmese", "km": "Khmer", "dv": "Divehi", "am": "Amharic", "he": "Hebrew",\n    "yo": "Yoruba", "zu": "Zulu", "xh": "Xhosa", "st": "Sotho", "sn": "Shona",\n    "ny": "Chichewa", "rw": "Kinyarwanda", "rn": "Rundi", "lg": "Ganda", "ln": "Lingala",\n    "bm": "Bambara", "tw": "Twi", "om": "Oromo", "aa": "Afar", "af": "Afrikaans",\n    "hy": "Armenian", "as": "Assamese", "ace": "Achinese", "ber": "Berber",\n    "bg": "Bulgarian", "ca": "Catalan", "hr": "Croatian", "cs": "Czech", "da": "Danish",\n    "eo": "Esperanto", "et": "Estonian", "fil": "Filipino", "fi": "Finnish",\n    "gl": "Galician", "ka": "Georgian", "el": "Greek", "hu": "Hungarian",\n    "is": "Icelandic", "ga": "Irish", "jv": "Javanese", "la": "Latin", "lv": "Latvian",\n    "lt": "Lithuanian", "mk": "Macedonian", "mt": "Maltese", "mn": "Mongolian",\n    "no": "Norwegian", "pl": "Polish", "ro": "Romanian", "sk": "Slovak",\n    "sl": "Slovenian", "sv": "Swedish", "tl": "Tagalog", "uk": "Ukrainian",\n    "ug": "Uyghur", "cy": "Welsh", "yi": "Yiddish", "dag": "Dagbani", "ill": "Iranun",\n    "knx": "Kendayan", "mrw": "Maranao", "luy": "Luyia", "yau": "Yau", "prs": "Dari",\n}\n\n# Catalogue spellings that differ from the canonical English name above.\n_LANGUAGE_ALIASES: dict[str, str] = {\n    "azeri": "az", "central khmer": "km", "chinese(simplified)": "zh",\n    "chinese(traditional)": "zh", "kirghiz": "ky", "kyrgyz": "ky", "pushto": "ps",\n    "panjabi": "pa", "tagalog": "tl", "uighur": "ug", "divehi": "dv", "sinhala": "si",\n    "fulah": "ff", "filipino": "fil", "iranun": "ill", "kendayan": "knx",\n    "maranao": "mrw", "luyia": "luy", "yau": "yau", "twi": "tw", "ganda": "lg",\n    "rundi": "rn", "sotho": "st", "shona": "sn", "chichewa": "ny", "dagbani": "dag",\n    "kinyarwanda": "rw", "kurmanji": "ku", "dari": "prs",\n}\n_LANGUAGE_NAME_TO_CODE = {name.lower(): code for code, name in LANGUAGE_NAMES.items()}\n_LANGUAGE_NAME_TO_CODE.update(_LANGUAGE_ALIASES)\n\n\ndef normalise_language(name: str) -> str | None:\n    """Map a catalogue language string to a code (unknown \u2192 a slug)."""\n    key = (name or "").strip().lower()\n    if not key:\n        return None\n    if key in _LANGUAGE_NAME_TO_CODE:\n        return _LANGUAGE_NAME_TO_CODE[key]\n    return re.sub(r"[^a-z]+", "-", key).strip("-")\n\n\ndef language_name(code: str) -> str:\n    return LANGUAGE_NAMES.get(code) or (code or "").title()\n\n\ndef moc_section(code: str) -> str:\n    """Category-MOC heading for a language (e.g. ``Arabic Texts``)."""\n    return f"{language_name(code)} Texts"\n\n# Default overrides for well-known works. Merged with OVERRIDES_FILE if present.\nBUILTIN_OVERRIDES: dict[str, dict] = {\n    "tafsir:ar-tafsir-al-jalalayn": {\n        "title": "Tafs\u012Br al-Jal\u0101layn",\n        "short": "al-Jal\u0101layn",\n        "title_ar": "\u062A\u0641\u0633\u064A\u0631 \u0627\u0644\u062C\u0644\u0627\u0644\u064A\u0646",\n        "short_ar": "\u0627\u0644\u062C\u0644\u0627\u0644\u064A\u0646",\n        "dir": "Tafs\u012Br al-Jal\u0101layn",\n        "authors": ["Jal\u0101l al-D\u012Bn al-Ma\u1E25all\u012B", "Jal\u0101l al-D\u012Bn al-Suy\u016B\u1E6D\u012B"],\n    },\n    "tafsir:en-al-jalalayn": {\n        "title": "Tafs\u012Br al-Jal\u0101layn (English)",\n        "short": "al-Jal\u0101layn (English)",\n        "title_ar": "\u062A\u0641\u0633\u064A\u0631 \u0627\u0644\u062C\u0644\u0627\u0644\u064A\u0646",\n        "short_ar": "\u0627\u0644\u062C\u0644\u0627\u0644\u064A\u0646",\n        "dir": "Tafs\u012Br al-Jal\u0101layn (English)",\n        "authors": [\n            "Jal\u0101l al-D\u012Bn al-Ma\u1E25all\u012B",\n            "Jal\u0101l al-D\u012Bn al-Suy\u016B\u1E6D\u012B",\n        ],\n        "translators": ["Feras Hamza"],\n    },\n}\n\n# \u2500\u2500 Small helpers \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n\nARABIC_DIGITS = str.maketrans("0123456789", "\u0660\u0661\u0662\u0663\u0664\u0665\u0666\u0667\u0668\u0669")\n\n# S\u016Brah names as they appear in the vault\'s _7 Sources/Quran folder, with the\n# Arabic name used for headings and reference display text. Kept as a fallback\n# for when the Qur\'\u0101n folder cannot be read.\nSURAH_NAMES: list[tuple[str, str]] = [\n    ("Al-Fatihah", "\u0627\u0644\u0641\u0627\u062A\u062D\u0629"), ("Al-Baqarah", "\u0627\u0644\u0628\u0642\u0631\u0629"), ("Al \'Imran", "\u0622\u0644 \u0639\u0645\u0631\u0627\u0646"),\n    ("An-Nisa", "\u0627\u0644\u0646\u0633\u0627\u0621"), ("Al-Ma\'idah", "\u0627\u0644\u0645\u0627\u0626\u062F\u0629"), ("Al-An\'am", "\u0627\u0644\u0623\u0646\u0639\u0627\u0645"),\n    ("Al-A\'raf", "\u0627\u0644\u0623\u0639\u0631\u0627\u0641"), ("Al-Anfal", "\u0627\u0644\u0623\u0646\u0641\u0627\u0644"), ("At-Tawbah", "\u0627\u0644\u062A\u0648\u0628\u0629"),\n    ("Yunus", "\u064A\u0648\u0646\u0633"), ("Hud", "\u0647\u0648\u062F"), ("Yusuf", "\u064A\u0648\u0633\u0641"),\n    ("Ar-Ra\'d", "\u0627\u0644\u0631\u0639\u062F"), ("Ibrahim", "\u0625\u0628\u0631\u0627\u0647\u064A\u0645"), ("Al-Hijr", "\u0627\u0644\u062D\u062C\u0631"),\n    ("An-Nahl", "\u0627\u0644\u0646\u062D\u0644"), ("Al-Isra", "\u0627\u0644\u0625\u0633\u0631\u0627\u0621"), ("Al-Kahf", "\u0627\u0644\u0643\u0647\u0641"),\n    ("Maryam", "\u0645\u0631\u064A\u0645"), ("Taha", "\u0637\u0647"), ("Al-Anbya", "\u0627\u0644\u0623\u0646\u0628\u064A\u0627\u0621"),\n    ("Al-Hajj", "\u0627\u0644\u062D\u062C"), ("Al-Mu\'minun", "\u0627\u0644\u0645\u0624\u0645\u0646\u0648\u0646"), ("An-Nur", "\u0627\u0644\u0646\u0648\u0631"),\n    ("Al-Furqan", "\u0627\u0644\u0641\u0631\u0642\u0627\u0646"), ("Ash-Shu\'ara", "\u0627\u0644\u0634\u0639\u0631\u0627\u0621"), ("An-Naml", "\u0627\u0644\u0646\u0645\u0644"),\n    ("Al-Qasas", "\u0627\u0644\u0642\u0635\u0635"), ("Al-\'Ankabut", "\u0627\u0644\u0639\u0646\u0643\u0628\u0648\u062A"), ("Ar-Rum", "\u0627\u0644\u0631\u0648\u0645"),\n    ("Luqman", "\u0644\u0642\u0645\u0627\u0646"), ("As-Sajdah", "\u0627\u0644\u0633\u062C\u062F\u0629"), ("Al-Ahzab", "\u0627\u0644\u0623\u062D\u0632\u0627\u0628"),\n    ("Saba", "\u0633\u0628\u0623"), ("Fatir", "\u0641\u0627\u0637\u0631"), ("Ya-Sin", "\u064A\u0633"),\n    ("As-Saffat", "\u0627\u0644\u0635\u0627\u0641\u0627\u062A"), ("Sad", "\u0635"), ("Az-Zumar", "\u0627\u0644\u0632\u0645\u0631"),\n    ("Ghafir", "\u063A\u0627\u0641\u0631"), ("Fussilat", "\u0641\u0635\u0644\u062A"), ("Ash-Shuraa", "\u0627\u0644\u0634\u0648\u0631\u0649"),\n    ("Az-Zukhruf", "\u0627\u0644\u0632\u062E\u0631\u0641"), ("Ad-Dukhan", "\u0627\u0644\u062F\u062E\u0627\u0646"), ("Al-Jathiyah", "\u0627\u0644\u062C\u0627\u062B\u064A\u0629"),\n    ("Al-Ahqaf", "\u0627\u0644\u0623\u062D\u0642\u0627\u0641"), ("Muhammad", "\u0645\u062D\u0645\u062F"), ("Al-Fath", "\u0627\u0644\u0641\u062A\u062D"),\n    ("Al-Hujurat", "\u0627\u0644\u062D\u062C\u0631\u0627\u062A"), ("Qaf", "\u0642"), ("Adh-Dhariyat", "\u0627\u0644\u0630\u0627\u0631\u064A\u0627\u062A"),\n    ("At-Tur", "\u0627\u0644\u0637\u0648\u0631"), ("An-Najm", "\u0627\u0644\u0646\u062C\u0645"), ("Al-Qamar", "\u0627\u0644\u0642\u0645\u0631"),\n    ("Ar-Rahman", "\u0627\u0644\u0631\u062D\u0645\u0646"), ("Al-Waqi\'ah", "\u0627\u0644\u0648\u0627\u0642\u0639\u0629"), ("Al-Hadid", "\u0627\u0644\u062D\u062F\u064A\u062F"),\n    ("Al-Mujadila", "\u0627\u0644\u0645\u062C\u0627\u062F\u0644\u0629"), ("Al-Hashr", "\u0627\u0644\u062D\u0634\u0631"), ("Al-Mumtahanah", "\u0627\u0644\u0645\u0645\u062A\u062D\u0646\u0629"),\n    ("As-Saf", "\u0627\u0644\u0635\u0641"), ("Al-Jumu\'ah", "\u0627\u0644\u062C\u0645\u0639\u0629"), ("Al-Munafiqun", "\u0627\u0644\u0645\u0646\u0627\u0641\u0642\u0648\u0646"),\n    ("At-Taghabun", "\u0627\u0644\u062A\u063A\u0627\u0628\u0646"), ("At-Talaq", "\u0627\u0644\u0637\u0644\u0627\u0642"), ("At-Tahrim", "\u0627\u0644\u062A\u062D\u0631\u064A\u0645"),\n    ("Al-Mulk", "\u0627\u0644\u0645\u0644\u0643"), ("Al-Qalam", "\u0627\u0644\u0642\u0644\u0645"), ("Al-Haqqah", "\u0627\u0644\u062D\u0627\u0642\u0629"),\n    ("Al-Ma\'arij", "\u0627\u0644\u0645\u0639\u0627\u0631\u062C"), ("Nuh", "\u0646\u0648\u062D"), ("Al-Jinn", "\u0627\u0644\u062C\u0646"),\n    ("Al-Muzzammil", "\u0627\u0644\u0645\u0632\u0645\u0644"), ("Al-Muddaththir", "\u0627\u0644\u0645\u062F\u062B\u0631"), ("Al-Qiyamah", "\u0627\u0644\u0642\u064A\u0627\u0645\u0629"),\n    ("Al-Insan", "\u0627\u0644\u0625\u0646\u0633\u0627\u0646"), ("Al-Mursalat", "\u0627\u0644\u0645\u0631\u0633\u0644\u0627\u062A"), ("An-Naba", "\u0627\u0644\u0646\u0628\u0623"),\n    ("An-Nazi\'at", "\u0627\u0644\u0646\u0627\u0632\u0639\u0627\u062A"), ("\'Abasa", "\u0639\u0628\u0633"), ("At-Takwir", "\u0627\u0644\u062A\u0643\u0648\u064A\u0631"),\n    ("Al-Infitar", "\u0627\u0644\u0627\u0646\u0641\u0637\u0627\u0631"), ("Al-Mutaffifin", "\u0627\u0644\u0645\u0637\u0641\u0641\u064A\u0646"), ("Al-Inshiqaq", "\u0627\u0644\u0627\u0646\u0634\u0642\u0627\u0642"),\n    ("Al-Buruj", "\u0627\u0644\u0628\u0631\u0648\u062C"), ("At-Tariq", "\u0627\u0644\u0637\u0627\u0631\u0642"), ("Al-A\'la", "\u0627\u0644\u0623\u0639\u0644\u0649"),\n    ("Al-Ghashiyah", "\u0627\u0644\u063A\u0627\u0634\u064A\u0629"), ("Al-Fajr", "\u0627\u0644\u0641\u062C\u0631"), ("Al-Balad", "\u0627\u0644\u0628\u0644\u062F"),\n    ("Ash-Shams", "\u0627\u0644\u0634\u0645\u0633"), ("Al-Layl", "\u0627\u0644\u0644\u064A\u0644"), ("Ad-Duhaa", "\u0627\u0644\u0636\u062D\u0649"),\n    ("Ash-Sharh", "\u0627\u0644\u0634\u0631\u062D"), ("At-Tin", "\u0627\u0644\u062A\u064A\u0646"), ("Al-\'Alaq", "\u0627\u0644\u0639\u0644\u0642"),\n    ("Al-Qadr", "\u0627\u0644\u0642\u062F\u0631"), ("Al-Bayyinah", "\u0627\u0644\u0628\u064A\u0646\u0629"), ("Az-Zalzalah", "\u0627\u0644\u0632\u0644\u0632\u0644\u0629"),\n    ("Al-\'Adiyat", "\u0627\u0644\u0639\u0627\u062F\u064A\u0627\u062A"), ("Al-Qari\'ah", "\u0627\u0644\u0642\u0627\u0631\u0639\u0629"), ("At-Takathur", "\u0627\u0644\u062A\u0643\u0627\u062B\u0631"),\n    ("Al-\'Asr", "\u0627\u0644\u0639\u0635\u0631"), ("Al-Humazah", "\u0627\u0644\u0647\u0645\u0632\u0629"), ("Al-Fil", "\u0627\u0644\u0641\u064A\u0644"),\n    ("Quraysh", "\u0642\u0631\u064A\u0634"), ("Al-Ma\'un", "\u0627\u0644\u0645\u0627\u0639\u0648\u0646"), ("Al-Kawthar", "\u0627\u0644\u0643\u0648\u062B\u0631"),\n    ("Al-Kafirun", "\u0627\u0644\u0643\u0627\u0641\u0631\u0648\u0646"), ("An-Nasr", "\u0627\u0644\u0646\u0635\u0631"), ("Al-Masad", "\u0627\u0644\u0645\u0633\u062F"),\n    ("Al-Ikhlas", "\u0627\u0644\u0625\u062E\u0644\u0627\u0635"), ("Al-Falaq", "\u0627\u0644\u0641\u0644\u0642"), ("An-Nas", "\u0627\u0644\u0646\u0627\u0633"),\n]\n\n\ndef emit(event: str, **fields) -> None:\n    """Print a JSON-lines event for the plugin, and nothing else."""\n    payload = {"event": event}\n    payload.update(fields)\n    print(json.dumps(payload, ensure_ascii=False), flush=True)\n\n\ndef log(message: str) -> None:\n    emit("log", message=message)\n\n\ndef arabic_numeral(n: int) -> str:\n    return str(n).translate(ARABIC_DIGITS)\n\n\ndef slug_to_dir(value: str) -> str:\n    """Sanitize a value for use as a folder/file name."""\n    value = re.sub(r\'[<>:"/\\\\|?*]\', "", value)\n    return re.sub(r"\\s+", " ", value).strip()\n\n\n# Romanization \u2192 searchable form: drop diacritics, map \u02BF/\u02BE to a straight apostrophe.\n_DIACRITICS = str.maketrans({\n    "\u0101": "a", "\u012B": "i", "\u016B": "u", "\xE1": "a", "\xED": "i", "\xFA": "u",\n    "\u1E25": "h", "\u1E63": "s", "\u1E0D": "d", "\u1E6D": "t", "\u1E93": "z", "\u1E0F": "d", "\u1E6F": "t",\n    "\u0121": "g", "\u1E2B": "kh", "\u0161": "sh", "\u017E": "zh", "\xF1": "n",\n    "\u0100": "A", "\u012A": "I", "\u016A": "U", "\u1E24": "H", "\u1E62": "S", "\u1E0C": "D", "\u1E6C": "T", "\u1E92": "Z",\n    "\u02BF": "\'", "\u02BE": "\'", "\u02B9": "\'", "\u02BB": "\'", "\u02BC": "\'",\n})\n\n\ndef strip_diacritics(text: str) -> str:\n    return (text or "").translate(_DIACRITICS)\n\n\n# \u2500\u2500 Qur\'\u0101n citation linking \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n# Arabic tafs\u012Brs cite *other* verses inline in square brackets, e.g.\n#   \uFD3F\u0648\u064E\u0645\u064E\u0627 \u064A\u064F\u0624\u0652\u0645\u0650\u0646\u064F \u0623\u064E\u0643\u0652\u062B\u064E\u0631\u064F\u0647\u064F\u0645\u0652...\uFD3E [\u064A\u064F\u0648\u0633\u064F\u0641\u064E: \u0661\u0660\u0666]\n# Those citations are replaced with links to the vault\'s canonical Qur\'\u0101n notes.\n# A quote of the verse being commented carries no bracket citation (its `## [[\u2026]]`\n# heading already covers it), so it is left alone.\n\n_ARABIC_TO_WESTERN = str.maketrans("\u0660\u0661\u0662\u0663\u0664\u0665\u0666\u0667\u0668\u0669", "0123456789")\n_WESTERN_TO_ARABIC = str.maketrans("0123456789", "\u0660\u0661\u0662\u0663\u0664\u0665\u0666\u0667\u0668\u0669")\n# Citations come in several shapes across the tafs\u012Br repositories:\n#   [\u064A\u064F\u0648\u0633\u064F\u0641\u064E: \u0661\u0660\u0663]      Arabic s\u016Bra name, Arabic numerals  (Ibn Kath\u012Br)\n#   [ \u0627\u0644\u0623\u0639\u0631\u0627\u0641 : 3 ]      spaced, Western numerals          (Tanw\u012Br al-Miqb\u0101s)\n#   [\u0665\u0660: \u0663\u0668]            s\u016Bra number : \u0101ya                  (al-Qur\u1E6Dub\u012B)\n#   (\u0627\u0644\u0642\u0635\u0635: \u0665)          parenthesised                      (al-Mukhta\u1E63ar)\n# A number of editions (Muyassar, Sa\u02BFd\u012B, Was\u012B\u1E6D, I\u02BFr\u0101b \u2026) carry no citations at\n# all, and editorial refs like `[\u062A\u0641\u0633\u064A\u0631 \u0627\u0628\u0646 \u0643\u062B\u064A\u0631: \u0662 / \u0661\u0663\u0665]` never match a s\u016Bra.\n_VerseCitation = re.compile(\n    r"(?P<open>[\\[(])\\s*(?P<name>[^\\[\\]()]{1,40}?)\\s*:\\s*"\n    r"(?P<ayah>[\\u0660-\\u0669\\d]{1,4}(?:\\s*[-\\u2013\\u060C,]\\s*[\\u0660-\\u0669\\d]{1,4})*)\\s*(?P<close>[\\])])"\n)\n\n_SURAH_NAME_INDEX: dict[str, dict] | None = None\n_SURAH_ROWS: list[dict] | None = None\n\n# Citations are matched against the canonical Qur\'\u0101n notes, so they only make\n# sense for \u1E24af\u1E63 \u2014 the reading the vast majority of source texts quote. Set from\n# `fetch --canonical`; any other riw\u0101ya disables the linking entirely.\n_CANONICAL_RIWAYA = "hafs"\n\n\ndef _normalize_ayah_name(name: str) -> str:\n    """Fold an Arabic s\u016Bra name to a comparable key (no tashk\u012Bl, unified alef)."""\n    name = unicodedata.normalize("NFKD", name)\n    name = "".join(c for c in name if not unicodedata.category(c).startswith("Mn"))\n    for a, b in (("\u0623", "\u0627"), ("\u0625", "\u0627"), ("\u0622", "\u0627"), ("\u0671", "\u0627"),\n                 ("\u0649", "\u064A"), ("\u0629", "\u0647"), ("\u0624", "\u0648"), ("\u0626", "\u064A")):\n        name = name.replace(a, b)\n    return re.sub(r"[^\\u0600-\\u06FF]", "", name)\n\n\ndef _surah_rows() -> list[dict]:\n    """The s\u016Bra table, read from the vault once per run."""\n    global _SURAH_ROWS\n    if _SURAH_ROWS is None:\n        _SURAH_ROWS = surah_table()\n    return _SURAH_ROWS\n\n\ndef surah_name_index() -> dict[str, dict]:\n    """Normalized s\u016Bra name \u2192 its table row (built once, from the vault notes)."""\n    global _SURAH_NAME_INDEX\n    if _SURAH_NAME_INDEX is None:\n        _SURAH_NAME_INDEX = {}\n        for row in _surah_rows():\n            for name in (row.get("arabic"), row.get("translit")):\n                if not name:\n                    continue\n                for key in (_normalize_ayah_name(name), re.sub(r"[^a-z]", "", name.lower())):\n                    if key:\n                        _SURAH_NAME_INDEX.setdefault(key, row)\n    return _SURAH_NAME_INDEX\n\n\ndef _ar_numeral(n: int) -> str:\n    """Western integer \u2192 Arabic-Indic numeral (as the vault\'s notes use)."""\n    return str(n).translate(_WESTERN_TO_ARABIC)\n\n\ndef _lookup_surah(name: str) -> dict | None:\n    """Resolve a citation\'s s\u016Bra from its name (Arabic or transliterated) or number."""\n    key = re.sub(r"^\u0633\u0648\u0631\u0647", "", _normalize_ayah_name(name))  # tolerate a leading "\u0633\u0648\u0631\u0629"\n    row = surah_name_index().get(key) or surah_name_index().get(re.sub(r"[^a-z]", "", name.lower()))\n    if row:\n        return row\n    digits = name.strip().translate(_ARABIC_TO_WESTERN)\n    if digits.isdigit() and 1 <= int(digits) <= len(_surah_rows()):\n        return _surah_rows()[int(digits) - 1]\n    return None\n\n\ndef link_verse_citations(text: str, *, skip: tuple[int, int] | None = None) -> str:\n    """Replace `S\u016Brah: \u0101ya` citations with links to the vault\'s Qur\'\u0101n notes.\n\n    Handles the shapes the repositories actually use (see `_VerseCitation`). `skip`\n    is the (s\u016Bra, \u0101ya) of the verse being commented, so a citation of that very\n    verse is left as written.\n    """\n    if not text or ":" not in text or _CANONICAL_RIWAYA != "hafs":\n        return text\n\n    def repl(m: re.Match) -> str:\n        if (m.group("open") == "[") != (m.group("close") == "]"):\n            return m.group(0)  # mismatched delimiters \u2014 not a citation\n        name = m.group("name")\n        row = _lookup_surah(name)\n        if row is None and skip:\n            # "[\u0627\u0644\u0622\u064A\u0629: \u0661\u0662\u0663]" cites the current s\u016Bra (the one being commented).\n            bare = re.sub(r"^\u0627\u0644", "", re.sub(r"^\u0633\u0648\u0631\u0647", "", _normalize_ayah_name(name)))\n            if bare in ("\u0627\u064A\u0647", "\u0627\u064A\u062A") and 1 <= skip[0] <= len(_surah_rows()):\n                row = _surah_rows()[skip[0] - 1]\n        if not row:\n            return m.group(0)\n        nums = [int(x.translate(_ARABIC_TO_WESTERN))\n                for x in re.findall(r"[\\u0660-\\u0669\\d]{1,4}", m.group("ayah"))]\n        if not nums:\n            return m.group(0)\n        first, last = nums[0], nums[-1]\n        if skip and (row["number"], first) == skip:\n            return m.group(0)\n        if last != first:\n            # A range or list (`\u0662\u0664-\u0662\u0667`, `\u0661\u0667\u0662\u060C \u0661\u0667\u0663`) links its two ends.\n            return (f"([[{row[\'base\']}#{first}|{row[\'arabic\']} : {_ar_numeral(first)}]]"\n                    f"\u2013[[{row[\'base\']}#{last}|{_ar_numeral(last)}]])")\n        return f"([[{row[\'base\']}#{first}|{row[\'arabic\']} : {_ar_numeral(first)}]])"\n\n    return _VerseCitation.sub(repl, text)\n\n\n_QURAN_MODULE = None\n# Quotes already carrying the vault\'s marker, plus the other delimiters a tafs\u012Br\n# may use for a Qur\'\u0101n quote instead of `\uFD3F\u2026\uFD3E`: guillemets, curly quotes, parens.\n# (Digitised tafs\u012Brs rarely mix them, but a few use only one of these.)\n_QuoteMark = re.compile(r"\\*\uFD3F(.+?)\uFD3E\\{\\.quran-quote\\}\\*(?!\\s*\\(\\[\\[)")\n_ExtraDelims = {\n    "\xAB\xBB": re.compile(r"\xAB([^\xAB\xBB]{1,400}?)\xBB"),\n    "\u201C\u201D": re.compile(r"\u201C([^\u201C\u201D]{1,400}?)\u201D"),\n    "()": re.compile(r"\\(([^()\\[\\]]{1,400}?)\\)"),\n}\n\n\ndef _quran_module():\n    """Load transcription-quran.py lazily \u2014 it exposes the Qur\'\u0101n verse matcher."""\n    global _QURAN_MODULE\n    if _QURAN_MODULE is None:\n        from importlib.machinery import SourceFileLoader\n        mod = SourceFileLoader("transcription_quran", str(Path(__file__).with_name("transcription-quran.py"))).load_module()\n        mod.QURAN_DIR = QURAN_DIR  # match the importer\'s canonical Qur\'\u0101n folder\n        _QURAN_MODULE = mod\n    return _QURAN_MODULE\n\n\ndef detect_quote_delims(text: str) -> tuple[str, ...]:\n    """Which non-`\uFD3F\uFD3E` delimiters this text actually uses for Qur\'\u0101n quotes.\n\n    A work follows one standard throughout, so a handful of resolved spans is\n    enough to enable a delimiter for the whole work; a delimiter whose spans never\n    resolve (guillemets around \u1E25ad\u012Bth, parens around prose) is left off, so the\n    matcher is not run over hundreds of non-Qur\'\u0101nic spans.\n    """\n    if _CANONICAL_RIWAYA != "hafs":\n        return ()\n    tfq = _quran_module()\n    enabled: list[str] = []\n    for name, rx in _ExtraDelims.items():\n        spans = [s.strip() for s in rx.findall(text) if len(s.split()) >= 3]\n        hits = 0\n        for s in spans[:40]:\n            try:\n                if tfq.find_verse_in_text(s):\n                    hits += 1\n            except Exception:  # noqa: BLE001\n                pass\n            if hits >= 3:\n                enabled.append(name)\n                break\n    return tuple(enabled)\n\n\ndef link_quote_citations(text: str, *, surah: int, ayah: int, delims: tuple[str, ...] = ()) -> str:\n    """Cite every Qur\'\u0101n quote that resolves to a verse other than this one.\n\n    Quotes come from the vault-marked `\uFD3F\u2026\uFD3E` spans and, when the work uses them\n    (`delims`), from guillemets / curly quotes / parentheses. Each is matched\n    against the canonical notes with the transcription matcher, walking forward \u2014\n    the quotes of the commented verse come in order \u2014 and a quote of the commented\n    verse itself is left uncited. One- or two-word quotes are never cited: nobody\n    quotes a word or two from a *different* verse, and matching them (\uFD3F\u0627\u0644\u0645\uFD3E,\n    \uFD3F\u0630\u064E\u0644\u0650\u0643\uFD3E \u2026) would only produce false positives.\n    """\n    if not text or _CANONICAL_RIWAYA != "hafs":\n        return text\n    if "\uFD3F" not in text and not any(d in text for d in ("\xAB", "\u201C", "(")):\n        return text\n    tfq = _quran_module()\n    state = {"s": surah, "v": ayah}\n\n    def cite(quote: str) -> str:\n        """The citation for a quote, or \'\' when it needs none."""\n        # A quote may span verses (`\uFD3FA * B\uFD3E`, the editor\'s separator). Cite the\n        # first segment that resolves; a multi-verse span never matches on its own.\n        segments = [s.strip() for s in quote.split("*") if s.strip()]\n        res = None\n        for seg in segments:\n            if len(seg.split()) <= 2:\n                continue\n            try:\n                res = tfq.find_verse_in_text(seg, hint_surah=state["s"], hint_verse=state["v"])\n            except Exception:  # noqa: BLE001\n                res = None\n            if res:\n                break\n        if not res:\n            return ""\n        s, v = res[0][0], res[0][1]\n        state["s"], state["v"] = s, v\n        if (s, v) == (surah, ayah):\n            return ""\n        row = _surah_rows()[s - 1]\n        numeral = str(v).translate(_WESTERN_TO_ARABIC)\n        return f" ([[{row[\'base\']}#{v}|{row[\'arabic\']} : {numeral}]])"\n\n    text = _QuoteMark.sub(lambda m: m.group(0) + cite(m.group(1).strip()), text)\n    for name in delims:\n        text = _ExtraDelims[name].sub(lambda m: m.group(0) + cite(m.group(1).strip()), text)\n    return text\n\n\ndef canonical_aliases(work: dict) -> list[str]:\n    """Parent aliases: full + short romanized, their Arabic forms, and a plain form."""\n    out: list[str] = []\n\n    def add(value: str | None) -> None:\n        value = (value or "").strip()\n        if value and value not in out:\n            out.append(value)\n\n    add(work.get("title"))\n    add(work.get("short"))\n    add(work.get("title_ar"))\n    add(work.get("short_ar"))\n    add(strip_diacritics(work.get("title", "")))\n    return out\n\n\ndef repository_name(url: str) -> str:\n    """A short, human name for a source URL (used in the `repository:` property)."""\n    if not url:\n        return ""\n    m = re.match(r"https?://([^/]+)(/.*)?$", url)\n    if not m:\n        return url\n    host = m.group(1).replace("www.", "")\n    path = (m.group(2) or "").strip("/")\n    if host == "github.com" and path:\n        return "github.com/" + "/".join(path.split("/")[:2])\n    return host\n\n\ndef _github_last_commit(owner: str, repo: str, path: str | None = None) -> str:\n    """YYYY-MM-DD of the last commit touching `path` (or the repo). Best effort."""\n    url = f"https://api.github.com/repos/{owner}/{repo}/commits?per_page=1"\n    if path:\n        url += f"&path={path}"\n    try:\n        data = fetch_json(url, cache=False)\n        if isinstance(data, list) and data:\n            return (data[0].get("commit", {}).get("committer", {}).get("date", "") or "")[:10]\n    except Exception:  # noqa: BLE001\n        pass\n    return ""\n\n\n# Last-update source per collection that is not backed by a dated catalogue.\n_REPO_COMMITS = {\n    "tafsir": lambda w: _github_last_commit("spa5k", "tafsir_api", f"tafsir/{w[\'id\']}"),\n    "quran": lambda w: _github_last_commit("fawazahmed0", "quran-api", f"editions/{w[\'id\']}.json"),\n    "hadith": lambda w: _github_last_commit("AhmedBaset", "hadith-json", f"db/by_book/{w.get(\'group\', \'\')}/{w[\'id\']}.json"),\n    "dictionary": lambda w: _github_last_commit(*_github_slug(w), w.get("db_path") or "assets/hanswehr.sqlite")\n    if _github_slug(w) else "",\n}\n\n\ndef repo_updated(work: dict) -> str:\n    """Best-effort date (YYYY-MM-DD) of the source repository\'s last update for a work."""\n    coll = work.get("collection")\n    if coll == "tafsir-qul":\n        ts = work.get("qul_updated") or 0\n        try:\n            return datetime.fromtimestamp(int(ts)).strftime("%Y-%m-%d") if ts else ""\n        except (ValueError, OverflowError, OSError):\n            return ""\n    if coll == "quran-text":\n        try:\n            man = fetch_json("https://quran-json.risanb.com/manifest.json", cache=True)\n            for s in man.get("scripts", []):\n                if s.get("id") == work.get("source_id"):\n                    version = (s.get("license") or {}).get("version")\n                    if version:\n                        return version\n            version = ((man.get("license") or {}).get("text") or {}).get("version")\n            if version:\n                return version\n        except Exception:  # noqa: BLE001\n            pass\n        return _github_last_commit("risan", "quran-json")\n    fn = _REPO_COMMITS.get(coll)\n    return fn(work) if fn else ""\n\n\n# The repository path holding each work\'s actual text.\n_REPO_PATHS = {\n    "tafsir": lambda w: f"tafsir/{w[\'id\']}",\n    "quran": lambda w: f"editions/{w[\'id\']}.json",\n    "hadith": lambda w: f"db/by_book/{w.get(\'group\', \'\')}/{w[\'id\']}.json",\n    "dictionary": lambda w: w.get("db_path") or "assets/hanswehr.sqlite",\n}\n_REPO_SLUGS = {\n    "tafsir": ("spa5k", "tafsir_api"),\n    "tafsir-qul": ("TarteelAI", "quranic-universal-library"),\n    "quran": ("fawazahmed0", "quran-api"),\n    "hadith": ("AhmedBaset", "hadith-json"),\n    "quran-text": ("risan", "quran-json"),\n    "dictionary": ("GibreelAbdullah", "HansWehrDictionary"),\n}\n\n\ndef _github_slug(work: dict) -> tuple[str, str] | None:\n    """The (owner, repo) a work\'s text comes from.\n\n    Dictionaries are per-work: the collection holds two of them, from different\n    repositories, so the slug is parsed from the work\'s own `source` URL.\n    """\n    if work.get("collection") == "dictionary":\n        m = re.match(r"https?://github\\.com/([^/]+)/([^/?#]+)", str(work.get("source") or ""))\n        return (m.group(1), m.group(2)) if m else None\n    return _REPO_SLUGS.get(work.get("collection"))\n\n\ndef repo_url(work: dict) -> str:\n    """The repository the work\'s text is drawn from (for the `repository:` property)."""\n    slug = _github_slug(work)\n    return f"https://github.com/{slug[0]}/{slug[1]}" if slug else ""\n\n\ndef repo_license_attribution(work: dict) -> str:\n    """Attribution the source licence requires (currently the riw\u0101y\u0101t, from Tanzil)."""\n    if work.get("collection") != "quran-text":\n        return ""\n    try:\n        man = fetch_json("https://quran-json.risanb.com/manifest.json", cache=True)\n        for s in man.get("scripts", []):\n            if s.get("id") == work.get("source_id"):\n                return str((s.get("license") or {}).get("attribution") or "").strip()\n    except Exception:  # noqa: BLE001\n        pass\n    return ""\n\n\ndef _github_content_hash(owner: str, repo: str, path: str) -> str:\n    """A short hash of a path\'s blob SHAs (a file\'s, or a directory\'s file set)."""\n    try:\n        data = fetch_json(f"https://api.github.com/repos/{owner}/{repo}/contents/{path}", cache=False)\n    except Exception:  # noqa: BLE001\n        return ""\n    if isinstance(data, list):\n        shas = sorted(f"{x.get(\'name\')}:{x.get(\'sha\')}" for x in data if x.get("sha"))\n        return hashlib.sha1("\\n".join(shas).encode("utf-8")).hexdigest()[:12]\n    if isinstance(data, dict) and data.get("sha"):\n        return str(data["sha"])[:12]\n    return ""\n\n\ndef repo_hash(work: dict) -> str:\n    """A hash of the work\'s actual text in the repository.\n\n    Changes when the text changes, regardless of unrelated commits. For the\n    dated risan catalogue the per-script version is already text-specific.\n    """\n    coll = work.get("collection")\n    if coll == "tafsir-qul":\n        # The catalogue\'s per-resource `updated_at` is the best text-change signal.\n        return str(work.get("qul_updated") or "")\n    if coll == "quran-text":\n        return repo_updated(work)\n    path_fn = _REPO_PATHS.get(coll)\n    slug = _github_slug(work)\n    if not path_fn or not slug:\n        return ""\n    return _github_content_hash(slug[0], slug[1], path_fn(work))\n\n\ndef smart_quotes(text: str) -> str:\n    """Curly quotes whose direction is decided by position, not by a running toggle.\n\n    Two hazards in these corpora: some sources ship already-reversed quotes, and a\n    single unmatched straight quote flips a toggle for the rest of the note. Both\n    are handled by deciding from the neighbouring character; already-curly quotes\n    are normalised the same way. A grave accent stands for \u02BFayn in some sources\n    (e.g. the translated \u1E25ad\u012Bth) and is unsafe in Obsidian, so it becomes \u2018 \u2014 a\n    quote mark, not the \u02BFayn character used for full transliteration.\n    """\n    text = text.replace("`", "\u2018")\n    # Mark openings: at the start, or after space / an opening bracket / a dash.\n    text = re.sub(r\'(?:^|(?<=[\\s(\\[{<\\-\u2013\u2014]))["\u201C\u201D]\', "\\x01", text)\n    text = re.sub(r"(?:^|(?<=[\\s(\\[{<\\-\u2013\u2014]))[\'\u2018\u2019]", "\\x02", text)\n    # Everything else \u2014 straight or curly \u2014 closes.\n    text = (text.replace(\'"\', "\u201D").replace("\u201C", "\u201D")\n                .replace("\'", "\u2019").replace("\u2018", "\u2019"))\n    return text.replace("\\x01", "\u201C").replace("\\x02", "\u2018")\n\n\n# \u2500\u2500 Fetching \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n\ndef _url_candidates(url: str):\n    """Yield the URL and any mirror that serves the same file.\n\n    jsDelivr occasionally rejects individual files with HTTP 403; the backing\n    raw.githubusercontent.com copy almost always still works.\n    """\n    yield url\n    m = re.match(r"https://cdn\\.jsdelivr\\.net/gh/([^/]+)/([^/]+)@([^/]+)/(.*)$", url)\n    if m:\n        yield f"https://raw.githubusercontent.com/{m.group(1)}/{m.group(2)}/{m.group(3)}/{m.group(4)}"\n\n\ndef fetch(url: str, *, cache: bool = False, retries: int = 3) -> bytes:\n    """Fetch a URL, optionally caching to disk, with mirror fallback + retries."""\n    if cache:\n        CACHE_DIR.mkdir(parents=True, exist_ok=True)\n        key = re.sub(r"[^\\w.-]+", "_", url)[-180:]\n        cached = CACHE_DIR / key\n        if cached.exists():\n            return cached.read_bytes()\n    last_err: Exception | None = None\n    for attempt in range(retries):\n        for candidate in _url_candidates(url):\n            try:\n                req = urllib.request.Request(candidate, headers={"User-Agent": "obsidian-text-source-import/1.0"})\n                with urllib.request.urlopen(req, timeout=60) as resp:\n                    data = resp.read()\n                if cache:\n                    cached.write_bytes(data)\n                return data\n            except Exception as exc:  # noqa: BLE001 - try mirror, then retry\n                last_err = exc\n        # A 404 is definitive; anything else (403/429/network) is worth retrying.\n        if isinstance(last_err, urllib.error.HTTPError) and last_err.code == 404:\n            break\n        time.sleep(1.5 * (attempt + 1))\n    raise RuntimeError(f"Could not fetch {url}: {last_err}")\n\n\n\ndef fetch_json(url: str, *, cache: bool = False):\n    return json.loads(fetch(url, cache=cache).decode("utf-8"))\n\n\ndef _cache_files() -> list[tuple[str, int]]:\n    """Every cached source file as (name, bytes) \u2014 read once per `list`."""\n    out: list[tuple[str, int]] = []\n    if CACHE_DIR.is_dir():\n        for f in CACHE_DIR.iterdir():\n            if f.is_file():\n                try:\n                    out.append((f.name, f.stat().st_size))\n                except OSError:\n                    pass\n    return out\n\n\ndef cached_bytes(work: dict, files: list[tuple[str, int]]) -> int:\n    """How many bytes of this work\'s source are already downloaded (0 if none).\n\n    Cache names are the sanitised URL, so the work\'s id appears as a token\n    between underscores (or before `.json` for a single-file work).\n    """\n    needle = re.compile(rf"_{re.escape(str(work.get(\'source_id\') or work[\'id\']))}(?:_|\\.(?:json|sqlite)$)")\n    return sum(size for name, size in files if needle.search(name))\n\n\n# \u2500\u2500 Catalogues \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n\ndef load_catalog(collection: str, *, use_cache: bool = True) -> list[dict]:\n    """Return a normalized list of works for a collection."""\n    spec = COLLECTIONS[collection]\n    works: list[dict] = []\n    if spec["kind"] == "hadith":\n        for b in HADITH_BOOKS:\n            works.append({\n                "collection": collection,\n                "id": b["id"],\n                "group": b["group"],\n                "name": b["title"],\n                "arabic": b["arabic"],\n                "author": b.get("author", ""),\n                "language": "ar",\n                "language_name": "arabic",\n                "source": "https://github.com/AhmedBaset/hadith-json",\n            })\n    elif spec["kind"] == "quran-text":\n        for b in QURAN_TEXTS:\n            works.append({\n                "collection": collection,\n                "id": b["id"],\n                "source_id": b.get("source_id", b["id"]),\n                "name": b["title"],\n                "riwaya_ar": b.get("riwaya_ar", ""),\n                "author": "",\n                "language": "ar",\n                "language_name": "arabic",\n                "source": "https://quran-json.risanb.com",\n            })\n    elif spec["kind"] == "dictionary":\n        for b in DICTIONARIES:\n            works.append({\n                "collection": collection,\n                "id": b["id"],\n                "name": b["title"],\n                "arabic": b.get("arabic", ""),\n                "author": b.get("author", ""),\n                "source": b["source"],\n                "db_url": b["db"],\n                "db_path": b.get("db_path", ""),\n                # `grid` = Wehr\'s label/content senses; `prose` = Lane\'s paragraphs.\n                "body": b.get("body", "grid"),\n                "note_prefix": b.get("note_prefix", "HW"),\n                # The id at which this work\'s source stops being one book and\n                # starts being its Supplement (0 = no such split).\n                "supplement_from": int(b.get("supplement_from", 0)),\n                # Which named romanization path its names follow.\n                "convention": b.get("convention", DEFAULT_ROMANIZATION),\n                "language": "ar",\n                "language_name": "arabic",\n            })\n    else:\n        raw = fetch_json(spec["catalog"], cache=use_cache)\n        if spec["kind"] == "tafsir":\n            for item in raw:\n                code = normalise_language(item.get("language_name"))\n                if not code:\n                    continue\n                works.append({\n                    "collection": collection,\n                    "id": item["slug"],\n                    "name": item.get("name", item["slug"]),\n                    "author": item.get("author_name", ""),\n                    "language": code,\n                    "language_name": item.get("language_name", ""),\n                    "source": item.get("source", ""),\n                })\n        elif spec["kind"] == "qul-tafsir":\n            # QUL\'s catalogue is `{"tafsirs": [{id, name, language_name,\n            # author_name, records_count, updated_at, slug}]}`; skip the empty\n            # stubs some resources carry.\n            for item in (raw.get("tafsirs", []) if isinstance(raw, dict) else []):\n                if int(item.get("records_count") or 0) <= 0:\n                    continue\n                code = normalise_language(item.get("language_name"))\n                if not code:\n                    continue\n                rid = item.get("id")\n                records = int(item.get("records_count") or 0)\n                works.append({\n                    "collection": collection,\n                    "id": str(rid),\n                    "name": item.get("name", str(rid)),\n                    "author": item.get("author_name") or "",\n                    "language": code,\n                    "language_name": item.get("language_name", ""),\n                    "source": f"https://qul.tarteel.ai/resources/tafsir/{rid}",\n                    "qul_updated": item.get("updated_at") or 0,\n                    # A rough footprint (source + model + notes) for a work not yet\n                    # downloaded, so the modal can show an "\u2248" estimate.\n                    "est_bytes": records * 2200,\n                })\n        elif spec["kind"] == "translation":\n            for _key, item in raw.items():\n                code = normalise_language(item.get("language"))\n                if not code:\n                    continue\n                ident = item.get("name") or _key\n                works.append({\n                    "collection": collection,\n                    "id": ident,\n                    "name": item.get("name", ident),\n                    "author": item.get("author", ""),\n                    "language": code,\n                    "language_name": item.get("language", ""),\n                    "source": item.get("source") or "https://github.com/fawazahmed0/quran-api",\n                })\n        else:  # pragma: no cover - guarded by the registry\n            raise ValueError(f"Unknown catalog kind {spec[\'kind\']!r}")\n    for w in works:\n        w["key"] = f"{collection}:{w[\'id\']}"\n        w["type"] = collection\n        w["collection_label"] = spec["label"]\n        w["genre"] = spec.get("genre", collection)\n        # A collection normally has one repository, but the dictionary collection\n        # holds two dictionaries from different ones, so each work names its own.\n        if collection == "dictionary":\n            w["repository"] = repository_name(w.get("source", "")).removeprefix("github.com/")\n        else:\n            w["repository"] = spec.get("repo_label", "")\n        w["needs_transliteration"] = bool(spec.get("needs_transliteration"))\n    return works\n\n\ndef load_overrides() -> dict[str, dict]:\n    overrides = json.loads(json.dumps(BUILTIN_OVERRIDES))\n    if OVERRIDES_FILE.exists():\n        try:\n            external = json.loads(OVERRIDES_FILE.read_text(encoding="utf-8"))\n            for k, v in external.items():\n                overrides.setdefault(k, {}).update(v)\n        except Exception as exc:  # noqa: BLE001\n            emit("error", message=f"Could not read {OVERRIDES_FILE.name}: {exc}")\n    return overrides\n\n\ndef edition_variant(work_id: str) -> str:\n    """A short qualifier for script variants of a translation edition.\n\n    The quran-api catalogue gives a romanised edition a `-la` suffix and its\n    vocalised form a `-lad` suffix; the base, `-la` and `-lad` editions share\n    their author and title, so without this they collapse onto one folder.\n    """\n    if work_id.endswith("-lad"):\n        return "Latin diacritics"\n    if work_id.endswith("-la"):\n        return "Latin"\n    return ""\n\n\ndef apply_overrides(work: dict, overrides: dict[str, dict]) -> dict:\n    merged = dict(work)\n    merged["title_ar"] = ""\n    merged["short_ar"] = ""\n    if work["collection"] == "quran":\n        # Qur\'\u0101n translation editions are identified by their translator; a\n        # romanised edition carries a -la/-lad suffix, which must qualify the\n        # title or the editions collapse onto one folder.\n        label = work.get("author") or work["name"]\n        variant = edition_variant(work["id"])\n        title = f"Qur\u02BE\u0101n - {label}" + (f" ({variant})" if variant else "")\n        merged["title"] = title\n        merged["dir"] = slug_to_dir(title)\n        merged["title_ar"] = "\u0627\u0644\u0642\u0631\u0622\u0646 \u0627\u0644\u0643\u0631\u064A\u0645"\n    elif work["collection"] == "hadith":\n        merged["title"] = work["name"]\n        merged["dir"] = slug_to_dir(work["name"])\n        merged["title_ar"] = work.get("arabic", "")\n    elif work["collection"] == "quran-text":\n        merged["title"] = work["name"]\n        merged["dir"] = slug_to_dir(work["name"])\n        # Qualify the Arabic alias with its riw\u0101ya, so a bare "\u0627\u0644\u0642\u0631\u0622\u0646 \u0627\u0644\u0643\u0631\u064A\u0645"\n        # never points ambiguously at one riw\u0101ya among several.\n        riwaya_ar = work.get("riwaya_ar", "")\n        merged["title_ar"] = f"\u0627\u0644\u0642\u0631\u0622\u0646 \u0627\u0644\u0643\u0631\u064A\u0645 - {riwaya_ar}" if riwaya_ar else "\u0627\u0644\u0642\u0631\u0622\u0646 \u0627\u0644\u0643\u0631\u064A\u0645"\n    elif work["collection"] == "dictionary":\n        merged["title"] = work["name"]\n        merged["dir"] = slug_to_dir(work["name"])\n        merged["title_ar"] = work.get("arabic", "")\n    else:\n        merged["title"] = work["name"]\n        merged["dir"] = slug_to_dir(work["name"])\n    merged["authors"] = []\n    merged["translators"] = []\n    if work["collection"] == "hadith":\n        if work.get("author"):\n            merged["authors"] = [work["author"]]\n    elif work["collection"] == "dictionary":\n        if work.get("author"):\n            merged["authors"] = [work["author"]]\n    elif work["collection"] == "quran":\n        if work.get("author"):\n            merged["translators"] = [work["author"]]\n    spec = COLLECTIONS[work["collection"]]\n    merged["up"] = [f"[[{spec[\'moc\']}]]"]\n    merged["cssclass"] = spec["cssclass"]\n    merged["moc"] = spec["moc"]\n    # Languages the work actually contains (\u1E25ad\u012Bth are bilingual).\n    merged["languages"] = ["ar", "en"] if work["collection"] == "hadith" else [work["language"]]\n    o = overrides.get(work["key"])\n    if o:\n        merged.update({k: v for k, v in o.items() if v is not None})\n    merged["dir"] = slug_to_dir(merged["dir"])\n    merged["language_label"] = language_name(merged["language"])\n    merged["language_links"] = [language_name(l) for l in merged["languages"]]\n    merged["moc_sections"] = [moc_section(l) for l in merged["languages"]]\n    merged["aliases"] = canonical_aliases(merged)\n    return merged\n\n\ndef _installed_work_dirs() -> dict[str, str]:\n    """key \u2192 folder for every work already recorded in the manifest (installed)."""\n    try:\n        data = json.loads((VAULT / ".midad-arabic-sources" / "source-imports.json").read_text(encoding="utf-8"))\n        return {\n            str(w["key"]): str(w["dir"])\n            for w in data.get("works", [])\n            if w.get("key") and w.get("dir")\n        }\n    except Exception:  # noqa: BLE001\n        return {}\n\n\ndef with_unique_dirs(works: list[dict]) -> None:\n    """Give every work a stable, unique output folder (mutates in place).\n\n    The folder comes from the title, but two editions can share a title \u2014 one\n    translator into several languages, or the romanised `-la`/`-lad` variants of\n    one edition. Qualify the later ones with their language, then their id.\n\n    The result depends only on the catalogue order, never on which works are\n    being fetched, so `list`, `fetch` and `check-updates` always agree on a\n    work\'s folder. (A request-scoped rule breaks: a reinstall then lands in a\n    folder the plugin is not checking, and repeats forever.)\n\n    A work already in the manifest keeps **the folder it has** \u2014 renaming an\n    installed work orphans its notes and leaves a stale folder behind \u2014 and that\n    folder is reserved, so a colliding newcomer is qualified instead.\n    """\n    installed = _installed_work_dirs()\n    seen: set[str] = set(installed.values())\n    for w in works:\n        key = str(w.get("key"))\n        if key in installed:\n            w["dir"] = installed[key]\n            continue\n        base = w["dir"]\n        if base not in seen:\n            seen.add(base)\n            continue\n        qualifiers = [\n            w.get("language_label") or w.get("language"),\n            edition_variant(w["id"]),\n            w["id"],\n        ]\n        unique = base\n        for label in qualifiers:\n            if not label:\n                continue\n            candidate = slug_to_dir(f"{base} ({label})")\n            if candidate not in seen:\n                unique = candidate\n                break\n        else:\n            n = 2\n            while unique in seen:\n                unique = slug_to_dir(f"{base} ({n})")\n                n += 1\n        w["dir"] = unique\n        seen.add(unique)\n\n\ndef all_works(overrides: dict[str, dict]) -> dict[str, dict]:\n    """Every catalogue work, merged and given a stable unique folder, by key."""\n    works: list[dict] = []\n    for coll in COLLECTIONS:\n        for w in load_catalog(coll, use_cache=True):\n            works.append(apply_overrides(w, overrides))\n    with_unique_dirs(works)\n    return {w["key"]: w for w in works}\n\n\n# \u2500\u2500 S\u016Brah table \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n\ndef surah_table() -> list[dict]:\n    """Return [{number, base, translit, arabic}] for the 114 s\u016Brahs.\n\n    Prefers the vault\'s _7 Sources/Quran folder so links match real note names;\n    falls back to the built-in table.\n    """\n    table: list[dict] = []\n    for i, (translit, arabic) in enumerate(SURAH_NAMES, start=1):\n        table.append({"number": i, "base": f"{i:03d} {translit}", "translit": translit, "arabic": arabic})\n    if QURAN_DIR.is_dir():\n        for f in sorted(QURAN_DIR.glob("*.md")):\n            m = re.match(r"^(\\d{1,3})\\s+(.+)$", f.stem)\n            if not m:\n                continue\n            num = int(m.group(1))\n            if not 1 <= num <= 114:\n                continue\n            arabic = _arabic_alias_from_note(f) or table[num - 1]["arabic"]\n            table[num - 1] = {"number": num, "base": f.stem, "translit": m.group(2), "arabic": arabic}\n    return table\n\n\ndef _arabic_alias_from_note(path: Path) -> str | None:\n    try:\n        text = path.read_text(encoding="utf-8", errors="ignore")\n    except OSError:\n        return None\n    m = re.match(r"^---\\n(.*?)\\n---", text, re.DOTALL)\n    if not m:\n        return None\n    in_aliases = False\n    for line in m.group(1).splitlines():\n        if re.match(r"^aliases:\\s*$", line):\n            in_aliases = True\n            continue\n        if in_aliases:\n            item = re.match(r"^\\s*-\\s*(.+?)\\s*$", line)\n            if not item:\n                if line and not line.startswith((" ", "\\t")):\n                    break\n                continue\n            value = item.group(1).strip().strip(\'"\\\'\')\n            if value and re.fullmatch(r"[\\u0600-\\u06FF\\s]+", value):\n                return value\n    return None\n\n\n# \u2500\u2500 Text cleaning \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n\n_LIST_MARK = re.compile(r"\\s-?(\\d{1,2})\\.\\s")\n\n\ndef number_list_items(text: str) -> str:\n    """Rebuild an inline numbered list the source hard-wrapped.\n\n    The sources wrap prose at ~100 characters, but start each list item with\n    `-N.` (e.g. the "five things given to no one before me" \u1E25ad\u012Bth). Once the\n    wraps are folded away the markers read as ` -1. \u2026 -2. \u2026`; if at least two\n    are present, separate them into a real ordered list (and put the run-in\n    intro on its own paragraph, as Markdown requires).\n    """\n    marks = list(_LIST_MARK.finditer(text))\n    if len(marks) < 2:\n        return text\n    intro = text[: marks[0].start()].strip()\n    items: list[str] = []\n    for i, m in enumerate(marks):\n        end = marks[i + 1].start() if i + 1 < len(marks) else len(text)\n        chunk = text[m.end():end].strip()\n        if chunk:\n            items.append(chunk)\n    body = "\\n".join(f"{n}. {t}" for n, t in enumerate(items, 1))\n    return f"{intro}\\n\\n{body}" if intro else body\n\n\ndef clean_text(raw: str, *, english: bool) -> str:\n    """HTML-strip and normalise a commentary/translation string."""\n    if not raw:\n        return ""\n    text = html.unescape(raw)\n    # Turn block-level HTML into paragraph breaks, then drop any remaining tags.\n    text = re.sub(r"(?i)<br\\s*/?>", "\\n", text)\n    text = re.sub(r"(?i)</p\\s*>", "\\n\\n", text)\n    text = re.sub(r"(?i)<p[^>]*>", "", text)\n    text = re.sub(r"<[^>]+>", "", text)\n    # The editor sometimes inserts apparatus *inside* a verse quote\n    # (`\uFD3F\u2026 \\[\u2026\\] \u2026\uFD3E`), which would otherwise become part of the verse text. Pull\n    # it out so the quote stays the canonical verse, and re-emit it after the quote\n    # (the `[[\u2026]]` \u2192 <sup> step below then handles it).\n    def _pull_apparatus(m: re.Match) -> str:\n        inner = m.group(1)\n        apparatus: list[str] = []\n        inner = re.sub(r"\\[\\[(.+?)\\]\\]", lambda mm: (apparatus.append(f"[[{mm.group(1)}]]"), "")[1], inner)\n        inner = re.sub(r"\\[(.+?)\\]", lambda mm: (apparatus.append(f"[{mm.group(1)}]"), "")[1], inner)\n        quote = f"\uFD3F{inner.strip()}\uFD3E"\n        return quote + (" " + " ".join(apparatus) if apparatus else "")\n\n    text = re.sub(r"\uFD3F(.+?)\uFD3E", _pull_apparatus, text, flags=re.DOTALL)\n    # Mark Qur\'\u0101n spans with the vault\'s quran-quote classes.\n    text = re.sub(r"\uFD3F(.+?)\uFD3E", lambda m: f"*\uFD3F{m.group(1)}\uFD3E{{.quran-quote}}*", text, flags=re.DOTALL)\n    # Collapse each paragraph onto one line, keep one blank line between them.\n    paragraphs = [re.sub(r"\\s+", " ", p).strip() for p in re.split(r"\\n\\s*\\n", text)]\n    paragraphs = [p for p in paragraphs if p]\n    body = "\\n\\n".join(paragraphs)\n    # The vault always uses curly quotes, in Arabic and English alike.\n    body = smart_quotes(body)\n    # Then rebuild any hard-wrapped inline numbered list ("\u2026 me. -1. \u2026 -2. \u2026").\n    body = number_list_items(body)\n    # The source\'s editorial apparatus \u2014 manuscript variants (`\u0632\u064A\u0627\u062F\u0629 \u0645\u0646 \u062F.`,\n    # `\u0641\u064A \u0647\u0640: "\u2026"`) and bibliographic refs (`\u0635\u062D\u064A\u062D`, `\u0631\u0648\u0627\u0647`, `\u0627\u0646\u0638\u0631:`) \u2014 is marked\n    # `[[\u2026]]`, which Obsidian would read as a wikilink. Render it as a muted\n    # superscript aside instead. A bare <sup> is used deliberately: a tooltip\n    # (<span title=\u2026>) made notes with ~1000 of these hang Obsidian\'s renderer.\n    # Done AFTER smart_quotes (which would otherwise curl attribute quotes);\n    # links we add ourselves come later and are not touched.\n    body = re.sub(\n        r"\\[\\[(.+?)\\]\\]",\n        lambda m: f\'<sup class="mas-src-note">({html.escape(m.group(1))})</sup>\',\n        body,\n    )\n    # Added words in single brackets (`[\u0642\u064E\u0648\u0652\u0644\u064F\u0647\u064F]`, `[\u0648\u064E\u0627\u0635\u0652\u0628\u0650\u0631\u0652]`) become round\n    # brackets: square brackets are avoided entirely, because Obsidian\'s renderer\n    # mishandles them \u2014 they read as links, and they break a preceding\n    # `{.quran-quote}`. Our own `[[\u2026]]` links are added later, after this runs.\n    body = re.sub(r"\\[(.+?)\\]", lambda m: f"({m.group(1)})", body)\n    # A stray, unpaired bracket is rare but does occur; nothing in the vault text\n    # should carry a square bracket, so fold any that remain into round brackets.\n    body = body.replace("[", "(").replace("]", ")")\n    return body\n\n\ndef parse_work_file(data, shape: str) -> list[tuple[int, str]]:\n    """Return [(ayah_number, raw_text)] from a downloaded work file."""\n    records: list[dict] = []\n    if shape == "chapter":\n        records = data.get("chapter", []) if isinstance(data, dict) else data\n    elif shape == "ayah-list":\n        if isinstance(data, list):\n            records = data\n        elif isinstance(data, dict):\n            records = data.get("ayahs") or data.get("verses") or []\n            if not records and all(str(k).isdigit() for k in data):\n                records = [{"ayah": int(k), "text": v} for k, v in data.items()]\n    out: list[tuple[int, str]] = []\n    for rec in records:\n        ayah = rec.get("ayah", rec.get("verse"))\n        text = rec.get("text", "")\n        if ayah is None:\n            continue\n        out.append((int(ayah), text))\n    out.sort(key=lambda t: t[0])\n    return out\n\n\n# \u2500\u2500 Render models (the contract consumed by the plugin\'s ETA templates) \u2500\u2500\u2500\u2500\u2500\u2500\n#\n# A model is {"schema", "generated", "work", "units"}. The full field reference\n# lives in the plugin docs. Acquisition never renders markdown.\n#\n# `MODEL_SCHEMA` is the version at which each collection\'s *acquisition* last\n# changed \u2014 the plugin re-fetches a cached model older than its collection\'s\n# entry, because a re-render only replays the model and cannot apply an\n# acquisition change. Bump the affected entry whenever this file\'s output for a\n# collection changes, and mirror it in the plugin\'s `COLLECTION_MODEL_SCHEMA`.\nMODEL_SCHEMA: dict[str, int] = {"dictionary": 4}\nBASE_MODEL_SCHEMA = 1\n\n\ndef display_title(base: str) -> str:\n    """A unit\'s title as it should read, e.g. `2 Al-Baqarah`, not `002 Al-Baqarah`.\n\n    A title is for viewing, so the numeric prefix loses its leading zeros. The\n    *file name* keeps them (it is what makes s\u016Bra notes sort correctly), and the\n    hub links to the file, so the two never drift.\n    """\n    return re.sub(r"^0+(\\d)", r"\\1", base)\n\n\ndef _ayah_blocks(surah: dict, records: list[tuple[int, str]], english: bool,\n                 delims: tuple[str, ...] = ()) -> list[dict]:\n    # The source repeats one section verbatim across a range of \u0101y\u0101t (2:26\u201327,\n    # 2:31\u201333 \u2026 are the same text). Merge such runs *on the raw source text*, so\n    # the heading reads `# 31\u201333` rather than repeating the section per verse.\n    # (Dedupe on the raw text, not the processed body: processing depends on the\n    # verse context \u2014 `skip`, matcher hints \u2014 so the outputs differ.)\n    groups: list[dict] = []\n    for ayah_no, raw in records:\n        if groups and raw == groups[-1]["raw"]:\n            groups[-1]["end"] = ayah_no\n            continue\n        groups.append({"start": ayah_no, "end": ayah_no, "raw": raw})\n\n    out: list[dict] = []\n    for g in groups:\n        start, end = g["start"], g["end"]\n        body = clean_text(g["raw"], english=english)\n        # Link citations of *other* verses; the commented verse\'s own quotes stay.\n        body = link_verse_citations(body, skip=(surah["number"], start))\n        body = link_quote_citations(body, surah=surah["number"], ayah=start, delims=delims)\n        if not body:\n            continue\n        if end == start:\n            out.append({\n                "number": start,\n                "ref": f"[[{surah[\'base\']}#{start}|{surah[\'arabic\']} : {arabic_numeral(start)}]]",\n                "body": body,\n            })\n        else:\n            out.append({\n                "number": f"{start}\u2013{end}",\n                "ref": (f"[[{surah[\'base\']}#{start}|{surah[\'arabic\']} : {arabic_numeral(start)}]]"\n                        f"\u2013[[{surah[\'base\']}#{end}|{arabic_numeral(end)}]]"),\n                "body": body,\n            })\n    return out\n\n\ndef build_surah_units(work: dict, table: list[dict], wanted: set[int] | None,\n                      args: argparse.Namespace) -> list[dict]:\n    """One unit per s\u016Brah, each with \u0101ya blocks."""\n    english = work["language"] == "en"\n    units: list[dict] = []\n    for surah in table:\n        if wanted and surah["number"] not in wanted:\n            continue\n        url = COLLECTIONS[work["collection"]]["data"].format(id=work["id"], surah=surah["number"])\n        try:\n            data = fetch_json(url, cache=not args.no_cache)\n        except Exception as exc:  # noqa: BLE001\n            emit("log", message=f"  skipped {surah[\'base\']}: {exc}")\n            continue\n        records = parse_work_file(data, COLLECTIONS[work["collection"]]["shape"])\n        units.append({\n            "kind": "surah",\n            "id": surah["number"],\n            "base": surah["base"],\n            "title": display_title(surah["base"]),\n            "translit": surah["translit"],\n            "arabic": surah["arabic"],\n            "blocks": _ayah_blocks(\n                surah, records, english,\n                detect_quote_delims("\\n".join(t for _, t in records))),\n        })\n        if len(units) % 10 == 0:\n            emit("step", name=work["title"], status="parsing", detail=f"{len(units)} s\u016Brahs")\n    return units\n\n\ndef build_qul_units(work: dict, table: list[dict], wanted: set[int] | None,\n                    args: argparse.Namespace) -> list[dict]:\n    """One unit per s\u016Brah from the Qur\u02BE\u0101nic Universal Library API.\n\n    QUL serves a passage per s\u016Brah range (`by_range`), each record naming the\n    \u0101y\u0101t it covers; it expands a shared passage to every covered \u0101ya, so the\n    usual consecutive-dedupe in `_ayah_blocks` folds it into a ranged block.\n    """\n    english = work["language"] == "en"\n    template = COLLECTIONS["tafsir-qul"]["data"]\n    units: list[dict] = []\n    for surah in table:\n        num = surah["number"]\n        if wanted and num not in wanted:\n            continue\n        url = template.format(id=work["id"], surah=num, count=SURAH_AYAHS[num - 1])\n        try:\n            data = fetch_json(url, cache=not args.no_cache)\n        except Exception as exc:  # noqa: BLE001\n            emit("log", message=f"  skipped {surah[\'base\']}: {exc}")\n            continue\n        records: list[tuple[int, str]] = []\n        for rec in (data.get("tafsirs", []) if isinstance(data, dict) else []):\n            keys = rec.get("verses") or []\n            if isinstance(keys, str):\n                keys = [keys]\n            text = rec.get("text", "")\n            for k in keys:\n                try:\n                    s, a = (int(x) for x in str(k).split(":", 1))\n                except ValueError:\n                    continue\n                if s == num:\n                    records.append((a, text))\n        if not records:\n            continue\n        records.sort(key=lambda t: t[0])\n        units.append({\n            "kind": "surah",\n            "id": num,\n            "base": surah["base"],\n            "title": display_title(surah["base"]),\n            "translit": surah["translit"],\n            "arabic": surah["arabic"],\n            "blocks": _ayah_blocks(\n                surah, records, english,\n                detect_quote_delims("\\n".join(t for _, t in records))),\n        })\n        if len(units) % 10 == 0:\n            emit("step", name=work["title"], status="parsing", detail=f"{len(units)} s\u016Brahs")\n    return units\n\n\ndef parse_hadith_book(data: dict) -> list[dict]:\n    """Group a whole-book \u1E25ad\u012Bth file into chapters, each with its hadiths."""\n    by_chapter: dict = {}\n    for h in data.get("hadiths", []):\n        by_chapter.setdefault(h.get("chapterId"), []).append(h)\n    units = []\n    for c in data.get("chapters", []):\n        units.append({\n            "id": c.get("id"),\n            "arabic": c.get("arabic", ""),\n            "english": c.get("english", ""),\n            "hadiths": sorted(by_chapter.get(c.get("id"), []),\n                              key=lambda h: h.get("idInBook", h.get("id", 0))),\n        })\n    return units\n\n\ndef hadith_chapter_label(chapter: dict) -> str:\n    label = f\'{chapter["id"]} {chapter.get("english") or chapter.get("arabic")}\'.strip()\n    # Chapter titles carry the same backtick-for-\u02BFayn and straight quotes as the\n    # text (e.g. "26 `Umrah"), so normalise them too.\n    return smart_quotes(label)\n\n\ndef build_hadith_units(work: dict, args: argparse.Namespace) -> list[dict]:\n    """One unit per chapter (kit\u0101b), each with its hadiths (Arabic + English)."""\n    url = COLLECTIONS["hadith"]["data"].format(group=work["group"], id=work["id"])\n    emit("step", name=work["title"], status="downloading", detail="whole book")\n    data = fetch_json(url, cache=not args.no_cache)\n    units: list[dict] = []\n    for chapter in parse_hadith_book(data):\n        label = hadith_chapter_label(chapter)\n        hadiths = []\n        for h in chapter["hadiths"]:\n            en = h.get("english") or {}\n            hadiths.append({\n                "number": h.get("idInBook", h.get("id")),\n                "narrator": clean_text(en.get("narrator", ""), english=True),\n                "english": link_verse_citations(clean_text(en.get("text", ""), english=True)),\n                "arabic": link_quote_citations(\n                    link_verse_citations(clean_text(h.get("arabic", ""), english=False)),\n                    surah=0, ayah=0),\n            })\n        units.append({\n            "kind": "hadith",\n            "id": chapter["id"],\n            "base": slug_to_dir(label),\n            "title": display_title(label),\n            "label": label,\n            "arabic": smart_quotes(chapter.get("arabic", "")),\n            "english": smart_quotes(chapter.get("english", "")),\n            "hadiths": hadiths,\n        })\n        if len(units) % 10 == 0:\n            emit("step", name=work["title"], status="parsing", detail=f"{len(units)} chapters")\n    return units\n\n\ndef build_quran_text_units(work: dict, table: list[dict], wanted: set[int] | None,\n                           args: argparse.Namespace) -> list[dict]:\n    """One unit per s\u016Brah of a riw\u0101ya. \u1E24af\u1E63 generates the work note only."""\n    units: list[dict] = []\n    for surah in table:\n        if wanted and surah["number"] not in wanted:\n            continue\n        url = COLLECTIONS["quran-text"]["data"].format(id=work["source_id"], surah=surah["number"])\n        try:\n            data = fetch_json(url, cache=not args.no_cache)\n        except Exception as exc:  # noqa: BLE001\n            emit("log", message=f"  skipped {surah[\'base\']}: {exc}")\n            continue\n        blocks: list[dict] = []\n        for v in data.get("verses", []):\n            text = clean_text(v.get("text", ""), english=False)\n            if text:\n                blocks.append({\n                    "number": v.get("id"),\n                    "body": text,\n                    "hafs": v.get("number_in_hafs", []),\n                })\n        units.append({\n            "kind": "quran",\n            "id": surah["number"],\n            "base": surah["base"],\n            "title": display_title(surah["base"]),\n            "translit": surah["translit"],\n            "arabic": surah["arabic"],\n            "blocks": blocks,\n        })\n        if len(units) % 10 == 0:\n            emit("step", name=work["title"], status="parsing", detail=f"{len(units)} s\u016Brahs")\n    return units\n\n\n# \u2500\u2500 Dictionaries (SQLite lexicons) \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n#\n# The lexicons ship as SQLite, not JSON. A work is one row group: a root entry\n# (`is_root`) plus the derived entries that point at it (`parent_id`); one note\n# per root, which is how the vault already keeps Hans Wehr. The transformation\n# reproduces that note format exactly \u2014 an H1 for the root, an H2 per derived\n# entry, each followed by a `mas-dictionary-definition` callout rendered as an\n# alternating label/content list (the two-column grid).\n#\n# Two subtleties, both learned the hard way:\n#   * The definitions carry HTML tags (`<b>II</b>`); tags must be stripped\n#     *before* the transliteration is scanned, or `<b>` supplies a stray "b"\n#     that passes for the romanisation (e.g. \u0627\u0628\u0646 \u2192 "b").\n#   * Many roots have no transliteration of their own: their definition *starts*\n#     with a verb-form marker (`<b>II</b> \u2026`). For those the transliteration is\n#     taken from the first derived entry that is not itself a verb form, and only\n#     if that fails is a character-by-character transliteration of the root used.\n\n_HW_ARABIC = r"\\u0600-\\u06FF\\u0750-\\u077F\\u08A0-\\u08FF"\n_HW_HEAD_RE = re.compile(rf"^[{_HW_ARABIC}0-9]+(?:[\\s,]+[{_HW_ARABIC}0-9]+)*")\n_HW_ARABIC_RE = re.compile(rf"[{_HW_ARABIC}]")\n# Words that open an etymology parenthetical rather than the transliteration:\n# language abbreviations and grammatical pointers. Wehr writes loanwords as\n# `\u062C\u0631\u0627\u062C (Fr.) gar\u0101\u017E` and `\u0628\u0631\u063A\u0649 (Turk. \u0628\u0648\u0631\u063A\u0649 bur\u011F\u0173) burg\u012B`, where the\n# transliteration follows the parenthetical.\n_HW_PAREN_STOP = {\n    "also", "and", "or", "pl", "sg", "du", "variant", "see", "of", "cf", "esp",\n    "f", "m", "n", "invar", "vb", "adj", "adv", "coll", "prov", "eg",\n    "engl", "fr", "it", "gr", "lat", "pers", "syr", "leb", "jord", "ir",\n    "turk", "ger", "sp", "port", "npers", "aram", "hebr", "copt", "for",\n}\n# Wehr\'s transliteration alphabet. A character set, not a regex: \u2018 \u2019 ` \' are\n# mapped positionally to \u02BF (\u02BFayn) and \u02BE (hamza) as they are scanned.\n_HW_VALID_CHARS = set(\n    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"\n    "\u0101\u0113\u012B\u016B\u014D\u0100\u0112\u012A\u016A\u014C\xE9\xE8\xEA\xE4\xEB\xEF\xF6\xFC\xC4\xCB\xCF\xD6\xDC\xE7\xC7\u015F\u015E\u010D\u010C\u0161\u0160\u1E25\u1E24\u1E33\u1E32\u1E63\u1E62\u1E0D\u1E0C\u1E6D\u1E6C\u1E93\u1E92\u1E0F\u1E0E\u1E6F\u1E6E\u1E2B\u1E2A\u0121\u0120\u017E\u017D-"\n    "\u02BF\u02BE\u0254\u0294"\n)\n_HW_SKIP_RE = (\n    re.compile(r"^look up alphabetically"),\n    re.compile(r"^see\\s+\\w+"),\n    re.compile(r"^\\s*$"),\n    re.compile(r"look up alphabetically"),\n    re.compile(r"^[0-9]+$"),\n)\n_HW_RADICALS = {\n    "\u0627": "\u0101", "\u0628": "b", "\u062A": "t", "\u062B": "th", "\u062C": "j", "\u062D": "\u1E25", "\u062E": "kh",\n    "\u062F": "d", "\u0630": "dh", "\u0631": "r", "\u0632": "z", "\u0633": "s", "\u0634": "sh", "\u0635": "\u1E63",\n    "\u0636": "\u1E0D", "\u0637": "\u1E6D", "\u0638": "\u1E93", "\u0639": "\u02BF", "\u063A": "gh", "\u0641": "f", "\u0642": "q",\n    "\u0643": "k", "\u0644": "l", "\u0645": "m", "\u0646": "n", "\u0647": "h", "\u0648": "w", "\u064A": "y",\n    # A hamza-bearing alif is never a long \u0101: it is an initial \u02BEa/\u02BEu or an\n    # internal \u02BEa/\u02BEu, or an unvowelled \u02BE. Writing \u0101 here (as this table once did)\n    # turned \u0646\u0623\u062A into `n\u0101t`.\n    "\u0621": "\u02BE", "\u0629": "h", "\u0649": "\u0101", "\u0624": "\u02BE", "\u0626": "\u02BE", "\u0640": "",\n    "\u0622": "\u02BE\u0101", "\u0623": "\u02BEa", "\u0625": "\u02BEi", "\u0671": "a",\n}\n_HW_NUMBER_RE = re.compile(r"(?<!\\d)(\\d+)\\.\\s+")\n_HW_ROMAN_RE = re.compile(r"(?:<b>)?([IVXLCDM]+)(?:</b>)?\\s+")\n# \u2500\u2500 Romanization conventions \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n#\n# Named transliteration paths, so a work *declares* which one it follows instead\n# of letters being swapped ad hoc. The engine (`arabic-bw-transliterate.py`)\n# emits the vault\'s own convention, so every other path is a recast of that:\n#\n#   vault  the house convention \u2014 no case endings, but a verb\'s inflection, a\n#          pronominal or prepositional ending and the two tanw\u012Bn exceptions are\n#          kept (`ba\u1E25r`, `kataba`, `minka`, `q\u0101\u1E0Din`, `\u1E6Dab\u02BFan`). Lane uses this.\n#   wehr   Hans Wehr\'s own \u2014 the European Orientalist system of the printed\n#          dictionary (`\u0161`, `\u1E6F`, `\u1E35`, `\u1E0F`, `\u0121`, `\u010D`, `\u017E`). Wehr uses it, so a name\n#          the engine produced still matches the transliterations the note\'s own\n#          text carries. Note that Wehr writes q\u0101f as plain `q`: the `\u1E33` that turns\n#          up in its scanned text is a mis-read kh\u0101\u02BE (`a\u1E33a\u1E0Da` for `a\u1E2Ba\u1E0Fa`), not a\n#          q\u0101f, and `_hw_skeleton` folds it onto kh\u0101\u02BE accordingly.\n#   full   fully vocalised, every case ending written. That is the service\'s\n#          `keep_case` mode \u2014 it changes how a reading is *produced*, not how its\n#          letters are written \u2014 and is what the vault uses for Qur\'\u0101n passages.\n#\nROMANIZATION_CONVENTIONS = ("vault", "wehr", "full")\nDEFAULT_ROMANIZATION = "vault"\n\n_WEHR_LETTERS: tuple[tuple[str, str], ...] = (\n    ("sh", "\u0161"), ("th", "\u1E6F"), ("kh", "\u1E35"), ("dh", "\u1E0F"), ("gh", "\u0121"),\n    ("ch", "\u010D"), ("zh", "\u017E"),\n)\n\n\ndef _hw_romanize(reading: str, convention: str = DEFAULT_ROMANIZATION) -> str:\n    """Recast a reading in the vault\'s convention as `convention` (idempotent).\n\n    `full` needs no recasting: it is a mode of *producing* a reading, not of\n    writing its letters.\n    """\n    if convention == "wehr":\n        for plain, wehr in _WEHR_LETTERS:\n            reading = reading.replace(plain, wehr)\n    return reading\n# A prose work\'s headword is a bare run of Arabic \u2014 no transliteration follows it,\n# and Lane puts the verb-form numeral *after* a space (`\u062D\u064E\u0631\u064E\u0628\u064E\u0647\u064F 1 ,`), so unlike\n# `_HW_HEAD_RE` this one must stop at the digit.\n_HW_PROSE_HEAD_RE = re.compile(rf"^[{_HW_ARABIC}]+(?:[\\s,]+[{_HW_ARABIC}]+)*")\n# Every Arabic run in a definition (used to hunt for a word that carries a root\'s\n# radicals); the runs are then split on whitespace.\n_HW_ARABIC_WORD_RE = re.compile(rf"[{_HW_ARABIC}]+")\n# Lane writes an aorist vowel as a presentation-form mark standing alone after\n# "aor." (`aor. \uFE79`). The isolated mark renders as a floating dot, so write the\n# vowel itself.\n_HW_MEDIAL_VOWELS = {"\\ufe77": "a", "\\ufe7b": "i", "\\ufe79": "u"}\n# The callout a Lane verse becomes \u2014 the same shape the transcription pipeline\n# emits. It must survive the square-bracket rule, so it is written from one\n# constant (see `_hw_prose`).\n_HW_POETRY_CALLOUT = ">[!arabic-poetry]"\n_HW_VOWELS = "aeiou\u0101\u0113\u012B\u014D\u016B"\n# The hamza in any of its seats. A bare alef counts: a root cannot begin with a\n# long vowel, so an alef in a root is a hamza seat (`\u0627\u062B\u0641` is `athf`, `\u062B\u0623\u0641` is\n# `th\u02BEf`) \u2014 never a madd.\n_HW_HAMZA = "\u0621\u0623\u0625\u0622\u0624\u0626\u0671\u0627"\n# The vowel marks and other combining signs. Their presence means a word is\n# *vocalised* \u2014 a real written form, not a bare root cluster.\n_HW_HARAKAT = (\n    "\\u064b\\u064c\\u064d\\u064e\\u064f\\u0650\\u0651\\u0652\\u0653\\u0654\\u0655"\n    "\\u0670\\u06d6\\u06d7\\u06d8\\u06d9\\u06da\\u06db\\u06dc\\u06df\\u06e0\\u06e1\\u06e2"\n    "\\u06e3\\u06e4\\u06e7\\u06e8\\u06ea\\u06eb\\u06ec\\u06ed"\n)\n# The short vowels that can end a fully vocalised word, and the Latin to restore.\n# No tanw\u012Bn on a name (`ba\u1E25r`, not `ba\u1E25run`), but `-an` is kept, as the guidelines\n# require \u2014 so dammatan and kasratan are absent here on purpose.\n_HW_FINAL_VOWELS = {\n    "\\u064e": "a", "\\u064f": "u", "\\u0650": "i",\n    "\\u064b": "an",\n}\n\n\ndef _hw_should_skip(text: str, *, pointers: bool = False) -> bool:\n    if not text:\n        return True\n    t = text.strip().lower()\n    if any(p.search(t) for p in _HW_SKIP_RE):\n        return True\n    if not pointers:\n        return False\n    # A pointer row: the headword followed by nothing but a cross-reference\n    # (`\u062D\u0643\u064A\u0645\u0628\u0627\u0634\u064A see`). The patterns above catch the bare `see \u2026` form, which is\n    # what a Wehr row carries when the scan lost its Arabic. Lane\'s cross-references\n    # are the entry itself (`\u0625\u0650\u062D\u0652\u062A\u064E\u0631\u064E\u0628\u064E 8 see 6.`, `\u0647\u064E\u0628\u064E\u0631\u064E 1, &c.: see Supplement.`),\n    # so this applies to the grid work only \u2014 and the headword is stripped without\n    # its digits, so a form-numbered pointer is never caught even there.\n    rest = _HW_PROSE_HEAD_RE.sub("", t, count=1).strip().strip(".")\n    return bool(rest) and re.fullmatch(r"see(\\s+\\S+)?", rest) is not None\n\n\ndef _hw_strip_tags(text: str) -> str:\n    return re.sub(r"<[^>]+>", "", text or "")\n\n\ndef _hw_headword(text: str) -> str | None:\n    m = _HW_HEAD_RE.search(text.strip())\n    return m.group(0).strip() if m else None\n\n\ndef _hw_is_verb_form(text: str) -> bool:\n    """True when a definition starts with a verb-form marker (`<b>II</b> \u2026`)."""\n    if not text:\n        return False\n    cleaned = _hw_strip_tags(text)\n    m = _HW_HEAD_RE.search(cleaned)\n    if not m:\n        return False\n    return bool(re.match(r"^[IVXLCDM]+\\s", cleaned[m.end():].lstrip()))\n\n\ndef _hw_extract_romanization(text: str) -> str | None:\n    """The transliteration after the headword (one word per Arabic headword word).\n\n    A leading parenthetical is usually an etymology note that *precedes* the\n    transliteration \u2014 `(\u0627\u0648\u0628)`, `(also \u0627\u0648\u0631\u0637\u0629)`, `(Fr.)`, `(pl. of \u0627\u0644\u0649 ilan)`. But\n    for noun roots Wehr puts the transliteration *inside* it:\n    `\u062D\u0631\u0628 (\u1E25arb f., pl. \u062D\u0631\u0648\u0628 \u1E25ur\u016Bb \u2026)`. Keep the parenthetical only when it\n    contains Arabic *and* opens with the transliteration itself; otherwise skip\n    it. (Skipping unconditionally cost the noun roots their real name \u2014 `\u062D\u0631\u0628`\n    came out as `ahl\u012Bya`, the first gloss word inside the definition.)\n    """\n    if not text:\n        return None\n    cleaned = unicodedata.normalize("NFC", _hw_strip_tags(text).strip())\n    m = _HW_HEAD_RE.search(cleaned)\n    if not m:\n        return None\n    count = len(re.sub(r",", " ", m.group(0)).split())\n    rest = cleaned[m.end():].lstrip()\n    if rest.startswith("("):\n        close = rest.find(")")\n        paren = rest[1:close] if close != -1 else rest[1:]\n        lm = re.match(r"[A-Za-z\\u00C0-\\u024F\\u1E00-\\u1EFF]+", paren)\n        first = lm.group(0).lower() if lm else ""\n        # The transliteration must stand alone: in "(\u1E25arb \u2026)" it is followed by a\n        # space, whereas OCR rubble like "(\u1E25i\u0639\u0644\u0649)" glues it to an Arabic word.\n        well_formed = bool(lm) and (\n            lm.end() >= len(paren) or not _HW_ARABIC_RE.match(paren[lm.end():])\n        )\n        if not (well_formed and _HW_ARABIC_RE.search(paren) and first not in _HW_PAREN_STOP):\n            rest = re.sub(r"^\\([^)]+\\)\\s*", "", rest)\n    after = rest\n    words: list[str] = []\n    current: list[str] = []\n    for ch in after:\n        if ch in _HW_VALID_CHARS:\n            current.append(ch)\n        elif ch == "\\u2018":  # \u2018 left curly quote = \u02BFayn\n            current.append("\u02BF")\n        elif ch == "\\u2019":  # \u2019 right curly quote = hamza\n            current.append("\u02BE")\n        elif ch == "`":\n            current.append("\u02BF")\n        elif ch == "\'":\n            current.append("\u02BE")\n        elif ch.isspace() and current:\n            words.append("".join(current))\n            current = []\n            if len(words) >= count:\n                break\n        elif current and not ch.isspace() and ch not in _HW_VALID_CHARS:\n            words.append("".join(current))\n            current = []\n            if len(words) >= count:\n                break\n    if current and len(words) < count:\n        words.append("".join(current))\n    if not words:\n        return None\n    roman = " ".join(words[:count])\n    # A bare verb-form numeral is not a name ("V"), and neither is nothing at all.\n    if re.fullmatch(r"[IVXLCDM]+", roman):\n        return None\n    return roman\n\n\ndef _hw_radical_romanization(word: str) -> str:\n    """Letter-by-letter, the last resort when no reading can be found at all.\n\n    A hamza is never a long \u0101 in any position, and it is a hamza seat rather than a\n    consonant: an *initial* one is read as the vowel it carries \u2014 `\u0627\u062B\u0641` \u2192 `athf`,\n    and the bare root `\u0627` \u2192 `a` \u2014 while anywhere else it is `\u02BE` (`\u062B\u0623\u0641` \u2192 `th\u02BEf`).\n    (A letter page\'s own label is a different matter and still reads `\u0627 \u0101`.)\n    """\n    out: list[str] = []\n    for i, ch in enumerate(word):\n        if ch in _HW_HAMZA:\n            out.append("a" if i == 0 else "\u02BE")\n        else:\n            out.append(_HW_RADICALS.get(ch, ch))\n    return "".join(out)\n\n\n# \u2500\u2500 The plugin\'s transliteration engine, for entries with no transliteration \u2500\u2500\n#\n# A letter-for-letter radical is the last resort; before that we ask the plugin\'s\n# own romanizer (`arabic-bw-transliterate.py`, the same engine behind the\n# "transliterate" commands). It is occasionally idiosyncratic, but a real\n# reading beats `\u02BFbrwd`. We ask it under every engine it offers and accept a\n# result only when the analysis behind it is a **single morpheme** \u2014 the engine\n# marks proclitic/enclitic boundaries with `+_`/`_+`, and a bare radical guessed\n# as a prefixed or suffixed word is a mis-analysis, so it is rejected.\n\n_TRANS_MODULE = None\n_TRANS_LOADED = False\n_TRANS_ENGINES: dict[str, object] = {}\n# Set from the CLI: the transliteration service to use, or "" to use the engine\n# in-process (standalone runs). `_TRANS_OFF` skips transliteration entirely.\n_TRANS_SERVER = ""\n_TRANS_OFF = False\n\n\ndef _load_transliterator():\n    """Import `arabic-bw-transliterate.py` (dashes, so by path), once."""\n    global _TRANS_MODULE, _TRANS_LOADED\n    if _TRANS_LOADED:\n        return _TRANS_MODULE\n    _TRANS_LOADED = True\n    try:\n        import importlib.util\n        path = Path(__file__).with_name("arabic-bw-transliterate.py")\n        spec = importlib.util.spec_from_file_location("arabic_bw_transliterate", path)\n        module = importlib.util.module_from_spec(spec)\n        spec.loader.exec_module(module)  # type: ignore[union-attr]\n        _TRANS_MODULE = module\n    except Exception as exc:  # noqa: BLE001 - the engine is optional\n        emit("log", message=f"  transliteration engine unavailable: {exc}")\n        _TRANS_MODULE = None\n    return _TRANS_MODULE\n\n\ndef _hw_single_morpheme(analysis: dict) -> bool:\n    """True when the analysis carries no proclitic/enclitic boundary."""\n    seg = f"{analysis.get(\'d3seg\') or \'\'}{analysis.get(\'diac\') or \'\'}"\n    return "+_" not in seg and "_+" not in seg\n\n\ndef _hw_skeleton(text: str) -> str:\n    """The consonant skeleton of a transliteration: vowels and punctuation dropped,\n    digraphs folded, so `battak` and `bakhtara` can be compared with a root.\n\n    Variants of the same letter are folded too, because the sources use them for\n    loanwords and the scans confuse them: a j\u012Bm written `g` or `\u01E7` (`\u0101te\u0161g\u012B`),\n    a q\u0101f written `\u1E33` (Wehr\'s own letter), and a kh\u0101\u02BE written `\u1E35`. A `\u1E6F` (\u062B) lost\n    its underline to the scan and came out as plain `t`, but that is *not* folded\n    here \u2014 the comparison merges the two (`_hw_skeletons`), while the underline is\n    put back on the rendered name by `_hw_fix_underlined`, which needs them apart.\n    """\n    t = text.lower()\n    for digraph, one in (("sh", "\u0161"), ("th", "\u1E6F"), ("kh", "\u1E2B"), ("dh", "\u1E0F"),\n                         ("gh", "\u0121"), ("ch", "\u010D")):\n        t = t.replace(digraph, one)\n    for variant, one in (("\u01E7", "j"), ("g", "j"), ("\u1E33", "\u1E2B"), ("\u1E35", "\u1E2B")):\n        t = t.replace(variant, one)\n    return "".join(\n        ch for ch in t\n        if ch not in "aeiou\u0101\u0113\u012B\u014D\u016B" and not ch.isspace() and ch not in "-\'\u2019\u2018`.,;:()[]"\n    )\n\n\ndef _hw_root_skeleton(arabic: str) -> str:\n    """The consonant skeleton of an Arabic root (alif, alif maq\u1E63\u016Bra and t\u0101\u02BE marb\u016B\u1E6Da\n    are vocalic in transliteration, so they carry no consonant)."""\n    letters: list[str] = []\n    for ch in arabic:\n        if ch in "\u0627\u0623\u0625\u0622\u0671\u0649\u0629":\n            continue\n        letters.append(_HW_RADICALS.get(ch, ""))\n    return _hw_skeleton("".join(letters))\n\n\ndef _hw_is_bare_root(arabic: str, roman: str) -> bool:\n    """True when `roman` is the root itself \u2014 not a conjugation or a derivative.\n\n    Wehr defines the root, so an inflected reading (`katabtu`, `battak`) or one\n    with an affixed pronoun is not a name for the entry.\n    """\n    return _hw_bare_root_reading(arabic, roman) is not None\n\n\ndef _hw_collapse_gemination(skeleton: str) -> tuple[str, bool]:\n    """Collapse one doubled consonant; report whether one was collapsed."""\n    out: list[str] = []\n    collapsed = False\n    i = 0\n    while i < len(skeleton):\n        if not collapsed and i + 1 < len(skeleton) and skeleton[i] == skeleton[i + 1]:\n            out.append(skeleton[i])\n            collapsed = True\n            i += 2\n        else:\n            out.append(skeleton[i])\n            i += 1\n    return "".join(out), collapsed\n\n\ndef _hw_bare_root_reading(arabic: str, roman: str) -> str | None:\n    """The reading to use for `roman`, or None if it is not the root.\n\n    A doubled consonant is not an added morpheme: it marks the intensive verb form\n    (II, `fa\u02BF\u02BFala`), whose dictionary form is the perfect `battaka` \u2014 the engine\n    renders the bare pausal `battak`, so the final vowel is restored from the form\n    itself. Any *other* added consonant is an affix (a conjugation, a pronoun), and\n    such a reading is not a name for the root.\n    """\n    # The comparison uses the shared skeletons: gemination collapsed, the hamza\n    # ignored and the weak letters dropped on both sides \u2014 the root\'s column writes\n    # `\u0646\u0627\u062A` where the reading spells the carrier, and a weak letter (\u0648/\u064A) is as\n    # often a vowel in the reading as a consonant (`\u0627\u0628\u0631\u064A\u0632` \u2192 `ibr\u012Bz`). A headword of\n    # no letters at all (the root `\u0627`) has nothing to contradict, so anything stands\n    # \u2014 judged on the raw letters, so a root that is all weak letters (`\u0648\u0627`) does\n    # not get the same licence.\n    skeleton = _hw_skeletons(arabic)\n    if not _hw_root_skeleton(arabic).replace("\u02BE", ""):\n        return roman\n    # Tanw\u012Bn\'s *n* is not a root consonant, so the comparison ignores it \u2014 but the\n    # reading itself is returned untouched, because the guidelines keep tanw\u012Bn in\n    # the two cases that matter here: indefinite defective-root nouns (q\u0101\u1E0Din) and\n    # adverbials (\u1E6Dab\u02BFan). Everywhere else the engine\'s citation form already has\n    # no ending (ba\u1E25r, per "noun/adjective final inflections not represented").\n    probe = roman\n    if probe.endswith(("un", "an", "in")):\n        probe = probe[:-2]\n    collapsed = _hw_translit_skeleton(probe)\n    if collapsed != skeleton:\n        return None\n    # A doubled consonant is not an added morpheme: it marks the intensive form\n    # (II, fa\u02BF\u02BFala), and the engine renders the bare pausal fa\u02BF\u02BFal (battak), so the\n    # completion below needs to know whether one was collapsed.\n    _, geminated = _hw_collapse_gemination(_hw_skeleton(probe))\n    if not geminated:\n        return roman\n    # A doubled consonant is not an added morpheme: it marks the intensive form\n    # (II, fa\u02BF\u02BFala), and the engine renders the bare pausal fa\u02BF\u02BFal (battak). A\n    # verb\'s final inflection is retained (guideline 5), so complete it as the\n    # perfect battaka. A u/i stem is instead an imperfect or passive (a\u1E63udd,\n    # ahubb) \u2014 a conjugation, not a name for the root.\n    if any(v in probe for v in "u\u016Bi\u012Bo\u014D"):\n        return None\n    return probe if probe.endswith(("a", "\u0101")) else probe + "a"\n\n\ndef _hw_server_reading(arabic: str, *, prose: bool = False) -> str | None:\n    """A reading of the bare root, from the transliteration service.\n\n    `standalone` tells the service this is a word on its own, not an excerpt, so\n    it is not read in pausal form. Case endings are off, which is what the\n    guidelines want for a headword: the citation form has no tanw\u012Bn (`ba\u1E25r`, not\n    `ba\u1E25run`), while a verb\'s final inflection is kept (`kataba`) and a suffixed\n    word keeps its vowel (`minka`).\n    """\n    request = urllib.request.Request(\n        _TRANS_SERVER.rstrip("/") + "/transliterate",\n        data=json.dumps({"text": arabic, "engine": "bert", "keep_case": False,\n                         "standalone": True}).encode("utf-8"),\n        headers={"Content-Type": "application/json"},\n        method="POST",\n    )\n    try:\n        with urllib.request.urlopen(request, timeout=20) as resp:\n            payload = json.loads(resp.read().decode("utf-8"))\n    except Exception:  # noqa: BLE001\n        return None\n    candidate = str(payload.get("romanized") or "").strip().lower()\n    # A hyphen or space marks a proclitic/enclitic reading (more than one morpheme).\n    if not candidate or not re.fullmatch(r"[A-Za-z\\u00C0-\\u024F\\u1E00-\\u1EFF\u02BF\u02BE]+", candidate):\n        return None\n    return _hw_bare_root_reading(arabic, candidate)\n\n\ndef _hw_local_reading(arabic: str) -> str | None:\n    """The same, using the engine in-process (for standalone runs)."""\n    mod = _load_transliterator()\n    if mod is None:\n        return None\n    for engine in ("bert", "mle", "none"):\n        try:\n            if engine not in _TRANS_ENGINES:\n                _TRANS_ENGINES[engine] = None if engine == "none" else mod.load_disambiguator(engine)\n            dis = _TRANS_ENGINES[engine]\n        except Exception:  # noqa: BLE001 - that engine is unavailable here\n            continue\n        args = types.SimpleNamespace(\n            engine=engine, sun_letters=False, keep_case=False,\n            dotless_ya="maqsura", name=False, debug=False,\n        )\n        try:\n            if dis is not None:\n                # Ask for all its possibilities; the top analysis is the one the\n                # engine will render, so it is the one that must qualify.\n                analyses = getattr(dis.disambiguate([arabic])[0], "analyses", None) or []\n                if not analyses or not _hw_single_morpheme(analyses[0].analysis):\n                    continue\n            candidate = mod.transliterate(arabic, dis, args, capitalize=False, end_pausal=False)\n        except Exception:  # noqa: BLE001\n            continue\n        if not candidate or not re.fullmatch(r"[A-Za-z\\u00C0-\\u024F\\u1E00-\\u1EFF\u02BF\u02BE]+", candidate):\n            continue\n        reading = _hw_bare_root_reading(arabic, candidate.lower())\n        if reading:\n            return reading\n    return None\n\n\ndef _hw_engine_romanization(arabic: str) -> str | None:\n    """A single-morpheme reading of a word, or None.\n\n    The citation form is used (`ba\u1E25r`, not `ba\u1E25run`): our conventions write no\n    tanw\u012Bn, and a perfect verb\'s final `-a` is restored from the form itself\n    (`battaka`). See `_hw_bare_root_reading`.\n\n    A short or vowel-less result (`th`, `khr`) is a guess, not a word: it is\n    rejected here so the caller can try the entry\'s own terms, and only then the\n    letter-by-letter fallback.\n    """\n    if _TRANS_OFF or not arabic:\n        return None\n    ask = _hw_server_reading if _TRANS_SERVER else _hw_local_reading\n    reading = ask(arabic)\n    if reading and not _hw_plausible_reading(reading):\n        return None\n    return reading\n\n\ndef _hw_plausible_reading(reading: str) -> bool:\n    """A reading is a plausible name only if it is a word, not a consonant stub.\n\n    A vowel is the test, not a length: a one- or two-letter root has only a short\n    reading (`\u0648\u0627` \u2192 `wa`, `\u0627` \u2192 `a`), while the stub the engine returns for a bare\n    cluster (`th`, `khr`) has none. Whether a reading really is the root is decided\n    by the skeleton comparison, not here.\n    """\n    return any(v in reading.lower() for v in _HW_VOWELS)\n\n\ndef _hw_word_romanization(arabic: str, convention: str = DEFAULT_ROMANIZATION) -> str:\n    """Name a single word: the engine, normalised to the citation form, else letters.\n\n    Used for a derived entry\'s headword when the source gives no transliteration\n    for it \u2014 by either dictionary. The result is written in `convention`.\n    """\n    reading = _hw_engine_romanization(arabic)\n    if reading:\n        return _hw_romanize(_hw_normalize_citation(reading, arabic, arabic), convention)\n    return _hw_romanize(_hw_radical_romanization(arabic), convention)\n\n\ndef _hw_prose_terms(definition: str) -> list[str]:\n    """Every Arabic word in an entry, in order.\n\n    Lane gives the term first, with its subject or object after it (`\u0623\u064E\u062B\u064E\u0641\u064E\n    \u0627\u0644\u0642\u0650\u062F\u0652\u0631\u064E`), and examples follow \u2014 so the first word is the term, but a word\n    carrying the radicals may appear anywhere in the article, and usually does.\n    """\n    return [w for run in _HW_ARABIC_WORD_RE.findall(definition or "") for w in run.split()]\n\n\ndef _hw_skeletons(arabic: str) -> str:\n    """A word\'s skeleton, for comparing it with a root.\n\n    Gemination is collapsed and the hamza ignored; the weak letters are dropped\n    too, because they are interchangeable and often do not survive derivation \u2014\n    `\u0622\u062F\u0649` still matches the root `\u0627\u062F\u0648`, whose \u0648 the derived verb loses. A `\u1E6F` (\u062B)\n    is merged with `t`, since a scan loses that underline almost always and the\n    reading is still the same word; `_hw_fix_underlined` restores it for display.\n    """\n    skeleton = _hw_root_skeleton(arabic).replace("\u02BE", "")\n    skeleton = skeleton.replace("w", "").replace("y", "").replace("\u1E6F", "t")\n    return _hw_collapse_gemination(skeleton)[0]\n\n\ndef _hw_is_root(arabic: str, root: str) -> bool:\n    """True when a word *is* the root \u2014 not a derivative or a suffixed form.\n\n    Equality, not containment, is what keeps a suffixed reading out: `\u0623\u064E\u0628\u064E\u0636\u064E\u0647\u064F` is\n    not a name for `\u0628\u0636`, while `\u0638\u064E\u0644\u064E\u0651` is for `\u0638\u0644`.\n    """\n    return bool(_hw_skeletons(root)) and _hw_skeletons(arabic) == _hw_skeletons(root)\n\n\ndef _hw_contains_root(arabic: str, root: str) -> bool:\n    """True when a word contains the root\'s radicals, in order.\n\n    A conjugation may carry the radicals with extra letters and still be the only\n    form the entry gives (`\u0623\u064E\u062A\u0652\u0623\u064E\u0631\u0652\u062A\u064F` for `\u062A\u0623\u0631`), which the conventions allow as a\n    last resort before the letter-by-letter fallback. A one-letter skeleton would\n    match almost anything, so it is refused.\n    """\n    root_skeleton = _hw_skeletons(root)\n    if len(root_skeleton) < 2:\n        return False\n    letters = iter(_hw_skeletons(arabic))\n    return all(ch in letters for ch in root_skeleton)\n\n\ndef _hw_normalize_citation(reading: str, arabic: str, root: str) -> str:\n    """Bring an engine reading of a vocalised word to the vault\'s citation form.\n\n    Three adjustments. The guidelines write no tanw\u012Bn on a name (`ba\u1E25r`, not\n    `ba\u1E25run`), but the engine returns one for a noun (`\u0623\u064E\u062A\u0652\u0645\u064C` \u2192 `atmun`) \u2014 except\n    for a defective root, where an indefinite keeps it (`\u0642\u064E\u0627\u0636\u064D` \u2192 `q\u0101\u1E0Din`), and\n    `-an` is always kept. And a verb\'s final inflection is retained (`battaka`),\n    while the engine reads a citation form as pausal and drops it \u2014 `\u0646\u064E\u0623\u064E\u062A\u064E` comes\n    back `na\u02BEat` though the vowel is right there in the source.\n    """\n    defective = _hw_root_skeleton(root).rstrip().endswith(("w", "y"))\n    if reading.endswith("un") or (reading.endswith("in") and not defective):\n        reading = reading[:-2]\n    for ch in reversed(arabic or ""):\n        if ch in _HW_HARAKAT:\n            vowel = _HW_FINAL_VOWELS.get(ch, "")\n            if vowel and not reading.endswith(vowel):\n                return reading + vowel\n            return reading\n        if not ch.isspace():\n            break\n    return reading\n\n\ndef _hw_terms_romanization(arabic: str, derived: list[tuple]) -> str:\n    """The reading of a term from the root\'s own entries \u2014 either dictionary.\n\n    Two passes over the entry\'s Arabic words, in order. First a word that *is* the\n    root \u2014 `\u0623\u064E\u062B\u064E\u0641\u064E` for `\u0627\u062B\u0641`, fully vocalised, giving `athafa`. Then, since many\n    entries never give the plain term at all (`\u0623\u064E\u062A\u0652\u0623\u064E\u0631\u0652\u062A\u064F \u0625\u0650\u0644\u064E\u064A\u0652\u0647\u0650 \u0627\u0644\u0646\u064E\u0651\u0638\u064E\u0631\u064E` for\n    `\u062A\u0623\u0631`), a word that merely contains the radicals \u2014 a conjugated verb is\n    acceptable here, as the conventions allow when nothing clearer exists. The\n    engine\'s dropped final short vowel is restored from the source.\n    """\n    terms: list[str] = []\n    for _entry_id, _word, definition in derived[:3]:\n        terms.extend(_hw_prose_terms(definition))\n    for matcher in (_hw_is_root, _hw_contains_root):\n        for term in terms[:400]:\n            if not matcher(term, arabic):\n                continue\n            reading = _hw_engine_romanization(term)\n            if reading:\n                return _hw_normalize_citation(reading, term, arabic)\n    return ""\n\n\ndef _hw_root_romanization(arabic: str, derived: list[tuple],\n                          convention: str = DEFAULT_ROMANIZATION) -> str:\n    """The best reading of a root \u2014 shared by both dictionaries.\n\n    Neither source transliterates every root: Lane\'s gives none at all, and Wehr\'s\n    gives them in the definition but not always. Both file the root as a bare,\n    unvocalised cluster, so both need the same order here: the root itself, then\n    the root\'s own entries, then \u2014 only if nothing was found \u2014 letter by letter.\n    Anything the engine produces is written in `convention`; a transliteration the\n    source\'s own text carries is left exactly as it is, which the callers try\n    first.\n\n    A root carrying a hamza tries the entries *first*: the engine cannot know which\n    vowel a bare hamza has, and reads `\u0646\u0623\u062A` as the vowel-less `n\u02BEat` (the bare\n    cluster `\u0646\u0627\u062A`, its hamza dropped in the source\'s word column, is worse still \u2014\n    `n\u0101t`), whereas `\u0646\u064E\u0623\u064E\u062A\u064E` gives `na\u02BEata`.\n    """\n    from_entries = _hw_terms_romanization(arabic, derived)\n    if from_entries and any(ch in _HW_HAMZA for ch in arabic):\n        return _hw_romanize(from_entries, convention)\n    reading = _hw_engine_romanization(arabic)\n    if reading:\n        return _hw_romanize(_hw_normalize_citation(reading, arabic, arabic), convention)\n    return _hw_romanize(from_entries or _hw_radical_romanization(arabic), convention)\n\n\ndef _hw_translit_skeleton(roman: str) -> str:\n    """A Latin transliteration\'s skeleton, normalised exactly as an Arabic word\'s.\n\n    `_hw_skeletons` folds digraphs, drops the vowels, ignores the hamza and drops\n    the weak letters; this does the same to the Latin side so the two compare,\n    including the `\u1E6F`/`t` merge that a lost underline forces.\n    """\n    return _hw_collapse_gemination(\n        _hw_skeleton(roman).replace("\u02BE", "").replace("w", "").replace("y", "").replace("\u1E6F", "t")\n    )[0]\n\n\n_HW_TRANSLIT_UNIT_RE = re.compile(r"sh|th|kh|dh|gh|ch|zh|[A-Za-z\\u00C0-\\u024F\\u1E00-\\u1EFF]")\n\n\ndef _hw_fix_underlined(reading: str, arabic: str, convention: str = DEFAULT_ROMANIZATION) -> str:\n    """Render a `t` the scan lost its underline from where the Arabic has \u062B.\n\n    A scan almost always writes `\u1E6F` as plain `t`, so such a reading is accepted on\n    that basis (see `_hw_skeleton`); this writes the name as it should read \u2014 `\u1E6F` in\n    the Wehr work, `th` in the vault\'s convention, which never uses the underlined\n    letters. The two consonant skeletons are walked in step \u2014 they correspond, the\n    reading having just been validated against this headword \u2014 and only a `t`\n    standing where a \u062B does is rewritten. The walk applies only when the skeletons\n    hold the same number of consonants, so a reading with extra letters, or a\n    loanword whose letters do not line up, is left exactly as written.\n    """\n    arabic_units = [u for u in _HW_TRANSLIT_UNIT_RE.findall(_hw_root_skeleton(arabic))\n                    if u not in ("w", "y")]\n    reading_units = [(m.group(0), m.start(), m.end())\n                     for m in _HW_TRANSLIT_UNIT_RE.finditer(reading)\n                     if m.group(0) not in ("w", "y")\n                     and m.group(0)[0] not in "aeiou\u0101\u0113\u012B\u014D\u016B"]\n    if not arabic_units or len(arabic_units) != len(reading_units):\n        return reading\n    underlined = "\u1E6F" if convention == "wehr" else "th"\n    out: list[str] = []\n    at = 0\n    for unit, (text, start, end) in zip(arabic_units, reading_units):\n        out.append(reading[at:start])\n        out.append(underlined if unit in ("th", "\u1E6F") and text == "t" else text)\n        at = end\n    out.append(reading[at:])\n    return "".join(out)\n\n\ndef _hw_reads_arabic(roman: str, arabic: str) -> bool:\n    """Whether a transliteration found in the text really reads that Arabic.\n\n    A definition also carries Roman numerals, OCR rubble and cross-references, so\n    an extraction is usable only when its skeleton is the headword\'s \u2014 `\u062D\u0642\u0628 VITI \u2026`\n    (a numeral the scan turned into `VITI`) and `\u062D\u0643\u064A\u0645\u0628\u0627\u0634\u064A see` both fail, and the\n    entry\'s own transliterations, or the shared machinery, name it instead. The\n    skeleton test is enough here: the source\'s own value is already the form it\n    wants, so the engine\'s completion rules do not apply to it. A headword with no\n    letters at all (the root `\u0627`) has nothing to contradict, so anything stands \u2014\n    judged on the raw letters, so a root that is all weak letters (`\u0648\u0627`) does not\n    get the same licence.\n    """\n    if not roman:\n        return False\n    if not _hw_root_skeleton(arabic).replace("\u02BE", ""):\n        return True\n    return _hw_translit_skeleton(roman) == _hw_skeletons(arabic)\n\n\ndef _hw_reads_root(roman: str, root: str) -> bool:\n    """Whether a transliteration reads a word that carries the root\'s radicals.\n\n    Used for a candidate taken from one of the root\'s *entries*: a derived form\'s\n    own transliteration is usable as the root\'s name only if it contains the root\'s\n    consonants in order \u2014 `\u1E25uqb` for `\u062D\u0642\u0628`, `\u1E25ur\u016Bb` for `\u062D\u0631\u0628` \u2014 and not, say,\n    `toll`, which is a fine reading of a derived `\u062A\u0648\u0644` but says nothing about `\u0648\u0627`.\n    """\n    if not roman:\n        return False\n    if not _hw_root_skeleton(root).replace("\u02BE", ""):\n        return True\n    letters = iter(_hw_translit_skeleton(roman))\n    return all(ch in letters for ch in _hw_skeletons(root))\n\n\ndef _hw_find_first_valid_romanization(derived: list[tuple], root: str = "") -> str | None:\n    """The first derived entry that is not a verb form and has a transliteration.\n\n    With `root`, the transliteration must also read a word carrying the root\'s\n    radicals \u2014 the entry\'s own transliteration is only a name for the root if it\n    does.\n    """\n    for _entry_id, _word, definition in derived:\n        if _hw_is_verb_form(definition):\n            continue\n        roman = _hw_extract_romanization(definition)\n        if not roman:\n            continue\n        if root and not _hw_reads_root(roman, root):\n            continue\n        if _hw_reads_arabic(roman, _hw_headword(definition) or _word):\n            return roman\n    return None\n\n\ndef _hw_split_segments(def_text: str) -> list[tuple[str | None, str]]:\n    """Split a definition on its sense numbers (`1.`) and Roman numerals (`<b>II</b>`)."""\n    if not def_text:\n        return []\n    bounds: list[tuple[int, int, str]] = []\n    for m in _HW_NUMBER_RE.finditer(def_text):\n        bounds.append((m.start(), m.end(), m.group(1)))\n    for m in _HW_ROMAN_RE.finditer(def_text):\n        bounds.append((m.start(), m.end(), m.group(1)))\n    bounds.sort(key=lambda b: b[0])\n    merged: list[tuple[int, int, str]] = []\n    skip = False\n    for i, b in enumerate(bounds):\n        if skip:\n            skip = False\n            continue\n        if i + 1 < len(bounds) and "=" in def_text[b[1]:bounds[i + 1][0]]:\n            # "II = II V" \u2014 one label, not two segments.\n            merged.append((b[0], bounds[i + 1][1], f"{b[2]} = {bounds[i + 1][2]}"))\n            skip = True\n            continue\n        merged.append(b)\n    if not merged:\n        return [(None, def_text.strip())]\n    segments: list[tuple[str | None, str]] = []\n    if merged[0][0] > 0:\n        first = def_text[:merged[0][0]].strip()\n        if first:\n            segments.append((None, first))\n    for i, b in enumerate(merged):\n        end = merged[i + 1][0] if i + 1 < len(merged) else len(def_text)\n        segments.append((b[2], def_text[b[1]:end].strip()))\n    return segments\n\n\ndef _hw_grid_bullets(arabic: str, definition: str, roman: str | None) -> list[str]:\n    """The callout body as alternating bullets: label (odd), content (even)."""\n    def_text = re.sub(r"\\s+", " ", definition or "").strip()\n    def_text = _HW_HEAD_RE.sub("", def_text, count=1).lstrip()\n    if roman and roman != "unknown":\n        # The printed superscript diptote marker (mamn\u016B\u02BF min al-\u1E63arf) came out of\n        # the OCR as a literal digit glued to the transliteration ("a\u1E25mad2",\n        # "makka2"). Take the first occurrence of the term, italicise it, and put\n        # a glued digit back into a real superscript. A plain `\\b\u2026\\b` match would\n        # fail here: there is no word boundary between "d" and "2".\n        pattern = re.compile(r"(?<!\\w)" + re.escape(roman) + r"(\\d)?(?![^\\W\\d])")\n        def_text = pattern.sub(\n            lambda m: f"*{roman}*" + (f"<sup>{m.group(1)}</sup>" if m.group(1) else ""),\n            def_text, count=1,\n        )\n    segments = _hw_split_segments(def_text)\n    bullets: list[str] = [arabic]\n    if not segments:\n        bullets.append(def_text)\n    else:\n        first_label, first_content = segments[0]\n        if first_label is None:\n            bullets.append(first_content)\n            remaining = segments[1:]\n        else:\n            bullets.append("")\n            remaining = segments\n        for label, content in remaining:\n            bullets.append(label)\n            bullets.append(content or "")\n    # Pad to an even count so the two-column grid stays aligned.\n    if len(bullets) % 2 != 0:\n        bullets.append("")\n    # Our conventions bold with markdown / CSS, never HTML: drop any `<b>` the\n    # source leaves behind. (The sense markers were already turned into grid\n    # labels, and the callout CSS bolds the label column.) The `<sup>` marker\n    # added above is ours and is kept.\n    return [re.sub(r"</?b[^>]*>", "", b, flags=re.IGNORECASE) for b in bullets]\n\n\ndef _hw_prose_headword(text: str) -> str | None:\n    """The leading Arabic run of a prose definition \u2014 the entry\'s headword."""\n    m = _HW_PROSE_HEAD_RE.match((text or "").strip())\n    return m.group(0).strip() if m else None\n\n\ndef _hw_is_bare_arabic(text: str) -> bool:\n    """True when a string is nothing but Arabic \u2014 a bare root, not a definition."""\n    return bool(text) and not re.search(rf"[^{_HW_ARABIC}\\s]", text)\n\n\ndef _hw_prose_quotes(text: str) -> str:\n    """Curly quotes for a source that already has them.\n\n    Lane\'s text is already correctly quoted, but `smart_quotes` re-decides every\n    mark from its neighbours and so reverses a closing quote that follows a space\n    (`... war \u201D]` \u2192 `... war \u201C]`). Leave the curly marks alone and turn only the\n    rare straight one, by the same positional rule; a grave accent, which stands\n    for \u02BFayn in some sources, becomes \u2018.\n    """\n    text = text.replace("`", "\u2018")\n    text = re.sub(r\'(?:^|(?<=[\\s(\\[{<\\-\u2013\u2014]))"\', "\\x01", text)\n    text = re.sub(r"(?:^|(?<=[\\s(\\[{<\\-\u2013\u2014]))\'", "\\x02", text)\n    text = text.replace(\'"\', "\u201D").replace("\'", "\u2019")\n    return text.replace("\\x01", "\u201C").replace("\\x02", "\u2018")\n\n\ndef _hw_prose(definition: str) -> list[str]:\n    """Lane\'s definition as markdown paragraphs.\n\n    The text is English prose with a little markup: `<i>` for the glosses, a\n    `<center>` holding a verse or a heading, `<h3>` for its lines, and the rare\n    `<table>`. Keep what Obsidian renders, turn the source\'s own dividers (`===`,\n    `___`) into paragraph breaks, and drop the rest. Square brackets \u2014 Lane\'s\n    editorial additions \u2014 become round ones, per the vault\'s rule.\n    """\n    text = definition or ""\n\n    def _centre(m: re.Match) -> str:\n        """A `<center>` block is a verse.\n\n        Lane sets poetry as centred hemistichs \u2014 one `<h3>` per hemistich, often\n        several bayts \u2014 and 2,159 of the 2,160 blocks in the corpus are Arabic\n        alone. Emit the vault\'s poetry callout, the same shape the transcription\n        pipeline produces for a hemistich line. (Lane\'s print marks each hemistich\n        with an asterisk; it carries no meaning for us, so it is stripped.)\n        """\n        inner = re.sub(r"(?is)</?h3[^>]*>", "\\n", m.group(1))\n        lines = [re.sub(r"\\s+", " ", ln).strip().strip("*").strip() for ln in inner.split("\\n")]\n        lines = [ln for ln in lines if ln]\n        if not lines:\n            return "\\n\\n"\n        return "\\n\\n" + "\\n".join([_HW_POETRY_CALLOUT] + [f">- {ln}" for ln in lines]) + "\\n\\n"\n\n    text = re.sub(r"(?is)<center[^>]*>(.*?)</center>", _centre, text)\n    # Lane uses `*` as a mark of its own \u2014 a separator inside a reference list\n    # (`(S, * M, A, K;)`, `(IAar, K *.)`). Obsidian has no working escape for it,\n    # so it pairs with another `*` somewhere and italicises everything between\n    # them. A `*` with a space on either side can neither open nor close emphasis,\n    # so pad every run. Done here, before any markdown marker of our own is\n    # written, so those are left untouched.\n    text = re.sub(r"\\*+", " * ", text)\n    text = re.sub(r"(?is)<h3[^>]*>(.*?)</h3>", lambda m: f"\\n\\n**{m.group(1).strip()}**\\n\\n", text)\n    # A table (six entries in the whole lexicon) is flattened: one line per row,\n    # cells separated by a tab so the columns stay legible in the source.\n    text = re.sub(r"(?is)</t[dh]\\s*>", "\\t", text)\n    text = re.sub(r"(?is)<t[dh][^>]*>", "", text)\n    text = re.sub(r"(?is)</tr\\s*>", "\\n", text)\n    text = re.sub(r"(?is)</?(?:table|tbody|tr)[^>]*>", "", text)\n    text = re.sub(r"(?is)<br\\s*/?>", " ", text)\n    text = re.sub(r"(?is)<i>(.*?)</i>", lambda m: f"*{m.group(1).strip()}*", text)\n    text = re.sub(r"<[^>]+>", "", text)\n    # `===` and `___` divide senses; the barb arrow and `\u2193` point at another\n    # entry. (The daggers that mark post-classical usage are kept \u2014 they are\n    # meaningful, and render as ordinary text.)\n    text = re.sub(r"\\s*={3,}\\s*", "\\n\\n", text)\n    text = re.sub(r"\\s*_{3,}\\s*", "\\n\\n", text)\n    text = text.replace("\\U0001f87b", "\u2193").replace("\\u2193", "\u2193")\n    for mark, vowel in _HW_MEDIAL_VOWELS.items():\n        text = text.replace(mark, vowel)\n    text = text.replace("\\u200e", "")\n\n    def _collapse(paragraph: str) -> str:\n        # A verse block keeps its line breaks; everything else is one line.\n        if paragraph.lstrip().startswith(">"):\n            return "\\n".join(re.sub(r"\\s+", " ", ln).strip()\n                             for ln in paragraph.split("\\n") if ln.strip())\n        return re.sub(r"\\s+", " ", paragraph).strip()\n\n    paragraphs = [_collapse(p) for p in re.split(r"\\n\\s*\\n", text)]\n    paragraphs = [p for p in paragraphs if p]\n    # The vault uses curly quotes, and never a square bracket.\n    paragraphs = [_hw_prose_quotes(p) for p in paragraphs]\n    # ...except the poetry callout\'s own `[!type]`, which the bracket rule below\n    # would otherwise turn into `(!type)` and destroy the callout. Park it.\n    paragraphs = [p.replace(_HW_POETRY_CALLOUT, "\\x03") for p in paragraphs]\n    paragraphs = [p.replace("[[", "(").replace("]]", ")") for p in paragraphs]\n    paragraphs = [re.sub(r"\\[(.+?)\\]", r"(\\1)", p) for p in paragraphs]\n    paragraphs = [p.replace("[", "(").replace("]", ")") for p in paragraphs]\n    paragraphs = [p.replace("\\x03", _HW_POETRY_CALLOUT) for p in paragraphs]\n    # Mark the headword so the callout CSS can size it as Arabic, not as prose.\n    if paragraphs:\n        paragraphs[0] = _HW_PROSE_HEAD_RE.sub(\n            lambda m: f\'<span class="mas-hw">{m.group(0).strip()}</span>\',\n            paragraphs[0], count=1,\n        )\n    return paragraphs\n\n\ndef _hw_root_entry(entry_id: int, word: str, definition: str, derived: list[tuple],\n                   *, prose: bool = False, convention: str = DEFAULT_ROMANIZATION) -> dict | None:\n    """A root entry: its transliteration comes from a derived entry when it is a verb form."""\n    definition = (definition or "").strip()\n    if _hw_should_skip(definition, pointers=not prose):\n        return None\n    if prose:\n        # Lane gives no transliteration, so the name is read from the root itself\n        # by the transliteration service \u2014 and, if that reading is rejected, from\n        # the root\'s own entries (see `_hw_root_romanization`).\n        arabic = _hw_prose_headword(definition) or (word or "").strip()\n        if not arabic:\n            return None\n        paragraphs = _hw_prose(definition)\n        if len(paragraphs) == 1 and _hw_is_bare_arabic(_hw_strip_tags(paragraphs[0])):\n            # The row is the bare root with no entry of its own; the derived rows\n            # below carry the text.\n            paragraphs = []\n        return {\n            "id": entry_id, "arabic": arabic,\n            "roman": _hw_fix_underlined(_hw_root_romanization(arabic, derived, convention), arabic, convention),\n            "verb_form": False, "paragraphs": paragraphs,\n        }\n    arabic = _hw_headword(definition) or (word or "").strip()\n    if not arabic:\n        return None\n    verb = _hw_is_verb_form(definition)\n    if verb:\n        roman = _hw_find_first_valid_romanization(derived, arabic)\n        if not roman:\n            for _eid, _w, d in derived:\n                candidate = _hw_extract_romanization(d)\n                if candidate and _hw_reads_arabic(candidate, _hw_headword(d) or _w):\n                    roman = candidate\n                    break\n        if not roman:\n            roman = _hw_root_romanization(arabic, derived, convention)\n    else:\n        # The source\'s own transliteration first \u2014 but only if it really reads the\n        # headword (the text also carries numerals and cross-references) \u2014 then any\n        # the entries carry, then the same shared machinery Lane uses. A value the\n        # source wrote is kept exactly as written; only an engine reading is recast\n        # into the work\'s convention, inside `_hw_root_romanization`.\n        extracted = _hw_extract_romanization(definition)\n        roman = ((extracted if extracted and _hw_reads_arabic(extracted, arabic) else None)\n                 or _hw_find_first_valid_romanization(derived, arabic)\n                 or _hw_root_romanization(arabic, derived, convention))\n    # A verb-form root\'s own callout is never italicised, though its heading uses\n    # the transliteration found above.\n    roman = _hw_fix_underlined(_hw_romanize(roman, convention), arabic, convention)\n    return {\n        "id": entry_id, "arabic": arabic, "roman": roman, "verb_form": verb,\n        "bullets": _hw_grid_bullets(arabic, definition, None if verb else roman),\n    }\n\n\ndef _hw_derived_entry(entry_id: int, word: str, definition: str,\n                      *, prose: bool = False, convention: str = DEFAULT_ROMANIZATION) -> dict | None:\n    """A derived entry; a verb form carries no transliteration in its heading."""\n    definition = (definition or "").strip()\n    if _hw_should_skip(definition, pointers=not prose):\n        return None\n    if prose:\n        # The headword is already fully vocalized, and a derived form is not the\n        # root \u2014 so it is shown in Arabic only, with no transliterated heading.\n        arabic = _hw_prose_headword(definition) or (word or "").strip()\n        if not arabic:\n            return None\n        return {\n            "id": entry_id, "arabic": arabic, "roman": None,\n            "verb_form": False, "paragraphs": _hw_prose(definition),\n        }\n    arabic = _hw_headword(definition) or (word or "").strip()\n    if not arabic:\n        return None\n    if _hw_is_verb_form(definition):\n        return {\n            "id": entry_id, "arabic": arabic, "roman": None, "verb_form": True,\n            "bullets": _hw_grid_bullets(arabic, definition, None),\n        }\n    extracted = _hw_extract_romanization(definition)\n    roman = ((extracted if extracted and _hw_reads_arabic(extracted, arabic) else None)\n             or _hw_word_romanization(arabic, convention))\n    roman = _hw_fix_underlined(roman, arabic, convention)\n    return {\n        "id": entry_id, "arabic": arabic, "roman": roman, "verb_form": False,\n        "bullets": _hw_grid_bullets(arabic, definition, roman),\n    }\n\n\n_HW_LETTER_ORDER = "\u0627\u0628\u062A\u062B\u062C\u062D\u062E\u062F\u0630\u0631\u0632\u0633\u0634\u0635\u0636\u0637\u0638\u0639\u063A\u0641\u0642\u0643\u0644\u0645\u0646\u0647\u0648\u064A"\n# Fold the alef/hamza variants onto their base letter, so "\u0622\u0628" is filed under \u0627.\n_HW_LETTER_FOLD = {"\u0622": "\u0627", "\u0623": "\u0627", "\u0625": "\u0627", "\u0671": "\u0627", "\u0649": "\u064A", "\u0629": "\u0647"}\n\n\ndef _hw_note_base(entry: dict, prefix: str = "HW") -> str:\n    safe_ar = re.sub(r\'[<>:"/\\\\|?*]\', "", entry["arabic"])\n    safe_rom = re.sub(r\'[<>:"/\\\\|?*]\', "", entry["roman"] or "")\n    return re.sub(r"\\s+", " ", f"{prefix} {entry[\'id\']} {safe_ar} {safe_rom}").strip()\n\n\ndef _hw_letter_of(arabic: str) -> str:\n    """The letter a root is filed under (alef variants folded onto \u0627)."""\n    first = (arabic or "?")[0]\n    return _HW_LETTER_FOLD.get(first, first)\n\n\ndef _hw_letter_page(letter: str, convention: str = DEFAULT_ROMANIZATION) -> str:\n    """A letter page\'s label: the letter and its romanized equivalent (`\u0632 z`).\n\n    The label follows the work\'s own convention, so in the Wehr work it reads\n    `\u062B \u1E6F` \u2014 matching the transliterations of the notes it indexes.\n    """\n    return f"{letter} {_hw_romanize(_HW_RADICALS.get(letter, \'\'), convention)}".strip()\n\n\ndef _hw_letter_index(units: list[dict], convention: str = DEFAULT_ROMANIZATION) -> list[dict]:\n    """One index unit per first letter, so a work\'s hub lists letters, not roots.\n\n    A dictionary has thousands of roots \u2014 far too many to list on one page \u2014 so\n    the work note points at one *letter* page, and each letter page lists the\n    roots that start with it.\n    """\n    groups: dict[str, list[dict]] = {}\n    for u in units:\n        groups.setdefault(_hw_letter_of(u["root"]["arabic"]), []).append(u)\n\n    def order(letter: str) -> tuple[int, int]:\n        i = _HW_LETTER_ORDER.find(letter)\n        return (0, i) if i >= 0 else (1, ord(letter))\n\n    out: list[dict] = []\n    for letter in sorted(groups, key=order):\n        roots = sorted(groups[letter], key=lambda u: u["root"]["arabic"])\n        out.append({\n            "kind": "dict-index",\n            "id": letter,\n            "base": _hw_letter_page(letter, convention),\n            "title": _hw_letter_page(letter, convention),\n            "letter": letter,\n            "roman": _hw_romanize(_HW_RADICALS.get(letter, ""), convention),\n            "roots": [\n                {"base": u["base"], "title": u["title"], "arabic": u["root"]["arabic"], "roman": u["root"]["roman"]}\n                for u in roots\n            ],\n        })\n    return out\n\n\ndef build_dictionary_units(work: dict, args: argparse.Namespace) -> list[dict]:\n    """One unit (note) per dictionary root, carrying its derived entries."""\n    url = work.get("db_url") or COLLECTIONS["dictionary"]["data"]\n    emit("step", name=work["title"], status="downloading", detail="sqlite")\n    data = fetch(url, cache=not args.no_cache)\n    key = re.sub(r"[^\\w.-]+", "_", url)[-180:]\n    db_path = CACHE_DIR / key\n    if not db_path.exists():\n        db_path.parent.mkdir(parents=True, exist_ok=True)\n        db_path.write_bytes(data)\n    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)\n    try:\n        cur = conn.cursor()\n        names = {str(r[0]).lower() for r in cur.execute(\n            "SELECT name FROM sqlite_master WHERE type IN (\'table\',\'view\')")}\n        table = "entries" if "entries" in names else "dictionary"\n        rows = list(cur.execute(f"SELECT ID, WORD, DEFINITION, IS_ROOT, PARENT_ID FROM {table}"))\n    finally:\n        conn.close()\n    by_id: dict[int, tuple[str, str]] = {}\n    parent_of: dict[int, int] = {}\n    root_rows: list[int] = []\n    for rid, word, definition, is_root, parent in rows:\n        by_id[rid] = (word or "", definition or "")\n        parent_of[rid] = parent\n        if is_root:\n            root_rows.append(rid)\n    root_set = set(root_rows)\n\n    def nearest_root(rid: int) -> int | None:\n        """Walk up to the root a row belongs to \u2014 the database is not always flat:\n        `\u0634\u0631\u0641` \u2192 `\u0645\u0634\u0631\u0641` \u2192 `\u0645\u0634\u0631\u0642`, so a row\'s parent may itself be a derived row."""\n        seen: set[int] = set()\n        cur = parent_of.get(rid)\n        while cur is not None and cur not in seen:\n            if cur in root_set:\n                return cur\n            seen.add(cur)\n            cur = parent_of.get(cur)\n        return None\n\n    derived: dict[int, list[int]] = {}\n    orphaned = 0\n    for rid in by_id:\n        if rid in root_set:\n            continue\n        owner = nearest_root(rid)\n        if owner is None:\n            orphaned += 1\n            continue\n        derived.setdefault(owner, []).append(rid)\n    if orphaned:\n        emit("log", message=f"  {orphaned} entr(ies) had no root ancestor and were skipped")\n    # The database splits a root into more than one `is_root` row (548 roots) \u2014\n    # \u062D\u0631\u0628 is both \u1E25ariba the verb (4457) and \u1E25arb the noun (4458). In print they\n    # are one entry, so group the root rows by the root word and merge each group:\n    # the first row is the note, the rest join it, and every derived form of the\n    # group is nested beneath. (The rows are in the app\'s own order.)\n    groups: dict[str, list[int]] = {}\n    for rid in sorted(root_rows):\n        groups.setdefault(by_id[rid][0], []).append(rid)\n    emit("step", name=work["title"], status="parsing", detail=f"{len(groups)} roots")\n    prose = work.get("body") == "prose"\n    prefix = work.get("note_prefix") or "HW"\n    convention = work.get("convention") or DEFAULT_ROMANIZATION\n    units: list[dict] = []\n    for n, (word, group) in enumerate(groups.items()):\n        derived_ids = [d for rid in group for d in derived.get(rid, [])]\n        derived_rows = [(d, by_id[d][0], by_id[d][1]) for d in derived_ids]\n        # The group\'s first row with real content is the note; the others join it\n        # as further sections. The database pairs a pointer row with the row that\n        # carries the entry \u2014 \u0627\u0628\u064A\u0628 has id 6 ("look up alphabetically") and id 60\n        # ("ab\u012Bb the eleventh month\u2026") \u2014 so the pointer must not become the note.\n        root: dict | None = None\n        entries: list[dict] = []\n        for rid in group:\n            entry = _hw_root_entry(rid, by_id[rid][0], by_id[rid][1], derived_rows,\n                                   prose=prose, convention=convention)\n            if entry is None:\n                continue\n            if root is None:\n                root = entry\n            else:\n                entries.append(entry)\n        if root is None and derived_rows:\n            # Every row is a pointer, but the derived forms still carry content:\n            # keep the note, with the root as a bare headword rather than the\n            # pointer text. The id and word stay the root\'s, so the note is not\n            # named after a derived term.\n            main = group[0]\n            word_ar = (_hw_prose_headword if prose else _hw_headword)(by_id[main][1]) or by_id[main][0]\n            roman = _hw_root_romanization(word_ar, derived_rows, convention)\n            root = {"id": main, "arabic": word_ar, "roman": roman, "verb_form": False}\n            if prose:\n                root["paragraphs"] = []\n            else:\n                root["bullets"] = [word_ar, f"*{roman}*"]\n        if root is None:\n            continue\n        entries += [e for e in (_hw_derived_entry(eid, w, d, prose=prose, convention=convention) for eid, w, d in derived_rows) if e]\n        # Where the source stops being the Lexicon and starts being its\n        # Supplement: the note marks it so the two books stay distinguishable\n        # inside one root\'s page. (A Supplement-only root marks from the top.)\n        if work.get("supplement_from"):\n            boundary = work["supplement_from"]\n            if root["id"] >= boundary:\n                root["supplement"] = True\n            for entry in entries:\n                if entry["id"] >= boundary:\n                    entry["supplement"] = True\n        # A bare root with neither an entry of its own nor any derived form carries\n        # nothing, and a note with only a heading is noise. The database has one\n        # such row \u2014 12893, itself a child of another root, contradicting its own\n        # `IS_ROOT` flag \u2014 and its definition is just the headword.\n        if not entries and not (root.get("paragraphs") or root.get("bullets")):\n            continue\n        units.append({\n            "kind": "dict",\n            "id": root["id"],\n            "base": _hw_note_base(root, prefix),\n            "title": f"{root[\'arabic\']} {root[\'roman\']}",\n            # A two-level work: the bottom page names its letter page first in\n            # `mas-up`, so you can step to the adjacent entries of the same letter.\n            "section_page": f"{work[\'dir\']} - {_hw_letter_page(_hw_letter_of(root[\'arabic\']), convention)}",\n            "root": root,\n            "entries": entries,\n        })\n        if (n + 1) % 500 == 0:\n            emit("step", name=work["title"], status="parsing", detail=f"{len(units)} roots")\n    # The letter index units come first, so the hub lists letters, not 7,000 roots.\n    return _hw_letter_index(units, convention) + units\n\n\ndef work_model(work: dict, units: list[dict], created: str, layout: str) -> dict:\n    """Assemble the render model handed to the plugin\'s templates."""\n    is_hadith = work["collection"] == "hadith"\n    return {\n        "schema": MODEL_SCHEMA.get(work["collection"], BASE_MODEL_SCHEMA),\n        "generated": created,\n        "work": {\n            "key": work["key"],\n            "collection": work["collection"],\n            "collection_label": work.get("collection_label", ""),\n            "id": work["id"],\n            "name": work["name"],\n            "title": work["title"],\n            "dir": work["dir"],\n            "short": work.get("short", ""),\n            "title_ar": work.get("title_ar", ""),\n            "short_ar": work.get("short_ar", ""),\n            "title_plain": strip_diacritics(work["title"]),\n            "authors": work["authors"],\n            "translators": work["translators"],\n            "aliases": work["aliases"],\n            "language": work["language"],\n            "languages": work["languages"],\n            "language_links": work["language_links"],\n            "cssclass": work["cssclass"],\n            "moc": work["moc"],\n            "moc_sections": work["moc_sections"],\n            "up": work["up"],\n            "source": work.get("source", ""),\n            "repository_name": repository_name(work.get("source", "")),\n            "repo": repo_url(work),\n            "repo_name": repository_name(repo_url(work)),\n            "source_name": repository_name(work.get("source", "")),\n            "license_attribution": work.get("license_attribution", ""),\n            "repository_updated": work.get("repository_updated", ""),\n            "source_hash": work.get("source_hash", ""),\n            "author": work.get("author", ""),\n            "kind": ("dict" if work["collection"] == "dictionary"\n                     else "hadith" if is_hadith\n                     else "quran" if work["collection"] == "quran-text"\n                     else "surah"),\n            # A dictionary\'s body shape (`grid` senses or `prose` paragraphs) and\n            # the prefix its root notes carry (`HW \u2026`, `LL \u2026`), plus the id at\n            # which its source stops being one book and starts being a second\n            # (Lane\'s Supplement; 0 = no such split).\n            "body": work.get("body", "grid"),\n            "note_prefix": work.get("note_prefix", ""),\n            "supplement_from": work.get("supplement_from", 0),\n            # The named romanization path this work\'s names follow (`vault`,\n            # `wehr`, `full`) \u2014 so a note records which convention it is in.\n            "convention": work.get("convention", DEFAULT_ROMANIZATION),\n            "unit_label": ("Roots" if work["collection"] == "dictionary"\n                           else "Chapters" if is_hadith\n                           else "S\u016Brahs"),\n            "layout": layout,\n        },\n        "units": units,\n    }\n\n\n# \u2500\u2500 Commands \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n\ndef cmd_list(args: argparse.Namespace) -> int:\n    overrides = load_overrides()\n    works = list(all_works(overrides).values())\n    if args.collection:\n        works = [w for w in works if w["collection"] == args.collection]\n    if args.language:\n        works = [w for w in works if w["language"] == args.language]\n    cache_files = _cache_files()\n    for w in works:\n        w["cache_bytes"] = cached_bytes(w, cache_files)\n    works.sort(key=lambda w: (w["collection"], w["language"], w["name"].lower()))\n    if args.json:\n        emit("works", works=works)\n        return 0\n    current = None\n    for w in works:\n        if w["collection"] != current:\n            current = w["collection"]\n            print(f"\\n== {w[\'collection_label\']} ==")\n        lang = w["language_label"].upper() if len(w["language_label"]) <= 3 else w["language_label"]\n        print(f"  [{lang}] {w[\'key\']:<45} {w[\'name\']}  \u2014 {w[\'author\']}")\n    print()\n    return 0\n\n\ndef cmd_fetch(args: argparse.Namespace) -> int:\n    """Download each work\'s source JSON and write its render model."""\n    global _CANONICAL_RIWAYA, _TRANS_SERVER, _TRANS_OFF\n    _CANONICAL_RIWAYA = (getattr(args, "canonical", None) or "hafs").strip() or "hafs"\n    # Entries with no transliteration in their source are named by romanizing the\n    # bare root. Prefer the transliteration service when one is given; otherwise\n    # use the engine in-process (standalone runs). `--no-transliteration` skips\n    # it, which is what "proceed without transliteration" does.\n    _TRANS_SERVER = (getattr(args, "transliteration_server", "") or "").strip()\n    _TRANS_OFF = bool(getattr(args, "no_transliteration", False))\n    overrides = load_overrides()\n    created = args.created or datetime.now().strftime("%Y-%m-%d")\n    layout = getattr(args, "layout", None) or DEFAULT_LAYOUT\n    wanted_surahs = None\n    if getattr(args, "surahs", None):\n        wanted_surahs = {int(x) for x in re.split(r"[,\\s]+", args.surahs.strip()) if x}\n\n    by_key = all_works(overrides)\n\n    keys = args.key or []\n    unknown = [k for k in keys if k not in by_key]\n    if unknown:\n        emit("error", message=f"Unknown work key(s): {\', \'.join(unknown)}")\n        return 1\n    if not keys:\n        emit("error", message="Nothing to fetch. Pass --key <collection:id>.")\n        return 1\n\n    table = surah_table()\n    models: list[str] = []\n    for key in keys:\n        work = by_key[key]\n        emit("step", name=work["title"], status="starting", detail=work["language"])\n        if work["collection"] == "hadith":\n            units = build_hadith_units(work, args)\n        elif work["collection"] == "quran-text":\n            units = build_quran_text_units(work, table, wanted_surahs, args)\n        elif work["collection"] == "tafsir-qul":\n            units = build_qul_units(work, table, wanted_surahs, args)\n        elif work["collection"] == "dictionary":\n            units = build_dictionary_units(work, args)\n        else:\n            units = build_surah_units(work, table, wanted_surahs, args)\n        work["repository_updated"] = repo_updated(work)\n        work["source_hash"] = repo_hash(work)\n        work["license_attribution"] = repo_license_attribution(work)\n        model = work_model(work, units, created, layout)\n        model_path = MODEL_DIR / work["collection"] / f"{slug_to_dir(work[\'id\'])}.json"\n        model_path.parent.mkdir(parents=True, exist_ok=True)\n        model_path.write_text(json.dumps(model, ensure_ascii=False, indent=1), encoding="utf-8")\n        models.append(str(model_path))\n        emit("step", name=work["title"], status="finished", detail=f"{len(units)} units")\n\n    emit("result", result={"models": models})\n    return 0\n\n\ndef _update_model_metadata(model_path: Path, date: str, source_hash: str) -> None:\n    """Record a new repository date (text unchanged) without re-downloading."""\n    try:\n        data = json.loads(model_path.read_text(encoding="utf-8"))\n    except Exception:  # noqa: BLE001\n        return\n    work = data.setdefault("work", {})\n    if date:\n        work["repository_updated"] = date\n    if source_hash:\n        work["source_hash"] = source_hash\n    model_path.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")\n\n\ndef cmd_check_updates(args: argparse.Namespace) -> int:\n    """Two-stage update check: repository date first, then the text hash.\n\n    Emits keys whose *text* changed (``changed``) and model paths whose\n    repository date moved but whose text did not (``date_only``).\n    """\n    overrides = load_overrides()\n    by_key = all_works(overrides)\n    changed: list[str] = []\n    date_only: list[str] = []\n    for key in (args.key or []):\n        work = by_key.get(key)\n        if not work:\n            continue\n        model_path = MODEL_DIR / work["collection"] / f"{slug_to_dir(work[\'id\'])}.json"\n        stored_hash = stored_date = ""\n        if model_path.exists():\n            try:\n                stored_work = json.loads(model_path.read_text(encoding="utf-8"))["work"]\n                stored_hash = stored_work.get("source_hash", "")\n                stored_date = stored_work.get("repository_updated", "")\n            except Exception:  # noqa: BLE001\n                pass\n        current_date = repo_updated(work)\n        # Stage 1: the repository\'s own date. Unchanged \u21D2 nothing to do.\n        if current_date and stored_date and current_date == stored_date:\n            emit("step", name=work["title"], status="current", detail=current_date)\n            continue\n        # Stage 2: compare the text hash, but only against a known baseline.\n        # A model with no stored hash (imported before this feature) is adopted\n        # rather than re-downloaded \u2014 assume it was current when installed.\n        current_hash = repo_hash(work)\n        if stored_hash and current_hash and current_hash != stored_hash:\n            emit("step", name=work["title"], status="text-changed",\n                 detail=f"{stored_date or \'?\'} -> {current_date or \'?\'}")\n            changed.append(key)\n        else:\n            # Repository changed (or baseline unknown), text the same: record it.\n            emit("step", name=work["title"], status="date-only",\n                 detail=f"{stored_date or \'?\'} -> {current_date or \'?\'}")\n            _update_model_metadata(model_path, current_date, current_hash)\n            date_only.append(str(model_path))\n    emit("result", result={"changed": changed, "date_only": date_only})\n    return 0\n\n\ndef build_parser() -> argparse.ArgumentParser:\n    p = argparse.ArgumentParser(description="Acquire text corpora and emit render models for the vault.")\n    sub = p.add_subparsers(dest="command", required=True)\n\n    lp = sub.add_parser("list", help="List available works.")\n    lp.add_argument("--collection", choices=list(COLLECTIONS))\n    lp.add_argument("--language", default=None, help="Filter by language code (e.g. ar, en, fr, fa).")\n    lp.add_argument("--json", action="store_true", help="Emit JSON instead of a table.")\n    lp.set_defaults(func=cmd_list)\n\n    fp = sub.add_parser("fetch", help="Download a work and write its render model JSON.")\n    fp.add_argument("--key", action="append", help="<collection>:<id> (repeatable).")\n    fp.add_argument("--surahs", default=None, help="Comma-separated s\u016Brah numbers to limit to.")\n    fp.add_argument("--layout", default=DEFAULT_LAYOUT, choices=["stacked", "table"],\n                    help="Bilingual layout recorded in the model (used by \u1E25ad\u012Bth templates).")\n    fp.add_argument("--created", default=None, help="Override the model\'s generated date.")\n    fp.add_argument("--no-cache", action="store_true", help="Bypass the download cache.")\n    fp.add_argument("--canonical", default="hafs",\n                    help="Canonical riw\u0101ya id. Qur\'\u0101n citation links are added only "\n                         "when this is \'hafs\' (the reading almost all sources quote).")\n    fp.add_argument("--transliteration-server", default="",\n                    help="Transliteration service to use for entries whose source gives "\n                         "no transliteration (e.g. the dictionary roots).")\n    fp.add_argument("--no-transliteration", action="store_true",\n                    help="Skip transliteration; name such entries from their radicals.")\n    fp.set_defaults(func=cmd_fetch)\n\n    cp = sub.add_parser("check-updates", help="Report works whose source repository has changed.")\n    cp.add_argument("--key", action="append", help="<collection>:<id> (repeatable).")\n    cp.set_defaults(func=cmd_check_updates)\n\n    return p\n\n\ndef main(argv: list[str] | None = None) -> int:\n    args = build_parser().parse_args(argv)\n    try:\n        return args.func(args)\n    except KeyboardInterrupt:\n        emit("error", message="Interrupted.")\n        return 130\n    except Exception as exc:  # noqa: BLE001\n        emit("error", message=str(exc))\n        return 1\n\n\nif __name__ == "__main__":\n    sys.exit(main())\n' },
+  { path: "scripts/text-source-import.py", content: '#!/usr/bin/env python3\n"""Acquire born-digital Arabic / English text corpora for the Obsidian vault.\n\nThis script does **acquisition only**. It downloads a work\'s source JSON (cached\nunder ``.midad-arabic-sources/``), normalises it into a language-neutral **render\nmodel**, and writes that model to\n``.midad-arabic-sources/source-models/<collection>/<id>.json``. The Midad Arabic Sources\nplugin turns the model into markdown with editable ETA templates.\n\nCollections currently configured:\n\n  tafsir  Qur\'\u0101n commentaries (Arabic originals + English translations)\n          catalog: spa5k/tafsir_api, mirroring quran.com / altafsir.com\n  quran   Qur\'\u0101n translations (English)\n          catalog: fawazahmed0/quran-api\n  hadith  \u1E24ad\u012Bth collections (Arabic + English, bundled)\n          catalog: AhmedBaset/hadith-json\n\nUsage\n-----\n    python3 text-source-import.py list [--collection tafsir] [--language ar] [--json]\n    python3 text-source-import.py fetch --key tafsir:ar-tafsir-al-jalalayn\n    python3 text-source-import.py fetch --key hadith:bukhari\n    python3 text-source-import.py fetch --key tafsir:ar-tafsir-al-jalalayn --surahs 1,112\n\nThe script prints JSON-lines events (``{"event": "..."}``) so the plugin can\nstream progress. Only the Python standard library is used.\n"""\n\nfrom __future__ import annotations\n\nimport argparse\nimport hashlib\nimport html\nimport importlib.util\nimport json\nimport os\nimport re\nimport sqlite3\nimport sys\nimport time\nimport types\nimport unicodedata\nimport urllib.error\nimport urllib.request\nfrom datetime import datetime\nfrom pathlib import Path\n\n\n# \u2500\u2500 Paths \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n\ndef _find_vault() -> Path:\n    """Locate the vault root (env override, else nearest ancestor with .obsidian)."""\n    env = os.environ.get("OBSIDIAN_VAULT")\n    if env:\n        return Path(env)\n    here = Path(__file__).resolve()\n    for parent in [here.parent, *here.parents]:\n        if (parent / ".obsidian").is_dir():\n            return parent\n    return here.parent.parent\n\n\nVAULT = _find_vault()\nCACHE_DIR = VAULT / ".midad-arabic-sources" / "cache" / "text-sources"\nMODEL_DIR = VAULT / ".midad-arabic-sources" / "source-models"\n# Canonical, schema-bearing source data (the FODT dictionary keeps its homonym\n# and diptote fields here; the model is only the render cache).\nSOURCE_DATA_DIR = VAULT / ".midad-arabic-sources" / "source-data"\nQURAN_DIR = VAULT / "_7 Sources" / "Quran"\n\n# Optional per-work title/author/dir overrides, keyed by "<collection>:<id>".\nOVERRIDES_FILE = VAULT / ".midad-arabic-sources" / "text-source-titles.json"\n# User-added Turath works (the "add by URL" list), merged into the catalogue.\nCUSTOM_WORKS_FILE = VAULT / ".midad-arabic-sources" / "turath-custom-works.json"\n\nDEFAULT_LAYOUT = "stacked"  # "stacked" | "table" (facing-page cells)\n\n# \u2500\u2500 Collections \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n#\n# Each collection declares:\n#   label        human-readable name for the modal / CLI\n#   catalog      URL of the catalog JSON\n#   data         URL template for one s\u016Brah ({id} = work id, {surah} = number)\n#   kind         "tafsir" (list catalog) or "translation" (dict catalog)\n#   languages    map of our codes ("ar"/"en") to catalog language strings\n#   shape        how a downloaded file is structured:\n#                  "ayah-list"  \u2192 [{text, ayah, surah}, \u2026] or {"ayahs": [\u2026]}\n#                  "chapter"    \u2192 {"chapter": [{chapter, verse, text}, \u2026]}\n\nCOLLECTIONS: dict[str, dict] = {\n    "tafsir": {\n        "label": "Qur\u02BE\u0101n commentaries (tafs\u012Br)",\n        "genre": "tafsir",\n        "repo_label": "spa5k/tafsir_api",\n        "catalog": "https://cdn.jsdelivr.net/gh/spa5k/tafsir_api@main/tafsir/editions.json",\n        "data": "https://cdn.jsdelivr.net/gh/spa5k/tafsir_api@main/tafsir/{id}/{surah}.json",\n        "kind": "tafsir",\n        "languages": {"ar": "arabic", "en": "english"},\n        "shape": "ayah-list",\n        "moc": "Tafs\u012Br Sources",\n        "cssclass": "tafsir",\n    },\n    "tafsir-qul": {\n        "label": "Qur\u02BE\u0101n commentaries (QUL)",\n        "genre": "tafsir",\n        "repo_label": "Qur\u02BE\u0101nic Universal Library",\n        "catalog": "https://qul.tarteel.ai/api/v1/resources/tafsirs",\n        # One request per s\u016Brah: {id} is the QUL resource id, {surah} the chapter,\n        # {count} its \u0101ya count. QUL expands a passage to every \u0101ya it covers, so\n        # the usual consecutive-dedupe folds a shared passage into a ranged block.\n        "data": "https://qul.tarteel.ai/api/v1/tafsirs/{id}/by_range?from={surah}:1&to={surah}:{count}",\n        "kind": "qul-tafsir",\n        "languages": {"ar": "arabic", "en": "english"},\n        "shape": "qul-tafsir",\n        "moc": "Tafs\u012Br Sources",\n        "cssclass": "tafsir",\n    },\n    "quran": {\n        "label": "Qur\u02BE\u0101n translations",\n        "genre": "quran",\n        "repo_label": "fawazahmed0/quran-api",\n        "catalog": "https://cdn.jsdelivr.net/gh/fawazahmed0/quran-api@1/editions.min.json",\n        "data": "https://cdn.jsdelivr.net/gh/fawazahmed0/quran-api@1/editions/{id}/{surah}.json",\n        "kind": "translation",\n        "languages": {"en": "english"},\n        "shape": "chapter",\n        "moc": "Qur\u02BE\u0101n Translations",\n        "cssclass": "quran",\n    },\n    "hadith": {\n        "label": "\u1E24ad\u012Bth collections",\n        "genre": "hadith",\n        "repo_label": "AhmedBaset/hadith-json",\n        "catalog": None,  # static list below\n        "data": "https://cdn.jsdelivr.net/gh/AhmedBaset/hadith-json@v1.2.0/db/by_book/{group}/{id}.json",\n        "kind": "hadith",\n        "languages": {"ar": "arabic", "en": "english"},\n        "shape": "hadith-book",\n        "moc": "\u1E24ad\u012Bth Sources",\n        "cssclass": "hadith",\n    },\n    "quran-text": {\n        "label": "Qur\u02BE\u0101n texts (riw\u0101y\u0101t)",\n        "genre": "quran-text",\n        "repo_label": "risan/quran-json",\n        "catalog": None,  # static list below\n        "data": "https://quran-json.risanb.com/text/{id}/chapters/{surah}.json",\n        "kind": "quran-text",\n        "languages": {"ar": "arabic"},\n        "shape": "risan",\n        "moc": "Qur\u02BE\u0101n (text)",\n        "cssclass": "quran",\n    },\n    "dictionary": {\n        "label": "Dictionaries",\n        "genre": "dictionary",\n        "repo_label": "GibreelAbdullah/HansWehrDictionary",\n        "catalog": None,  # static list below\n        "data": "https://github.com/GibreelAbdullah/HansWehrDictionary/releases/latest/download/hanswehr.sqlite",\n        "kind": "dictionary",\n        "languages": {"ar": "arabic"},\n        "shape": "sqlite",\n        "moc": "Dictionaries",\n        "cssclass": "dictionary",\n        # Entries whose source gives no transliteration are named by romanizing\n        # the bare root \u2014 that needs the transliteration service, so the plugin\n        # asks the user before rendering a collection that declares this.\n        "needs_transliteration": True,\n    },\n    "turath": {\n        "label": "Turath.io (classical texts)",\n        "genre": "turath",\n        "repo_label": "turath.io",\n        "catalog": None,  # curated static list below\n        # One request per book, a minified file keyed by Arabic diacritics\n        # (decoded in `build_turath_units`). There is no bulk listing endpoint.\n        "data": "https://files.turath.io/books-v3/{id}.json",\n        "kind": "book",\n        "languages": {"ar": "arabic"},\n        "shape": "turath-v3",\n        "moc": "Turath",\n        "cssclass": "book",\n    },\n}\n\n# Static catalogue for lexicons distributed as SQLite. The importer downloads\n# the file and reads it with Python\'s own sqlite3 \u2014 no scraping, no JSON needed.\nDICTIONARIES: list[dict] = [\n    {\n        "id": "hanswehr",\n        "title": "Hans Wehr Dictionary",\n        "arabic": "\u0645\u0639\u062C\u0645 \u0647\u0627\u0646\u0633 \u06A4\u064A\u0631",\n        "author": "Hans Wehr",\n        "editor": "J Milton Cowan",\n        "source": "https://github.com/GibreelAbdullah/HansWehrDictionary",\n        "db": "https://github.com/GibreelAbdullah/HansWehrDictionary/releases/latest/download/hanswehr.sqlite",\n        "db_path": "assets/hanswehr.sqlite",\n        # `grid` = Wehr\'s label/content senses (a two-column callout); `prose` =\n        # Lane\'s English paragraphs. `note_prefix` labels a root note\'s file name\n        # and its `aliases:` \u2014 one per dictionary, so the two never collide.\n        "body": "grid",\n        "note_prefix": "HW",\n        # This work exists only once across the imported repositories, so it does\n        # not need a repo qualifier in its folder/file name (see `unique`).\n        "unique": True,\n        # Wehr\'s own transliteration \u2014 the European Orientalist system its text\n        # uses (\u0161, \u1E6F, \u1E35, \u2026) \u2014 so an engine reading still matches the note\'s text.\n        "convention": "wehr",\n    },\n    {\n        # The same dictionary from the FODT origin rather than the app\'s SQLite.\n        # It keeps Wehr\'s homonym numbers and diptote markers, which the app\'s\n        # conversion dropped. A separate work (folder, `HWF` prefix) so the two\n        # can be compared side by side; the 62 entries the FODT lost are carried\n        # from the app\'s SQLite and marked `source: "app-supplement"`.\n        "id": "hanswehr-fodt",\n        "title": "Hans Wehr Dictionary (FODT)",\n        "arabic": "\u0645\u0639\u062C\u0645 \u0647\u0627\u0646\u0633 \u06A4\u064A\u0631",\n        "author": "Hans Wehr",\n        "editor": "J Milton Cowan",\n        "source": "https://github.com/muhammad-abdurrahman/hans-wehr-fodt-parser",\n        "db": "https://raw.githubusercontent.com/muhammad-abdurrahman/"\n              "hans-wehr-fodt-parser/master/hanswehr.xml",\n        "db_path": "hanswehr.xml",\n        "body": "grid",\n        "note_prefix": "HWF",\n        "unique": True,\n        "convention": "wehr",\n        "shape": "fodt",\n        "license_attribution": "Text: Hans Wehr, A Dictionary of Modern Written Arabic, "\n                               "ed. J Milton Cowan. Digitisation: muhammad-abdurrahman/"\n                               "hans-wehr-fodt-parser (MIT, code only). The 62 entries the "\n                               "FODT lacks are carried from the app\'s SQLite, marked "\n                               "app-supplement.",\n    },\n    {\n        "id": "lanelexicon",\n        "title": "Lane\'s Lexicon",\n        "arabic": "\u0645\u0639\u062C\u0645 \u0644\u064A\u0646",\n        "author": "Edward William Lane",\n        "editor": "",\n        "source": "https://github.com/GibreelAbdullah/LaneLexicon",\n        "db": "https://github.com/GibreelAbdullah/LaneLexicon/releases/latest/download/lanelexicon.sqlite",\n        "db_path": "assets/lanelexicon.sqlite",\n        # Lane\'s definitions are English prose (with <i>/<h3>/<center> markup) and\n        # carry no Latin transliteration, so the body renders as paragraphs and the\n        # names come from the transliteration service.\n        "body": "prose",\n        "note_prefix": "LL",\n        # Lane, too, exists only once across the imported repositories.\n        "unique": True,\n        # Lane transliterates nothing itself, so its names follow the vault\'s own\n        # convention (no case endings, verb/pronoun/preposition endings kept, the\n        # two tanw\u012Bn exceptions).\n        "convention": "vault",\n        # The database folds the Supplement (Book II) into the Lexicon as one\n        # work: its rows are a suffix block in the scan\'s own numbering, from this\n        # id on (3,034 of 52,914 rows, 609 of them roots), attached under the\n        # corresponding Lexicon roots. A root note marks where they begin.\n        "supplement_from": 49881,\n    },\n]\n\n# \u0100ya counts (1..114), used to bound a QUL per-s\u016Brah request. The standard\n# K\u016Bfan count; an over-run is harmless (records group by their surah key), an\n# under-run would drop the tail, so a wrong entry is easy to spot and fix.\nSURAH_AYAHS: list[int] = [\n    7, 286, 200, 176, 120, 165, 206, 75, 129, 109, 123, 111, 43, 52, 99, 128,\n    111, 110, 98, 135, 112, 78, 118, 64, 77, 227, 93, 88, 69, 60, 34, 30, 73,\n    54, 45, 83, 182, 88, 75, 85, 54, 53, 89, 59, 37, 35, 38, 29, 18, 45, 60,\n    49, 62, 55, 78, 96, 29, 22, 24, 13, 14, 11, 11, 18, 12, 12, 30, 52, 52,\n    44, 28, 28, 20, 56, 40, 31, 50, 40, 46, 42, 29, 19, 36, 25, 22, 17, 19,\n    26, 30, 20, 15, 21, 11, 8, 8, 19, 5, 8, 8, 11, 11, 8, 3, 9, 5, 4, 7, 3,\n    6, 3, 5, 4, 5, 6,\n]\n\n# Static catalogue for the AhmedBaset/hadith-json repository (17 collections).\n# Titles are romanized to vault style; the Arabic titles are used in headings.\nHADITH_BOOKS: list[dict] = [\n    {"group": "the_9_books", "id": "bukhari", "title": "\u1E62a\u1E25\u012B\u1E25 al-Bukh\u0101r\u012B", "arabic": "\u0635\u062D\u064A\u062D \u0627\u0644\u0628\u062E\u0627\u0631\u064A", "author": "Mu\u1E25ammad b. Ism\u0101\u02BF\u012Bl al-Bukh\u0101r\u012B"},\n    {"group": "the_9_books", "id": "muslim", "title": "\u1E62a\u1E25\u012B\u1E25 Muslim", "arabic": "\u0635\u062D\u064A\u062D \u0645\u0633\u0644\u0645", "author": "Muslim b. al-\u1E24ajj\u0101j"},\n    {"group": "the_9_books", "id": "abudawud", "title": "Sunan Ab\u012B D\u0101w\u016Bd", "arabic": "\u0633\u0646\u0646 \u0623\u0628\u064A \u062F\u0627\u0648\u062F", "author": "Ab\u016B D\u0101w\u016Bd al-Sijist\u0101n\u012B"},\n    {"group": "the_9_books", "id": "tirmidhi", "title": "J\u0101mi\u02BF al-Tirmidh\u012B", "arabic": "\u062C\u0627\u0645\u0639 \u0627\u0644\u062A\u0631\u0645\u0630\u064A", "author": "Ab\u016B \u02BF\u012As\u0101 al-Tirmidh\u012B"},\n    {"group": "the_9_books", "id": "nasai", "title": "Sunan al-Nas\u0101\u02BE\u012B", "arabic": "\u0633\u0646\u0646 \u0627\u0644\u0646\u0633\u0627\u0626\u064A", "author": "A\u1E25mad b. Shu\u02BFayb al-Nas\u0101\u02BE\u012B"},\n    {"group": "the_9_books", "id": "ibnmajah", "title": "Sunan Ibn M\u0101jah", "arabic": "\u0633\u0646\u0646 \u0627\u0628\u0646 \u0645\u0627\u062C\u0647", "author": "Ibn M\u0101jah al-Qazw\u012Bn\u012B"},\n    {"group": "the_9_books", "id": "malik", "title": "Muwa\u1E6D\u1E6Da\u02BE M\u0101lik", "arabic": "\u0645\u0648\u0637\u0623 \u0645\u0627\u0644\u0643", "author": "M\u0101lik b. Anas"},\n    {"group": "the_9_books", "id": "ahmed", "title": "Musnad A\u1E25mad", "arabic": "\u0645\u0633\u0646\u062F \u0623\u062D\u0645\u062F", "author": "A\u1E25mad b. \u1E24anbal"},\n    {"group": "the_9_books", "id": "darimi", "title": "Sunan al-D\u0101rim\u012B", "arabic": "\u0633\u0646\u0646 \u0627\u0644\u062F\u0627\u0631\u0645\u064A", "author": "al-D\u0101rim\u012B"},\n    {"group": "other_books", "id": "riyad_assalihin", "title": "Riy\u0101\u1E0D al-\u1E62\u0101li\u1E25\u012Bn", "arabic": "\u0631\u064A\u0627\u0636 \u0627\u0644\u0635\u0627\u0644\u062D\u064A\u0646", "author": "Ya\u1E25y\u0101 al-Nawaw\u012B"},\n    {"group": "other_books", "id": "shamail_muhammadiyah", "title": "al-Sham\u0101\u02BEil al-Mu\u1E25ammadiyya", "arabic": "\u0627\u0644\u0634\u0645\u0627\u0626\u0644 \u0627\u0644\u0645\u062D\u0645\u062F\u064A\u0629", "author": "Ab\u016B \u02BF\u012As\u0101 al-Tirmidh\u012B"},\n    {"group": "other_books", "id": "bulugh_almaram", "title": "Bul\u016Bgh al-Mar\u0101m", "arabic": "\u0628\u0644\u0648\u063A \u0627\u0644\u0645\u0631\u0627\u0645", "author": "Ibn \u1E24ajar al-\u02BFAsqal\u0101n\u012B"},\n    {"group": "other_books", "id": "aladab_almufrad", "title": "al-Adab al-Mufrad", "arabic": "\u0627\u0644\u0623\u062F\u0628 \u0627\u0644\u0645\u0641\u0631\u062F", "author": "Mu\u1E25ammad b. Ism\u0101\u02BF\u012Bl al-Bukh\u0101r\u012B"},\n    {"group": "other_books", "id": "mishkat_almasabih", "title": "Mishk\u0101t al-Ma\u1E63\u0101b\u012B\u1E25", "arabic": "\u0645\u0634\u0643\u0627\u0629 \u0627\u0644\u0645\u0635\u0627\u0628\u064A\u062D", "author": "Mu\u1E25ammad b. \u02BFAbdall\u0101h al-Kha\u1E6D\u012Bb al-Tibr\u012Bz\u012B"},\n    {"group": "forties", "id": "nawawi40", "title": "al-Arba\u02BF\u016Bn al-Nawawiyya", "arabic": "\u0627\u0644\u0623\u0631\u0628\u0639\u0648\u0646 \u0627\u0644\u0646\u0648\u0648\u064A\u0629", "author": "Ya\u1E25y\u0101 al-Nawaw\u012B"},\n    {"group": "forties", "id": "qudsi40", "title": "al-Arba\u02BF\u016Bn al-Qudsiyya", "arabic": "\u0627\u0644\u0623\u0631\u0628\u0639\u0648\u0646 \u0627\u0644\u0642\u062F\u0633\u064A\u0629", "author": ""},\n    {"group": "forties", "id": "shahwaliullah40", "title": "Arba\u02BF\u016Bn Sh\u0101h Wal\u012B All\u0101h", "arabic": "\u0623\u0631\u0628\u0639\u0648\u0646 \u0627\u0644\u0634\u0627\u0647 \u0648\u0644\u064A \u0627\u0644\u0644\u0647", "author": "Sh\u0101h Wal\u012B All\u0101h al-Dihlaw\u012B"},\n]\n\n# Static catalogue for the risan/quran-json riw\u0101ya texts. `source_id` is the\n# script id in that repository. The plugin decides which riw\u0101ya is canonical\n# (its s\u016Bra notes are unprefixed); the others get prefixed notes.\nQURAN_TEXTS: list[dict] = [\n    {"id": "hafs", "source_id": "uthmani", "title": "Qur\u02BE\u0101n (riw\u0101yat \u1E24af\u1E63)", "riwaya_ar": "\u0631\u0648\u0627\u064A\u0629 \u062D\u0641\u0635"},\n    {"id": "warsh", "source_id": "warsh", "title": "Qur\u02BE\u0101n (riw\u0101yat Warsh)", "riwaya_ar": "\u0631\u0648\u0627\u064A\u0629 \u0648\u0631\u0634"},\n    {"id": "qalun", "source_id": "qalun", "title": "Qur\u02BE\u0101n (riw\u0101yat Q\u0101l\u016Bn)", "riwaya_ar": "\u0631\u0648\u0627\u064A\u0629 \u0642\u0627\u0644\u0648\u0646"},\n    {"id": "duri", "source_id": "duri", "title": "Qur\u02BE\u0101n (riw\u0101yat al-D\u016Br\u012B)", "riwaya_ar": "\u0631\u0648\u0627\u064A\u0629 \u0627\u0644\u062F\u0648\u0631\u064A"},\n    {"id": "shubah", "source_id": "shubah", "title": "Qur\u02BE\u0101n (riw\u0101yat Shu\u02BFbah)", "riwaya_ar": "\u0631\u0648\u0627\u064A\u0629 \u0634\u0639\u0628\u0629"},\n    {"id": "susi", "source_id": "susi", "title": "Qur\u02BE\u0101n (riw\u0101yat al-S\u016Bs\u012B)", "riwaya_ar": "\u0631\u0648\u0627\u064A\u0629 \u0627\u0644\u0633\u0648\u0633\u064A"},\n]\n\n# Static catalogue for Turath.io (api.turath.io), a keyless library of ~8,500\n# classical texts served as one JSON per book (files.turath.io/books-v3/<id>.json).\n# Turath exposes no bulk listing, so this is a curated starter list; more works can\n# be added here or per-vault via `.midad-arabic-sources/text-source-titles.json`.\n#\n# `type` is both the manage-modal genre toggle and the work\'s "<Type> Sources" MOC\n# (see `TURATH_TYPES`); the repository MOC `Turath` is added for every work. Latin\n# titles and authors are hand-checked against the vault\'s transliteration; the\n# Arabic forms are Turath\'s own metadata.\nTURATH_TYPES: dict[str, str] = {\n    "tafsir": "Tafs\u012Br Sources",\n    "hadith": "\u1E24ad\u012Bth Sources",\n    "fiqh": "Fiqh Sources",\n    "usul": "U\u1E63\u016Bl al-Fiqh Sources",\n    "aqida": "\u02BFAq\u012Bda Sources",\n    "tarikh": "T\u0101r\u012Bkh Sources",\n    "language": "Language Sources",\n    "quran-sciences": "\u02BFUl\u016Bm al-Qur\u02BE\u0101n Sources",\n}\n\nTURATH_BOOKS: list[dict] = [\n    # \u2500\u2500 Tafs\u012Br \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n    {"id": "7798", "title": "Tafs\u012Br al-\u1E6Cabar\u012B", "arabic": "\u062A\u0641\u0633\u064A\u0631 \u0627\u0644\u0637\u0628\u0631\u064A", "author": "Ab\u016B Ja\u02BFfar al-\u1E6Cabar\u012B", "type": "tafsir"},\n    {"id": "20855", "title": "al-J\u0101mi\u02BF li-A\u1E25k\u0101m al-Qur\u02BE\u0101n", "arabic": "\u0627\u0644\u062C\u0627\u0645\u0639 \u0644\u0623\u062D\u0643\u0627\u0645 \u0627\u0644\u0642\u0631\u0622\u0646", "author": "Ab\u016B \u02BFAbdall\u0101h al-Qur\u1E6Dub\u012B", "type": "tafsir"},\n    {"id": "8473", "title": "Tafs\u012Br Ibn Kath\u012Br", "arabic": "\u062A\u0641\u0633\u064A\u0631 \u0627\u0628\u0646 \u0643\u062B\u064A\u0631", "author": "Ism\u0101\u02BF\u012Bl b. \u02BFUmar Ibn Kath\u012Br", "type": "tafsir"},\n    {"id": "23627", "title": "al-Kashsh\u0101f", "arabic": "\u0627\u0644\u0643\u0634\u0627\u0641", "author": "Ma\u1E25m\u016Bd b. \u02BFUmar al-Zamakhshar\u012B", "type": "tafsir"},\n    {"id": "23635", "title": "Maf\u0101t\u012B\u1E25 al-Ghayb", "arabic": "\u0645\u0641\u0627\u062A\u064A\u062D \u0627\u0644\u063A\u064A\u0628", "author": "Fakhr al-D\u012Bn al-R\u0101z\u012B", "type": "tafsir"},\n    {"id": "23591", "title": "al-Ba\u1E25r al-Mu\u1E25\u012B\u1E6D", "arabic": "\u0627\u0644\u0628\u062D\u0631 \u0627\u0644\u0645\u062D\u064A\u0637", "author": "Ab\u016B \u1E24ayy\u0101n al-Andalus\u012B", "type": "tafsir"},\n    {"id": "12884", "title": "al-Durr al-Manth\u016Br", "arabic": "\u0627\u0644\u062F\u0631 \u0627\u0644\u0645\u0646\u062B\u0648\u0631", "author": "Jal\u0101l al-D\u012Bn al-Suy\u016B\u1E6D\u012B", "type": "tafsir"},\n    {"id": "12876", "title": "Tafs\u012Br al-Jal\u0101layn", "arabic": "\u062A\u0641\u0633\u064A\u0631 \u0627\u0644\u062C\u0644\u0627\u0644\u064A\u0646", "authors": ["Jal\u0101l al-D\u012Bn al-Ma\u1E25all\u012B", "Jal\u0101l al-D\u012Bn al-Suy\u016B\u1E6D\u012B"], "type": "tafsir"},\n    {"id": "22918", "title": "A\u1E0Dw\u0101\u02BE al-Bay\u0101n", "arabic": "\u0623\u0636\u0648\u0627\u0621 \u0627\u0644\u0628\u064A\u0627\u0646", "author": "Mu\u1E25ammad al-Am\u012Bn al-Shinq\u012B\u1E6D\u012B", "type": "tafsir"},\n    {"id": "23631", "title": "Ma\u1E25\u0101sin al-Ta\u02BEw\u012Bl", "arabic": "\u0645\u062D\u0627\u0633\u0646 \u0627\u0644\u062A\u0623\u0648\u064A\u0644", "author": "Jam\u0101l al-D\u012Bn al-Q\u0101sim\u012B", "type": "tafsir"},\n    {"id": "42", "title": "Tays\u012Br al-Kar\u012Bm al-Ra\u1E25m\u0101n", "arabic": "\u062A\u064A\u0633\u064A\u0631 \u0627\u0644\u0643\u0631\u064A\u0645 \u0627\u0644\u0631\u062D\u0645\u0646", "author": "\u02BFAbd al-Ra\u1E25m\u0101n al-Sa\u02BFd\u012B", "type": "tafsir"},\n    # \u2500\u2500 \u1E24ad\u012Bth \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n    {"id": "735", "title": "\u1E62a\u1E25\u012B\u1E25 al-Bukh\u0101r\u012B", "arabic": "\u0635\u062D\u064A\u062D \u0627\u0644\u0628\u062E\u0627\u0631\u064A", "author": "Mu\u1E25ammad b. Ism\u0101\u02BF\u012Bl al-Bukh\u0101r\u012B", "type": "hadith"},\n    {"id": "1727", "title": "\u1E62a\u1E25\u012B\u1E25 Muslim", "arabic": "\u0635\u062D\u064A\u062D \u0645\u0633\u0644\u0645", "author": "Muslim b. al-\u1E24ajj\u0101j", "type": "hadith"},\n    {"id": "117359", "title": "Sunan Ab\u012B D\u0101w\u016Bd", "arabic": "\u0633\u0646\u0646 \u0623\u0628\u064A \u062F\u0627\u0648\u062F", "author": "Ab\u016B D\u0101w\u016Bd al-Sijist\u0101n\u012B", "type": "hadith"},\n    {"id": "7895", "title": "Sunan al-Tirmidh\u012B", "arabic": "\u0633\u0646\u0646 \u0627\u0644\u062A\u0631\u0645\u0630\u064A", "author": "Ab\u016B \u02BF\u012As\u0101 al-Tirmidh\u012B", "type": "hadith"},\n    {"id": "1198", "title": "Sunan Ibn M\u0101jah", "arabic": "\u0633\u0646\u0646 \u0627\u0628\u0646 \u0645\u0627\u062C\u0647", "author": "Ibn M\u0101jah al-Qazw\u012Bn\u012B", "type": "hadith"},\n    {"id": "1699", "title": "al-Muwa\u1E6D\u1E6Da\u02BE", "arabic": "\u0645\u0648\u0637\u0623 \u0645\u0627\u0644\u0643", "author": "M\u0101lik b. Anas", "type": "hadith"},\n    {"id": "25794", "title": "Musnad A\u1E25mad", "arabic": "\u0645\u0633\u0646\u062F \u0623\u062D\u0645\u062F", "author": "A\u1E25mad b. \u1E24anbal", "type": "hadith"},\n    {"id": "1673", "title": "Fat\u1E25 al-B\u0101r\u012B", "arabic": "\u0641\u062A\u062D \u0627\u0644\u0628\u0627\u0631\u064A", "author": "Ibn \u1E24ajar al-\u02BFAsqal\u0101n\u012B", "type": "hadith"},\n    {"id": "1711", "title": "al-Minh\u0101j Shar\u1E25 \u1E62a\u1E25\u012B\u1E25 Muslim", "arabic": "\u0634\u0631\u062D \u0627\u0644\u0646\u0648\u0648\u064A \u0639\u0644\u0649 \u0645\u0633\u0644\u0645", "author": "Ya\u1E25y\u0101 al-Nawaw\u012B", "type": "hadith"},\n    {"id": "2348", "title": "Riy\u0101\u1E0D al-\u1E62\u0101li\u1E25\u012Bn", "arabic": "\u0631\u064A\u0627\u0636 \u0627\u0644\u0635\u0627\u0644\u062D\u064A\u0646", "author": "Ya\u1E25y\u0101 al-Nawaw\u012B", "type": "hadith"},\n    {"id": "12836", "title": "al-Arba\u02BF\u016Bn al-Nawawiyya", "arabic": "\u0627\u0644\u0623\u0631\u0628\u0639\u0648\u0646 \u0627\u0644\u0646\u0648\u0648\u064A\u0629", "author": "Ya\u1E25y\u0101 al-Nawaw\u012B", "type": "hadith"},\n    # \u2500\u2500 Fiqh \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n    {"id": "1655", "title": "al-Umm", "arabic": "\u0627\u0644\u0623\u0645", "author": "Mu\u1E25ammad b. Idr\u012Bs al-Sh\u0101fi\u02BF\u012B", "type": "fiqh"},\n    {"id": "6910", "title": "al-Mughn\u012B", "arabic": "\u0627\u0644\u0645\u063A\u0646\u064A", "author": "Muwaffaq al-D\u012Bn Ibn Qud\u0101ma", "type": "fiqh"},\n    {"id": "2186", "title": "al-Majm\u016B\u02BF Shar\u1E25 al-Muhadhdhab", "arabic": "\u0627\u0644\u0645\u062C\u0645\u0648\u0639 \u0634\u0631\u062D \u0627\u0644\u0645\u0647\u0630\u0628", "author": "Ya\u1E25y\u0101 al-Nawaw\u012B", "type": "fiqh"},\n    {"id": "8183", "title": "Bad\u0101\u02BEi\u02BF al-\u1E62an\u0101\u02BEi\u02BF", "arabic": "\u0628\u062F\u0627\u0626\u0639 \u0627\u0644\u0635\u0646\u0627\u0626\u0639", "author": "\u02BFAl\u0101\u02BE al-D\u012Bn al-K\u0101s\u0101n\u012B", "type": "fiqh"},\n    {"id": "11820", "title": "al-Hid\u0101ya", "arabic": "\u0627\u0644\u0647\u062F\u0627\u064A\u0629", "author": "Burh\u0101n al-D\u012Bn al-Margh\u012Bn\u0101n\u012B", "type": "fiqh"},\n    {"id": "587", "title": "al-Mudawwana", "arabic": "\u0627\u0644\u0645\u062F\u0648\u0646\u0629", "author": "M\u0101lik b. Anas", "type": "fiqh"},\n    {"id": "21739", "title": "Bid\u0101yat al-Mujtahid", "arabic": "\u0628\u062F\u0627\u064A\u0629 \u0627\u0644\u0645\u062C\u062A\u0647\u062F", "author": "Ibn Rushd", "type": "fiqh"},\n    {"id": "1679", "title": "al-Raw\u1E0D al-Murabba\u02BF", "arabic": "\u0627\u0644\u0631\u0648\u0636 \u0627\u0644\u0645\u0631\u0628\u0639", "author": "Man\u1E63\u016Br al-Buh\u016Bt\u012B", "type": "fiqh"},\n    {"id": "11373", "title": "al-Ris\u0101la al-Qayraw\u0101niyya", "arabic": "\u0627\u0644\u0631\u0633\u0627\u0644\u0629", "author": "Ibn Ab\u012B Zayd al-Qayraw\u0101n\u012B", "type": "fiqh"},\n    {"id": "9548", "title": "Mukhta\u1E63ar al-Akh\u1E0Dar\u012B", "arabic": "\u0645\u062A\u0646 \u0627\u0644\u0623\u062E\u0636\u0631\u064A \u0641\u064A \u0627\u0644\u0639\u0628\u0627\u062F\u0627\u062A", "author": "al-Akh\u1E0Dar\u012B", "type": "fiqh"},\n    {"id": "124336", "title": "Mukhta\u1E63ar al-Qud\u016Br\u012B", "arabic": "\u0645\u062E\u062A\u0635\u0631 \u0627\u0644\u0642\u062F\u0648\u0631\u064A", "author": "al-Qud\u016Br\u012B", "type": "fiqh"},\n    {"id": "6125", "title": "al-Muqaddima al-\u1E24a\u1E0Dramiyya", "arabic": "\u0627\u0644\u0645\u0642\u062F\u0645\u0629 \u0627\u0644\u062D\u0636\u0631\u0645\u064A\u0629", "author": "\u02BFAbdall\u0101h B\u0101 Fa\u1E0Dl al-\u1E24a\u1E0Dram\u012B", "type": "fiqh"},\n    {"id": "11315", "title": "\u02BFUmdat al-Fiqh", "arabic": "\u0639\u0645\u062F\u0629 \u0627\u0644\u0641\u0642\u0647", "author": "Ibn Qud\u0101ma", "type": "fiqh"},\n    {"id": "11355", "title": "Mukhta\u1E63ar Khal\u012Bl", "arabic": "\u0645\u062E\u062A\u0635\u0631 \u062E\u0644\u064A\u0644", "author": "Khal\u012Bl b. Is\u1E25\u0101q", "type": "fiqh"},\n    {"id": "91", "title": "Shar\u1E25 al-Kharash\u012B", "arabic": "\u0634\u0631\u062D \u0627\u0644\u062E\u0631\u0634\u064A \u0639\u0644\u0649 \u0645\u062E\u062A\u0635\u0631 \u062E\u0644\u064A\u0644", "author": "al-Kharash\u012B", "type": "fiqh"},\n    {"id": "569", "title": "Maw\u0101hib al-Jal\u012Bl", "arabic": "\u0645\u0648\u0627\u0647\u0628 \u0627\u0644\u062C\u0644\u064A\u0644 \u0641\u064A \u0634\u0631\u062D \u0645\u062E\u062A\u0635\u0631 \u062E\u0644\u064A\u0644", "author": "al-\u1E24a\u1E6D\u1E6D\u0101b", "type": "fiqh"},\n    {"id": "21611", "title": "al-T\u0101j wa-l-Ikl\u012Bl", "arabic": "\u0627\u0644\u062A\u0627\u062C \u0648\u0627\u0644\u0625\u0643\u0644\u064A\u0644 \u0644\u0645\u062E\u062A\u0635\u0631 \u062E\u0644\u064A\u0644", "author": "al-Maww\u0101q", "type": "fiqh"},\n    {"id": "21614", "title": "Man\u1E25 al-Jal\u012Bl", "arabic": "\u0645\u0646\u062D \u0627\u0644\u062C\u0644\u064A\u0644 \u0634\u0631\u062D \u0645\u062E\u062A\u0635\u0631 \u062E\u0644\u064A\u0644", "author": "\u02BFUlaysh", "type": "fiqh"},\n    {"id": "95864", "title": "al-Kawkab al-Zahr\u012B", "arabic": "\u0627\u0644\u0643\u0648\u0643\u0628 \u0627\u0644\u0632\u0647\u0631\u064A \u0646\u0638\u0645 \u0645\u062E\u062A\u0635\u0631 \u0627\u0644\u0623\u062E\u0636\u0631\u064A", "author": "Mu\u1E25ammad B\u0101y Bil\u02BF\u0101lam", "type": "fiqh"},\n    # \u2500\u2500 U\u1E63\u016Bl al-fiqh \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n    {"id": "8180", "title": "al-Ris\u0101la", "arabic": "\u0627\u0644\u0631\u0633\u0627\u0644\u0629", "author": "Mu\u1E25ammad b. Idr\u012Bs al-Sh\u0101fi\u02BF\u012B", "type": "usul"},\n    {"id": "5459", "title": "al-Musta\u1E63f\u0101", "arabic": "\u0627\u0644\u0645\u0633\u062A\u0635\u0641\u0649", "author": "Ab\u016B \u1E24\u0101mid al-Ghaz\u0101l\u012B", "type": "usul"},\n    {"id": "7439", "title": "al-Burh\u0101n f\u012B U\u1E63\u016Bl al-Fiqh", "arabic": "\u0627\u0644\u0628\u0631\u0647\u0627\u0646 \u0641\u064A \u0623\u0635\u0648\u0644 \u0627\u0644\u0641\u0642\u0647", "author": "Im\u0101m al-\u1E24aramayn al-Juwayn\u012B", "type": "usul"},\n    {"id": "2022", "title": "al-Ma\u1E25\u1E63\u016Bl", "arabic": "\u0627\u0644\u0645\u062D\u0635\u0648\u0644", "author": "Fakhr al-D\u012Bn al-R\u0101z\u012B", "type": "usul"},\n    {"id": "6301", "title": "U\u1E63\u016Bl al-Sarakhs\u012B", "arabic": "\u0623\u0635\u0648\u0644 \u0627\u0644\u0633\u0631\u062E\u0633\u064A", "author": "Ab\u016B Bakr al-Sarakhs\u012B", "type": "usul"},\n    {"id": "12010", "title": "Raw\u1E0Dat al-N\u0101\u1E93ir", "arabic": "\u0631\u0648\u0636\u0629 \u0627\u0644\u0646\u0627\u0638\u0631", "author": "Ibn Qud\u0101ma al-Maqdis\u012B", "type": "usul"},\n    # \u2500\u2500 \u02BFAq\u012Bda \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n    {"id": "8352", "title": "Shar\u1E25 al-\u02BFAq\u012Bda al-\u1E6Ca\u1E25\u0101wiyya", "arabic": "\u0634\u0631\u062D \u0627\u0644\u0639\u0642\u064A\u062F\u0629 \u0627\u0644\u0637\u062D\u0627\u0648\u064A\u0629", "author": "Ibn Ab\u012B al-\u02BFIzz", "type": "aqida"},\n    {"id": "18098", "title": "al-\u02BFAq\u012Bda al-W\u0101si\u1E6Diyya", "arabic": "\u0627\u0644\u0639\u0642\u064A\u062F\u0629 \u0627\u0644\u0648\u0627\u0633\u0637\u064A\u0629", "author": "A\u1E25mad b. Taymiyya", "type": "aqida"},\n    {"id": "8178", "title": "al-Ib\u0101na \u02BFan U\u1E63\u016Bl al-Diy\u0101na", "arabic": "\u0627\u0644\u0625\u0628\u0627\u0646\u0629 \u0639\u0646 \u0623\u0635\u0648\u0644 \u0627\u0644\u062F\u064A\u0627\u0646\u0629", "author": "Ab\u016B al-\u1E24asan al-Ash\u02BFar\u012B", "type": "aqida"},\n    {"id": "13035", "title": "al-Shar\u012B\u02BFa", "arabic": "\u0627\u0644\u0634\u0631\u064A\u0639\u0629", "author": "Ab\u016B Bakr al-\u0100jurr\u012B", "type": "aqida"},\n    {"id": "13032", "title": "Kit\u0101b al-Sunna", "arabic": "\u0627\u0644\u0633\u0646\u0629", "author": "Mu\u1E25ammad b. Na\u1E63r al-Marwaz\u012B", "type": "aqida"},\n    # \u2500\u2500 T\u0101r\u012Bkh, rij\u0101l, \u1E6Dabaq\u0101t \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n    {"id": "9783", "title": "T\u0101r\u012Bkh al-\u1E6Cabar\u012B", "arabic": "\u062A\u0627\u0631\u064A\u062E \u0627\u0644\u0637\u0628\u0631\u064A", "author": "Ab\u016B Ja\u02BFfar al-\u1E6Cabar\u012B", "type": "tarikh"},\n    {"id": "8376", "title": "al-Bid\u0101ya wa-l-Nih\u0101ya", "arabic": "\u0627\u0644\u0628\u062F\u0627\u064A\u0629 \u0648\u0627\u0644\u0646\u0647\u0627\u064A\u0629", "author": "Ibn Kath\u012Br", "type": "tarikh"},\n    {"id": "21712", "title": "al-K\u0101mil f\u012B al-T\u0101r\u012Bkh", "arabic": "\u0627\u0644\u0643\u0627\u0645\u0644 \u0641\u064A \u0627\u0644\u062A\u0627\u0631\u064A\u062E", "author": "Ibn al-Ath\u012Br", "type": "tarikh"},\n    {"id": "12320", "title": "T\u0101r\u012Bkh Ibn Khald\u016Bn", "arabic": "\u062A\u0627\u0631\u064A\u062E \u0627\u0628\u0646 \u062E\u0644\u062F\u0648\u0646", "author": "\u02BFAbd al-Ra\u1E25m\u0101n Ibn Khald\u016Bn", "type": "tarikh"},\n    {"id": "22669", "title": "Siyar A\u02BFl\u0101m al-Nubal\u0101\u02BE", "arabic": "\u0633\u064A\u0631 \u0623\u0639\u0644\u0627\u0645 \u0627\u0644\u0646\u0628\u0644\u0627\u0621", "author": "Shams al-D\u012Bn al-Dhahab\u012B", "type": "tarikh"},\n    {"id": "1000", "title": "Wafay\u0101t al-A\u02BFy\u0101n", "arabic": "\u0648\u0641\u064A\u0627\u062A \u0627\u0644\u0623\u0639\u064A\u0627\u0646", "author": "Ibn Khallik\u0101n", "type": "tarikh"},\n    {"id": "3310", "title": "Tahdh\u012Bb al-Tahdh\u012Bb", "arabic": "\u062A\u0647\u0630\u064A\u0628 \u0627\u0644\u062A\u0647\u0630\u064A\u0628", "author": "Ibn \u1E24ajar al-\u02BFAsqal\u0101n\u012B", "type": "tarikh"},\n    {"id": "8609", "title": "Taqr\u012Bb al-Tahdh\u012Bb", "arabic": "\u062A\u0642\u0631\u064A\u0628 \u0627\u0644\u062A\u0647\u0630\u064A\u0628", "author": "Ibn \u1E24ajar al-\u02BFAsqal\u0101n\u012B", "type": "tarikh"},\n    {"id": "3722", "title": "Tahdh\u012Bb al-Kam\u0101l", "arabic": "\u062A\u0647\u0630\u064A\u0628 \u0627\u0644\u0643\u0645\u0627\u0644", "author": "Y\u016Bsuf al-Mizz\u012B", "type": "tarikh"},\n    {"id": "146", "title": "al-\u1E6Cabaq\u0101t al-Kubr\u0101", "arabic": "\u0627\u0644\u0637\u0628\u0642\u0627\u062A \u0627\u0644\u0643\u0628\u0631\u0649", "author": "Ibn Sa\u02BFd", "type": "tarikh"},\n    {"id": "12286", "title": "al-A\u02BFl\u0101m", "arabic": "\u0627\u0644\u0623\u0639\u0644\u0627\u0645", "author": "Khayr al-D\u012Bn al-Zirikl\u012B", "type": "tarikh"},\n    # \u2500\u2500 Language and adab \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n    {"id": "1687", "title": "Lis\u0101n al-\u02BFArab", "arabic": "\u0644\u0633\u0627\u0646 \u0627\u0644\u0639\u0631\u0628", "author": "Ibn Man\u1E93\u016Br", "type": "language"},\n    {"id": "7283", "title": "al-Q\u0101m\u016Bs al-Mu\u1E25\u012B\u1E6D", "arabic": "\u0627\u0644\u0642\u0627\u0645\u0648\u0633 \u0627\u0644\u0645\u062D\u064A\u0637", "author": "al-F\u012Br\u016Bz\u0101b\u0101d\u012B", "type": "language"},\n    {"id": "23235", "title": "al-\u1E62i\u1E25\u0101\u1E25", "arabic": "\u0627\u0644\u0635\u062D\u0627\u062D", "author": "al-Jawhar\u012B", "type": "language"},\n    {"id": "21710", "title": "Maq\u0101y\u012Bs al-Lugha", "arabic": "\u0645\u0642\u0627\u064A\u064A\u0633 \u0627\u0644\u0644\u063A\u0629", "author": "Ibn F\u0101ris", "type": "language"},\n    {"id": "23018", "title": "al-Kit\u0101b", "arabic": "\u0627\u0644\u0643\u062A\u0627\u0628", "author": "S\u012Bbawayh", "type": "language"},\n    {"id": "26349", "title": "Adab al-K\u0101tib", "arabic": "\u0623\u062F\u0628 \u0627\u0644\u0643\u0627\u062A\u0628", "author": "Ibn Qutayba", "type": "language"},\n    {"id": "10614", "title": "al-Bay\u0101n wa-l-Taby\u012Bn", "arabic": "\u0627\u0644\u0628\u064A\u0627\u0646 \u0648\u0627\u0644\u062A\u0628\u064A\u064A\u0646", "author": "al-J\u0101\u1E25i\u1E93", "type": "language"},\n    {"id": "6936", "title": "al-Muzhir", "arabic": "\u0627\u0644\u0645\u0632\u0647\u0631", "author": "Jal\u0101l al-D\u012Bn al-Suy\u016B\u1E6D\u012B", "type": "language"},\n    {"id": "12732", "title": "Khiz\u0101nat al-Adab", "arabic": "\u062E\u0632\u0627\u0646\u0629 \u0627\u0644\u0623\u062F\u0628", "author": "\u02BFAbd al-Q\u0101dir al-Baghd\u0101d\u012B", "type": "language"},\n    {"id": "17387", "title": "Asr\u0101r al-Bal\u0101gha", "arabic": "\u0623\u0633\u0631\u0627\u0631 \u0627\u0644\u0628\u0644\u0627\u063A\u0629", "author": "\u02BFAbd al-Q\u0101hir al-Jurj\u0101n\u012B", "type": "language"},\n    {"id": "11235", "title": "Fiqh al-Lugha wa-Sirr al-\u02BFArabiyya", "arabic": "\u0641\u0642\u0647 \u0627\u0644\u0644\u063A\u0629 \u0648\u0633\u0631 \u0627\u0644\u0639\u0631\u0628\u064A\u0629", "author": "Ab\u016B Man\u1E63\u016Br al-Tha\u02BFlab\u012B", "type": "language"},\n    {"id": "11371", "title": "al-\u0100jurr\u016Bmiyya", "arabic": "\u0627\u0644\u0622\u062C\u0631\u0648\u0645\u064A\u0629", "author": "Ibn \u0100jurr\u016Bm", "type": "language"},\n    {"id": "122235", "title": "al-Sh\u0101fiya f\u012B \u02BFIlmay al-Ta\u1E63r\u012Bf wa-l-Kha\u1E6D\u1E6D", "arabic": "\u0627\u0644\u0634\u0627\u0641\u064A\u0629 \u0641\u064A \u0639\u0644\u0645\u064A \u0627\u0644\u062A\u0635\u0631\u064A\u0641 \u0648\u0627\u0644\u062E\u0637", "author": "Ibn al-\u1E24\u0101jib", "type": "language"},\n    # \u2500\u2500 \u02BFUl\u016Bm al-Qur\u02BE\u0101n and maq\u0101\u1E63id \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n    {"id": "11728", "title": "al-Itq\u0101n f\u012B \u02BFUl\u016Bm al-Qur\u02BE\u0101n", "arabic": "\u0627\u0644\u0625\u062A\u0642\u0627\u0646 \u0641\u064A \u0639\u0644\u0648\u0645 \u0627\u0644\u0642\u0631\u0622\u0646", "author": "Jal\u0101l al-D\u012Bn al-Suy\u016B\u1E6D\u012B", "type": "quran-sciences"},\n    {"id": "11436", "title": "al-Burh\u0101n f\u012B \u02BFUl\u016Bm al-Qur\u02BE\u0101n", "arabic": "\u0627\u0644\u0628\u0631\u0647\u0627\u0646 \u0641\u064A \u0639\u0644\u0648\u0645 \u0627\u0644\u0642\u0631\u0622\u0646", "author": "Badr al-D\u012Bn al-Zarkash\u012B", "type": "quran-sciences"},\n    {"id": "11435", "title": "al-Muw\u0101faq\u0101t", "arabic": "\u0627\u0644\u0645\u0648\u0627\u0641\u0642\u0627\u062A", "author": "Ab\u016B Is\u1E25\u0101q al-Sh\u0101\u1E6Dib\u012B", "type": "quran-sciences"},\n    {"id": "17798", "title": "I\u02BFl\u0101m al-Muwaqqi\u02BF\u012Bn", "arabic": "\u0625\u0639\u0644\u0627\u0645 \u0627\u0644\u0645\u0648\u0642\u0639\u064A\u0646", "author": "Ibn Qayyim al-Jawziyya", "type": "quran-sciences"},\n    {"id": "11495", "title": "al-\u1E6Curuq al-\u1E24ukmiyya", "arabic": "\u0627\u0644\u0637\u0631\u0642 \u0627\u0644\u062D\u0643\u0645\u064A\u0629", "author": "Ibn Qayyim al-Jawziyya", "type": "quran-sciences"},\n]\n\n# Finer, discipline-level classification and a longer descriptive title for\n# works whose main title says little about the contents (shown under the main\n# title in the manage-sources list). `genres` overrides the broad `type`; a work\n# may belong to several kinds (e.g. a \u1E25ad\u012Bth commentary is also \u1E25ad\u012Bth).\nTURATH_DETAILS: dict[str, dict] = {\n    # Tafs\u012Br\n    "20855": {"subtitle": "A legal (a\u1E25k\u0101m) Qur\u02BE\u0101n commentary"},\n    "22918": {"subtitle": "A Qur\u02BE\u0101n commentary by Qur\u02BE\u0101n"},\n    "23591": {"subtitle": "A Qur\u02BE\u0101n commentary"},\n    "23627": {"subtitle": "A Mu\u02BFtazil\u012B Qur\u02BE\u0101n commentary"},\n    "23635": {"subtitle": "A Qur\u02BE\u0101n commentary (kal\u0101m)"},\n    "12884": {"subtitle": "A Qur\u02BE\u0101n commentary by transmitted reports"},\n    "12876": {"subtitle": "A concise Qur\u02BE\u0101n commentary"},\n    "23631": {"subtitle": "A Qur\u02BE\u0101n commentary"},\n    "8473": {"subtitle": "A Qur\u02BE\u0101n commentary"},\n    "42": {"subtitle": "A Qur\u02BE\u0101n commentary"},\n    "7798": {"subtitle": "A Qur\u02BE\u0101n commentary by transmitted reports"},\n    # \u1E24ad\u012Bth\n    "1673": {"genres": ["hadith", "hadith-commentary"], "subtitle": "A commentary on \u1E62a\u1E25\u012B\u1E25 al-Bukh\u0101r\u012B"},\n    "1711": {"genres": ["hadith", "hadith-commentary"], "subtitle": "A commentary on \u1E62a\u1E25\u012B\u1E25 Muslim"},\n    "2348": {"subtitle": "A \u1E25ad\u012Bth anthology"},\n    "12836": {"subtitle": "Forty \u1E25ad\u012Bth"},\n    # Fiqh\n    "1655": {"subtitle": "Sh\u0101fi\u02BF\u012B fiqh"},\n    "6910": {"subtitle": "\u1E24anbal\u012B fiqh"},\n    "2186": {"subtitle": "Sh\u0101fi\u02BF\u012B fiqh"},\n    "8183": {"subtitle": "\u1E24anaf\u012B fiqh"},\n    "11820": {"subtitle": "\u1E24anaf\u012B fiqh"},\n    "587": {"subtitle": "M\u0101lik\u012B fiqh"},\n    "21739": {"subtitle": "Comparative fiqh"},\n    "1679": {"subtitle": "\u1E24anbal\u012B fiqh"},\n    "11373": {"subtitle": "M\u0101lik\u012B fiqh (the Ris\u0101la)"},\n    "9548": {"subtitle": "M\u0101lik\u012B fiqh (worship)"},\n    "124336": {"subtitle": "\u1E24anaf\u012B fiqh"},\n    "6125": {"subtitle": "Sh\u0101fi\u02BF\u012B fiqh"},\n    "11315": {"subtitle": "\u1E24anbal\u012B fiqh"},\n    "11355": {"subtitle": "M\u0101lik\u012B fiqh (the matn)"},\n    "91": {"genres": ["fiqh"], "subtitle": "A commentary on Mukhta\u1E63ar Khal\u012Bl"},\n    "569": {"genres": ["fiqh"], "subtitle": "A commentary on Mukhta\u1E63ar Khal\u012Bl"},\n    "21611": {"genres": ["fiqh"], "subtitle": "A commentary on Mukhta\u1E63ar Khal\u012Bl"},\n    "21614": {"genres": ["fiqh"], "subtitle": "A commentary on Mukhta\u1E63ar Khal\u012Bl"},\n    "95864": {"genres": ["fiqh"], "subtitle": "A versification of Mukhta\u1E63ar al-Akh\u1E0Dar\u012B"},\n    # U\u1E63\u016Bl al-fiqh\n    "8180": {"subtitle": "U\u1E63\u016Bl al-fiqh"},\n    "5459": {"subtitle": "U\u1E63\u016Bl al-fiqh"},\n    "7439": {"subtitle": "U\u1E63\u016Bl al-fiqh"},\n    "2022": {"subtitle": "U\u1E63\u016Bl al-fiqh"},\n    "6301": {"subtitle": "U\u1E63\u016Bl al-fiqh"},\n    "12010": {"subtitle": "U\u1E63\u016Bl al-fiqh"},\n    # \u02BFAq\u012Bda\n    "8352": {"genres": ["aqida", "theology"], "subtitle": "A creed commentary"},\n    "8178": {"genres": ["aqida", "theology"], "subtitle": "A creed"},\n    "18098": {"subtitle": "A creed"},\n    "13035": {"subtitle": "A creed and \u1E25ad\u012Bth collection"},\n    "13032": {"subtitle": "A creed"},\n    # T\u0101r\u012Bkh / rij\u0101l\n    "9783": {"subtitle": "A universal history"},\n    "8376": {"subtitle": "A universal history"},\n    "21712": {"subtitle": "A universal history"},\n    "12320": {"subtitle": "A universal history, with the Muqaddima"},\n    "22669": {"genres": ["tarikh", "biography"], "subtitle": "A biographical dictionary"},\n    "1000": {"genres": ["biography"], "subtitle": "A biographical dictionary"},\n    "3310": {"genres": ["biography"], "subtitle": "Narrator biography (rij\u0101l)"},\n    "8609": {"genres": ["biography"], "subtitle": "Narrator biography (rij\u0101l)"},\n    "3722": {"genres": ["biography"], "subtitle": "Narrator biography (rij\u0101l)"},\n    "146": {"genres": ["biography"], "subtitle": "A biographical dictionary"},\n    "12286": {"genres": ["biography"], "subtitle": "A biographical dictionary"},\n    # Language / adab\n    "1687": {"genres": ["language", "lexicography", "dictionary"], "subtitle": "An Arabic lexicon"},\n    "7283": {"genres": ["language", "lexicography", "dictionary"], "subtitle": "An Arabic lexicon"},\n    "23235": {"genres": ["language", "lexicography", "dictionary"], "subtitle": "An Arabic lexicon"},\n    "21710": {"genres": ["language", "lexicography", "dictionary"], "subtitle": "Arabic lexicology"},\n    "23018": {"genres": ["grammar"], "subtitle": "Arabic grammar (na\u1E25w)"},\n    "26349": {"genres": ["adab", "language"], "subtitle": "Literary adab and style"},\n    "10614": {"genres": ["rhetoric", "adab"], "subtitle": "Rhetoric and adab"},\n    "6936": {"genres": ["language", "linguistics"], "subtitle": "Arabic language and linguistics"},\n    "12732": {"genres": ["grammar", "adab"], "subtitle": "Grammar and literary evidence"},\n    "17387": {"genres": ["rhetoric"], "subtitle": "Arabic rhetoric"},\n    "11235": {"genres": ["language", "linguistics"], "subtitle": "Arabic philology"},\n    "11371": {"genres": ["grammar"], "subtitle": "Arabic grammar (na\u1E25w): a primer"},\n    "122235": {"genres": ["grammar"], "subtitle": "Arabic morphology (\u1E63arf)"},\n    # \u02BFUl\u016Bm al-Qur\u02BE\u0101n / maq\u0101\u1E63id\n    "11728": {"subtitle": "Qur\u02BE\u0101nic sciences"},\n    "11436": {"subtitle": "Qur\u02BE\u0101nic sciences"},\n    "11435": {"genres": ["usul", "maqasid"], "subtitle": "U\u1E63\u016Bl al-fiqh and maq\u0101\u1E63id"},\n    "17798": {"genres": ["usul", "fiqh"], "subtitle": "U\u1E63\u016Bl al-fiqh"},\n    "11495": {"genres": ["usul", "fiqh"], "subtitle": "U\u1E63\u016Bl al-fiqh and policy"},\n}\n\n# Language code \u2192 English name. Extend freely; the importer derives the code\n# from a catalogue\'s language string and renders the English name in the vault.\nLANGUAGE_NAMES: dict[str, str] = {\n    "ar": "Arabic", "en": "English", "fr": "French", "fa": "Persian", "ur": "Urdu",\n    "tr": "Turkish", "id": "Indonesian", "ms": "Malay", "bn": "Bengali", "ru": "Russian",\n    "es": "Spanish", "de": "German", "it": "Italian", "nl": "Dutch", "pt": "Portuguese",\n    "sq": "Albanian", "bs": "Bosnian", "zh": "Chinese", "ja": "Japanese", "ko": "Korean",\n    "hi": "Hindi", "sw": "Swahili", "ha": "Hausa", "ff": "Fulah", "so": "Somali",\n    "th": "Thai", "vi": "Vietnamese", "ku": "Kurdish", "ps": "Pashto", "az": "Azerbaijani",\n    "uz": "Uzbek", "tt": "Tatar", "kk": "Kazakh", "ky": "Kyrgyz", "tg": "Tajik",\n    "sd": "Sindhi", "pa": "Punjabi", "ml": "Malayalam", "ta": "Tamil", "te": "Telugu",\n    "kn": "Kannada", "mr": "Marathi", "gu": "Gujarati", "ne": "Nepali", "si": "Sinhala",\n    "my": "Burmese", "km": "Khmer", "dv": "Divehi", "am": "Amharic", "he": "Hebrew",\n    "yo": "Yoruba", "zu": "Zulu", "xh": "Xhosa", "st": "Sotho", "sn": "Shona",\n    "ny": "Chichewa", "rw": "Kinyarwanda", "rn": "Rundi", "lg": "Ganda", "ln": "Lingala",\n    "bm": "Bambara", "tw": "Twi", "om": "Oromo", "aa": "Afar", "af": "Afrikaans",\n    "hy": "Armenian", "as": "Assamese", "ace": "Achinese", "ber": "Berber",\n    "bg": "Bulgarian", "ca": "Catalan", "hr": "Croatian", "cs": "Czech", "da": "Danish",\n    "eo": "Esperanto", "et": "Estonian", "fil": "Filipino", "fi": "Finnish",\n    "gl": "Galician", "ka": "Georgian", "el": "Greek", "hu": "Hungarian",\n    "is": "Icelandic", "ga": "Irish", "jv": "Javanese", "la": "Latin", "lv": "Latvian",\n    "lt": "Lithuanian", "mk": "Macedonian", "mt": "Maltese", "mn": "Mongolian",\n    "no": "Norwegian", "pl": "Polish", "ro": "Romanian", "sk": "Slovak",\n    "sl": "Slovenian", "sv": "Swedish", "tl": "Tagalog", "uk": "Ukrainian",\n    "ug": "Uyghur", "cy": "Welsh", "yi": "Yiddish", "dag": "Dagbani", "ill": "Iranun",\n    "knx": "Kendayan", "mrw": "Maranao", "luy": "Luyia", "yau": "Yau", "prs": "Dari",\n}\n\n# Catalogue spellings that differ from the canonical English name above.\n_LANGUAGE_ALIASES: dict[str, str] = {\n    "azeri": "az", "central khmer": "km", "chinese(simplified)": "zh",\n    "chinese(traditional)": "zh", "kirghiz": "ky", "kyrgyz": "ky", "pushto": "ps",\n    "panjabi": "pa", "tagalog": "tl", "uighur": "ug", "divehi": "dv", "sinhala": "si",\n    "fulah": "ff", "filipino": "fil", "iranun": "ill", "kendayan": "knx",\n    "maranao": "mrw", "luyia": "luy", "yau": "yau", "twi": "tw", "ganda": "lg",\n    "rundi": "rn", "sotho": "st", "shona": "sn", "chichewa": "ny", "dagbani": "dag",\n    "kinyarwanda": "rw", "kurmanji": "ku", "dari": "prs",\n}\n_LANGUAGE_NAME_TO_CODE = {name.lower(): code for code, name in LANGUAGE_NAMES.items()}\n_LANGUAGE_NAME_TO_CODE.update(_LANGUAGE_ALIASES)\n\n\ndef normalise_language(name: str) -> str | None:\n    """Map a catalogue language string to a code (unknown \u2192 a slug)."""\n    key = (name or "").strip().lower()\n    if not key:\n        return None\n    if key in _LANGUAGE_NAME_TO_CODE:\n        return _LANGUAGE_NAME_TO_CODE[key]\n    return re.sub(r"[^a-z]+", "-", key).strip("-")\n\n\ndef language_name(code: str) -> str:\n    return LANGUAGE_NAMES.get(code) or (code or "").title()\n\n\ndef moc_section(code: str) -> str:\n    """Category-MOC heading for a language (e.g. ``Arabic Texts``)."""\n    return f"{language_name(code)} Texts"\n\n# Default overrides for well-known works. Merged with OVERRIDES_FILE if present.\nBUILTIN_OVERRIDES: dict[str, dict] = {\n    "tafsir:ar-tafsir-al-jalalayn": {\n        "title": "Tafs\u012Br al-Jal\u0101layn",\n        "short": "al-Jal\u0101layn",\n        "title_ar": "\u062A\u0641\u0633\u064A\u0631 \u0627\u0644\u062C\u0644\u0627\u0644\u064A\u0646",\n        "short_ar": "\u0627\u0644\u062C\u0644\u0627\u0644\u064A\u0646",\n        "dir": "Tafs\u012Br al-Jal\u0101layn",\n        "authors": ["Jal\u0101l al-D\u012Bn al-Ma\u1E25all\u012B", "Jal\u0101l al-D\u012Bn al-Suy\u016B\u1E6D\u012B"],\n    },\n    "tafsir:en-al-jalalayn": {\n        "title": "Tafs\u012Br al-Jal\u0101layn (English)",\n        "short": "al-Jal\u0101layn (English)",\n        "title_ar": "\u062A\u0641\u0633\u064A\u0631 \u0627\u0644\u062C\u0644\u0627\u0644\u064A\u0646",\n        "short_ar": "\u0627\u0644\u062C\u0644\u0627\u0644\u064A\u0646",\n        "dir": "Tafs\u012Br al-Jal\u0101layn (English)",\n        "authors": [\n            "Jal\u0101l al-D\u012Bn al-Ma\u1E25all\u012B",\n            "Jal\u0101l al-D\u012Bn al-Suy\u016B\u1E6D\u012B",\n        ],\n        "translators": ["Feras Hamza"],\n    },\n}\n\n# \u2500\u2500 Small helpers \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n\nARABIC_DIGITS = str.maketrans("0123456789", "\u0660\u0661\u0662\u0663\u0664\u0665\u0666\u0667\u0668\u0669")\n\n# S\u016Brah names as they appear in the vault\'s _7 Sources/Quran folder, with the\n# Arabic name used for headings and reference display text. Kept as a fallback\n# for when the Qur\'\u0101n folder cannot be read.\nSURAH_NAMES: list[tuple[str, str]] = [\n    ("Al-Fatihah", "\u0627\u0644\u0641\u0627\u062A\u062D\u0629"), ("Al-Baqarah", "\u0627\u0644\u0628\u0642\u0631\u0629"), ("Al \'Imran", "\u0622\u0644 \u0639\u0645\u0631\u0627\u0646"),\n    ("An-Nisa", "\u0627\u0644\u0646\u0633\u0627\u0621"), ("Al-Ma\'idah", "\u0627\u0644\u0645\u0627\u0626\u062F\u0629"), ("Al-An\'am", "\u0627\u0644\u0623\u0646\u0639\u0627\u0645"),\n    ("Al-A\'raf", "\u0627\u0644\u0623\u0639\u0631\u0627\u0641"), ("Al-Anfal", "\u0627\u0644\u0623\u0646\u0641\u0627\u0644"), ("At-Tawbah", "\u0627\u0644\u062A\u0648\u0628\u0629"),\n    ("Yunus", "\u064A\u0648\u0646\u0633"), ("Hud", "\u0647\u0648\u062F"), ("Yusuf", "\u064A\u0648\u0633\u0641"),\n    ("Ar-Ra\'d", "\u0627\u0644\u0631\u0639\u062F"), ("Ibrahim", "\u0625\u0628\u0631\u0627\u0647\u064A\u0645"), ("Al-Hijr", "\u0627\u0644\u062D\u062C\u0631"),\n    ("An-Nahl", "\u0627\u0644\u0646\u062D\u0644"), ("Al-Isra", "\u0627\u0644\u0625\u0633\u0631\u0627\u0621"), ("Al-Kahf", "\u0627\u0644\u0643\u0647\u0641"),\n    ("Maryam", "\u0645\u0631\u064A\u0645"), ("Taha", "\u0637\u0647"), ("Al-Anbya", "\u0627\u0644\u0623\u0646\u0628\u064A\u0627\u0621"),\n    ("Al-Hajj", "\u0627\u0644\u062D\u062C"), ("Al-Mu\'minun", "\u0627\u0644\u0645\u0624\u0645\u0646\u0648\u0646"), ("An-Nur", "\u0627\u0644\u0646\u0648\u0631"),\n    ("Al-Furqan", "\u0627\u0644\u0641\u0631\u0642\u0627\u0646"), ("Ash-Shu\'ara", "\u0627\u0644\u0634\u0639\u0631\u0627\u0621"), ("An-Naml", "\u0627\u0644\u0646\u0645\u0644"),\n    ("Al-Qasas", "\u0627\u0644\u0642\u0635\u0635"), ("Al-\'Ankabut", "\u0627\u0644\u0639\u0646\u0643\u0628\u0648\u062A"), ("Ar-Rum", "\u0627\u0644\u0631\u0648\u0645"),\n    ("Luqman", "\u0644\u0642\u0645\u0627\u0646"), ("As-Sajdah", "\u0627\u0644\u0633\u062C\u062F\u0629"), ("Al-Ahzab", "\u0627\u0644\u0623\u062D\u0632\u0627\u0628"),\n    ("Saba", "\u0633\u0628\u0623"), ("Fatir", "\u0641\u0627\u0637\u0631"), ("Ya-Sin", "\u064A\u0633"),\n    ("As-Saffat", "\u0627\u0644\u0635\u0627\u0641\u0627\u062A"), ("Sad", "\u0635"), ("Az-Zumar", "\u0627\u0644\u0632\u0645\u0631"),\n    ("Ghafir", "\u063A\u0627\u0641\u0631"), ("Fussilat", "\u0641\u0635\u0644\u062A"), ("Ash-Shuraa", "\u0627\u0644\u0634\u0648\u0631\u0649"),\n    ("Az-Zukhruf", "\u0627\u0644\u0632\u062E\u0631\u0641"), ("Ad-Dukhan", "\u0627\u0644\u062F\u062E\u0627\u0646"), ("Al-Jathiyah", "\u0627\u0644\u062C\u0627\u062B\u064A\u0629"),\n    ("Al-Ahqaf", "\u0627\u0644\u0623\u062D\u0642\u0627\u0641"), ("Muhammad", "\u0645\u062D\u0645\u062F"), ("Al-Fath", "\u0627\u0644\u0641\u062A\u062D"),\n    ("Al-Hujurat", "\u0627\u0644\u062D\u062C\u0631\u0627\u062A"), ("Qaf", "\u0642"), ("Adh-Dhariyat", "\u0627\u0644\u0630\u0627\u0631\u064A\u0627\u062A"),\n    ("At-Tur", "\u0627\u0644\u0637\u0648\u0631"), ("An-Najm", "\u0627\u0644\u0646\u062C\u0645"), ("Al-Qamar", "\u0627\u0644\u0642\u0645\u0631"),\n    ("Ar-Rahman", "\u0627\u0644\u0631\u062D\u0645\u0646"), ("Al-Waqi\'ah", "\u0627\u0644\u0648\u0627\u0642\u0639\u0629"), ("Al-Hadid", "\u0627\u0644\u062D\u062F\u064A\u062F"),\n    ("Al-Mujadila", "\u0627\u0644\u0645\u062C\u0627\u062F\u0644\u0629"), ("Al-Hashr", "\u0627\u0644\u062D\u0634\u0631"), ("Al-Mumtahanah", "\u0627\u0644\u0645\u0645\u062A\u062D\u0646\u0629"),\n    ("As-Saf", "\u0627\u0644\u0635\u0641"), ("Al-Jumu\'ah", "\u0627\u0644\u062C\u0645\u0639\u0629"), ("Al-Munafiqun", "\u0627\u0644\u0645\u0646\u0627\u0641\u0642\u0648\u0646"),\n    ("At-Taghabun", "\u0627\u0644\u062A\u063A\u0627\u0628\u0646"), ("At-Talaq", "\u0627\u0644\u0637\u0644\u0627\u0642"), ("At-Tahrim", "\u0627\u0644\u062A\u062D\u0631\u064A\u0645"),\n    ("Al-Mulk", "\u0627\u0644\u0645\u0644\u0643"), ("Al-Qalam", "\u0627\u0644\u0642\u0644\u0645"), ("Al-Haqqah", "\u0627\u0644\u062D\u0627\u0642\u0629"),\n    ("Al-Ma\'arij", "\u0627\u0644\u0645\u0639\u0627\u0631\u062C"), ("Nuh", "\u0646\u0648\u062D"), ("Al-Jinn", "\u0627\u0644\u062C\u0646"),\n    ("Al-Muzzammil", "\u0627\u0644\u0645\u0632\u0645\u0644"), ("Al-Muddaththir", "\u0627\u0644\u0645\u062F\u062B\u0631"), ("Al-Qiyamah", "\u0627\u0644\u0642\u064A\u0627\u0645\u0629"),\n    ("Al-Insan", "\u0627\u0644\u0625\u0646\u0633\u0627\u0646"), ("Al-Mursalat", "\u0627\u0644\u0645\u0631\u0633\u0644\u0627\u062A"), ("An-Naba", "\u0627\u0644\u0646\u0628\u0623"),\n    ("An-Nazi\'at", "\u0627\u0644\u0646\u0627\u0632\u0639\u0627\u062A"), ("\'Abasa", "\u0639\u0628\u0633"), ("At-Takwir", "\u0627\u0644\u062A\u0643\u0648\u064A\u0631"),\n    ("Al-Infitar", "\u0627\u0644\u0627\u0646\u0641\u0637\u0627\u0631"), ("Al-Mutaffifin", "\u0627\u0644\u0645\u0637\u0641\u0641\u064A\u0646"), ("Al-Inshiqaq", "\u0627\u0644\u0627\u0646\u0634\u0642\u0627\u0642"),\n    ("Al-Buruj", "\u0627\u0644\u0628\u0631\u0648\u062C"), ("At-Tariq", "\u0627\u0644\u0637\u0627\u0631\u0642"), ("Al-A\'la", "\u0627\u0644\u0623\u0639\u0644\u0649"),\n    ("Al-Ghashiyah", "\u0627\u0644\u063A\u0627\u0634\u064A\u0629"), ("Al-Fajr", "\u0627\u0644\u0641\u062C\u0631"), ("Al-Balad", "\u0627\u0644\u0628\u0644\u062F"),\n    ("Ash-Shams", "\u0627\u0644\u0634\u0645\u0633"), ("Al-Layl", "\u0627\u0644\u0644\u064A\u0644"), ("Ad-Duhaa", "\u0627\u0644\u0636\u062D\u0649"),\n    ("Ash-Sharh", "\u0627\u0644\u0634\u0631\u062D"), ("At-Tin", "\u0627\u0644\u062A\u064A\u0646"), ("Al-\'Alaq", "\u0627\u0644\u0639\u0644\u0642"),\n    ("Al-Qadr", "\u0627\u0644\u0642\u062F\u0631"), ("Al-Bayyinah", "\u0627\u0644\u0628\u064A\u0646\u0629"), ("Az-Zalzalah", "\u0627\u0644\u0632\u0644\u0632\u0644\u0629"),\n    ("Al-\'Adiyat", "\u0627\u0644\u0639\u0627\u062F\u064A\u0627\u062A"), ("Al-Qari\'ah", "\u0627\u0644\u0642\u0627\u0631\u0639\u0629"), ("At-Takathur", "\u0627\u0644\u062A\u0643\u0627\u062B\u0631"),\n    ("Al-\'Asr", "\u0627\u0644\u0639\u0635\u0631"), ("Al-Humazah", "\u0627\u0644\u0647\u0645\u0632\u0629"), ("Al-Fil", "\u0627\u0644\u0641\u064A\u0644"),\n    ("Quraysh", "\u0642\u0631\u064A\u0634"), ("Al-Ma\'un", "\u0627\u0644\u0645\u0627\u0639\u0648\u0646"), ("Al-Kawthar", "\u0627\u0644\u0643\u0648\u062B\u0631"),\n    ("Al-Kafirun", "\u0627\u0644\u0643\u0627\u0641\u0631\u0648\u0646"), ("An-Nasr", "\u0627\u0644\u0646\u0635\u0631"), ("Al-Masad", "\u0627\u0644\u0645\u0633\u062F"),\n    ("Al-Ikhlas", "\u0627\u0644\u0625\u062E\u0644\u0627\u0635"), ("Al-Falaq", "\u0627\u0644\u0641\u0644\u0642"), ("An-Nas", "\u0627\u0644\u0646\u0627\u0633"),\n]\n\n\ndef emit(event: str, **fields) -> None:\n    """Print a JSON-lines event for the plugin, and nothing else."""\n    payload = {"event": event}\n    payload.update(fields)\n    print(json.dumps(payload, ensure_ascii=False), flush=True)\n\n\ndef log(message: str) -> None:\n    emit("log", message=message)\n\n\ndef arabic_numeral(n: int) -> str:\n    return str(n).translate(ARABIC_DIGITS)\n\n\ndef slug_to_dir(value: str) -> str:\n    """Sanitize a value for use as a folder/file name."""\n    value = re.sub(r\'[<>:"/\\\\|?*]\', "", value)\n    return re.sub(r"\\s+", " ", value).strip()\n\n\ndef repo_qualifier(work: dict) -> str:\n    """A short repository label for the output folder, e.g. `turath.io`.\n\n    Folder and file names carry it so the same work from two repositories (or two\n    editions) can coexist; the `title:` properties and TOC aliases stay clean.\n    """\n    repo = str(work.get("repository") or "").strip().rstrip("/")\n    if not repo:\n        return ""\n    return re.sub(r"[<>:\\"/\\\\|?*]", "", repo.split("/")[-1]).strip()\n\n\n# Romanization \u2192 searchable form: drop diacritics, map \u02BF/\u02BE to a straight apostrophe.\n_DIACRITICS = str.maketrans({\n    "\u0101": "a", "\u012B": "i", "\u016B": "u", "\xE1": "a", "\xED": "i", "\xFA": "u",\n    "\u1E25": "h", "\u1E63": "s", "\u1E0D": "d", "\u1E6D": "t", "\u1E93": "z", "\u1E0F": "d", "\u1E6F": "t",\n    "\u0121": "g", "\u1E21": "g", "\u1E2B": "kh", "\u0161": "sh", "\u017E": "zh", "\xF1": "n",\n    "\u0120": "G", "\u1E20": "G",\n    "\u0100": "A", "\u012A": "I", "\u016A": "U", "\u1E24": "H", "\u1E62": "S", "\u1E0C": "D", "\u1E6C": "T", "\u1E92": "Z",\n    "\u02BF": "\'", "\u02BE": "\'", "\u02B9": "\'", "\u02BB": "\'", "\u02BC": "\'",\n})\n\n\ndef strip_diacritics(text: str) -> str:\n    return (text or "").translate(_DIACRITICS)\n\n\n# \u2500\u2500 Qur\'\u0101n citation linking \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n# Arabic tafs\u012Brs cite *other* verses inline in square brackets, e.g.\n#   \uFD3F\u0648\u064E\u0645\u064E\u0627 \u064A\u064F\u0624\u0652\u0645\u0650\u0646\u064F \u0623\u064E\u0643\u0652\u062B\u064E\u0631\u064F\u0647\u064F\u0645\u0652...\uFD3E [\u064A\u064F\u0648\u0633\u064F\u0641\u064E: \u0661\u0660\u0666]\n# Those citations are replaced with links to the vault\'s canonical Qur\'\u0101n notes.\n# A quote of the verse being commented carries no bracket citation (its `## [[\u2026]]`\n# heading already covers it), so it is left alone.\n\n_ARABIC_TO_WESTERN = str.maketrans("\u0660\u0661\u0662\u0663\u0664\u0665\u0666\u0667\u0668\u0669", "0123456789")\n_WESTERN_TO_ARABIC = str.maketrans("0123456789", "\u0660\u0661\u0662\u0663\u0664\u0665\u0666\u0667\u0668\u0669")\n# Citations come in several shapes across the tafs\u012Br repositories:\n#   [\u064A\u064F\u0648\u0633\u064F\u0641\u064E: \u0661\u0660\u0663]      Arabic s\u016Bra name, Arabic numerals  (Ibn Kath\u012Br)\n#   [ \u0627\u0644\u0623\u0639\u0631\u0627\u0641 : 3 ]      spaced, Western numerals          (Tanw\u012Br al-Miqb\u0101s)\n#   [\u0665\u0660: \u0663\u0668]            s\u016Bra number : \u0101ya                  (al-Qur\u1E6Dub\u012B)\n#   (\u0627\u0644\u0642\u0635\u0635: \u0665)          parenthesised                      (al-Mukhta\u1E63ar)\n# A number of editions (Muyassar, Sa\u02BFd\u012B, Was\u012B\u1E6D, I\u02BFr\u0101b \u2026) carry no citations at\n# all, and editorial refs like `[\u062A\u0641\u0633\u064A\u0631 \u0627\u0628\u0646 \u0643\u062B\u064A\u0631: \u0662 / \u0661\u0663\u0665]` never match a s\u016Bra.\n_VerseCitation = re.compile(\n    r"(?P<open>[\\[(])\\s*(?P<name>[^\\[\\]()]{1,40}?)\\s*:\\s*"\n    r"(?P<ayah>[\\u0660-\\u0669\\d]{1,4}(?:\\s*[-\\u2013\\u060C,]\\s*[\\u0660-\\u0669\\d]{1,4})*)\\s*(?P<close>[\\])])"\n)\n\n_SURAH_NAME_INDEX: dict[str, dict] | None = None\n_SURAH_ROWS: list[dict] | None = None\n\n# Citations are matched against the canonical Qur\'\u0101n notes, so they only make\n# sense for \u1E24af\u1E63 \u2014 the reading the vast majority of source texts quote. Set from\n# `fetch --canonical`; any other riw\u0101ya disables the linking entirely.\n_CANONICAL_RIWAYA = "hafs"\n\n\ndef _normalize_ayah_name(name: str) -> str:\n    """Fold an Arabic s\u016Bra name to a comparable key (no tashk\u012Bl, unified alef)."""\n    name = unicodedata.normalize("NFKD", name)\n    name = "".join(c for c in name if not unicodedata.category(c).startswith("Mn"))\n    for a, b in (("\u0623", "\u0627"), ("\u0625", "\u0627"), ("\u0622", "\u0627"), ("\u0671", "\u0627"),\n                 ("\u0649", "\u064A"), ("\u0629", "\u0647"), ("\u0624", "\u0648"), ("\u0626", "\u064A")):\n        name = name.replace(a, b)\n    return re.sub(r"[^\\u0600-\\u06FF]", "", name)\n\n\ndef _surah_rows() -> list[dict]:\n    """The s\u016Bra table, read from the vault once per run."""\n    global _SURAH_ROWS\n    if _SURAH_ROWS is None:\n        _SURAH_ROWS = surah_table()\n    return _SURAH_ROWS\n\n\ndef surah_name_index() -> dict[str, dict]:\n    """Normalized s\u016Bra name \u2192 its table row (built once, from the vault notes)."""\n    global _SURAH_NAME_INDEX\n    if _SURAH_NAME_INDEX is None:\n        _SURAH_NAME_INDEX = {}\n        for row in _surah_rows():\n            for name in (row.get("arabic"), row.get("translit")):\n                if not name:\n                    continue\n                for key in (_normalize_ayah_name(name), re.sub(r"[^a-z]", "", name.lower())):\n                    if key:\n                        _SURAH_NAME_INDEX.setdefault(key, row)\n    return _SURAH_NAME_INDEX\n\n\ndef _ar_numeral(n: int) -> str:\n    """Western integer \u2192 Arabic-Indic numeral (as the vault\'s notes use)."""\n    return str(n).translate(_WESTERN_TO_ARABIC)\n\n\ndef _lookup_surah(name: str) -> dict | None:\n    """Resolve a citation\'s s\u016Bra from its name (Arabic or transliterated) or number."""\n    key = re.sub(r"^\u0633\u0648\u0631\u0647", "", _normalize_ayah_name(name))  # tolerate a leading "\u0633\u0648\u0631\u0629"\n    row = surah_name_index().get(key) or surah_name_index().get(re.sub(r"[^a-z]", "", name.lower()))\n    if row:\n        return row\n    digits = name.strip().translate(_ARABIC_TO_WESTERN)\n    if digits.isdigit() and 1 <= int(digits) <= len(_surah_rows()):\n        return _surah_rows()[int(digits) - 1]\n    return None\n\n\ndef link_verse_citations(text: str, *, skip: tuple[int, int] | None = None) -> str:\n    """Replace `S\u016Brah: \u0101ya` citations with links to the vault\'s Qur\'\u0101n notes.\n\n    Handles the shapes the repositories actually use (see `_VerseCitation`). `skip`\n    is the (s\u016Bra, \u0101ya) of the verse being commented, so a citation of that very\n    verse is left as written.\n    """\n    if not text or ":" not in text or _CANONICAL_RIWAYA != "hafs":\n        return text\n\n    def repl(m: re.Match) -> str:\n        if (m.group("open") == "[") != (m.group("close") == "]"):\n            return m.group(0)  # mismatched delimiters \u2014 not a citation\n        name = m.group("name")\n        row = _lookup_surah(name)\n        if row is None and skip:\n            # "[\u0627\u0644\u0622\u064A\u0629: \u0661\u0662\u0663]" cites the current s\u016Bra (the one being commented).\n            bare = re.sub(r"^\u0627\u0644", "", re.sub(r"^\u0633\u0648\u0631\u0647", "", _normalize_ayah_name(name)))\n            if bare in ("\u0627\u064A\u0647", "\u0627\u064A\u062A") and 1 <= skip[0] <= len(_surah_rows()):\n                row = _surah_rows()[skip[0] - 1]\n        if not row:\n            return m.group(0)\n        nums = [int(x.translate(_ARABIC_TO_WESTERN))\n                for x in re.findall(r"[\\u0660-\\u0669\\d]{1,4}", m.group("ayah"))]\n        if not nums:\n            return m.group(0)\n        first, last = nums[0], nums[-1]\n        if skip and (row["number"], first) == skip:\n            return m.group(0)\n        if last != first:\n            # A range or list (`\u0662\u0664-\u0662\u0667`, `\u0661\u0667\u0662\u060C \u0661\u0667\u0663`) links its two ends.\n            return (f"([[{row[\'base\']}#{first}|{row[\'arabic\']} : {_ar_numeral(first)}]]"\n                    f"\u2013[[{row[\'base\']}#{last}|{_ar_numeral(last)}]])")\n        return f"([[{row[\'base\']}#{first}|{row[\'arabic\']} : {_ar_numeral(first)}]])"\n\n    return _VerseCitation.sub(repl, text)\n\n\n_QURAN_MODULE = None\n# Quotes already carrying the vault\'s marker, plus the other delimiters a tafs\u012Br\n# may use for a Qur\'\u0101n quote instead of `\uFD3F\u2026\uFD3E`: guillemets, curly quotes, parens.\n# (Digitised tafs\u012Brs rarely mix them, but a few use only one of these.)\n_QuoteMark = re.compile(r"\\*\uFD3F(.+?)\uFD3E\\{\\.quran-quote\\}\\*(?!\\s*\\(\\[\\[)")\n_ExtraDelims = {\n    "\xAB\xBB": re.compile(r"\xAB([^\xAB\xBB]{1,400}?)\xBB"),\n    "\u201C\u201D": re.compile(r"\u201C([^\u201C\u201D]{1,400}?)\u201D"),\n    "()": re.compile(r"\\(([^()\\[\\]]{1,400}?)\\)"),\n}\n\n\ndef _quran_module():\n    """Load transcription-quran.py lazily \u2014 it exposes the Qur\'\u0101n verse matcher."""\n    global _QURAN_MODULE\n    if _QURAN_MODULE is None:\n        from importlib.machinery import SourceFileLoader\n        mod = SourceFileLoader("transcription_quran", str(Path(__file__).with_name("transcription-quran.py"))).load_module()\n        mod.QURAN_DIR = QURAN_DIR  # match the importer\'s canonical Qur\'\u0101n folder\n        _QURAN_MODULE = mod\n    return _QURAN_MODULE\n\n\ndef detect_quote_delims(text: str) -> tuple[str, ...]:\n    """Which non-`\uFD3F\uFD3E` delimiters this text actually uses for Qur\'\u0101n quotes.\n\n    A work follows one standard throughout, so a handful of resolved spans is\n    enough to enable a delimiter for the whole work; a delimiter whose spans never\n    resolve (guillemets around \u1E25ad\u012Bth, parens around prose) is left off, so the\n    matcher is not run over hundreds of non-Qur\'\u0101nic spans.\n    """\n    if _CANONICAL_RIWAYA != "hafs":\n        return ()\n    tfq = _quran_module()\n    enabled: list[str] = []\n    for name, rx in _ExtraDelims.items():\n        spans = [s.strip() for s in rx.findall(text) if len(s.split()) >= 3]\n        hits = 0\n        for s in spans[:40]:\n            try:\n                if tfq.find_verse_in_text(s):\n                    hits += 1\n            except Exception:  # noqa: BLE001\n                pass\n            if hits >= 3:\n                enabled.append(name)\n                break\n    return tuple(enabled)\n\n\ndef link_quote_citations(text: str, *, surah: int, ayah: int, delims: tuple[str, ...] = ()) -> str:\n    """Cite every Qur\'\u0101n quote that resolves to a verse other than this one.\n\n    Quotes come from the vault-marked `\uFD3F\u2026\uFD3E` spans and, when the work uses them\n    (`delims`), from guillemets / curly quotes / parentheses. Each is matched\n    against the canonical notes with the transcription matcher, walking forward \u2014\n    the quotes of the commented verse come in order \u2014 and a quote of the commented\n    verse itself is left uncited. One- or two-word quotes are never cited: nobody\n    quotes a word or two from a *different* verse, and matching them (\uFD3F\u0627\u0644\u0645\uFD3E,\n    \uFD3F\u0630\u064E\u0644\u0650\u0643\uFD3E \u2026) would only produce false positives.\n    """\n    if not text or _CANONICAL_RIWAYA != "hafs":\n        return text\n    if "\uFD3F" not in text and not any(d in text for d in ("\xAB", "\u201C", "(")):\n        return text\n    tfq = _quran_module()\n    state = {"s": surah, "v": ayah}\n\n    def cite(quote: str) -> str:\n        """The citation for a quote, or \'\' when it needs none."""\n        # A quote may span verses (`\uFD3FA * B\uFD3E`, the editor\'s separator). Cite the\n        # first segment that resolves; a multi-verse span never matches on its own.\n        segments = [s.strip() for s in quote.split("*") if s.strip()]\n        res = None\n        for seg in segments:\n            if len(seg.split()) <= 2:\n                continue\n            try:\n                res = tfq.find_verse_in_text(seg, hint_surah=state["s"], hint_verse=state["v"])\n            except Exception:  # noqa: BLE001\n                res = None\n            if res:\n                break\n        if not res:\n            return ""\n        s, v = res[0][0], res[0][1]\n        state["s"], state["v"] = s, v\n        if (s, v) == (surah, ayah):\n            return ""\n        row = _surah_rows()[s - 1]\n        numeral = str(v).translate(_WESTERN_TO_ARABIC)\n        return f" ([[{row[\'base\']}#{v}|{row[\'arabic\']} : {numeral}]])"\n\n    text = _QuoteMark.sub(lambda m: m.group(0) + cite(m.group(1).strip()), text)\n    for name in delims:\n        text = _ExtraDelims[name].sub(lambda m: m.group(0) + cite(m.group(1).strip()), text)\n    return text\n\n\ndef canonical_aliases(work: dict) -> list[str]:\n    """Parent aliases: full + short romanized, their Arabic forms, and a plain form."""\n    out: list[str] = []\n\n    def add(value: str | None) -> None:\n        value = (value or "").strip()\n        if value and value not in out:\n            out.append(value)\n\n    add(work.get("title"))\n    add(work.get("short"))\n    add(work.get("title_ar"))\n    add(work.get("short_ar"))\n    add(strip_diacritics(work.get("title", "")))\n    return out\n\n\ndef repository_name(url: str) -> str:\n    """A short, human name for a source URL (used in the `repository:` property)."""\n    if not url:\n        return ""\n    m = re.match(r"https?://([^/]+)(/.*)?$", url)\n    if not m:\n        return url\n    host = m.group(1).replace("www.", "")\n    path = (m.group(2) or "").strip("/")\n    if host == "github.com" and path:\n        return "github.com/" + "/".join(path.split("/")[:2])\n    return host\n\n\ndef _github_last_commit(owner: str, repo: str, path: str | None = None) -> str:\n    """YYYY-MM-DD of the last commit touching `path` (or the repo). Best effort."""\n    url = f"https://api.github.com/repos/{owner}/{repo}/commits?per_page=1"\n    if path:\n        url += f"&path={path}"\n    try:\n        data = fetch_json(url, cache=False)\n        if isinstance(data, list) and data:\n            return (data[0].get("commit", {}).get("committer", {}).get("date", "") or "")[:10]\n    except Exception:  # noqa: BLE001\n        pass\n    return ""\n\n\n# Last-update source per collection that is not backed by a dated catalogue.\n_REPO_COMMITS = {\n    "tafsir": lambda w: _github_last_commit("spa5k", "tafsir_api", f"tafsir/{w[\'id\']}"),\n    "quran": lambda w: _github_last_commit("fawazahmed0", "quran-api", f"editions/{w[\'id\']}.json"),\n    "hadith": lambda w: _github_last_commit("AhmedBaset", "hadith-json", f"db/by_book/{w.get(\'group\', \'\')}/{w[\'id\']}.json"),\n    "dictionary": lambda w: _github_last_commit(*_github_slug(w), w.get("db_path") or "assets/hanswehr.sqlite")\n    if _github_slug(w) else "",\n}\n\n\ndef repo_updated(work: dict) -> str:\n    """Best-effort date (YYYY-MM-DD) of the source repository\'s last update for a work."""\n    coll = work.get("collection")\n    if coll == "turath":\n        ts = work.get("date_built") or 0\n        try:\n            return datetime.fromtimestamp(int(ts)).strftime("%Y-%m-%d") if ts else ""\n        except (ValueError, OverflowError, OSError):\n            return ""\n    if coll == "tafsir-qul":\n        ts = work.get("qul_updated") or 0\n        try:\n            return datetime.fromtimestamp(int(ts)).strftime("%Y-%m-%d") if ts else ""\n        except (ValueError, OverflowError, OSError):\n            return ""\n    if coll == "quran-text":\n        try:\n            man = fetch_json("https://quran-json.risanb.com/manifest.json", cache=True)\n            for s in man.get("scripts", []):\n                if s.get("id") == work.get("source_id"):\n                    version = (s.get("license") or {}).get("version")\n                    if version:\n                        return version\n            version = ((man.get("license") or {}).get("text") or {}).get("version")\n            if version:\n                return version\n        except Exception:  # noqa: BLE001\n            pass\n        return _github_last_commit("risan", "quran-json")\n    fn = _REPO_COMMITS.get(coll)\n    return fn(work) if fn else ""\n\n\n# The repository path holding each work\'s actual text.\n_REPO_PATHS = {\n    "tafsir": lambda w: f"tafsir/{w[\'id\']}",\n    "quran": lambda w: f"editions/{w[\'id\']}.json",\n    "hadith": lambda w: f"db/by_book/{w.get(\'group\', \'\')}/{w[\'id\']}.json",\n    "dictionary": lambda w: w.get("db_path") or "assets/hanswehr.sqlite",\n}\n_REPO_SLUGS = {\n    "tafsir": ("spa5k", "tafsir_api"),\n    "tafsir-qul": ("TarteelAI", "quranic-universal-library"),\n    "quran": ("fawazahmed0", "quran-api"),\n    "hadith": ("AhmedBaset", "hadith-json"),\n    "quran-text": ("risan", "quran-json"),\n    "dictionary": ("GibreelAbdullah", "HansWehrDictionary"),\n}\n\n\ndef _github_slug(work: dict) -> tuple[str, str] | None:\n    """The (owner, repo) a work\'s text comes from.\n\n    Dictionaries are per-work: the collection holds two of them, from different\n    repositories, so the slug is parsed from the work\'s own `source` URL.\n    """\n    if work.get("collection") == "dictionary":\n        m = re.match(r"https?://github\\.com/([^/]+)/([^/?#]+)", str(work.get("source") or ""))\n        return (m.group(1), m.group(2)) if m else None\n    return _REPO_SLUGS.get(work.get("collection"))\n\n\ndef repo_url(work: dict) -> str:\n    """The repository the work\'s text is drawn from (for the `repository:` property)."""\n    if work.get("collection") == "turath":\n        return "https://app.turath.io"\n    slug = _github_slug(work)\n    return f"https://github.com/{slug[0]}/{slug[1]}" if slug else ""\n\n\ndef repo_license_attribution(work: dict) -> str:\n    """Attribution the source licence requires (the riw\u0101y\u0101t, or a dictionary\'s text)."""\n    if work.get("collection") == "dictionary":\n        return str(work.get("license_attribution") or "")\n    if work.get("collection") != "quran-text":\n        return ""\n    try:\n        man = fetch_json("https://quran-json.risanb.com/manifest.json", cache=True)\n        for s in man.get("scripts", []):\n            if s.get("id") == work.get("source_id"):\n                return str((s.get("license") or {}).get("attribution") or "").strip()\n    except Exception:  # noqa: BLE001\n        pass\n    return ""\n\n\ndef _github_content_hash(owner: str, repo: str, path: str) -> str:\n    """A short hash of a path\'s blob SHAs (a file\'s, or a directory\'s file set)."""\n    try:\n        data = fetch_json(f"https://api.github.com/repos/{owner}/{repo}/contents/{path}", cache=False)\n    except Exception:  # noqa: BLE001\n        return ""\n    if isinstance(data, list):\n        shas = sorted(f"{x.get(\'name\')}:{x.get(\'sha\')}" for x in data if x.get("sha"))\n        return hashlib.sha1("\\n".join(shas).encode("utf-8")).hexdigest()[:12]\n    if isinstance(data, dict) and data.get("sha"):\n        return str(data["sha"])[:12]\n    return ""\n\n\ndef repo_hash(work: dict) -> str:\n    """A hash of the work\'s actual text in the repository.\n\n    Changes when the text changes, regardless of unrelated commits. For the\n    dated risan catalogue the per-script version is already text-specific.\n    """\n    coll = work.get("collection")\n    if coll == "turath":\n        # `date_built` moves when Turath rebuilds the book file.\n        return str(work.get("date_built") or "")\n    if coll == "tafsir-qul":\n        # The catalogue\'s per-resource `updated_at` is the best text-change signal.\n        return str(work.get("qul_updated") or "")\n    if coll == "quran-text":\n        return repo_updated(work)\n    path_fn = _REPO_PATHS.get(coll)\n    slug = _github_slug(work)\n    if not path_fn or not slug:\n        return ""\n    return _github_content_hash(slug[0], slug[1], path_fn(work))\n\n\ndef smart_quotes(text: str) -> str:\n    """Curly quotes whose direction is decided by position, not by a running toggle.\n\n    Two hazards in these corpora: some sources ship already-reversed quotes, and a\n    single unmatched straight quote flips a toggle for the rest of the note. Both\n    are handled by deciding from the neighbouring character; already-curly quotes\n    are normalised the same way. A grave accent stands for \u02BFayn in some sources\n    (e.g. the translated \u1E25ad\u012Bth) and is unsafe in Obsidian, so it becomes \u2018 \u2014 a\n    quote mark, not the \u02BFayn character used for full transliteration.\n    """\n    text = text.replace("`", "\u2018")\n    # Mark openings: at the start, or after space / an opening bracket / a dash.\n    text = re.sub(r\'(?:^|(?<=[\\s(\\[{<\\-\u2013\u2014]))["\u201C\u201D]\', "\\x01", text)\n    text = re.sub(r"(?:^|(?<=[\\s(\\[{<\\-\u2013\u2014]))[\'\u2018\u2019]", "\\x02", text)\n    # Everything else \u2014 straight or curly \u2014 closes.\n    text = (text.replace(\'"\', "\u201D").replace("\u201C", "\u201D")\n                .replace("\'", "\u2019").replace("\u2018", "\u2019"))\n    return text.replace("\\x01", "\u201C").replace("\\x02", "\u2018")\n\n\n# \u2500\u2500 Fetching \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n\ndef _url_candidates(url: str):\n    """Yield the URL and any mirror that serves the same file.\n\n    jsDelivr occasionally rejects individual files with HTTP 403; the backing\n    raw.githubusercontent.com copy almost always still works.\n    """\n    yield url\n    m = re.match(r"https://cdn\\.jsdelivr\\.net/gh/([^/]+)/([^/]+)@([^/]+)/(.*)$", url)\n    if m:\n        yield f"https://raw.githubusercontent.com/{m.group(1)}/{m.group(2)}/{m.group(3)}/{m.group(4)}"\n\n\ndef fetch(url: str, *, cache: bool = False, retries: int = 3) -> bytes:\n    """Fetch a URL, optionally caching to disk, with mirror fallback + retries."""\n    if cache:\n        CACHE_DIR.mkdir(parents=True, exist_ok=True)\n        key = re.sub(r"[^\\w.-]+", "_", url)[-180:]\n        cached = CACHE_DIR / key\n        if cached.exists():\n            return cached.read_bytes()\n    last_err: Exception | None = None\n    for attempt in range(retries):\n        for candidate in _url_candidates(url):\n            try:\n                req = urllib.request.Request(candidate, headers={"User-Agent": "obsidian-text-source-import/1.0"})\n                with urllib.request.urlopen(req, timeout=60) as resp:\n                    data = resp.read()\n                if cache:\n                    cached.write_bytes(data)\n                return data\n            except Exception as exc:  # noqa: BLE001 - try mirror, then retry\n                last_err = exc\n        # A 404 is definitive; anything else (403/429/network) is worth retrying.\n        if isinstance(last_err, urllib.error.HTTPError) and last_err.code == 404:\n            break\n        time.sleep(1.5 * (attempt + 1))\n    raise RuntimeError(f"Could not fetch {url}: {last_err}")\n\n\n\ndef fetch_json(url: str, *, cache: bool = False):\n    return json.loads(fetch(url, cache=cache).decode("utf-8"))\n\n\ndef _cache_files() -> list[tuple[str, int]]:\n    """Every cached source file as (name, bytes) \u2014 read once per `list`."""\n    out: list[tuple[str, int]] = []\n    if CACHE_DIR.is_dir():\n        for f in CACHE_DIR.iterdir():\n            if f.is_file():\n                try:\n                    out.append((f.name, f.stat().st_size))\n                except OSError:\n                    pass\n    return out\n\n\ndef cached_bytes(work: dict, files: list[tuple[str, int]]) -> int:\n    """How many bytes of this work\'s source are already downloaded (0 if none).\n\n    Cache names are the sanitised URL, so the work\'s id appears as a token\n    between underscores (or before `.json` for a single-file work).\n    """\n    needle = re.compile(rf"_{re.escape(str(work.get(\'source_id\') or work[\'id\']))}(?:_|\\.(?:json|sqlite)$)")\n    return sum(size for name, size in files if needle.search(name))\n\n\n# \u2500\u2500 Catalogues \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n\ndef load_catalog(collection: str, *, use_cache: bool = True) -> list[dict]:\n    """Return a normalized list of works for a collection."""\n    spec = COLLECTIONS[collection]\n    works: list[dict] = []\n    if spec["kind"] == "hadith":\n        for b in HADITH_BOOKS:\n            works.append({\n                "collection": collection,\n                "id": b["id"],\n                "group": b["group"],\n                "name": b["title"],\n                "arabic": b["arabic"],\n                "author": b.get("author", ""),\n                "language": "ar",\n                "language_name": "arabic",\n                "source": "https://github.com/AhmedBaset/hadith-json",\n            })\n    elif spec["kind"] == "quran-text":\n        for b in QURAN_TEXTS:\n            works.append({\n                "collection": collection,\n                "id": b["id"],\n                "source_id": b.get("source_id", b["id"]),\n                "name": b["title"],\n                "riwaya_ar": b.get("riwaya_ar", ""),\n                "author": "",\n                "language": "ar",\n                "language_name": "arabic",\n                "source": "https://quran-json.risanb.com",\n            })\n    elif spec["kind"] == "dictionary":\n        for b in DICTIONARIES:\n            works.append({\n                "collection": collection,\n                "id": b["id"],\n                "name": b["title"],\n                "arabic": b.get("arabic", ""),\n                "author": b.get("author", ""),\n                "source": b["source"],\n                "db_url": b["db"],\n                "db_path": b.get("db_path", ""),\n                # `grid` = Wehr\'s label/content senses; `prose` = Lane\'s paragraphs.\n                "body": b.get("body", "grid"),\n                "note_prefix": b.get("note_prefix", "HW"),\n                # The id at which this work\'s source stops being one book and\n                # starts being its Supplement (0 = no such split).\n                "supplement_from": int(b.get("supplement_from", 0)),\n                # Which named romanization path its names follow.\n                "convention": b.get("convention", DEFAULT_ROMANIZATION),\n                # `sqlite` (the app\'s database) or `fodt` (the document origin).\n                "shape": b.get("shape", "sqlite"),\n                # A catalogue-supplied attribution (the FODT work); the app\'s\n                # dictionaries have none.\n                "license_attribution": b.get("license_attribution", ""),\n                # A work that exists only once can keep its bare folder name.\n                "unique": bool(b.get("unique")),\n                "language": "ar",\n                "language_name": "arabic",\n            })\n    elif spec["kind"] == "book":\n        # Built-in catalogue plus works the user added by URL (their entries win\n        # only where they are not already built in).\n        builtin_ids = {str(b["id"]) for b in TURATH_BOOKS}\n        entries = list(TURATH_BOOKS) + [\n            w for w in _custom_turath_works() if str(w.get("id", "")) not in builtin_ids\n        ]\n        for b in entries:\n            detail = TURATH_DETAILS.get(str(b["id"]), {})\n            type_key = str(b.get("type") or detail.get("type") or "other")\n            genres = b.get("genres") or detail.get("genres") or [type_key]\n            works.append({\n                "collection": collection,\n                "id": str(b["id"]),\n                "name": _sentence_case_title(b.get("title") or b.get("arabic") or str(b["id"])),\n                "arabic": b.get("arabic", ""),\n                "author": b.get("author", ""),\n                "authors": b.get("authors", []),\n                "source": b.get("url") or f"https://app.turath.io/book/{b[\'id\']}",\n                # Both a repository MOC and a work-type MOC (see TURATH_TYPES).\n                "kind_type": type_key,\n                "genre": type_key,\n                # Finer disciplines for the modal\'s Kinds (a work may sit in\n                # several) and a longer title for the list.\n                "genres": genres,\n                "subtitle": b.get("subtitle") or detail.get("subtitle", ""),\n                "section_level": int(b.get("section_level", 1)),\n                # A Turath work duplicated in another collection keeps its repo\n                # qualifier; a work found only here can opt out with `unique`.\n                "unique": bool(b.get("unique")),\n                "language": "ar",\n                "language_name": "arabic",\n            })\n    else:\n        raw = fetch_json(spec["catalog"], cache=use_cache)\n        if spec["kind"] == "tafsir":\n            for item in raw:\n                code = normalise_language(item.get("language_name"))\n                if not code:\n                    continue\n                works.append({\n                    "collection": collection,\n                    "id": item["slug"],\n                    "name": item.get("name", item["slug"]),\n                    "author": item.get("author_name", ""),\n                    "language": code,\n                    "language_name": item.get("language_name", ""),\n                    "source": item.get("source", ""),\n                })\n        elif spec["kind"] == "qul-tafsir":\n            # QUL\'s catalogue is `{"tafsirs": [{id, name, language_name,\n            # author_name, records_count, updated_at, slug}]}`; skip the empty\n            # stubs some resources carry.\n            for item in (raw.get("tafsirs", []) if isinstance(raw, dict) else []):\n                if int(item.get("records_count") or 0) <= 0:\n                    continue\n                code = normalise_language(item.get("language_name"))\n                if not code:\n                    continue\n                rid = item.get("id")\n                records = int(item.get("records_count") or 0)\n                works.append({\n                    "collection": collection,\n                    "id": str(rid),\n                    "name": item.get("name", str(rid)),\n                    "author": item.get("author_name") or "",\n                    "language": code,\n                    "language_name": item.get("language_name", ""),\n                    "source": f"https://qul.tarteel.ai/resources/tafsir/{rid}",\n                    "qul_updated": item.get("updated_at") or 0,\n                    # A rough footprint (source + model + notes) for a work not yet\n                    # downloaded, so the modal can show an "\u2248" estimate.\n                    "est_bytes": records * 2200,\n                })\n        elif spec["kind"] == "translation":\n            for _key, item in raw.items():\n                code = normalise_language(item.get("language"))\n                if not code:\n                    continue\n                ident = item.get("name") or _key\n                works.append({\n                    "collection": collection,\n                    "id": ident,\n                    "name": item.get("name", ident),\n                    "author": item.get("author", ""),\n                    "language": code,\n                    "language_name": item.get("language", ""),\n                    "source": item.get("source") or "https://github.com/fawazahmed0/quran-api",\n                })\n        else:  # pragma: no cover - guarded by the registry\n            raise ValueError(f"Unknown catalog kind {spec[\'kind\']!r}")\n    for w in works:\n        w["key"] = f"{collection}:{w[\'id\']}"\n        w["type"] = collection\n        w["collection_label"] = spec["label"]\n        # A collection normally has one genre; the Turath books carry their own\n        # (tafsir/fiqh/\u2026), which is both the modal toggle and the type MOC.\n        w.setdefault("genre", spec.get("genre", collection))\n        # A collection normally has one repository, but the dictionary collection\n        # holds two dictionaries from different ones, so each work names its own.\n        if collection == "dictionary":\n            w["repository"] = repository_name(w.get("source", "")).removeprefix("github.com/")\n        else:\n            w["repository"] = spec.get("repo_label", "")\n        w["needs_transliteration"] = bool(spec.get("needs_transliteration"))\n    return works\n\n\ndef load_overrides() -> dict[str, dict]:\n    overrides = json.loads(json.dumps(BUILTIN_OVERRIDES))\n    if OVERRIDES_FILE.exists():\n        try:\n            external = json.loads(OVERRIDES_FILE.read_text(encoding="utf-8"))\n            for k, v in external.items():\n                overrides.setdefault(k, {}).update(v)\n        except Exception as exc:  # noqa: BLE001\n            emit("error", message=f"Could not read {OVERRIDES_FILE.name}: {exc}")\n    return overrides\n\n\n# Proper-name stems kept capitalised in a sentence-cased (non-English) title.\n_TITLE_PROPER = {\n    "ibn", "ab\u012B", "ab\u016B", "bint", "ban\u016B",\n    "\u1E6Dabar\u012B", "qur\u1E6Dub\u012B", "kath\u012Br", "zamakhshar\u012B", "r\u0101z\u012B", "andalus\u012B", "suy\u016B\u1E6D\u012B", "ma\u1E25all\u012B",\n    "jal\u0101layn", "shinq\u012B\u1E6D\u012B", "q\u0101sim\u012B", "sa\u02BFd\u012B", "bukh\u0101r\u012B", "muslim", "d\u0101w\u016Bd", "tirmidh\u012B",\n    "m\u0101jah", "m\u0101lik", "a\u1E25mad", "\u1E25anbal", "\u1E25ajar", "\u02BFasqal\u0101n\u012B", "nawaw\u012B", "qud\u0101ma", "sh\u0101fi\u02BF\u012B",\n    "k\u0101s\u0101n\u012B", "margh\u012Bn\u0101n\u012B", "rushd", "buh\u016Bt\u012B", "qayraw\u0101n\u012B", "akh\u1E0Dar\u012B", "qud\u016Br\u012B", "\u1E25a\u1E0Dram\u012B",\n    "tha\u02BFlab\u012B", "\u0101jurr\u016Bm", "\u1E25\u0101jib", "khal\u012Bl", "kharash\u012B", "\u1E25a\u1E6D\u1E6D\u0101b", "maww\u0101q", "\u02BFulaysh",\n    "bil\u02BF\u0101lam", "s\u012Bbawayh", "j\u0101\u1E25i\u1E93", "man\u1E93\u016Br", "f\u012Br\u016Bz\u0101b\u0101d\u012B", "jawhar\u012B", "f\u0101ris", "qutayba",\n    "jurj\u0101n\u012B", "mizz\u012B", "dhahab\u012B", "khallik\u0101n", "sa\u02BFd", "zirikl\u012B", "ath\u012Br", "taymiyya",\n    "\u02BFizz", "ash\u02BFar\u012B", "\u0101jurr\u012B", "marwaz\u012B", "sarakhs\u012B", "juwayn\u012B", "sh\u0101\u1E6Dib\u012B", "qayyim",\n    "jawziyya", "qur\u02BE\u0101n", "qur\u2019\u0101n", "qur\'\u0101n", "all\u0101h", "ra\u1E25m\u0101n", "b\u0101r\u012B", "\u02BFarab", "\u02BFarabiyya",\n    "nawawiyya", "qayraw\u0101niyya", "\u1E25a\u1E0Dramiyya", "\u0101jurr\u016Bmiyya", "m\u0101lik\u012B", "\u1E25anaf\u012B", "\u1E25anbal\u012B",\n    "baghd\u0101d\u012B", "qazw\u012Bn\u012B", "sijist\u0101n\u012B", "nas\u0101\u02BE\u012B", "d\u0101rim\u012B", "tibr\u012Bz\u012B", "dihlaw\u012B",\n    "jal\u012Bl", "khald\u016Bn", "zahr\u012B", "\u1E6Da\u1E25\u0101wiyya", "w\u0101si\u1E6Diyya",\n}\n\n\ndef _sentence_case_title(text: str) -> str:\n    """Sentence case for a romanized non-English title.\n\n    The first word and proper nouns are capitalized; everything else is\n    lowercased. The article stays `al-` (so `al-Ba\u1E25r al-mu\u1E25\u012B\u1E6D`, not `Al-Ba\u1E25r\n    Al-Mu\u1E25\u012B\u1E6D`). Arabic-script titles are left as they are.\n    """\n    def cap(value: str) -> str:\n        return value[:1].upper() + value[1:] if value else value\n\n    out: list[str] = []\n    for i, token in enumerate(str(text or "").split()):\n        bare = re.sub(r"^[^\\w]+|[^\\w]+$", "", token.lower())\n        stem = bare.removeprefix("al-")\n        if stem in _TITLE_PROPER:\n            out.append("al-" + cap(token[3:]) if token.lower().startswith("al-") else cap(token))\n        elif i == 0:\n            out.append("al-" + cap(token[3:]) if token.lower().startswith("al-") else cap(token))\n        else:\n            out.append(token.lower())\n    return " ".join(out)\n\n\ndef _custom_turath_works() -> list[dict]:\n    """Works the user added by URL (`turath-custom-works.json`).\n\n    Accepted shape: `{"works": [{id, title, arabic, author, type, genres?,\n    subtitle?, url?}]}` (a bare list works too). Entries without an id are\n    ignored; the plugin writes this file from its "add by URL" dialog.\n    """\n    try:\n        data = json.loads(CUSTOM_WORKS_FILE.read_text(encoding="utf-8"))\n    except Exception:  # noqa: BLE001 - the file is optional\n        return []\n    rows = data.get("works", []) if isinstance(data, dict) else data\n    if not isinstance(rows, list):\n        return []\n    out = []\n    for w in rows:\n        if not (isinstance(w, dict) and str(w.get("id", "")).strip()):\n            continue\n        # Old custom entries may carry the former split grammar keys.\n        if isinstance(w.get("genres"), list):\n            w["genres"] = ["grammar" if g in ("grammar-syntax", "grammar-inflection") else g\n                           for g in w["genres"]]\n        out.append(w)\n    return out\n\n\ndef edition_variant(work_id: str) -> str:\n    """A short qualifier for script variants of a translation edition.\n\n    The quran-api catalogue gives a romanised edition a `-la` suffix and its\n    vocalised form a `-lad` suffix; the base, `-la` and `-lad` editions share\n    their author and title, so without this they collapse onto one folder.\n    """\n    if work_id.endswith("-lad"):\n        return "Latin diacritics"\n    if work_id.endswith("-la"):\n        return "Latin"\n    return ""\n\n\ndef apply_overrides(work: dict, overrides: dict[str, dict]) -> dict:\n    merged = dict(work)\n    merged["title_ar"] = ""\n    merged["short_ar"] = ""\n    if work["collection"] == "quran":\n        # Qur\'\u0101n translation editions are identified by their translator; a\n        # romanised edition carries a -la/-lad suffix, which must qualify the\n        # title or the editions collapse onto one folder.\n        label = work.get("author") or work["name"]\n        variant = edition_variant(work["id"])\n        title = f"Qur\u02BE\u0101n - {label}" + (f" ({variant})" if variant else "")\n        merged["title"] = title\n        merged["dir"] = slug_to_dir(title)\n        merged["title_ar"] = "\u0627\u0644\u0642\u0631\u0622\u0646 \u0627\u0644\u0643\u0631\u064A\u0645"\n    elif work["collection"] == "hadith":\n        merged["title"] = work["name"]\n        merged["dir"] = slug_to_dir(work["name"])\n        merged["title_ar"] = work.get("arabic", "")\n    elif work["collection"] == "quran-text":\n        merged["title"] = work["name"]\n        merged["dir"] = slug_to_dir(work["name"])\n        # Qualify the Arabic alias with its riw\u0101ya, so a bare "\u0627\u0644\u0642\u0631\u0622\u0646 \u0627\u0644\u0643\u0631\u064A\u0645"\n        # never points ambiguously at one riw\u0101ya among several.\n        riwaya_ar = work.get("riwaya_ar", "")\n        merged["title_ar"] = f"\u0627\u0644\u0642\u0631\u0622\u0646 \u0627\u0644\u0643\u0631\u064A\u0645 - {riwaya_ar}" if riwaya_ar else "\u0627\u0644\u0642\u0631\u0622\u0646 \u0627\u0644\u0643\u0631\u064A\u0645"\n    elif work["collection"] == "dictionary":\n        merged["title"] = work["name"]\n        merged["dir"] = slug_to_dir(work["name"])\n        merged["title_ar"] = work.get("arabic", "")\n    elif work["collection"] == "turath":\n        merged["title"] = work["name"]\n        merged["dir"] = slug_to_dir(work["name"])\n        merged["title_ar"] = work.get("arabic", "")\n    else:\n        merged["title"] = work["name"]\n        merged["dir"] = slug_to_dir(work["name"])\n    merged["authors"] = []\n    merged["translators"] = []\n    if work["collection"] == "hadith":\n        if work.get("author"):\n            merged["authors"] = [work["author"]]\n    elif work["collection"] == "dictionary":\n        if work.get("author"):\n            merged["authors"] = [work["author"]]\n    elif work["collection"] == "turath":\n        merged["authors"] = list(work.get("authors") or\n                                 ([work["author"]] if work.get("author") else []))\n    elif work["collection"] == "quran":\n        if work.get("author"):\n            merged["translators"] = [work["author"]]\n    spec = COLLECTIONS[work["collection"]]\n    merged["cssclass"] = spec["cssclass"]\n    # Languages the work actually contains (\u1E25ad\u012Bth are bilingual).\n    merged["languages"] = ["ar", "en"] if work["collection"] == "hadith" else [work["language"]]\n    if work["collection"] == "turath":\n        # Two axes: the repository (Turath) and the work type (e.g. Fiqh Sources).\n        type_moc = TURATH_TYPES.get(work.get("kind_type", ""), "Turath")\n        merged["moc"] = type_moc\n        merged["mocs"] = ["Turath", type_moc]\n        merged["up"] = [f"[[Turath]]", f"[[{type_moc}]]"]\n    else:\n        merged["moc"] = spec["moc"]\n        merged["mocs"] = [spec["moc"]]\n        merged["up"] = [f"[[{spec[\'moc\']}]]"]\n    o = overrides.get(work["key"])\n    if o:\n        merged.update({k: v for k, v in o.items() if v is not None})\n    merged["dir"] = slug_to_dir(merged["dir"])\n    # The repository qualifier is appended by `with_unique_dirs`, *after* any\n    # edition/language qualifier, so `Tafsir Ibn Kathir (Arabic) (tafsir_api)`.\n    # An override that sets its own `dir`, or a work flagged `unique`, opts out.\n    if (o and o.get("dir")) or merged.get("unique"):\n        merged["repo_dir"] = ""\n    else:\n        merged["repo_dir"] = repo_qualifier(merged)\n    merged["language_label"] = language_name(merged["language"])\n    merged["language_links"] = [language_name(l) for l in merged["languages"]]\n    merged["moc_sections"] = [moc_section(l) for l in merged["languages"]]\n    merged["aliases"] = canonical_aliases(merged)\n    return merged\n\n\ndef _installed_work_dirs() -> dict[str, str]:\n    """key \u2192 folder for every work already recorded in the manifest (installed)."""\n    try:\n        data = json.loads((VAULT / ".midad-arabic-sources" / "source-imports.json").read_text(encoding="utf-8"))\n        return {\n            str(w["key"]): str(w["dir"])\n            for w in data.get("works", [])\n            if w.get("key") and w.get("dir")\n        }\n    except Exception:  # noqa: BLE001\n        return {}\n\n\ndef with_unique_dirs(works: list[dict], *, preserve_installed: bool = True) -> None:\n    """Give every work a stable, unique output folder (mutates in place).\n\n    The folder comes from the title, but two editions can share a title \u2014 one\n    translator into several languages, or the romanised `-la`/`-lad` variants of\n    one edition. Qualify the later ones with their language, then their id.\n\n    The result depends only on the catalogue order, never on which works are\n    being fetched, so `list`, `fetch` and `check-updates` always agree on a\n    work\'s folder. (A request-scoped rule breaks: a reinstall then lands in a\n    folder the plugin is not checking, and repeats forever.)\n\n    A work already in the manifest keeps **the folder it has** \u2014 renaming an\n    installed work orphans its notes and leaves a stale folder behind \u2014 and that\n    folder is reserved, so a colliding newcomer is qualified instead. Pass\n    `preserve_installed=False` to compute the names the current scheme *would*\n    give (the plugin\'s naming migration does this before moving the files).\n    """\n    installed = _installed_work_dirs() if preserve_installed else {}\n    seen: set[str] = set(installed.values())\n\n    def qualified(base: str, repo: str, label: str = "") -> str:\n        """`Title (edition) (repo)` \u2014 the edition label, when needed, comes first."""\n        parts = [base]\n        if label:\n            parts.append(f"({label})")\n        if repo:\n            parts.append(f"({repo})")\n        return slug_to_dir(" ".join(parts))\n\n    for w in works:\n        key = str(w.get("key"))\n        if key in installed:\n            w["dir"] = installed[key]\n            continue\n        base = w["dir"]\n        repo = str(w.get("repo_dir") or "")\n        candidate = qualified(base, repo)\n        if candidate not in seen:\n            w["dir"] = candidate\n            seen.add(candidate)\n            continue\n        qualifiers = [\n            w.get("language_label") or w.get("language"),\n            edition_variant(w["id"]),\n            w["id"],\n        ]\n        unique = ""\n        for label in qualifiers:\n            if not label:\n                continue\n            attempt = qualified(base, repo, str(label))\n            if attempt not in seen:\n                unique = attempt\n                break\n        if not unique:\n            n = 2\n            while not unique:\n                attempt = qualified(base, repo, str(n))\n                if attempt not in seen:\n                    unique = attempt\n                n += 1\n        w["dir"] = unique\n        seen.add(unique)\n\n\ndef all_works(overrides: dict[str, dict], *, preserve_installed: bool = True) -> dict[str, dict]:\n    """Every catalogue work, merged and given a stable unique folder, by key."""\n    works: list[dict] = []\n    for coll in COLLECTIONS:\n        for w in load_catalog(coll, use_cache=True):\n            works.append(apply_overrides(w, overrides))\n    with_unique_dirs(works, preserve_installed=preserve_installed)\n    return {w["key"]: w for w in works}\n\n\n# \u2500\u2500 S\u016Brah table \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n\ndef surah_table() -> list[dict]:\n    """Return [{number, base, translit, arabic}] for the 114 s\u016Brahs.\n\n    Prefers the vault\'s _7 Sources/Quran folder so links match real note names;\n    falls back to the built-in table.\n    """\n    table: list[dict] = []\n    for i, (translit, arabic) in enumerate(SURAH_NAMES, start=1):\n        table.append({"number": i, "base": f"{i:03d} {translit}", "translit": translit, "arabic": arabic})\n    if QURAN_DIR.is_dir():\n        for f in sorted(QURAN_DIR.glob("*.md")):\n            m = re.match(r"^(\\d{1,3})\\s+(.+)$", f.stem)\n            if not m:\n                continue\n            num = int(m.group(1))\n            if not 1 <= num <= 114:\n                continue\n            arabic = _arabic_alias_from_note(f) or table[num - 1]["arabic"]\n            table[num - 1] = {"number": num, "base": f.stem, "translit": m.group(2), "arabic": arabic}\n    return table\n\n\ndef _arabic_alias_from_note(path: Path) -> str | None:\n    try:\n        text = path.read_text(encoding="utf-8", errors="ignore")\n    except OSError:\n        return None\n    m = re.match(r"^---\\n(.*?)\\n---", text, re.DOTALL)\n    if not m:\n        return None\n    in_aliases = False\n    for line in m.group(1).splitlines():\n        if re.match(r"^aliases:\\s*$", line):\n            in_aliases = True\n            continue\n        if in_aliases:\n            item = re.match(r"^\\s*-\\s*(.+?)\\s*$", line)\n            if not item:\n                if line and not line.startswith((" ", "\\t")):\n                    break\n                continue\n            value = item.group(1).strip().strip(\'"\\\'\')\n            if value and re.fullmatch(r"[\\u0600-\\u06FF\\s]+", value):\n                return value\n    return None\n\n\n# \u2500\u2500 Text cleaning \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n\n_LIST_MARK = re.compile(r"\\s-?(\\d{1,2})\\.\\s")\n\n\ndef number_list_items(text: str) -> str:\n    """Rebuild an inline numbered list the source hard-wrapped.\n\n    The sources wrap prose at ~100 characters, but start each list item with\n    `-N.` (e.g. the "five things given to no one before me" \u1E25ad\u012Bth). Once the\n    wraps are folded away the markers read as ` -1. \u2026 -2. \u2026`; if at least two\n    are present, separate them into a real ordered list (and put the run-in\n    intro on its own paragraph, as Markdown requires).\n    """\n    marks = list(_LIST_MARK.finditer(text))\n    if len(marks) < 2:\n        return text\n    intro = text[: marks[0].start()].strip()\n    items: list[str] = []\n    for i, m in enumerate(marks):\n        end = marks[i + 1].start() if i + 1 < len(marks) else len(text)\n        chunk = text[m.end():end].strip()\n        if chunk:\n            items.append(chunk)\n    body = "\\n".join(f"{n}. {t}" for n, t in enumerate(items, 1))\n    return f"{intro}\\n\\n{body}" if intro else body\n\n\ndef clean_text(raw: str, *, english: bool) -> str:\n    """HTML-strip and normalise a commentary/translation string."""\n    if not raw:\n        return ""\n    text = html.unescape(raw)\n    # Turn block-level HTML into paragraph breaks, then drop any remaining tags.\n    text = re.sub(r"(?i)<br\\s*/?>", "\\n", text)\n    text = re.sub(r"(?i)</p\\s*>", "\\n\\n", text)\n    text = re.sub(r"(?i)<p[^>]*>", "", text)\n    text = re.sub(r"<[^>]+>", "", text)\n    # The editor sometimes inserts apparatus *inside* a verse quote\n    # (`\uFD3F\u2026 \\[\u2026\\] \u2026\uFD3E`), which would otherwise become part of the verse text. Pull\n    # it out so the quote stays the canonical verse, and re-emit it after the quote\n    # (the `[[\u2026]]` \u2192 <sup> step below then handles it).\n    def _pull_apparatus(m: re.Match) -> str:\n        inner = m.group(1)\n        apparatus: list[str] = []\n        inner = re.sub(r"\\[\\[(.+?)\\]\\]", lambda mm: (apparatus.append(f"[[{mm.group(1)}]]"), "")[1], inner)\n        inner = re.sub(r"\\[(.+?)\\]", lambda mm: (apparatus.append(f"[{mm.group(1)}]"), "")[1], inner)\n        quote = f"\uFD3F{inner.strip()}\uFD3E"\n        return quote + (" " + " ".join(apparatus) if apparatus else "")\n\n    text = re.sub(r"\uFD3F(.+?)\uFD3E", _pull_apparatus, text, flags=re.DOTALL)\n    # Mark Qur\'\u0101n spans with the vault\'s quran-quote classes.\n    text = re.sub(r"\uFD3F(.+?)\uFD3E", lambda m: f"*\uFD3F{m.group(1)}\uFD3E{{.quran-quote}}*", text, flags=re.DOTALL)\n    # Collapse each paragraph onto one line, keep one blank line between them.\n    paragraphs = [re.sub(r"\\s+", " ", p).strip() for p in re.split(r"\\n\\s*\\n", text)]\n    paragraphs = [p for p in paragraphs if p]\n    body = "\\n\\n".join(paragraphs)\n    # The vault always uses curly quotes, in Arabic and English alike.\n    body = smart_quotes(body)\n    # Then rebuild any hard-wrapped inline numbered list ("\u2026 me. -1. \u2026 -2. \u2026").\n    body = number_list_items(body)\n    # The source\'s editorial apparatus \u2014 manuscript variants (`\u0632\u064A\u0627\u062F\u0629 \u0645\u0646 \u062F.`,\n    # `\u0641\u064A \u0647\u0640: "\u2026"`) and bibliographic refs (`\u0635\u062D\u064A\u062D`, `\u0631\u0648\u0627\u0647`, `\u0627\u0646\u0638\u0631:`) \u2014 is marked\n    # `[[\u2026]]`, which Obsidian would read as a wikilink. Render it as a muted\n    # superscript aside instead. A bare <sup> is used deliberately: a tooltip\n    # (<span title=\u2026>) made notes with ~1000 of these hang Obsidian\'s renderer.\n    # Done AFTER smart_quotes (which would otherwise curl attribute quotes);\n    # links we add ourselves come later and are not touched.\n    body = re.sub(\n        r"\\[\\[(.+?)\\]\\]",\n        lambda m: f\'<sup class="mas-src-note">({html.escape(m.group(1))})</sup>\',\n        body,\n    )\n    # Added words in single brackets (`[\u0642\u064E\u0648\u0652\u0644\u064F\u0647\u064F]`, `[\u0648\u064E\u0627\u0635\u0652\u0628\u0650\u0631\u0652]`) become round\n    # brackets: square brackets are avoided entirely, because Obsidian\'s renderer\n    # mishandles them \u2014 they read as links, and they break a preceding\n    # `{.quran-quote}`. Our own `[[\u2026]]` links are added later, after this runs.\n    body = re.sub(r"\\[(.+?)\\]", lambda m: f"({m.group(1)})", body)\n    # A stray, unpaired bracket is rare but does occur; nothing in the vault text\n    # should carry a square bracket, so fold any that remain into round brackets.\n    body = body.replace("[", "(").replace("]", ")")\n    return body\n\n\ndef parse_work_file(data, shape: str) -> list[tuple[int, str]]:\n    """Return [(ayah_number, raw_text)] from a downloaded work file."""\n    records: list[dict] = []\n    if shape == "chapter":\n        records = data.get("chapter", []) if isinstance(data, dict) else data\n    elif shape == "ayah-list":\n        if isinstance(data, list):\n            records = data\n        elif isinstance(data, dict):\n            records = data.get("ayahs") or data.get("verses") or []\n            if not records and all(str(k).isdigit() for k in data):\n                records = [{"ayah": int(k), "text": v} for k, v in data.items()]\n    out: list[tuple[int, str]] = []\n    for rec in records:\n        ayah = rec.get("ayah", rec.get("verse"))\n        text = rec.get("text", "")\n        if ayah is None:\n            continue\n        out.append((int(ayah), text))\n    out.sort(key=lambda t: t[0])\n    return out\n\n\n# \u2500\u2500 Render models (the contract consumed by the plugin\'s ETA templates) \u2500\u2500\u2500\u2500\u2500\u2500\n#\n# A model is {"schema", "generated", "work", "units"}. The full field reference\n# lives in the plugin docs. Acquisition never renders markdown.\n#\n# `MODEL_SCHEMA` is the version at which each collection\'s *acquisition* last\n# changed \u2014 the plugin re-fetches a cached model older than its collection\'s\n# entry, because a re-render only replays the model and cannot apply an\n# acquisition change. Bump the affected entry whenever this file\'s output for a\n# collection changes, and mirror it in the plugin\'s `COLLECTION_MODEL_SCHEMA`.\nMODEL_SCHEMA: dict[str, int] = {"dictionary": 6, "turath": 1}\nBASE_MODEL_SCHEMA = 1\n\n\ndef display_title(base: str) -> str:\n    """A unit\'s title as it should read, e.g. `2 Al-Baqarah`, not `002 Al-Baqarah`.\n\n    A title is for viewing, so the numeric prefix loses its leading zeros. The\n    *file name* keeps them (it is what makes s\u016Bra notes sort correctly), and the\n    hub links to the file, so the two never drift.\n    """\n    return re.sub(r"^0+(\\d)", r"\\1", base)\n\n\ndef _ayah_blocks(surah: dict, records: list[tuple[int, str]], english: bool,\n                 delims: tuple[str, ...] = ()) -> list[dict]:\n    # The source repeats one section verbatim across a range of \u0101y\u0101t (2:26\u201327,\n    # 2:31\u201333 \u2026 are the same text). Merge such runs *on the raw source text*, so\n    # the heading reads `# 31\u201333` rather than repeating the section per verse.\n    # (Dedupe on the raw text, not the processed body: processing depends on the\n    # verse context \u2014 `skip`, matcher hints \u2014 so the outputs differ.)\n    groups: list[dict] = []\n    for ayah_no, raw in records:\n        if groups and raw == groups[-1]["raw"]:\n            groups[-1]["end"] = ayah_no\n            continue\n        groups.append({"start": ayah_no, "end": ayah_no, "raw": raw})\n\n    out: list[dict] = []\n    for g in groups:\n        start, end = g["start"], g["end"]\n        body = clean_text(g["raw"], english=english)\n        # Link citations of *other* verses; the commented verse\'s own quotes stay.\n        body = link_verse_citations(body, skip=(surah["number"], start))\n        body = link_quote_citations(body, surah=surah["number"], ayah=start, delims=delims)\n        if not body:\n            continue\n        if end == start:\n            out.append({\n                "number": start,\n                "ref": f"[[{surah[\'base\']}#{start}|{surah[\'arabic\']} : {arabic_numeral(start)}]]",\n                "body": body,\n            })\n        else:\n            out.append({\n                "number": f"{start}\u2013{end}",\n                "ref": (f"[[{surah[\'base\']}#{start}|{surah[\'arabic\']} : {arabic_numeral(start)}]]"\n                        f"\u2013[[{surah[\'base\']}#{end}|{arabic_numeral(end)}]]"),\n                "body": body,\n            })\n    return out\n\n\ndef build_surah_units(work: dict, table: list[dict], wanted: set[int] | None,\n                      args: argparse.Namespace) -> list[dict]:\n    """One unit per s\u016Brah, each with \u0101ya blocks."""\n    english = work["language"] == "en"\n    units: list[dict] = []\n    for surah in table:\n        if wanted and surah["number"] not in wanted:\n            continue\n        url = COLLECTIONS[work["collection"]]["data"].format(id=work["id"], surah=surah["number"])\n        try:\n            data = fetch_json(url, cache=not args.no_cache)\n        except Exception as exc:  # noqa: BLE001\n            emit("log", message=f"  skipped {surah[\'base\']}: {exc}")\n            continue\n        records = parse_work_file(data, COLLECTIONS[work["collection"]]["shape"])\n        units.append({\n            "kind": "surah",\n            "id": surah["number"],\n            "base": surah["base"],\n            "title": display_title(surah["base"]),\n            "translit": surah["translit"],\n            "arabic": surah["arabic"],\n            "blocks": _ayah_blocks(\n                surah, records, english,\n                detect_quote_delims("\\n".join(t for _, t in records))),\n        })\n        if len(units) % 10 == 0:\n            emit("step", name=work["title"], status="parsing", detail=f"{len(units)} s\u016Brahs")\n    return units\n\n\ndef build_qul_units(work: dict, table: list[dict], wanted: set[int] | None,\n                    args: argparse.Namespace) -> list[dict]:\n    """One unit per s\u016Brah from the Qur\u02BE\u0101nic Universal Library API.\n\n    QUL serves a passage per s\u016Brah range (`by_range`), each record naming the\n    \u0101y\u0101t it covers; it expands a shared passage to every covered \u0101ya, so the\n    usual consecutive-dedupe in `_ayah_blocks` folds it into a ranged block.\n    """\n    english = work["language"] == "en"\n    template = COLLECTIONS["tafsir-qul"]["data"]\n    units: list[dict] = []\n    for surah in table:\n        num = surah["number"]\n        if wanted and num not in wanted:\n            continue\n        url = template.format(id=work["id"], surah=num, count=SURAH_AYAHS[num - 1])\n        try:\n            data = fetch_json(url, cache=not args.no_cache)\n        except Exception as exc:  # noqa: BLE001\n            emit("log", message=f"  skipped {surah[\'base\']}: {exc}")\n            continue\n        records: list[tuple[int, str]] = []\n        for rec in (data.get("tafsirs", []) if isinstance(data, dict) else []):\n            keys = rec.get("verses") or []\n            if isinstance(keys, str):\n                keys = [keys]\n            text = rec.get("text", "")\n            for k in keys:\n                try:\n                    s, a = (int(x) for x in str(k).split(":", 1))\n                except ValueError:\n                    continue\n                if s == num:\n                    records.append((a, text))\n        if not records:\n            continue\n        records.sort(key=lambda t: t[0])\n        units.append({\n            "kind": "surah",\n            "id": num,\n            "base": surah["base"],\n            "title": display_title(surah["base"]),\n            "translit": surah["translit"],\n            "arabic": surah["arabic"],\n            "blocks": _ayah_blocks(\n                surah, records, english,\n                detect_quote_delims("\\n".join(t for _, t in records))),\n        })\n        if len(units) % 10 == 0:\n            emit("step", name=work["title"], status="parsing", detail=f"{len(units)} s\u016Brahs")\n    return units\n\n\ndef parse_hadith_book(data: dict) -> list[dict]:\n    """Group a whole-book \u1E25ad\u012Bth file into chapters, each with its hadiths."""\n    by_chapter: dict = {}\n    for h in data.get("hadiths", []):\n        by_chapter.setdefault(h.get("chapterId"), []).append(h)\n    units = []\n    for c in data.get("chapters", []):\n        units.append({\n            "id": c.get("id"),\n            "arabic": c.get("arabic", ""),\n            "english": c.get("english", ""),\n            "hadiths": sorted(by_chapter.get(c.get("id"), []),\n                              key=lambda h: h.get("idInBook", h.get("id", 0))),\n        })\n    return units\n\n\ndef hadith_chapter_label(chapter: dict) -> str:\n    label = f\'{chapter["id"]} {chapter.get("english") or chapter.get("arabic")}\'.strip()\n    # Chapter titles carry the same backtick-for-\u02BFayn and straight quotes as the\n    # text (e.g. "26 `Umrah"), so normalise them too.\n    return smart_quotes(label)\n\n\ndef build_hadith_units(work: dict, args: argparse.Namespace) -> list[dict]:\n    """One unit per chapter (kit\u0101b), each with its hadiths (Arabic + English)."""\n    url = COLLECTIONS["hadith"]["data"].format(group=work["group"], id=work["id"])\n    emit("step", name=work["title"], status="downloading", detail="whole book")\n    data = fetch_json(url, cache=not args.no_cache)\n    units: list[dict] = []\n    for chapter in parse_hadith_book(data):\n        label = hadith_chapter_label(chapter)\n        hadiths = []\n        for h in chapter["hadiths"]:\n            en = h.get("english") or {}\n            hadiths.append({\n                "number": h.get("idInBook", h.get("id")),\n                "narrator": clean_text(en.get("narrator", ""), english=True),\n                "english": link_verse_citations(clean_text(en.get("text", ""), english=True)),\n                "arabic": link_quote_citations(\n                    link_verse_citations(clean_text(h.get("arabic", ""), english=False)),\n                    surah=0, ayah=0),\n            })\n        units.append({\n            "kind": "hadith",\n            "id": chapter["id"],\n            "base": slug_to_dir(label),\n            "title": display_title(label),\n            "label": label,\n            "arabic": smart_quotes(chapter.get("arabic", "")),\n            "english": smart_quotes(chapter.get("english", "")),\n            "hadiths": hadiths,\n        })\n        if len(units) % 10 == 0:\n            emit("step", name=work["title"], status="parsing", detail=f"{len(units)} chapters")\n    return units\n\n\ndef build_quran_text_units(work: dict, table: list[dict], wanted: set[int] | None,\n                           args: argparse.Namespace) -> list[dict]:\n    """One unit per s\u016Brah of a riw\u0101ya. \u1E24af\u1E63 generates the work note only."""\n    units: list[dict] = []\n    for surah in table:\n        if wanted and surah["number"] not in wanted:\n            continue\n        url = COLLECTIONS["quran-text"]["data"].format(id=work["source_id"], surah=surah["number"])\n        try:\n            data = fetch_json(url, cache=not args.no_cache)\n        except Exception as exc:  # noqa: BLE001\n            emit("log", message=f"  skipped {surah[\'base\']}: {exc}")\n            continue\n        blocks: list[dict] = []\n        for v in data.get("verses", []):\n            text = clean_text(v.get("text", ""), english=False)\n            if text:\n                blocks.append({\n                    "number": v.get("id"),\n                    "body": text,\n                    "hafs": v.get("number_in_hafs", []),\n                })\n        units.append({\n            "kind": "quran",\n            "id": surah["number"],\n            "base": surah["base"],\n            "title": display_title(surah["base"]),\n            "translit": surah["translit"],\n            "arabic": surah["arabic"],\n            "blocks": blocks,\n        })\n        if len(units) % 10 == 0:\n            emit("step", name=work["title"], status="parsing", detail=f"{len(units)} s\u016Brahs")\n    return units\n\n\n# \u2500\u2500 Dictionaries (SQLite lexicons) \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n#\n# The lexicons ship as SQLite, not JSON. A work is one row group: a root entry\n# (`is_root`) plus the derived entries that point at it (`parent_id`); one note\n# per root, which is how the vault already keeps Hans Wehr. The transformation\n# reproduces that note format exactly \u2014 an H1 for the root, an H2 per derived\n# entry, each followed by a `mas-dictionary-definition` callout rendered as an\n# alternating label/content list (the two-column grid).\n#\n# Two subtleties, both learned the hard way:\n#   * The definitions carry HTML tags (`<b>II</b>`); tags must be stripped\n#     *before* the transliteration is scanned, or `<b>` supplies a stray "b"\n#     that passes for the romanisation (e.g. \u0627\u0628\u0646 \u2192 "b").\n#   * Many roots have no transliteration of their own: their definition *starts*\n#     with a verb-form marker (`<b>II</b> \u2026`). For those the transliteration is\n#     taken from the first derived entry that is not itself a verb form, and only\n#     if that fails is a character-by-character transliteration of the root used.\n\n_HW_ARABIC = r"\\u0600-\\u06FF\\u0750-\\u077F\\u08A0-\\u08FF"\n# A digit is allowed only in the *first* run (a homonym number, `1 \u0628\u0646\u0643`); after a\n# space it is a sense number, not part of the headword (`\u0627\u0630\u0627 1. \u2026`).\n_HW_HEAD_RE = re.compile(rf"^[{_HW_ARABIC}0-9]+(?:[\\s,]+[{_HW_ARABIC}]+)*")\n_HW_ARABIC_RE = re.compile(rf"[{_HW_ARABIC}]")\n# Words that open an etymology parenthetical rather than the transliteration:\n# language abbreviations and grammatical pointers. Wehr writes loanwords as\n# `\u062C\u0631\u0627\u062C (Fr.) gar\u0101\u017E` and `\u0628\u0631\u063A\u0649 (Turk. \u0628\u0648\u0631\u063A\u0649 bur\u011F\u0173) burg\u012B`, where the\n# transliteration follows the parenthetical.\n_HW_PAREN_STOP = {\n    "also", "and", "or", "pl", "sg", "du", "variant", "see", "of", "cf", "esp",\n    "f", "m", "n", "invar", "vb", "adj", "adv", "coll", "prov", "eg",\n    "engl", "fr", "it", "gr", "lat", "pers", "syr", "leb", "jord", "ir",\n    "turk", "ger", "sp", "port", "npers", "aram", "hebr", "copt", "for",\n}\n# Wehr\'s transliteration alphabet. A character set, not a regex: \u2018 \u2019 ` \' are\n# mapped positionally to \u02BF (\u02BFayn) and \u02BE (hamza) as they are scanned.\n_HW_VALID_CHARS = set(\n    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"\n    "\u0101\u0113\u012B\u016B\u014D\u0100\u0112\u012A\u016A\u014C\xE9\xE8\xEA\xE4\xEB\xEF\xF6\xFC\xC4\xCB\xCF\xD6\xDC\xE7\xC7\u015F\u015E\u010D\u010C\u0161\u0160\u1E25\u1E24\u1E33\u1E32\u1E63\u1E62\u1E0D\u1E0C\u1E6D\u1E6C\u1E93\u1E92\u1E0F\u1E0E\u1E6F\u1E6E\u1E2B\u1E2A\u0121\u0120\u1E21\u1E20\u017E\u017D"\n    "\u0259\u025B\u0254\u026A\u028A\xE6\u0251-"\n    "\u02BF\u02BE\u0254\u0294"\n)\n_HW_SKIP_RE = (\n    re.compile(r"^look up alphabetically"),\n    re.compile(r"^see\\s+\\w+"),\n    re.compile(r"^\\s*$"),\n    re.compile(r"look up alphabetically"),\n    re.compile(r"^[0-9]+$"),\n)\n_HW_RADICALS = {\n    "\u0627": "\u0101", "\u0628": "b", "\u062A": "t", "\u062B": "th", "\u062C": "j", "\u062D": "\u1E25", "\u062E": "kh",\n    "\u062F": "d", "\u0630": "dh", "\u0631": "r", "\u0632": "z", "\u0633": "s", "\u0634": "sh", "\u0635": "\u1E63",\n    "\u0636": "\u1E0D", "\u0637": "\u1E6D", "\u0638": "\u1E93", "\u0639": "\u02BF", "\u063A": "gh", "\u0641": "f", "\u0642": "q",\n    "\u0643": "k", "\u0644": "l", "\u0645": "m", "\u0646": "n", "\u0647": "h", "\u0648": "w", "\u064A": "y",\n    # A hamza-bearing alif is never a long \u0101: it is an initial \u02BEa/\u02BEu or an\n    # internal \u02BEa/\u02BEu, or an unvowelled \u02BE. Writing \u0101 here (as this table once did)\n    # turned \u0646\u0623\u062A into `n\u0101t`.\n    "\u0621": "\u02BE", "\u0629": "h", "\u0649": "\u0101", "\u0624": "\u02BE", "\u0626": "\u02BE", "\u0640": "",\n    "\u0622": "\u02BE\u0101", "\u0623": "\u02BEa", "\u0625": "\u02BEi", "\u0671": "a",\n}\n_HW_NUMBER_RE = re.compile(r"(?<!\\d)(\\d+)\\.\\s+")\n_HW_ROMAN_RE = re.compile(r"(?:<b>)?([IVXLCDM]+)(?:</b>)?\\s+")\n# \u2500\u2500 Romanization conventions \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n#\n# Named transliteration paths, so a work *declares* which one it follows instead\n# of letters being swapped ad hoc. The engine (`arabic-bw-transliterate.py`)\n# emits the vault\'s own convention, so every other path is a recast of that:\n#\n#   vault  the house convention \u2014 no case endings, but a verb\'s inflection, a\n#          pronominal or prepositional ending and the two tanw\u012Bn exceptions are\n#          kept (`ba\u1E25r`, `kataba`, `minka`, `q\u0101\u1E0Din`, `\u1E6Dab\u02BFan`). Lane uses this.\n#   wehr   Hans Wehr\'s own \u2014 the European Orientalist system of the printed\n#          dictionary (`\u0161`, `\u1E6F`, `\u1E35`, `\u1E0F`, `\u1E21`, `\u010D`, `\u017E`). Wehr uses it, so a name\n#          the engine produced still matches the transliterations the note\'s own\n#          text carries. Note that Wehr writes q\u0101f as plain `q`: the `\u1E33` that turns\n#          up in its scanned text is a mis-read kh\u0101\u02BE (`a\u1E33a\u1E0Da` for `a\u1E2Ba\u1E0Fa`), not a\n#          q\u0101f, and `_hw_skeleton` folds it onto kh\u0101\u02BE accordingly.\n#   full   fully vocalised, every case ending written. That is the service\'s\n#          `keep_case` mode \u2014 it changes how a reading is *produced*, not how its\n#          letters are written \u2014 and is what the vault uses for Qur\'\u0101n passages.\n#\nROMANIZATION_CONVENTIONS = ("vault", "wehr", "full")\nDEFAULT_ROMANIZATION = "vault"\n\n# A digraph is only recast when it stands for a *single* letter that Wehr writes\n# differently. \u062B is deliberately absent: `th` in a reading may equally be \u062A + \u0647\n# (`\u062A\u0647\u062A\u0647` \u2192 `thth`), so that letter is handled positionally instead, where the\n# Arabic is known (`_hw_fix_underlined`).\n_WEHR_LETTERS: tuple[tuple[str, str], ...] = (\n    ("sh", "\u0161"), ("kh", "\u1E35"), ("dh", "\u1E0F"), ("gh", "\u1E21"), ("ch", "\u010D"), ("zh", "\u017E"),\n)\n\n\ndef _hw_romanize(reading: str, convention: str = DEFAULT_ROMANIZATION) -> str:\n    """Recast a reading in the vault\'s convention as `convention` (idempotent).\n\n    Only digraphs that stand for one letter are recast \u2014 see `_WEHR_LETTERS` for\n    why \u062B is not among them. `full` needs no recasting at all: it is a mode of\n    *producing* a reading, not of writing its letters.\n    """\n    if convention == "wehr":\n        for plain, wehr in _WEHR_LETTERS:\n            reading = reading.replace(plain, wehr)\n    return reading\n# A prose work\'s headword is a bare run of Arabic \u2014 no transliteration follows it,\n# and Lane puts the verb-form numeral *after* a space (`\u062D\u064E\u0631\u064E\u0628\u064E\u0647\u064F 1 ,`), so unlike\n# `_HW_HEAD_RE` this one must stop at the digit.\n_HW_PROSE_HEAD_RE = re.compile(rf"^[{_HW_ARABIC}]+(?:[\\s,]+[{_HW_ARABIC}]+)*")\n# Every Arabic run in a definition (used to hunt for a word that carries a root\'s\n# radicals); the runs are then split on whitespace.\n_HW_ARABIC_WORD_RE = re.compile(rf"[{_HW_ARABIC}]+")\n# Lane writes an aorist vowel as a presentation-form mark standing alone after\n# "aor." (`aor. \uFE79`). The isolated mark renders as a floating dot, so write the\n# vowel itself.\n_HW_MEDIAL_VOWELS = {"\\ufe77": "a", "\\ufe7b": "i", "\\ufe79": "u"}\n# The callout a Lane verse becomes \u2014 the same shape the transcription pipeline\n# emits. It must survive the square-bracket rule, so it is written from one\n# constant (see `_hw_prose`).\n_HW_POETRY_CALLOUT = ">[!arabic-poetry]"\n_HW_VOWELS = "aeiou\u0101\u0113\u012B\u014D\u016B\u0259\u025B\u0254\u026A\u028A\xE6\u0251"\n# The hamza in any of its seats, plus the bare alef (for the letter-by-letter\n# fallback, where a first-position alef is a hamza seat rather than a madd).\n_HW_HAMZA = "\u0621\u0623\u0625\u0622\u0624\u0626\u0671\u0627"\n# The seats whose *vowel* the engine cannot know from an unvocalised cluster \u2014 an\n# explicit hamza-bearing letter, or a bare alif in first position. A medial or\n# final bare alif is not one of them: it is simply a long \u0101 (`\u063A\u0627\u063A\u0629` reads\n# `gh\u0101gha`, and its own row names it), so a root like that keeps its own reading.\n_HW_HAMZA_SEATS = "\u0621\u0623\u0625\u0622\u0624\u0626\u0671"\n\n\ndef _hw_hamza_root(arabic: str) -> bool:\n    """True when the root\'s own reading needs the engine\'s vowel guess."""\n    return any(ch in _HW_HAMZA_SEATS for ch in arabic) or arabic.startswith("\u0627")\n\n\ndef _hw_should_skip(text: str, *, pointers: bool = False) -> bool:\n    if not text:\n        return True\n    t = text.strip().lower()\n    if any(p.search(t) for p in _HW_SKIP_RE):\n        return True\n    if not pointers:\n        return False\n    # A pointer row: the headword followed by nothing but a cross-reference\n    # (`\u062D\u0643\u064A\u0645\u0628\u0627\u0634\u064A see`). The patterns above catch the bare `see \u2026` form, which is\n    # what a Wehr row carries when the scan lost its Arabic. Lane\'s cross-references\n    # are the entry itself (`\u0625\u0650\u062D\u0652\u062A\u064E\u0631\u064E\u0628\u064E 8 see 6.`, `\u0647\u064E\u0628\u064E\u0631\u064E 1, &c.: see Supplement.`),\n    # so this applies to the grid work only \u2014 and the headword is stripped without\n    # its digits, so a form-numbered pointer is never caught even there.\n    rest = _HW_PROSE_HEAD_RE.sub("", t, count=1).strip().strip(".")\n    return bool(rest) and re.fullmatch(r"see(\\s+\\S+)?", rest) is not None\n\n\ndef _hw_strip_tags(text: str) -> str:\n    return re.sub(r"<[^>]+>", "", text or "")\n\n\ndef _hw_headword(text: str) -> str | None:\n    m = _HW_HEAD_RE.search(text.strip())\n    return m.group(0).strip() if m else None\n\n\ndef _hw_is_verb_form(text: str) -> bool:\n    """True when a definition starts with a verb-form marker (`<b>II</b> \u2026`)."""\n    if not text:\n        return False\n    cleaned = _hw_strip_tags(text)\n    m = _HW_HEAD_RE.search(cleaned)\n    if not m:\n        return False\n    return bool(re.match(r"^[IVXLCDM]+\\s", cleaned[m.end():].lstrip()))\n\n\ndef _hw_extract_romanization(text: str) -> str | None:\n    """The transliteration after the headword (one word per Arabic headword word).\n\n    A leading parenthetical is usually an etymology note that *precedes* the\n    transliteration \u2014 `(\u0627\u0648\u0628)`, `(also \u0627\u0648\u0631\u0637\u0629)`, `(Fr.)`, `(pl. of \u0627\u0644\u0649 ilan)`. But\n    for noun roots Wehr puts the transliteration *inside* it:\n    `\u062D\u0631\u0628 (\u1E25arb f., pl. \u062D\u0631\u0648\u0628 \u1E25ur\u016Bb \u2026)`. Keep the parenthetical only when it\n    contains Arabic *and* opens with the transliteration itself; otherwise skip\n    it. (Skipping unconditionally cost the noun roots their real name \u2014 `\u062D\u0631\u0628`\n    came out as `ahl\u012Bya`, the first gloss word inside the definition.)\n    """\n    if not text:\n        return None\n    cleaned = unicodedata.normalize("NFC", _hw_strip_tags(text).strip())\n    m = _HW_HEAD_RE.search(cleaned)\n    if not m:\n        return None\n    count = len(re.sub(r",", " ", m.group(0)).split())\n    rest = cleaned[m.end():].lstrip()\n    # A root whose own paragraph is a verb form (`\u0628\u062E\u062A\u0631 <b>II</b> taba\u1E33tara \u2026`)\n    # carries its reading after the form label; the numeral is not the name.\n    rest = re.sub(r"^[IVXLCDM]+\\s+", "", rest)\n    if rest.startswith("("):\n        close = rest.find(")")\n        paren = rest[1:close] if close != -1 else rest[1:]\n        lm = re.match(r"[A-Za-z\\u00C0-\\u024F\\u1E00-\\u1EFF]+", paren)\n        first = lm.group(0).lower() if lm else ""\n        # The transliteration must stand alone: in "(\u1E25arb \u2026)" it is followed by a\n        # space, whereas OCR rubble like "(\u1E25i\u0639\u0644\u0649)" glues it to an Arabic word.\n        well_formed = bool(lm) and (\n            lm.end() >= len(paren) or not _HW_ARABIC_RE.match(paren[lm.end():])\n        )\n        if not (well_formed and _HW_ARABIC_RE.search(paren) and first not in _HW_PAREN_STOP):\n            rest = re.sub(r"^\\([^)]+\\)\\s*", "", rest)\n    # The scan reads `l` as `1` inside a transliteration (`ba1as\u0101n`, `a1-`).\n    # Normalise it for the *comparison*; the body keeps the source\'s own token.\n    after = re.sub(r"(?<=[A-Za-z])1(?![0-9])", "l", rest)\n    words: list[str] = []\n    current: list[str] = []\n    for ch in after:\n        if ch in _HW_VALID_CHARS:\n            current.append(ch)\n        elif ch == "\\u2018":  # \u2018 left curly quote = \u02BFayn\n            current.append("\u02BF")\n        elif ch == "\\u2019":  # \u2019 right curly quote = hamza\n            current.append("\u02BE")\n        elif ch == "`":\n            current.append("\u02BF")\n        elif ch == "\'":\n            current.append("\u02BE")\n        elif ch.isspace() and current:\n            words.append("".join(current))\n            current = []\n            if len(words) >= count:\n                break\n        elif current and not ch.isspace() and ch not in _HW_VALID_CHARS:\n            words.append("".join(current))\n            current = []\n            if len(words) >= count:\n                break\n    if current and len(words) < count:\n        words.append("".join(current))\n    if not words:\n        return None\n    roman = " ".join(words[:count])\n    # A bare verb-form numeral is not a name ("V"), and neither is nothing at all.\n    if re.fullmatch(r"[IVXLCDM]+", roman):\n        return None\n    # A grammatical abbreviation (`pl.`, `f.`, `adj.`) is not a transliteration;\n    # taking one cost `\u0622\u0633 pl. -\u0101t` its real name and made the body italicise `pl`.\n    if roman.strip(".,").lower() in _HW_PAREN_STOP:\n        return None\n    return roman\n\n\ndef _hw_radical_romanization(word: str) -> str:\n    """Letter-by-letter, the last resort when no reading can be found at all.\n\n    A hamza is never a long \u0101 in any position, and it is a hamza seat rather than a\n    consonant: an *initial* one is read as the vowel it carries \u2014 `\u0627\u062B\u0641` \u2192 `athf`,\n    and the bare root `\u0627` \u2192 `a` \u2014 while anywhere else it is `\u02BE` (`\u062B\u0623\u0641` \u2192 `th\u02BEf`).\n    (A letter page\'s own label is a different matter and still reads `\u0627 \u0101`.)\n    """\n    out: list[str] = []\n    for i, ch in enumerate(word):\n        if ch == "\u0627":\n            # First position is a hamza seat; anywhere else a bare alif is a madd.\n            out.append("a" if i == 0 else "\u0101")\n        elif ch in _HW_HAMZA:\n            out.append("a" if i == 0 else "\u02BE")\n        else:\n            out.append(_HW_RADICALS.get(ch, ch))\n    return "".join(out)\n\n\n# \u2500\u2500 The plugin\'s transliteration engine, for entries with no transliteration \u2500\u2500\n#\n# A letter-for-letter radical is the last resort; before that we ask the plugin\'s\n# own romanizer (`arabic-bw-transliterate.py`, the same engine behind the\n# "transliterate" commands). It is occasionally idiosyncratic, but a real\n# reading beats `\u02BFbrwd`. We ask it under every engine it offers and accept a\n# result only when the analysis behind it is a **single morpheme** \u2014 the engine\n# marks proclitic/enclitic boundaries with `+_`/`_+`, and a bare radical guessed\n# as a prefixed or suffixed word is a mis-analysis, so it is rejected.\n\n_TRANS_MODULE = None\n_TRANS_LOADED = False\n_TRANS_ENGINES: dict[str, object] = {}\n# Set from the CLI: the transliteration service to use, or "" to use the engine\n# in-process (standalone runs). `_TRANS_OFF` skips transliteration entirely.\n_TRANS_SERVER = ""\n_TRANS_OFF = False\n\n\ndef _load_transliterator():\n    """Import `arabic-bw-transliterate.py` (dashes, so by path), once."""\n    global _TRANS_MODULE, _TRANS_LOADED\n    if _TRANS_LOADED:\n        return _TRANS_MODULE\n    _TRANS_LOADED = True\n    try:\n        import importlib.util\n        path = Path(__file__).with_name("arabic-bw-transliterate.py")\n        spec = importlib.util.spec_from_file_location("arabic_bw_transliterate", path)\n        module = importlib.util.module_from_spec(spec)\n        spec.loader.exec_module(module)  # type: ignore[union-attr]\n        _TRANS_MODULE = module\n    except Exception as exc:  # noqa: BLE001 - the engine is optional\n        emit("log", message=f"  transliteration engine unavailable: {exc}")\n        _TRANS_MODULE = None\n    return _TRANS_MODULE\n\n\ndef _hw_single_morpheme(analysis: dict) -> bool:\n    """True when the analysis carries no proclitic/enclitic boundary."""\n    seg = f"{analysis.get(\'d3seg\') or \'\'}{analysis.get(\'diac\') or \'\'}"\n    return "+_" not in seg and "_+" not in seg\n\n\ndef _hw_skeleton(text: str) -> str:\n    """The consonant skeleton of a transliteration: vowels and punctuation dropped,\n    digraphs folded, so `battak` and `bakhtara` can be compared with a root.\n\n    Variants of the same letter are folded too, because the sources use them for\n    loanwords and the scans confuse them: a j\u012Bm written `g` or `\u01E7` (`\u0101te\u0161g\u012B`),\n    a q\u0101f written `\u1E33` (Wehr\'s own letter), and a kh\u0101\u02BE written `\u1E35`. A `\u1E6F` (\u062B) lost\n    its underline to the scan and came out as plain `t`, but that is *not* folded\n    here \u2014 the comparison merges the two (`_hw_skeletons`), while the underline is\n    put back on the rendered name by `_hw_fix_underlined`, which needs them apart.\n    """\n    t = text.lower()\n    for digraph, one in (("sh", "\u0161"), ("th", "\u1E6F"), ("kh", "\u1E2B"), ("dh", "\u1E0F"),\n                         ("gh", "\u0121"), ("ch", "\u010D")):\n        t = t.replace(digraph, one)\n    # The OCR writes \u02BFayn and hamza with the same apostrophes (`\u2018`, `\u2019`, `\'`, `` ` ``),\n    # so all of them fold onto one marker: a reading\'s apostrophe then matches\n    # whichever the Arabic has (`ya\u2018b\u016Bb` for `\u064A\u0639\u0628\u0648\u0628`, whose print letter is \u02BFayn).\n    for mark in ("\u02BF", "\u02BE", "\u2018", "\u2019", "\'", "`"):\n        t = t.replace(mark, "\u02BF")\n    for variant, one in (("\u01E7", "j"), ("\u1E33", "\u1E2B"), ("\u1E35", "\u1E2B"), ("\u1E21", "\u0121")):\n        t = t.replace(variant, one)\n    return "".join(\n        ch for ch in t\n        if ch not in "aeiou\u0101\u0113\u012B\u014D\u016B\u0259\u025B\u0254\u026A\u028A\xE6\u0251" and not ch.isspace() and ch not in "-\'\u2019\u2018`.,;:()[]"\n    )\n\n\n# The skeleton\'s own alphabet: one character per Arabic letter, so a digraph the\n# transliteration writes for a single letter (\u062B \u2192 th) can never be mistaken for two\n# letters that happen to spell the same thing (\u062A + \u0647 \u2192 th, as in \u062A\u0647\u062A\u0647). The reading\n# side folds its digraphs to these same characters (`_hw_skeleton`).\n# One character per letter. The hamza-bearing alefs are overridden because the\n# radical table spells them with their vowel (`\u02BEa`, `\u02BEi`, `\u02BE\u0101`) \u2014 two characters,\n# which would break the one-letter-one-unit invariant the alignment relies on \u2014 and\n# a hamza *is* a consonant that a transliteration writes (`\u0645\u0623\u062E\u0630` is ma\u02BE\u1E2Ba\u1E0F).\n_HW_SKELETON_LETTERS = {\n    **_HW_RADICALS, "\u062B": "\u1E6F", "\u062E": "\u1E2B", "\u0630": "\u1E0F", "\u0634": "\u0161", "\u063A": "\u0121",\n    "\u0623": "\u02BE", "\u0625": "\u02BE", "\u0622": "\u02BE",\n}\n\n\n# \u2500\u2500 OCR tolerance \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n#\n# A scan loses the marks that tell several letters apart: the dots under \u1E25, \u1E63, \u1E0D,\n# \u1E6D, \u1E93, \u1E0F, the breve under \u1E2B, the ha\u010Dek over \u0161, \u010D, \u017E, the macron over \u1E21, the underscore of \u1E35 and\n# \u1E6F. So a reading may write \u0630 as plain `d` (`\u2018aud` for `\u0639\u0648\u0630`), \u0634 as `s`, \u062E as `h`.\n# Both sides of a comparison are reduced to the undiacriticised letter, so any of\n# those stripped forms is a match candidate; `_hw_fix_underlined` then writes the\n# work\'s own letter back, which is where the Arabic settles the ambiguity.\n_HW_OCR_PLAIN = {\n    "\u1E25": "h", "\u1E2B": "k", "\u1E0F": "d", "\u1E6F": "t", "\u1E63": "s", "\u1E0D": "d", "\u1E6D": "t",\n    # A loanword transcription writes p where the Arabic has \u0628 (`\u014Dp\u0259r\u0113t` for \u0627\u0648\u0628\u0631\u064A\u062A,\n    # `p\u0101\u1E63` for \u0628\u0627\u0635). Matched, but never rewritten: see the walk\'s own branch.\n    "p": "b",\n    "\u1E93": "z", "\u0161": "s", "\u0121": "g", "\u1E21": "g", "\u1E33": "k", "\u1E35": "k", "\u01E7": "j", "\u010D": "c",\n    "\u017E": "z",\n}\n\n\ndef _hw_ocr_plain(text: str) -> str:\n    """A transliteration\'s letters with the marks a scan drops removed.\n\n    The digraph spellings are folded onto their marked letter first, so `kh`,\n    `\u1E2B` and `\u1E35` all reduce to the same letter \u2014 exactly as `_hw_skeleton` folds\n    them \u2014 and `\u02BF`/`\u02BE` are left alone: the comparison tells those two apart.\n    """\n    # The scan\'s `l` is frequently read as `1` (`ba1as\u0101n`, `p1astique`, `a1-`).\n    # This is for comparison only; the rendered name keeps its own source token.\n    text = re.sub(r"(?<=[A-Za-z])1(?![0-9])", "l", text)\n    for digraph, one in (("sh", "\u0161"), ("th", "\u1E6F"), ("kh", "\u1E2B"), ("dh", "\u1E0F"),\n                         ("gh", "\u0121"), ("ch", "\u010D"), ("zh", "\u017E")):\n        text = text.replace(digraph, one)\n    text = text.replace("\u1E33", "\u1E2B").replace("\u1E35", "\u1E2B").replace("\u01E7", "j")\n    return "".join(_HW_OCR_PLAIN.get(ch, ch) for ch in text)\n\n\n# How an Arabic consonant is written in a work\'s convention. Only the letters Wehr\n# marks and the vault spells as digraphs differ; every other letter is its own.\n_HW_CONVENTION_LETTER = {\n    "\u1E6F": {"vault": "th", "wehr": "\u1E6F"},\n    "\u1E2B": {"vault": "kh", "wehr": "\u1E35"},\n    "\u1E0F": {"vault": "dh", "wehr": "\u1E0F"},\n    "\u0161": {"vault": "sh", "wehr": "\u0161"},\n    # Wehr prints \u063A with a macron over the g, not a dot above it (`\u1E21`, U+1E21).\n    # `\u0121` (U+0121) is kept as the internal skeleton letter and as the spelling\n    # older app-derived data uses; both fold to the same consonant.\n    "\u0121": {"vault": "gh", "wehr": "\u1E21"},\n    "\u1E21": {"vault": "gh", "wehr": "\u1E21"},\n}\n\n\ndef _hw_convention_letter(unit: str, convention: str = DEFAULT_ROMANIZATION) -> str:\n    """An Arabic skeleton letter as `convention` writes it."""\n    return _HW_CONVENTION_LETTER.get(unit, {}).get(convention, unit)\n\n\ndef _hw_root_skeleton(arabic: str) -> str:\n    """The consonant skeleton of an Arabic word, one character per letter.\n\n    Alif, alif wa\u1E63la, alif maq\u1E63\u016Bra and t\u0101\u02BE marb\u016B\u1E6Da carry no consonant in\n    transliteration. Every other letter maps to a *single* character \u2014 \u062B to `\u1E6F`, not\n    `th` \u2014 so `\u062A\u0647\u062A\u0647` (\u062A + \u0647 + \u062A + \u0647) can never collapse into a doubled `\u1E6F` when a\n    reading is compared with it. (Folding the digraphs here, as this once did, is\n    what turned that word into `\u1E6F\u1E6F` and then, by the gemination rule, into `\u1E6F\u1E6Fa`.)\n    A hamza-bearing alif keeps its hamza, which is a consonant a transliteration\n    writes (`\u0645\u0623\u062E\u0630` ma\u02BE\u1E2Ba\u1E0F); only the bare alif is silent. The comparison skeleton\n    (`_hw_skeletons`) drops the hamza again, so nothing that compares changes.\n    """\n    return "".join(_HW_SKELETON_LETTERS.get(ch, "") for ch in arabic if ch not in "\u0627\u0671\u0649\u0629")\n\n\ndef _hw_is_bare_root(arabic: str, roman: str) -> bool:\n    """True when `roman` is the root itself \u2014 not a conjugation or a derivative.\n\n    Wehr defines the root, so an inflected reading (`katabtu`, `battak`) or one\n    with an affixed pronoun is not a name for the entry.\n    """\n    return _hw_bare_root_reading(arabic, roman) is not None\n\n\ndef _hw_collapse_gemination(skeleton: str) -> tuple[str, bool]:\n    """Collapse one doubled consonant; report whether one was collapsed."""\n    out: list[str] = []\n    collapsed = False\n    i = 0\n    while i < len(skeleton):\n        if not collapsed and i + 1 < len(skeleton) and skeleton[i] == skeleton[i + 1]:\n            out.append(skeleton[i])\n            collapsed = True\n            i += 2\n        else:\n            out.append(skeleton[i])\n            i += 1\n    return "".join(out), collapsed\n\n\ndef _hw_bare_root_reading(arabic: str, roman: str) -> str | None:\n    """The reading to use for `roman`, or None if it is not the root.\n\n    A doubled consonant is not an added morpheme: it marks the intensive verb form\n    (II, `fa\u02BF\u02BFala`), whose dictionary form is the perfect `battaka` \u2014 the engine\n    renders the bare pausal `battak`, so the final vowel is restored from the form\n    itself. Any *other* added consonant is an affix (a conjugation, a pronoun), and\n    such a reading is not a name for the root.\n    """\n    # The comparison uses the shared skeletons: gemination collapsed, the hamza\n    # ignored and the weak letters dropped on both sides \u2014 the root\'s column writes\n    # `\u0646\u0627\u062A` where the reading spells the carrier, and a weak letter (\u0648/\u064A) is as\n    # often a vowel in the reading as a consonant (`\u0627\u0628\u0631\u064A\u0632` \u2192 `ibr\u012Bz`). A headword of\n    # no letters at all (the root `\u0627`) has nothing to contradict, so anything stands\n    # \u2014 judged on the raw letters, so a root that is all weak letters (`\u0648\u0627`) does\n    # not get the same licence.\n    skeleton = _hw_skeletons(arabic)\n    if not _hw_root_skeleton(arabic).replace("\u02BE", ""):\n        return roman\n    # Tanw\u012Bn\'s *n* is not a root consonant, so the comparison ignores it \u2014 but the\n    # reading itself is returned untouched, because the guidelines keep tanw\u012Bn in\n    # the two cases that matter here: indefinite defective-root nouns (q\u0101\u1E0Din) and\n    # adverbials (\u1E6Dab\u02BFan). Everywhere else the engine\'s citation form already has\n    # no ending (ba\u1E25r, per "noun/adjective final inflections not represented").\n    probe = roman\n    if probe.endswith(("un", "an", "in")):\n        probe = probe[:-2]\n    if not _hw_skeleton_matches(probe, skeleton):\n        return None\n    # A doubled consonant is not an added morpheme: it marks the intensive form\n    # (II, fa\u02BF\u02BFala), and the engine renders the bare pausal fa\u02BF\u02BFal (battak), so the\n    # completion below needs to know whether one was collapsed.\n    _, geminated = _hw_collapse_gemination(_hw_skeleton(probe))\n    if not geminated:\n        return roman\n    # A doubled consonant is not an added morpheme: it marks the intensive form\n    # (II, fa\u02BF\u02BFala), and the engine renders the bare pausal fa\u02BF\u02BFal (battak). A\n    # verb\'s final inflection is retained (guideline 5), so complete it as the\n    # perfect battaka. A u/i stem is instead an imperfect or passive (a\u1E63udd,\n    # ahubb) \u2014 a conjugation, not a name for the root.\n    if any(v in probe for v in "u\u016Bi\u012Bo\u014D"):\n        return None\n    return probe if probe.endswith(("a", "\u0101")) else probe + "a"\n\n\ndef _hw_server_reading(arabic: str, *, prose: bool = False) -> str | None:\n    """A reading of the bare root, from the transliteration service.\n\n    `standalone` tells the service this is a word on its own, not an excerpt, so\n    it is not read in pausal form. Case endings are off, which is what the\n    guidelines want for a headword: the citation form has no tanw\u012Bn (`ba\u1E25r`, not\n    `ba\u1E25run`), while a verb\'s final inflection is kept (`kataba`) and a suffixed\n    word keeps its vowel (`minka`).\n    """\n    request = urllib.request.Request(\n        _TRANS_SERVER.rstrip("/") + "/transliterate",\n        data=json.dumps({"text": arabic, "engine": "bert", "keep_case": False,\n                         "standalone": True, "citation": True}).encode("utf-8"),\n        headers={"Content-Type": "application/json"},\n        method="POST",\n    )\n    try:\n        with urllib.request.urlopen(request, timeout=20) as resp:\n            payload = json.loads(resp.read().decode("utf-8"))\n    except Exception:  # noqa: BLE001\n        return None\n    candidate = str(payload.get("romanized") or "").strip().lower()\n    # A hyphen or space marks a proclitic/enclitic reading (more than one morpheme).\n    if not candidate or not re.fullmatch(r"[A-Za-z\\u00C0-\\u024F\\u1E00-\\u1EFF\u02BF\u02BE]+", candidate):\n        return None\n    return _hw_bare_root_reading(arabic, candidate)\n\n\ndef _hw_local_reading(arabic: str) -> str | None:\n    """The same, using the engine in-process (for standalone runs)."""\n    mod = _load_transliterator()\n    if mod is None:\n        return None\n    for engine in ("bert", "none"):\n        try:\n            if engine not in _TRANS_ENGINES:\n                _TRANS_ENGINES[engine] = None if engine == "none" else mod.load_disambiguator(engine)\n            dis = _TRANS_ENGINES[engine]\n        except Exception:  # noqa: BLE001 - that engine is unavailable here\n            continue\n        args = types.SimpleNamespace(\n            engine=engine, sun_letters=False, keep_case=False,\n            dotless_ya="maqsura", name=False, citation=True, debug=False,\n        )\n        try:\n            if dis is not None:\n                # Ask for all its possibilities; the top analysis is the one the\n                # engine will render, so it is the one that must qualify.\n                analyses = getattr(dis.disambiguate([arabic])[0], "analyses", None) or []\n                if not analyses or not _hw_single_morpheme(analyses[0].analysis):\n                    continue\n            candidate = mod.transliterate(arabic, dis, args, capitalize=False, end_pausal=False)\n        except Exception:  # noqa: BLE001\n            continue\n        if not candidate or not re.fullmatch(r"[A-Za-z\\u00C0-\\u024F\\u1E00-\\u1EFF\u02BF\u02BE]+", candidate):\n            continue\n        reading = _hw_bare_root_reading(arabic, candidate.lower())\n        if reading:\n            return reading\n    return None\n\n\ndef _hw_engine_romanization(arabic: str) -> str | None:\n    """A single-morpheme reading of a word, or None.\n\n    The citation form is used (`ba\u1E25r`, not `ba\u1E25run`): our conventions write no\n    tanw\u012Bn, and a perfect verb\'s final `-a` is restored from the form itself\n    (`battaka`). See `_hw_bare_root_reading`.\n\n    A short or vowel-less result (`th`, `khr`) is a guess, not a word: it is\n    rejected here so the caller can try the entry\'s own terms, and only then the\n    letter-by-letter fallback.\n    """\n    if _TRANS_OFF or not arabic:\n        return None\n    ask = _hw_server_reading if _TRANS_SERVER else _hw_local_reading\n    reading = ask(arabic)\n    if reading and not _hw_plausible_reading(reading):\n        return None\n    return reading\n\n\ndef _hw_plausible_reading(reading: str) -> bool:\n    """A reading is a plausible name only if it is a word, not a consonant stub.\n\n    A vowel is the test, not a length: a one- or two-letter root has only a short\n    reading (`\u0648\u0627` \u2192 `wa`, `\u0627` \u2192 `a`), while the stub the engine returns for a bare\n    cluster (`th`, `khr`) has none. Whether a reading really is the root is decided\n    by the skeleton comparison, not here.\n    """\n    return any(v in reading.lower() for v in _HW_VOWELS)\n\n\ndef _hw_word_romanization(arabic: str, convention: str = DEFAULT_ROMANIZATION) -> str:\n    """Name a single word: the engine, normalised to the citation form, else letters.\n\n    Used for a derived entry\'s headword when the source gives no transliteration\n    for it \u2014 by either dictionary. The result is written in `convention`.\n    """\n    reading = _hw_engine_romanization(arabic)\n    if reading:\n        return _hw_romanize(_hw_normalize_citation(reading, arabic, arabic), convention)\n    return _hw_romanize(_hw_radical_romanization(arabic), convention)\n\n\ndef _hw_prose_terms(definition: str) -> list[str]:\n    """Every Arabic word in an entry, in order.\n\n    Lane gives the term first, with its subject or object after it (`\u0623\u064E\u062B\u064E\u0641\u064E\n    \u0627\u0644\u0642\u0650\u062F\u0652\u0631\u064E`), and examples follow \u2014 so the first word is the term, but a word\n    carrying the radicals may appear anywhere in the article, and usually does.\n    """\n    return [w for run in _HW_ARABIC_WORD_RE.findall(definition or "") for w in run.split()]\n\n\ndef _hw_skeletons(arabic: str) -> str:\n    """A word\'s skeleton, for comparing it with a root.\n\n    Gemination is collapsed and the hamza ignored; the weak letters are dropped\n    too, because they are interchangeable and often do not survive derivation \u2014\n    `\u0622\u062F\u0649` still matches the root `\u0627\u062F\u0648`, whose \u0648 the derived verb loses. A `\u1E6F` (\u062B)\n    is merged with `t`, since a scan loses that underline almost always and the\n    reading is still the same word; `_hw_fix_underlined` restores it for display.\n    """\n    skeleton = _hw_ocr_plain(_hw_root_skeleton(arabic).replace("\u02BE", ""))\n    skeleton = skeleton.replace("w", "").replace("y", "")\n    return _hw_collapse_gemination(skeleton)[0]\n\n\ndef _hw_is_root(arabic: str, root: str) -> bool:\n    """True when a word *is* the root \u2014 not a derivative or a suffixed form.\n\n    Equality, not containment, is what keeps a suffixed reading out: `\u0623\u064E\u0628\u064E\u0636\u064E\u0647\u064F` is\n    not a name for `\u0628\u0636`, while `\u0638\u064E\u0644\u064E\u0651` is for `\u0638\u0644`.\n    """\n    return bool(_hw_skeletons(root)) and _hw_skeletons(arabic) == _hw_skeletons(root)\n\n\ndef _hw_contains_root(arabic: str, root: str) -> bool:\n    """True when a word contains the root\'s radicals, in order.\n\n    A conjugation may carry the radicals with extra letters and still be the only\n    form the entry gives (`\u0623\u064E\u062A\u0652\u0623\u064E\u0631\u0652\u062A\u064F` for `\u062A\u0623\u0631`), which the conventions allow as a\n    last resort before the letter-by-letter fallback. A one-letter skeleton would\n    match almost anything, so it is refused.\n    """\n    root_skeleton = _hw_skeletons(root)\n    if len(root_skeleton) < 2:\n        return False\n    letters = iter(_hw_skeletons(arabic))\n    return all(ch in letters for ch in root_skeleton)\n\n\ndef _hw_normalize_citation(reading: str, arabic: str, root: str) -> str:\n    """Bring an engine reading to the vault\'s citation form.\n\n    The engine is asked for a citation form (`citation`), so a noun already comes\n    back without its case ending and a verb with its inflection. What is left is\n    the tanw\u012Bn: the guidelines write none on a name (`ba\u1E25r`, not `ba\u1E25run`), but\n    `-an` is always kept and a defective root\'s indefinite keeps `-in` (`\u0642\u064E\u0627\u0636\u064D` \u2192\n    `q\u0101\u1E0Din`), so only `-un`/`-in` are removed here.\n    """\n    defective = _hw_root_skeleton(root).rstrip().endswith(("w", "y"))\n    if reading.endswith("un") or (reading.endswith("in") and not defective):\n        reading = reading[:-2]\n    return reading\n\n\ndef _hw_terms_romanization(arabic: str, derived: list[tuple]) -> str:\n    """The reading of a term from the root\'s own entries \u2014 either dictionary.\n\n    Two passes over the entry\'s Arabic words, in order. First a word that *is* the\n    root \u2014 `\u0623\u064E\u062B\u064E\u0641\u064E` for `\u0627\u062B\u0641`, fully vocalised, giving `athafa`. Then, since many\n    entries never give the plain term at all (`\u0623\u064E\u062A\u0652\u0623\u064E\u0631\u0652\u062A\u064F \u0625\u0650\u0644\u064E\u064A\u0652\u0647\u0650 \u0627\u0644\u0646\u064E\u0651\u0638\u064E\u0631\u064E` for\n    `\u062A\u0623\u0631`), a word that merely contains the radicals \u2014 a conjugated verb is\n    acceptable here, as the conventions allow when nothing clearer exists. The\n    engine\'s dropped final short vowel is restored from the source.\n    """\n    terms: list[str] = []\n    for _entry_id, _word, definition in derived[:3]:\n        terms.extend(_hw_prose_terms(definition))\n    for matcher in (_hw_is_root, _hw_contains_root):\n        for term in terms[:400]:\n            if not matcher(term, arabic):\n                continue\n            reading = _hw_engine_romanization(term)\n            if reading:\n                return _hw_normalize_citation(reading, term, arabic)\n    return ""\n\n\ndef _hw_root_romanization(arabic: str, derived: list[tuple],\n                          convention: str = DEFAULT_ROMANIZATION) -> str:\n    """The best reading of a root \u2014 shared by both dictionaries.\n\n    Neither source transliterates every root: Lane\'s gives none at all, and Wehr\'s\n    gives them in the definition but not always. Both file the root as a bare,\n    unvocalised cluster, so both need the same order here: the root itself, then\n    the root\'s own entries, then \u2014 only if nothing was found \u2014 letter by letter.\n    Anything the engine produces is written in `convention`; a transliteration the\n    source\'s own text carries is left exactly as it is, which the callers try\n    first.\n\n    A root carrying a hamza tries the entries *first*: the engine cannot know which\n    vowel a bare hamza has, and reads `\u0646\u0623\u062A` as the vowel-less `n\u02BEat` (the bare\n    cluster `\u0646\u0627\u062A`, its hamza dropped in the source\'s word column, is worse still \u2014\n    `n\u0101t`), whereas `\u0646\u064E\u0623\u064E\u062A\u064E` gives `na\u02BEata`.\n    """\n    from_entries = _hw_terms_romanization(arabic, derived)\n    if from_entries and _hw_hamza_root(arabic):\n        return _hw_romanize(from_entries, convention)\n    reading = _hw_engine_romanization(arabic)\n    if reading:\n        return _hw_romanize(_hw_normalize_citation(reading, arabic, arabic), convention)\n    return _hw_romanize(from_entries or _hw_radical_romanization(arabic), convention)\n\n\ndef _hw_translit_skeleton(roman: str) -> str:\n    """A Latin transliteration\'s skeleton, normalised exactly as an Arabic word\'s.\n\n    `_hw_skeletons` folds digraphs, drops the vowels, ignores the hamza and drops\n    the weak letters; this does the same to the Latin side so the two compare,\n    including the `\u1E6F`/`t` merge that a lost underline forces. An ambiguous `g` is\n    left as it is \u2014 a scan writes both \u062C and \u063A that way, so `_hw_skeleton_matches`\n    tries both.\n    """\n    base = _hw_ocr_plain(_hw_skeleton(roman))\n    base = base.replace("\u02BE", "").replace("w", "").replace("y", "")\n    return _hw_collapse_gemination(base)[0]\n\n\ndef _hw_skeleton_matches(roman: str, skeleton: str) -> bool:\n    """Whether a reading\'s skeleton is `skeleton`, allowing for an ambiguous `g`.\n\n    A scan renders both \u062C and \u063A as plain `g` (`g\u0101ga` for `\u063A\u0627\u063A\u0629`, `wagd` for `\u0648\u063A\u062F`,\n    `\u0101te\u0161g\u012B` for `\u0622\u062A\u0634\u062C\u064A`), so a `g` in a reading may stand for either and each is\n    tried. Everything else is compared as it stands.\n    """\n    base = _hw_translit_skeleton(roman)\n    # An apostrophe in a reading may be the \u02BFayn or the hamza the scan wrote the same\n    # way, and the two are not interchangeable in the skeleton (the hamza is ignored,\n    # the \u02BFayn is not). So both readings of the mark are tried: as it stands, and\n    # dropped as a hamza would be. `ya\u02BFb\u016Bb` and `ya\u02BEb\u016Bb` then both name `\u064A\u0639\u0628\u0648\u0628`.\n    candidates = {base}\n    if "\u02BF" in base:\n        candidates.add(base.replace("\u02BF", ""))\n    for candidate in list(candidates):\n        if "g" in candidate:\n            candidates.add(candidate.replace("g", "j"))\n            candidates.add(candidate.replace("g", "\u0121"))\n    return skeleton in candidates\n\n\n# A run of Latin transliteration \u2014 a term, in a definition that also carries the\n# Arabic and the English prose around it.\n# The range reaches into the IPA extensions (U+0250\u2013U+02AF): a loanword transcription\n# uses `\u0259`, `\u025B`, `\u0254` and friends (`\u014Dp\u0259r\u0113t` for \u0627\u0648\u0628\u0631\u064A\u062A), and stopping short of them\n# would truncate the token to `\u014Dp`.\n_HW_LATIN_TOKEN_RE = re.compile(r"([A-Za-z\\u00C0-\\u02AF\\u1E00-\\u1EFF\\u02BE\\u02BF\\u2018\\u2019\'`]+)(\\d)?")\n\n\n# The apostrophe marks are units of their own: the OCR writes \u02BFayn and hamza with\n# them, and the rendering walk (`_hw_fix_underlined`) must see one on each side to\n# write the Arabic\'s own letter back.\n_HW_TRANSLIT_UNIT_RE = re.compile(\n    r"sh|th|kh|dh|gh|ch|zh|[A-Za-z\\u00C0-\\u024F\\u1E00-\\u1EFF]|[\\u02BE\\u02BF\\u2018\\u2019]")\n\n\ndef _hw_fix_underlined(reading: str, arabic: str, convention: str = DEFAULT_ROMANIZATION) -> str:\n    """Write back the letters a scan could not carry, taking them from the Arabic.\n\n    The reading has already been validated against this headword (see\n    `_hw_reads_arabic`), so the two consonant skeletons correspond and can be walked\n    in step: wherever the reading\'s letter is an *undiacriticised* form of the\n    Arabic\'s \u2014 `t` for \u062B or \u0637, `d` for \u0630 or \u0636, `s` for \u0634, `h` for \u062E, `g` for \u063A \u2014 the\n    Arabic settles which letter it is, and the convention\'s letter is written in its\n    place (`\u1E6F`/`\u1E6D`/`\u1E0F`/`\u1E0D` in the Wehr work; `th`/`dh` in the vault\'s, which never\n    uses the marked letters). A letter that already agrees is left exactly as the\n    source wrote it, and the walk applies only when the two runs hold the same\n    number of consonants \u2014 a reading with extra letters, or a loanword whose letters\n    do not line up, is left untouched.\n\n    A doubled consonant in the reading is a shadda on *one* Arabic letter: `\u0628\u0637\u0627\u0631\u064A\u0629`\n    is `ba\u1E6D\u1E6D\u0101r\u012Bya` \u2014 one \u0637 in the text, two \u1E6D in the reading \u2014 so runs of the same\n    letter are merged on both sides before aligning, and the chosen letter is\n    written once per unit the reading actually has.\n    """\n    # One character per Arabic letter \u2014 deliberately *not* the digraph-aware\n    # tokeniser, which would read the \u062A + \u0647 of `\u062A\u0647\u062A\u0647` as a single `th`.\n    arabic_units = [u for u in _hw_root_skeleton(arabic) if u not in ("w", "y")]\n    reading_runs = _hw_merge_runs([\n        (m.group(0), 1, m.start(), m.end())\n        for m in _HW_TRANSLIT_UNIT_RE.finditer(reading)\n        if m.group(0) not in ("w", "y") and m.group(0)[0] not in "aeiou\u0101\u0113\u012B\u014D\u016B\u0259\u025B\u0254\u026A\u028A\xE6\u0251"\n    ])\n    if not arabic_units or not reading_runs:\n        return reading\n    marks = ("\u02BF", "\u02BE", "\u2018", "\u2019", "\'", "`")\n    # The Arabic is walked as written first: its own adjacent letters are separate\n    # (`\u063A\u0627\u063A\u0629` is \u1E21\u0101\u1E21a \u2014 two \u063A, with a long vowel the skeleton drops between them).\n    # Only when that does not line up is a run of the *same* Arabic letter folded,\n    # which is what a genuinely doubled letter (`\u0645\u0631\u062F\u062F`) needs.\n    units = [(u, 1, i, i + 1) for i, u in enumerate(arabic_units)]\n\n    def emit(pairs: list[tuple[str | None, tuple[str, int, int, int]]]) -> str:\n        out: list[str] = []\n        at = 0\n        for unit, (text, count, start, end) in pairs:\n            if unit is None:\n                # A mark set aside: left exactly where and as the source wrote it.\n                continue\n            out.append(reading[at:start])\n            letter = _hw_convention_letter(unit, convention)\n            if text in marks and unit in ("\u02BF", "\u02BE"):\n                # The reading\'s apostrophe may stand for either; write the Arabic\'s.\n                out.append(unit * count)\n            elif text == "g" and unit == "\u0121":\n                # A scan writes \u063A as plain `g`; write the convention\'s letter for it.\n                out.append(_hw_convention_letter("\u0121", convention) * count)\n            elif text == "g" and unit == "j":\n                out.append("j" * count)\n            elif text == "p" and unit == "b":\n                # The source\'s own spelling of a loanword, not a mark the scan lost:\n                # kept exactly as written, so the name reads as the print does.\n                out.append(reading[start:end])\n            elif text != letter and _hw_ocr_plain(text) == _hw_ocr_plain(unit):\n                # The reading is a spelling the work\'s convention does not use: a mark\n                # the scan could not carry \u2014 \u0630 written `d` (`\u2018aud`), \u062B written `t`, \u0634\n                # written `s`, \u062E written `k` \u2014 or a digraph where the convention wants\n                # the marked letter, and the reverse. The Arabic settles which letter\n                # it is, so the convention\'s own form is written in its place. Tested\n                # against the convention\'s letter, not the skeleton\'s: \u062E\'s skeleton\n                # character is `\u1E2B`, which is *not* how this work writes it.\n                out.append(letter * count)\n            else:\n                out.append(reading[start:end])\n            at = end\n        out.append(reading[at:])\n        return "".join(out)\n\n    def pair(runs: list[tuple[str, int, int, int]], skip_marks: bool):\n        """Match the Arabic letters to the reading\'s runs, or None if they differ."""\n        remaining = list(runs)\n        out: list[tuple[str | None, tuple[str, int, int, int]]] = []\n        for run in reading_runs:\n            if skip_marks and run[0] in marks:\n                out.append((None, run))\n                continue\n            if not remaining:\n                return None\n            out.append((remaining.pop(0)[0], run))\n        return out if not remaining else None\n\n    # A source transliteration may or may not spell a hamza the Arabic carries\n    # (`\u0645\u0623\u062E\u0630` ma\u02BE\u1E33ad, but `\u0623\u062E\u0630` a\u1E33d), and the Arabic may write a geminate once where\n    # the reading doubles it (`\u0645\u0631\u062F\u062F` muraddad). So several alignments are possible;\n    # the most specific is tried first, and the marks are only set aside when no\n    # alignment can place them.\n    variants: list[list[tuple[str, int, int, int]]] = []\n    for drop_hamza in (False, True):\n        base = [u for u in units if not (drop_hamza and u[0] == "\u02BE")]\n        if not base:\n            continue\n        for runs in (base, _hw_merge_runs(base)):\n            if runs not in variants:\n                variants.append(runs)\n    for skip_marks in (False, True):\n        for arabic_runs in variants:\n            pairs = pair(arabic_runs, skip_marks)\n            if pairs is not None:\n                return emit(pairs)\n    # Nothing lined up \u2014 the reading has letters this Arabic cannot account for.\n    # Leaving it as the source wrote it is the safe answer.\n    return reading\n\n\ndef _hw_merge_runs(units: list[tuple[str, int, int, int]]) -> list[tuple[str, int, int, int]]:\n    """Merge units that are identical *and adjacent in the text*.\n\n    A transliteration writes a geminate twice (`ba\u1E6D\u1E6D\u0101r\u012Bya`) where the unvocalised\n    Arabic writes the letter once (\u0628\u0637\u0627\u0631\u064A\u0629), so the run has to collapse before the two\n    skeletons can be aligned \u2014 and be written back at its own length. Only genuinely\n    adjacent units merge: the two `t` of `tata` are separate letters, and a vowel\n    between them (which the caller has already dropped) keeps them apart.\n    """\n    out: list[tuple[str, int, int, int]] = []\n    for text, count, start, end in units:\n        if out and out[-1][0] == text and out[-1][3] == start:\n            first = out[-1]\n            out[-1] = (first[0], first[1] + count, first[2], end)\n        else:\n            out.append((text, count, start, end))\n    return out\n\n\ndef _hw_reads_arabic(roman: str, arabic: str) -> bool:\n    """Whether a transliteration found in the text really reads that Arabic.\n\n    A definition also carries Roman numerals, OCR rubble and cross-references, so\n    an extraction is usable only when its skeleton is the headword\'s \u2014 `\u062D\u0642\u0628 VITI \u2026`\n    (a numeral the scan turned into `VITI`) and `\u062D\u0643\u064A\u0645\u0628\u0627\u0634\u064A see` both fail, and the\n    entry\'s own transliterations, or the shared machinery, name it instead. The\n    skeleton test is enough here: the source\'s own value is already the form it\n    wants, so the engine\'s completion rules do not apply to it. A headword with no\n    letters at all (the root `\u0627`) has nothing to contradict, so anything stands \u2014\n    judged on the raw letters, so a root that is all weak letters (`\u0648\u0627`) does not\n    get the same licence.\n    """\n    if not roman:\n        return False\n    if not _hw_root_skeleton(arabic).replace("\u02BE", ""):\n        return True\n    return _hw_skeleton_matches(roman, _hw_skeletons(arabic))\n\n\ndef _hw_loose_skeleton(text: str, *, arabic: bool) -> str:\n    """A loanword-tolerant skeleton: article, final \u0647/\u0629, and g/k/q, z/\u017E/j folded.\n\n    The strict comparison is right for a reading of the Arabic. It rejects the\n    source\'s own spellings of loanwords and proper names for reasons that are not\n    errors: a final \u0647/\u0629 is silent (`\u0627\u0633\u0645\u0631\u0647` / `asmara`), the article is optional\n    (`\u0627\u0644\u0627\u0646\u062C\u0644\u064A\u0632` / `al-ing\u0259l\u012Bz`), a tanw\u012Bn adds a final n (`\u0627\u0630\u0627` / `idan`), and a\n    transcription may write g for \u0643 or j for \u0632 (`arg\u012Bla`, `oksi\u017E\u0113n`).\n    """\n    s = _hw_skeletons(text) if arabic else _hw_translit_skeleton(text)\n    if s.startswith("l"):\n        s = s[1:]                      # the Arabic article / a romanized al-\n    s = s.rstrip("h")\n    return s.translate(str.maketrans({"q": "k", "z": "j", "\u017E": "j"}))\n\n\ndef _hw_reads_arabic_loose(roman: str, arabic: str) -> bool:\n    """Whether a source spelling reads the Arabic once loanword variation is allowed."""\n    if not roman:\n        return False\n    target = _hw_loose_skeleton(arabic, arabic=True)\n    if not target:\n        return False\n    base = _hw_translit_skeleton(roman)\n    if base.startswith("l"):\n        base = base[1:]\n    base = base.rstrip("h")\n    # g may stand for \u062C or \u0643 in a transcription; try both before folding.\n    # g may stand for \u062C or \u0643, and in a loanword for a weak letter the Arabic\n    # skeleton has already dropped (`urg\u016Bl` / `\u0627\u0631\u0648\u0644`); try all three.\n    variants = {_hw_collapse_gemination(\n                    base.replace("g", g).translate(str.maketrans({"q": "k", "z": "j", "c": "k"}))\n                )[0]\n                for g in ("j", "k", "")}\n    tail = arabic.rstrip()\n    if tail.endswith(("\u0627", "\u0649")):\n        variants |= {v[:-1] for v in variants if v.endswith("n") and len(v) > 1}\n    if tail.endswith("\u0629"):\n        variants |= {v[:-1] for v in variants if v.endswith("t") and len(v) > 1}\n    return target in variants\n\n\ndef _hw_reads_root(roman: str, root: str) -> bool:\n    """Whether a transliteration reads a word that carries the root\'s radicals.\n\n    Used for a candidate taken from one of the root\'s *entries*: a derived form\'s\n    own transliteration is usable as the root\'s name only if it contains the root\'s\n    consonants in order \u2014 `\u1E25uqb` for `\u062D\u0642\u0628`, `\u1E25ur\u016Bb` for `\u062D\u0631\u0628` \u2014 and not, say,\n    `toll`, which is a fine reading of a derived `\u062A\u0648\u0644` but says nothing about `\u0648\u0627`.\n    """\n    if not roman:\n        return False\n    if not _hw_root_skeleton(root).replace("\u02BE", ""):\n        return True\n    skeleton = _hw_skeletons(root)\n    candidates = {_hw_translit_skeleton(roman)}\n    base = next(iter(candidates))\n    if "\u02BF" in base:\n        candidates.add(base.replace("\u02BF", ""))\n    for candidate in list(candidates):\n        if "g" in candidate:\n            candidates.add(candidate.replace("g", "j"))\n            candidates.add(candidate.replace("g", "\u0121"))\n    return any(all(ch in iter(c) for ch in skeleton) for c in candidates)\n\n\ndef _hw_find_first_valid_romanization(derived: list[tuple], root: str = "") -> str | None:\n    """The first derived entry that is not a verb form and has a transliteration.\n\n    With `root`, the transliteration must also read a word carrying the root\'s\n    radicals \u2014 the entry\'s own transliteration is only a name for the root if it\n    does.\n    """\n    for _entry_id, _word, definition in derived:\n        if _hw_is_verb_form(definition):\n            continue\n        roman = _hw_extract_romanization(definition)\n        if not roman:\n            continue\n        if root and not _hw_reads_root(roman, root):\n            continue\n        if _hw_reads_arabic(roman, _hw_headword(definition) or _word):\n            return roman\n    return None\n\n\ndef _hw_split_segments(def_text: str) -> list[tuple[str | None, str]]:\n    """Split a definition on its sense numbers (`1.`) and Roman numerals (`<b>II</b>`)."""\n    if not def_text:\n        return []\n    bounds: list[tuple[int, int, str]] = []\n    for m in _HW_NUMBER_RE.finditer(def_text):\n        bounds.append((m.start(), m.end(), m.group(1)))\n    for m in _HW_ROMAN_RE.finditer(def_text):\n        bounds.append((m.start(), m.end(), m.group(1)))\n    bounds.sort(key=lambda b: b[0])\n    merged: list[tuple[int, int, str]] = []\n    skip = False\n    for i, b in enumerate(bounds):\n        if skip:\n            skip = False\n            continue\n        if i + 1 < len(bounds) and "=" in def_text[b[1]:bounds[i + 1][0]]:\n            # "II = II V" \u2014 one label, not two segments.\n            merged.append((b[0], bounds[i + 1][1], f"{b[2]} = {bounds[i + 1][2]}"))\n            skip = True\n            continue\n        merged.append(b)\n    if not merged:\n        return [(None, def_text.strip())]\n    segments: list[tuple[str | None, str]] = []\n    if merged[0][0] > 0:\n        first = def_text[:merged[0][0]].strip()\n        if first:\n            segments.append((None, first))\n    for i, b in enumerate(merged):\n        end = merged[i + 1][0] if i + 1 < len(merged) else len(def_text)\n        segments.append((b[2], def_text[b[1]:end].strip()))\n    return segments\n\n\n_HW_KAF_TOKEN_RE = re.compile(r"[A-Za-z\\u00C0-\\u024F\\u1E00-\\u1EFF]*\\u1e33[A-Za-z\\u00C0-\\u024F\\u1E00-\\u1EFF]*")\n\n\ndef _hw_fix_kaf(text: str, convention: str = DEFAULT_ROMANIZATION) -> str:\n    """Write every \u1E33 as the work\'s kh\u0101\u02BE.\n\n    `\u1E33` is not a letter Wehr uses \u2014 his q\u0101f is plain `q` \u2014 so it is a\n    document-conversion artifact and *never* correct where it stands: leaving it is\n    wrong every time, while writing the kh\u0101\u02BE is wrong only where the letter is not\n    one. In this source it stands for \u062E in 329 of its 330 occurrences; the single\n    exception (`a\u1E33tara` for `ak\u1E6Fara`, where the conversion moved the dot from the \u062B\n    onto the k\u0101f) is settled by `_EYEBALL` *before* this runs, which is why the\n    replacement can be unconditional here. Anything a future eyeball entry adds has\n    to be written in its corrected form for the same reason.\n\n    Because it takes no Arabic, it can be applied to a note\'s romanization as well\n    as to a definition\'s prose \u2014 and to prose safely, since `\u1E33` cannot occur in\n    English.\n    """\n    return text.replace("\u1E33", _hw_convention_letter("\u1E2B", convention))\n\n\ndef _hw_grid_bullets(arabic: str, definition: str, roman: str | None,\n                     source_roman: str | None = None, convention: str = DEFAULT_ROMANIZATION) -> list[str]:\n    """The callout body as alternating bullets: label (odd), content (even)."""\n    def_text = re.sub(r"\\s+", " ", definition or "").strip()\n    # Before the headword is stripped: the token\'s own Arabic *is* the headword\n    # (`\u0627\u062E\u0630 a\u1E33a\u1E0Da`), so the correction needs it still in place.\n    def_text = _hw_fix_kaf(def_text, convention)\n    def_text = _HW_HEAD_RE.sub("", def_text, count=1).lstrip()\n    # Only a source\'s own token may be touched. `roman` may be a fallback (the\n    # engine, or letter by letter) when Wehr gives no usable transliteration;\n    # inserting that into the text replaces a real gloss \u2014 `\u0637\u0648\u0632\u0644\u0642 (Turk. tozluk)\n    # gaiter(s)` became `(Turk. tozluk) *\u1E6Dwzlq*(s)`. If there is no source token,\n    # leave the definition exactly as written. The source token is tried first,\n    # then the corrected spelling the heading uses (`ba\u1E6F\u1E6F\u0101r\u012Bya` \u2192 `ba\u1E6D\u1E6D\u0101r\u012Bya`).\n    #\n    # The glued digit after the term is Wehr\'s diptote marker (mamn\u016B\u02BF min al-\u1E63arf,\n    # `makka2`, `a\u1E25mad2`); it is re-emitted as a real superscript.\n    if source_roman:\n        spellings = [source_roman]\n        if roman and roman != source_roman:\n            spellings.append(roman)\n        span: tuple[int, int] | None = None\n        digit: str | None = None\n        for spelling in spellings:\n            m = re.search(r"(?<!\\w)" + re.escape(spelling) + r"(\\d)?(?![^\\W\\d])", def_text)\n            if m:\n                span, digit = (m.start(), m.end()), m.group(1)\n                break\n        if span is not None:\n            # Italicise the token *as printed*, never the heading\'s normalised\n            # spelling: the body is the book\'s text. The only addition is the\n            # diptote marker, which the scan glued to the term.\n            shown = def_text[span[0]:span[1]]\n            if digit:\n                shown = shown[:-len(digit)]\n            marked = f"*{shown}*" + (f"<sup>{digit}</sup>" if digit else "")\n            def_text = def_text[:span[0]] + marked + def_text[span[1]:]\n\n    # The digitisation put a generated \u2014 and often corrupt \u2014 vocalised form in\n    # parentheses right after every derived-form label (`<b>III</b> (\u0627\u064E\u0627\u064E\u062E\u064E\u0630\u064E)`),\n    # where the print gives none; form III of \u0623\u062E\u0630 came out as \u0627\u064E\u0627\u064E\u062E\u064E\u0630\u064E for \u0622\u062E\u0630.\n    # Drop it: the form number and the romanized reading already carry the form,\n    # so a wrong spelling in parentheses is worse than none. Where the print *does*\n    # give the form, it sits after this parenthetical and is left in place\n    # (`(\u0627\u0650\u0627\u0652\u062A\u064E\u062E\u064E\u0630\u064E) \u0627\u062A\u062E\u0630 itta\u1E33ada \u2026` \u2192 `\u0627\u062A\u062E\u0630 itta\u1E33ada \u2026`). Scoped to a\n    # `<b>ROMAN</b>` label followed by a parenthetical containing Arabic, so\n    # nothing else is touched. (All 4,970 occurrences in the corpus are a single\n    # vocalised form token.)\n    def_text = re.sub(\n        rf"(<b>\\s*[IVXLCDM]+\\s*</b>)\\s*\\([^()]*[{_HW_ARABIC}][^()]*\\)",\n        r"\\1", def_text,\n    )\n\n    segments = _hw_split_segments(def_text)\n    bullets: list[str] = [arabic]\n    if not segments:\n        bullets.append(def_text)\n    else:\n        first_label, first_content = segments[0]\n        if first_label is None:\n            bullets.append(first_content)\n            remaining = segments[1:]\n        else:\n            bullets.append("")\n            remaining = segments\n        for label, content in remaining:\n            bullets.append(label)\n            bullets.append(content or "")\n    # Pad to an even count so the two-column grid stays aligned.\n    if len(bullets) % 2 != 0:\n        bullets.append("")\n    # Our conventions bold with markdown / CSS, never HTML: drop any `<b>` the\n    # source leaves behind. (The sense markers were already turned into grid\n    # labels, and the callout CSS bolds the label column.) The `<sup>` marker\n    # added above is ours and is kept.\n    return [re.sub(r"</?b[^>]*>", "", b, flags=re.IGNORECASE) for b in bullets]\n\n\ndef _hw_prose_headword(text: str) -> str | None:\n    """The leading Arabic run of a prose definition \u2014 the entry\'s headword."""\n    m = _HW_PROSE_HEAD_RE.match((text or "").strip())\n    return m.group(0).strip() if m else None\n\n\ndef _hw_is_bare_arabic(text: str) -> bool:\n    """True when a string is nothing but Arabic \u2014 a bare root, not a definition."""\n    return bool(text) and not re.search(rf"[^{_HW_ARABIC}\\s]", text)\n\n\ndef _hw_prose_quotes(text: str) -> str:\n    """Curly quotes for a source that already has them.\n\n    Lane\'s text is already correctly quoted, but `smart_quotes` re-decides every\n    mark from its neighbours and so reverses a closing quote that follows a space\n    (`... war \u201D]` \u2192 `... war \u201C]`). Leave the curly marks alone and turn only the\n    rare straight one, by the same positional rule; a grave accent, which stands\n    for \u02BFayn in some sources, becomes \u2018.\n    """\n    text = text.replace("`", "\u2018")\n    text = re.sub(r\'(?:^|(?<=[\\s(\\[{<\\-\u2013\u2014]))"\', "\\x01", text)\n    text = re.sub(r"(?:^|(?<=[\\s(\\[{<\\-\u2013\u2014]))\'", "\\x02", text)\n    text = text.replace(\'"\', "\u201D").replace("\'", "\u2019")\n    return text.replace("\\x01", "\u201C").replace("\\x02", "\u2018")\n\n\ndef _hw_prose(definition: str, convention: str = DEFAULT_ROMANIZATION) -> list[str]:\n    """Lane\'s definition as markdown paragraphs.\n\n    The text is English prose with a little markup: `<i>` for the glosses, a\n    `<center>` holding a verse or a heading, `<h3>` for its lines, and the rare\n    `<table>`. Keep what Obsidian renders, turn the source\'s own dividers (`===`,\n    `___`) into paragraph breaks, and drop the rest. Square brackets \u2014 Lane\'s\n    editorial additions \u2014 become round ones, per the vault\'s rule.\n    """\n    text = definition or ""\n\n    def _centre(m: re.Match) -> str:\n        """A `<center>` block is a verse.\n\n        Lane sets poetry as centred hemistichs \u2014 one `<h3>` per hemistich, often\n        several bayts \u2014 and 2,159 of the 2,160 blocks in the corpus are Arabic\n        alone. Emit the vault\'s poetry callout, the same shape the transcription\n        pipeline produces for a hemistich line. (Lane\'s print marks each hemistich\n        with an asterisk; it carries no meaning for us, so it is stripped.)\n        """\n        inner = re.sub(r"(?is)</?h3[^>]*>", "\\n", m.group(1))\n        lines = [re.sub(r"\\s+", " ", ln).strip().strip("*").strip() for ln in inner.split("\\n")]\n        lines = [ln for ln in lines if ln]\n        if not lines:\n            return "\\n\\n"\n        return "\\n\\n" + "\\n".join([_HW_POETRY_CALLOUT] + [f">- {ln}" for ln in lines]) + "\\n\\n"\n\n    text = re.sub(r"(?is)<center[^>]*>(.*?)</center>", _centre, text)\n    # Lane uses `*` as a mark of its own \u2014 a separator inside a reference list\n    # (`(S, * M, A, K;)`, `(IAar, K *.)`). Obsidian has no working escape for it,\n    # so it pairs with another `*` somewhere and italicises everything between\n    # them. A `*` with a space on either side can neither open nor close emphasis,\n    # so pad every run. Done here, before any markdown marker of our own is\n    # written, so those are left untouched.\n    text = re.sub(r"\\*+", " * ", text)\n    text = re.sub(r"(?is)<h3[^>]*>(.*?)</h3>", lambda m: f"\\n\\n**{m.group(1).strip()}**\\n\\n", text)\n    # A table (six entries in the whole lexicon) is flattened: one line per row,\n    # cells separated by a tab so the columns stay legible in the source.\n    text = re.sub(r"(?is)</t[dh]\\s*>", "\\t", text)\n    text = re.sub(r"(?is)<t[dh][^>]*>", "", text)\n    text = re.sub(r"(?is)</tr\\s*>", "\\n", text)\n    text = re.sub(r"(?is)</?(?:table|tbody|tr)[^>]*>", "", text)\n    text = re.sub(r"(?is)<br\\s*/?>", " ", text)\n    text = re.sub(r"(?is)<i>(.*?)</i>", lambda m: f"*{m.group(1).strip()}*", text)\n    text = re.sub(r"<[^>]+>", "", text)\n    # `===` and `___` divide senses; the barb arrow and `\u2193` point at another\n    # entry. (The daggers that mark post-classical usage are kept \u2014 they are\n    # meaningful, and render as ordinary text.)\n    text = re.sub(r"\\s*={3,}\\s*", "\\n\\n", text)\n    text = re.sub(r"\\s*_{3,}\\s*", "\\n\\n", text)\n    text = text.replace("\\U0001f87b", "\u2193").replace("\\u2193", "\u2193")\n    for mark, vowel in _HW_MEDIAL_VOWELS.items():\n        text = text.replace(mark, vowel)\n    text = text.replace("\\u200e", "")\n\n    def _collapse(paragraph: str) -> str:\n        # A verse block keeps its line breaks; everything else is one line.\n        if paragraph.lstrip().startswith(">"):\n            return "\\n".join(re.sub(r"\\s+", " ", ln).strip()\n                             for ln in paragraph.split("\\n") if ln.strip())\n        return re.sub(r"\\s+", " ", paragraph).strip()\n\n    paragraphs = [_collapse(p) for p in re.split(r"\\n\\s*\\n", text)]\n    paragraphs = [p for p in paragraphs if p]\n    # The vault uses curly quotes, and never a square bracket.\n    paragraphs = [_hw_prose_quotes(p) for p in paragraphs]\n    # ...except the poetry callout\'s own `[!type]`, which the bracket rule below\n    # would otherwise turn into `(!type)` and destroy the callout. Park it.\n    paragraphs = [p.replace(_HW_POETRY_CALLOUT, "\\x03") for p in paragraphs]\n    paragraphs = [p.replace("[[", "(").replace("]]", ")") for p in paragraphs]\n    paragraphs = [re.sub(r"\\[(.+?)\\]", r"(\\1)", p) for p in paragraphs]\n    paragraphs = [p.replace("[", "(").replace("]", ")") for p in paragraphs]\n    paragraphs = [p.replace("\\x03", _HW_POETRY_CALLOUT) for p in paragraphs]\n    # Mark the headword so the callout CSS can size it as Arabic, not as prose.\n    if paragraphs:\n        paragraphs[0] = _HW_PROSE_HEAD_RE.sub(\n            lambda m: f\'<span class="mas-hw">{m.group(0).strip()}</span>\',\n            paragraphs[0], count=1,\n        )\n    return [_hw_fix_kaf(p, convention) for p in paragraphs]\n\n\n# The language a loanword came from, as Wehr marks it: `\u0627\u062A\u0648\u0628\u064A\u0633 (Fr.) otob\u012Bs`.\n_HW_LANG_MARKER_RE = re.compile(\n    # The marker may close immediately (`(Fr.) otomob\u012Bl`) or hold the word itself\n    # (`(Turk. tozluk)`), so stop at the abbreviation\'s dot, not at the `)`.\n    # `(pronounced amb\u0101)` is the same kind of guarantee.\n    r"\\((?:Fr|Engl|It|Sp|Gk|Lat|Turk|Pers|Ger|Port|Russ|Hind|Mal|Swah|Tam|Chin|Jap)\\."\n    r"|\\((?:pronounced|pron)\\b"\n)\n\n\ndef _hw_romanization_after_marker(definition: str) -> str | None:\n    """The transliteration a loanword entry gives after its language marker.\n\n    Wehr writes a loanword as `ARABIC (and ARABIC) (Fr.) otomob\u012Bl automobile`, and a\n    French or German transcription may use letters that do not map onto the Arabic at\n    all (`\u014Dp\u0259r\u0113t` for \u0627\u0648\u0628\u0631\u064A\u062A, a p where the Arabic has \u0628), so it cannot be validated\n    against the headword the usual way. The marker is the guarantee that the token\n    after it is the entry\'s own transliteration \u2014 and it is the source\'s, which beats\n    the engine\'s guess at the bare cluster.\n    """\n    m = _HW_LANG_MARKER_RE.search(definition or "")\n    if not m:\n        return None\n    t = _HW_LATIN_TOKEN_RE.search(definition, m.end())\n    return t.group(1) if t else None\n\n\ndef _hw_romanization_in_text(definition: str, arabic: str, *, loose: bool = False) -> str | None:\n    """A transliteration of the headword found anywhere in the definition.\n\n    A loanword entry can carry two spellings with OCR rubble between them and the\n    transliteration at the end (`\u0627\u062A\u0648\u0645\u0628\u064A\u0644 boyl lI\u0627\u0644\u0649d \u0627\u062A\u0648\u0645\u0648\u0628\u064A\u0644 (Fr.) otomob\u012Bl`), so the\n    leading token is not always the term. When the usual extraction fails, any token\n    that actually reads the headword is the source\'s own name for it \u2014 better than\n    the engine\'s guess at a bare cluster. `loose` also accepts the spelling\n    variations a loanword or proper name uses (see `_hw_reads_arabic_loose`).\n    """\n    for m in _HW_LATIN_TOKEN_RE.finditer(definition or ""):\n        token = m.group(1)\n        if _hw_reads_arabic(token, arabic):\n            return token\n        if loose and _hw_reads_arabic_loose(token, arabic):\n            return token\n    return None\n\n\ndef _hw_source_romanization(definition: str, arabic: str) -> tuple[str | None, str]:\n    """The source\'s own transliteration, and where it came from.\n\n    The order matters: the token right after the headword, then any token that\n    reads the headword, then the token after a language marker (a loanword\n    transcription need not map onto the Arabic at all). `None` means Wehr gives\n    no usable romanization here, so the caller must fall back \u2014 and must not\n    insert that fallback into the definition.\n    """\n    extracted = _hw_extract_romanization(definition)\n    if extracted and _hw_reads_arabic(extracted, arabic):\n        return extracted, "definition"\n    text = _hw_romanization_in_text(definition, arabic)\n    if text:\n        return text, "text"\n    # A marker is the guarantee that the next token is the loanword\'s own\n    # transcription, so it beats the loose check: `(Turk. tozluk)` must keep\n    # `tozluk`, not be "corrected" to a reading of the Arabic.\n    marker = _hw_romanization_after_marker(definition)\n    if marker:\n        return marker, "marker"\n    if extracted and _hw_reads_arabic_loose(extracted, arabic):\n        return extracted, "definition"\n    text = _hw_romanization_in_text(definition, arabic, loose=True)\n    if text:\n        return text, "text"\n    # A multiword headword whose variants defeat the full comparison still has a\n    # usable first name (`\u0627\u0644\u0627\u0637\u0644\u0627\u0646\u062A\u064A\u0643` \u2192 `al-a\u1E6Flant\u012Bk`).\n    first_ar = re.split(r"[\\s,]+", arabic)[0]\n    first_ro = (extracted or "").split()[0] if extracted else ""\n    if first_ro and _hw_reads_arabic_loose(first_ro, first_ar):\n        return first_ro, "definition"\n    return None, ""\n\n\ndef _hw_root_entry(entry_id: int, word: str, definition: str, derived: list[tuple],\n                   *, prose: bool = False, convention: str = DEFAULT_ROMANIZATION) -> dict | None:\n    """A root entry: its transliteration comes from a derived entry when it is a verb form."""\n    definition = (definition or "").strip()\n    if _hw_should_skip(definition, pointers=not prose):\n        return None\n    if prose:\n        # Lane gives no transliteration, so the name is read from the root itself\n        # by the transliteration service \u2014 and, if that reading is rejected, from\n        # the root\'s own entries (see `_hw_root_romanization`).\n        arabic = _hw_prose_headword(definition) or (word or "").strip()\n        if not arabic:\n            return None\n        paragraphs = _hw_prose(definition, convention)\n        if len(paragraphs) == 1 and _hw_is_bare_arabic(_hw_strip_tags(paragraphs[0])):\n            # The row is the bare root with no entry of its own; the derived rows\n            # below carry the text.\n            paragraphs = []\n        return {\n            "id": entry_id, "arabic": arabic,\n            "roman": _hw_fix_kaf(_hw_fix_underlined(_hw_root_romanization(arabic, derived, convention), arabic, convention), convention),\n            "verb_form": False, "paragraphs": paragraphs,\n        }\n    arabic = _hw_headword(definition) or (word or "").strip()\n    if not arabic:\n        return None\n    verb = _hw_is_verb_form(definition)\n    source_roman: str | None = None\n    source_kind = ""\n    if verb:\n        # A root that is itself a verb form can carry its own reading after the\n        # form label (`\u0628\u062E\u062A\u0631 II taba\u1E33tara \u2026`); use that before the derived rows.\n        own = _hw_extract_romanization(definition)\n        if own and _hw_reads_root(own, arabic):\n            roman = own\n            source_kind = "definition"\n        else:\n            roman = _hw_find_first_valid_romanization(derived, arabic)\n            if roman:\n                source_kind = "derived"\n            else:\n                for _eid, _w, d in derived:\n                    candidate = _hw_extract_romanization(d)\n                    if candidate and _hw_reads_arabic(candidate, _hw_headword(d) or _w):\n                        roman = candidate\n                        source_kind = "derived"\n                        break\n            if not roman:\n                roman = _hw_root_romanization(arabic, derived, convention)\n                source_kind = "fallback"\n    else:\n        # The source\'s own transliteration first \u2014 but only if it really reads the\n        # headword (the text also carries numerals and cross-references) \u2014 then any\n        # the entries carry, then the same shared machinery Lane uses. A value the\n        # source wrote is kept exactly as written; only an engine reading is recast\n        # into the work\'s convention, inside `_hw_root_romanization`.\n        source_roman, source_kind = _hw_source_romanization(definition, arabic)\n        roman = source_roman or _hw_find_first_valid_romanization(derived, arabic)\n        if not source_roman and roman:\n            source_kind = "derived"\n        elif not roman:\n            roman = _hw_root_romanization(arabic, derived, convention)\n            source_kind = "fallback"\n    # A marker token is a loanword transcription, not a reading of the Arabic:\n    # the walk would "correct" `tozluk` to `tozluq`. Keep it exactly as Wehr\n    # printed it, apart from the `\u1E33` typo. Everything else is a reading and may\n    # be recast/corrected from the Arabic.\n    if source_kind == "marker":\n        roman = _hw_fix_kaf(roman, convention)\n    else:\n        roman = _hw_fix_kaf(_hw_fix_underlined(_hw_romanize(roman, convention), arabic, convention), convention)\n    return {\n        "id": entry_id, "arabic": arabic, "roman": roman, "verb_form": verb,\n        "roman_source": source_kind or "fallback",\n        # Only the source\'s own token may be italicised in the body. A fallback\n        # name is for the heading; inserting it would replace a real gloss.\n        "bullets": _hw_grid_bullets(arabic, definition, None if verb else roman, source_roman, convention),\n    }\n\n\ndef _hw_derived_entry(entry_id: int, word: str, definition: str,\n                      *, prose: bool = False, convention: str = DEFAULT_ROMANIZATION) -> dict | None:\n    """A derived entry; a verb form carries no transliteration in its heading."""\n    definition = (definition or "").strip()\n    if _hw_should_skip(definition, pointers=not prose):\n        return None\n    if prose:\n        # The headword is already fully vocalized, and a derived form is not the\n        # root \u2014 so it is shown in Arabic only, with no transliterated heading.\n        arabic = _hw_prose_headword(definition) or (word or "").strip()\n        if not arabic:\n            return None\n        return {\n            "id": entry_id, "arabic": arabic, "roman": None,\n            "verb_form": False, "paragraphs": _hw_prose(definition),\n        }\n    arabic = _hw_headword(definition) or (word or "").strip()\n    if not arabic:\n        return None\n    if _hw_is_verb_form(definition):\n        return {\n            "id": entry_id, "arabic": arabic, "roman": None, "verb_form": True,\n            "roman_source": "verb",\n            "bullets": _hw_grid_bullets(arabic, definition, None),\n        }\n    source_roman, source_kind = _hw_source_romanization(definition, arabic)\n    roman = source_roman or _hw_word_romanization(arabic, convention)\n    if not source_roman:\n        source_kind = "fallback"\n    if source_kind == "marker":\n        roman = _hw_fix_kaf(roman, convention)\n    else:\n        roman = _hw_fix_kaf(_hw_fix_underlined(roman, arabic, convention), convention)\n    return {\n        "id": entry_id, "arabic": arabic, "roman": roman, "verb_form": False,\n        "roman_source": source_kind,\n        "bullets": _hw_grid_bullets(arabic, definition, roman, source_roman, convention),\n    }\n\n\n_HW_LETTER_ORDER = "\u0627\u0628\u062A\u062B\u062C\u062D\u062E\u062F\u0630\u0631\u0632\u0633\u0634\u0635\u0636\u0637\u0638\u0639\u063A\u0641\u0642\u0643\u0644\u0645\u0646\u0647\u0648\u064A"\n# Fold the alef/hamza variants onto their base letter, so "\u0622\u0628" is filed under \u0627.\n_HW_LETTER_FOLD = {"\u0622": "\u0627", "\u0623": "\u0627", "\u0625": "\u0627", "\u0671": "\u0627", "\u0649": "\u064A", "\u0629": "\u0647"}\n\n\ndef _hw_note_base(entry: dict, prefix: str = "HW") -> str:\n    safe_ar = re.sub(r\'[<>:"/\\\\|?*]\', "", entry["arabic"])\n    safe_rom = re.sub(r\'[<>:"/\\\\|?*]\', "", entry["roman"] or "")\n    return re.sub(r"\\s+", " ", f"{prefix} {entry[\'id\']} {safe_ar} {safe_rom}").strip()\n\n\ndef _hw_letter_of(arabic: str) -> str:\n    """The letter a root is filed under (alef variants folded onto \u0627)."""\n    first = (arabic or "?")[0]\n    return _HW_LETTER_FOLD.get(first, first)\n\n\ndef _hw_letter_page(letter: str, convention: str = DEFAULT_ROMANIZATION) -> str:\n    """A letter page\'s label: the letter and its romanized equivalent (`\u0632 z`).\n\n    The label follows the work\'s own convention, so in the Wehr work it reads\n    `\u062B \u1E6F` \u2014 matching the transliterations of the notes it indexes.\n    """\n    return f"{letter} {_hw_romanize(_HW_RADICALS.get(letter, \'\'), convention)}".strip()\n\n\ndef _hw_letter_index(units: list[dict], convention: str = DEFAULT_ROMANIZATION) -> list[dict]:\n    """One index unit per first letter, so a work\'s hub lists letters, not roots.\n\n    A dictionary has thousands of roots \u2014 far too many to list on one page \u2014 so\n    the work note points at one *letter* page, and each letter page lists the\n    roots that start with it.\n    """\n    groups: dict[str, list[dict]] = {}\n    for u in units:\n        groups.setdefault(_hw_letter_of(u["root"]["arabic"]), []).append(u)\n\n    def order(letter: str) -> tuple[int, int]:\n        i = _HW_LETTER_ORDER.find(letter)\n        return (0, i) if i >= 0 else (1, ord(letter))\n\n    out: list[dict] = []\n    for letter in sorted(groups, key=order):\n        roots = sorted(groups[letter], key=lambda u: u["root"]["arabic"])\n        out.append({\n            "kind": "dict-index",\n            "id": letter,\n            "base": _hw_letter_page(letter, convention),\n            "title": _hw_letter_page(letter, convention),\n            "letter": letter,\n            "roman": _hw_romanize(_HW_RADICALS.get(letter, ""), convention),\n            "roots": [\n                {"base": u["base"], "title": u["title"], "arabic": u["root"]["arabic"], "roman": u["root"]["roman"]}\n                for u in roots\n            ],\n        })\n    return out\n\n\n# \u2500\u2500 Eyeball corrections \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n#\n# Cases the rules cannot derive, found by reading the entry rather than by a rule.\n# Each is a literal replacement applied to a work\'s definition *before* anything\n# else runs, so every rule afterwards sees the corrected text and leaves it alone \u2014\n# which is why the replacement is written in the form the rules already agree with.\n# Keyed by the source row\'s id, the one stable handle a definition has: if a future\n# release moves the row, the entry simply stops matching rather than matching\n# wrongly. (Where a rule would mangle a case rather than leave it, the correction\n# can instead be applied after the rules, matching the output we know they produce.)\n#\n# This is the residue, not a strategy: the point of the rules is that they need no\n# list, and the list is worth keeping short. It also belongs in the upstream\n# correction list, where the same fix can be made once for everyone.\n_EYEBALL: dict[str, dict[int, tuple[str, str]]] = {\n    "hanswehr": {\n        # 951 `\u0627\u0648\u0644`: `a\u1E33tara` for \u0623\u064E\u0643\u0652\u062B\u064E\u0631. The document conversion moved the dot off\n        # the \u062B onto the k\u0101f, so here the `\u1E33` is a k\u0101f, not a \u062E \u2014 the single\n        # occurrence in the corpus where it is not a kh\u0101\u02BE. Wehr writes `ak\u1E6Fara`.\n        951: ("a\u1E33tara", "ak\u1E6Fara"),\n        # 26 `\u0627\u0628\u0631\u064A\u0632`: the print reads `\u0627\u0628\u0631\u064A\u0632 ibr\u012Bz pure gold`, but both\n        # digitizations dropped `ibr\u012Bz` and kept the page number `1`; the page\n        # number is now stripped by the FODT reader, and this restores the\n        # print\'s word so it is a source token, not an engine guess.\n        26: ("pure gold", "ibr\u012Bz pure gold"),\n    },\n}\n\n\n# \u2500\u2500 Parent overrides \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n#\n# Rows the digitisation marks as a root of their own \u2014 `IS_ROOT`, parented to\n# themselves \u2014 while Wehr files them under another root. The letters cannot tell us:\n# the distinction is morphological, not textual (`\u0645\u062A\u0623\u062E\u0631` is \u0645 + \u062A + \u0623\u062E\u0631, a form-V\n# participle, so neither a containment test nor a "root plus one prefix" test finds\n# it, and a loose containment test matches thousands of legitimate roots). So, like\n# `_EYEBALL`, this is a short curated list, keyed by the source row\'s id, mapping it\n# to the root it belongs under. The row then becomes an entry inside that root\'s note\n# instead of a note of its own, and the renderer\'s prune removes the orphan.\n#\n# Worth reporting upstream: these flags come from the origin\'s own schema\n# (`WordMetadata(RootWordId, IsRoot)`), so one fix there reaches every downstream app.\n_REPARENT: dict[str, dict[int, int]] = {\n    "hanswehr": {\n        # A term inadvertently split from the entry *before* it: the digitisation marks\n        # it as a root of its own (its own parent) while Wehr files it under the root\n        # listed just before it. The condition is adjacency *and* direction \u2014 the row\n        # sits right after that root\'s last child, and its word is the previous root\'s\n        # word plus a derivational prefix \u2014 and every entry here has been **eyeballed**,\n        # not taken from the script\'s output on trust. `scripts/audit-parents.py`\n        # proposes candidates with that rule and flags the ones to look at first: a\n        # term carrying Wehr\'s homonym number \u2014 a digit *before* the Arabic term\n        # (`2\u0628\u0646\u0643` beside `3\u0645\u0628\u0646\u0643`) \u2014 is a separate entry, and a pointer (`look up\n        # alphabetically`, `see 2\u0633\u0645`) is skipped by the importer rather than\n        # re-parented. But the number cannot be used as a filter: the digitisation\n        # kept almost none of them, and `\u062C\u0644\u0648\u0646`/`\u0645\u062C\u0644\u0648\u0646` are unrelated loanwords that\n        # carry none at all. So cases are confirmed by reading, not by the rule \u2014\n        # 3727 `\u0645\u062C\u0644\u0648\u0646` was proposed by it and removed for exactly that reason.\n          179: 167,    # \u0645\u062A\u0627\u062E\u0631  = \u0645\u062A + \u0627\u062E\u0631   (form-V participle)\n        1180: 1179,  # \u0645\u0628\u062D\u062B\u0631  = \u0645 + \u0628\u062D\u062B\u0631\n        5346: 5342,  # \u0645\u062D\u0646\u0642   = \u0645 + \u062D\u0646\u0642\n        5351: 5347,  # \u0645\u062D\u0646\u0643   = \u0645 + \u062D\u0646\u0643\n        5678: 5674,  # \u062A\u062E\u062B\u0631   = \u062A + \u062E\u062B\u0631\n        7030: 7024,  # \u0645\u062F\u0643    = \u0645 + \u062F\u0643    (noun of instrument)\n        7716: 7715,  # \u062A\u0631\u0628\u0635   = \u062A + \u0631\u0628\u0635\n        7717: 7716,  # \u0645\u062A\u0631\u0628\u0635  = \u0645 + \u062A\u0631\u0628\u0635  (chains onto the row above)\n    },\n}\n\n\ndef _hw_starts_new_root(definition: str) -> bool:\n    """Whether a root row begins a new root rather than continuing the previous one.\n\n    Wehr starts every root with its verbs \u2014 a form-I verb resembling the root, or a\n    form given by a Roman numeral \u2014 so a verb-initial definition after a noun is a\n    different root even when the two share a spelling. The digitisation gives `\u062F\u0643`\n    twice (7024 `dakka u (dakk) to make flat, level or even` and 7031 `<b>II</b> to\n    provide \u2026 with a waist-band`), and merging them would combine two entries the\n    print keeps apart. Keeping the text\'s own division is the whole point.\n    """\n    # The marker comes *after* the headword (`\u062F\u0643 <b>II</b> to provide \u2026`), so it is\n    # what follows the headword that has to be examined, not the definition\'s start.\n    rest = _HW_HEAD_RE.sub("", (definition or "").strip(), count=1).lstrip()\n    if _HW_ROMAN_RE.match(rest):\n        return True\n    return bool(re.match(r"^(?:to|=)\\b", rest))\n\n\ndef _load_fodt_converter():\n    """The FODT\u2192JSON converter, loaded beside this script (it imports this module)."""\n    path = Path(__file__).resolve().parent / "hanswehr-fodt-json.py"\n    spec = importlib.util.spec_from_file_location("hanswehr_fodt_json", path)\n    module = importlib.util.module_from_spec(spec)\n    spec.loader.exec_module(module)\n    return module\n\n\ndef build_fodt_dictionary_units(work: dict, args: argparse.Namespace) -> list[dict]:\n    """A dictionary read from the FODT origin instead of the app\'s SQLite."""\n    module = _load_fodt_converter()\n    # The converter holds its own import of this module, so give that copy the\n    # same transliteration settings as this fetch.\n    module.tsi._TRANS_SERVER = getattr(args, "transliteration_server", "")\n    module.tsi._TRANS_OFF = getattr(args, "no_transliteration", False)\n    emit("step", name=work["title"], status="parsing", detail="FODT")\n    entries, meta, _app, mapping = module.build_entries()\n    emit("step", name=work["title"], status="parsing",\n         detail=f"{len(entries):,} paragraphs, {meta[\'supplement_rows\']} supplement")\n    # The model is a render cache; this is the canonical data, with the fields\n    # the app\'s SQLite dropped (homonym, level) and the supplement\'s provenance.\n    data_path = SOURCE_DATA_DIR / "dictionary" / f"{work[\'id\']}.json"\n    data_path.parent.mkdir(parents=True, exist_ok=True)\n    data_path.write_text(json.dumps({\n        "schema": 1,\n        "work": {k: work.get(k) for k in (\n            "key", "collection", "id", "name", "title", "dir", "author",\n            "source", "license_attribution", "note_prefix", "body", "convention")},\n        "source": meta,\n        "entries": entries,\n    }, ensure_ascii=False, indent=1), encoding="utf-8")\n    units = module.build_units(entries, mapping, work=work)\n    work["fodt_paragraphs"] = meta["fodt_paragraphs"]\n    work["fodt_supplement_rows"] = meta["supplement_rows"]\n    work["source_hash"] = meta["fodt_sha256"][:12]\n    return units\n\n\ndef build_dictionary_units(work: dict, args: argparse.Namespace) -> list[dict]:\n    """One unit (note) per dictionary root, carrying its derived entries."""\n    if work.get("shape") == "fodt":\n        return build_fodt_dictionary_units(work, args)\n    url = work.get("db_url") or COLLECTIONS["dictionary"]["data"]\n    emit("step", name=work["title"], status="downloading", detail="sqlite")\n    data = fetch(url, cache=not args.no_cache)\n    key = re.sub(r"[^\\w.-]+", "_", url)[-180:]\n    db_path = CACHE_DIR / key\n    if not db_path.exists():\n        db_path.parent.mkdir(parents=True, exist_ok=True)\n        db_path.write_bytes(data)\n    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)\n    try:\n        cur = conn.cursor()\n        names = {str(r[0]).lower() for r in cur.execute(\n            "SELECT name FROM sqlite_master WHERE type IN (\'table\',\'view\')")}\n        table = "entries" if "entries" in names else "dictionary"\n        rows = list(cur.execute(f"SELECT ID, WORD, DEFINITION, IS_ROOT, PARENT_ID FROM {table}"))\n    finally:\n        conn.close()\n    by_id: dict[int, tuple[str, str]] = {}\n    parent_of: dict[int, int] = {}\n    root_rows: list[int] = []\n    for rid, word, definition, is_root, parent in rows:\n        by_id[rid] = (word or "", definition or "")\n        parent_of[rid] = parent\n        if is_root:\n            root_rows.append(rid)\n    root_set = set(root_rows)\n    # Parent overrides (see `_REPARENT`): a row the source marks as a root of its own\n    # but Wehr files under another root is re-parented, so it becomes an entry in that\n    # root\'s note rather than a note of its own.\n    for rid, parent in _REPARENT.get(work["id"], {}).items():\n        if rid not in by_id or parent not in root_set or rid not in root_set:\n            continue\n        parent_of[rid] = parent\n        root_set.discard(rid)\n        root_rows.remove(rid)\n    # Eyeball corrections (see `_EYEBALL`) go in first, so the rules that follow see\n    # the corrected text and have nothing left to change.\n    for rid, (old, new) in _EYEBALL.get(work["id"], {}).items():\n        word, definition = by_id.get(rid, ("", ""))\n        if definition and old in definition:\n            by_id[rid] = (word, definition.replace(old, new))\n\n    def nearest_root(rid: int) -> int | None:\n        """Walk up to the root a row belongs to \u2014 the database is not always flat:\n        `\u0634\u0631\u0641` \u2192 `\u0645\u0634\u0631\u0641` \u2192 `\u0645\u0634\u0631\u0642`, so a row\'s parent may itself be a derived row."""\n        seen: set[int] = set()\n        cur = parent_of.get(rid)\n        while cur is not None and cur not in seen:\n            if cur in root_set:\n                return cur\n            seen.add(cur)\n            cur = parent_of.get(cur)\n        return None\n\n    derived: dict[int, list[int]] = {}\n    orphaned = 0\n    for rid in by_id:\n        if rid in root_set:\n            continue\n        owner = nearest_root(rid)\n        if owner is None:\n            orphaned += 1\n            continue\n        derived.setdefault(owner, []).append(rid)\n    if orphaned:\n        emit("log", message=f"  {orphaned} entr(ies) had no root ancestor and were skipped")\n    # The database splits a root into more than one `is_root` row (548 roots) \u2014\n    # \u062D\u0631\u0628 is both \u1E25ariba the verb (4457) and \u1E25arb the noun (4458). In print they\n    # are one entry, so group the root rows by the root word and merge each group:\n    # the first row is the note, the rest join it, and every derived form of the\n    # group is nested beneath. (The rows are in the app\'s own order.)\n    # Root rows sharing a word are usually one root in the print \u2014 `\u062D\u0631\u0628` the verb\n    # (4457) and `\u062D\u0631\u0628` the noun (4458) are one entry \u2014 but Wehr\'s homonym numbers mark\n    # genuinely different roots under the same spelling (`\u062F\u0643` 7024 `dakka u (dakk) to\n    # make flat\u2026` and 7031 `<b>II</b> to provide \u2026 with a waist-band`). The number is\n    # lost in the digitisation, but the verb test survives it: Wehr starts every root\n    # with its verbs, so a verb-initial definition begins a new root while a noun after\n    # a verb continues the one before. So the merge runs over *consecutive* same-word\n    # rows and breaks at a verb \u2014 never collapsing a homonym number by a rule.\n    groups: list[tuple[str, list[int]]] = []\n    for rid in sorted(root_rows):\n        # Keyed on the *headword* the note is named from, not the `word` column: that\n        # column drops the hamza, so `\u0631\u0623\u0628` (7631, "to mend") and `\u0631\u0627\u0628` (7701,\n        # "stepfather") both read `\u0631\u0627\u0628` and were being merged into one note despite\n        # being unrelated roots. The definition keeps the distinction.\n        word = _hw_headword(by_id[rid][1]) or by_id[rid][0]\n        if groups and groups[-1][0] == word and not _hw_starts_new_root(by_id[rid][1]):\n            groups[-1][1].append(rid)\n        else:\n            groups.append((word, [rid]))\n    emit("step", name=work["title"], status="parsing", detail=f"{len(groups)} roots")\n    prose = work.get("body") == "prose"\n    prefix = work.get("note_prefix") or "HW"\n    convention = work.get("convention") or DEFAULT_ROMANIZATION\n    units: list[dict] = []\n    for n, (word, group) in enumerate(groups):\n        derived_ids = [d for rid in group for d in derived.get(rid, [])]\n        derived_rows = [(d, by_id[d][0], by_id[d][1]) for d in derived_ids]\n        # The group\'s first row with real content is the note; the others join it\n        # as further sections. The database pairs a pointer row with the row that\n        # carries the entry \u2014 \u0627\u0628\u064A\u0628 has id 6 ("look up alphabetically") and id 60\n        # ("ab\u012Bb the eleventh month\u2026") \u2014 so the pointer must not become the note.\n        root: dict | None = None\n        entries: list[dict] = []\n        for rid in group:\n            entry = _hw_root_entry(rid, by_id[rid][0], by_id[rid][1], derived_rows,\n                                   prose=prose, convention=convention)\n            if entry is None:\n                continue\n            if root is None:\n                root = entry\n            else:\n                entries.append(entry)\n        if root is None and derived_rows:\n            # Every row is a pointer, but the derived forms still carry content:\n            # keep the note, with the root as a bare headword rather than the\n            # pointer text. The id and word stay the root\'s, so the note is not\n            # named after a derived term.\n            main = group[0]\n            word_ar = (_hw_prose_headword if prose else _hw_headword)(by_id[main][1]) or by_id[main][0]\n            roman = _hw_fix_kaf(_hw_root_romanization(word_ar, derived_rows, convention), convention)\n            root = {"id": main, "arabic": word_ar, "roman": roman, "verb_form": False}\n            if prose:\n                root["paragraphs"] = []\n            else:\n                root["bullets"] = [word_ar, f"*{roman}*"]\n        if root is None:\n            continue\n        entries += [e for e in (_hw_derived_entry(eid, w, d, prose=prose, convention=convention) for eid, w, d in derived_rows) if e]\n        # Where the source stops being the Lexicon and starts being its\n        # Supplement: the note marks it so the two books stay distinguishable\n        # inside one root\'s page. (A Supplement-only root marks from the top.)\n        if work.get("supplement_from"):\n            boundary = work["supplement_from"]\n            if root["id"] >= boundary:\n                root["supplement"] = True\n            for entry in entries:\n                if entry["id"] >= boundary:\n                    entry["supplement"] = True\n        # A bare root with neither an entry of its own nor any derived form carries\n        # nothing, and a note with only a heading is noise. The database has one\n        # such row \u2014 12893, itself a child of another root, contradicting its own\n        # `IS_ROOT` flag \u2014 and its definition is just the headword.\n        if not entries and not (root.get("paragraphs") or root.get("bullets")):\n            continue\n        units.append({\n            "kind": "dict",\n            "id": root["id"],\n            "base": _hw_note_base(root, prefix),\n            "title": f"{root[\'arabic\']} {root[\'roman\']}",\n            # A two-level work: the bottom page names its letter page first in\n            # `mas-up`, so you can step to the adjacent entries of the same letter.\n            "section_page": f"{work[\'dir\']} - {_hw_letter_page(_hw_letter_of(root[\'arabic\']), convention)}",\n            "root": root,\n            "entries": entries,\n        })\n        if (n + 1) % 500 == 0:\n            emit("step", name=work["title"], status="parsing", detail=f"{len(units)} roots")\n    # The letter index units come first, so the hub lists letters, not 7,000 roots.\n    return _hw_letter_index(units, convention) + units\n\n\n# \u2500\u2500 Turath.io (book/TOC/page) \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n#\n# `files.turath.io/books-v3/<id>.json` is one whole-book JSON whose keys are Arabic\n# diacritics. The facts that matter (verified on single- and multi-volume books):\n#   * `headings[i].page` is a 1-based **index into `pages`**, not a printed page.\n#   * `page_map[j]` is "<vol>,<printed page>", aligned with `pages[j]`.\n#   * `<span data-type="title" id=toc-N>` marks heading N\'s position; a few\n#     headings have no span, so fall back to the logical page.\n#   * `page_headings` (U+065B) is unusable here (its values are a running index).\n\n_TURATH_META, _TURATH_INDEXES = "\\u064B", "\\u0658"\n_TURATH_VOLUMES, _TURATH_HEADINGS, _TURATH_PAGE_MAP = "\\u0659", "\\u065A", "\\u065D"\n_TURATH_TITLE = re.compile(\n    r\'<span[^>]*\\bdata-type="title"[^>]*\\bid=["\\\']?toc-(\\d+)["\\\']?[^>]*>(.*?)</span>\',\n    re.DOTALL | re.I,\n)\n# A chapter file name is capped at a word boundary; the full heading stays in the\n# note\'s `title` (and the hub link\'s alias), so nothing is lost.\n_TURATH_MAX_BASE = 60\n\n\ndef _turath_decode(raw: dict) -> dict:\n    meta = raw.get(_TURATH_META, {}) or {}\n    idx = raw.get(_TURATH_INDEXES, {}) or {}\n    return {\n        "meta": {\n            "id": meta.get("\\u064C"),\n            "name": meta.get("\\u064D", ""),\n            "cat_id": meta.get("\\u064E"),\n            "author_id": meta.get("\\u064F"),\n            "details": meta.get("\\u0651", ""),\n            "date_built": meta.get("\\u0656"),\n        },\n        "volumes": [str(v) for v in (idx.get(_TURATH_VOLUMES) or ["1"])],\n        "headings": idx.get(_TURATH_HEADINGS) or [],\n        "page_map": idx.get(_TURATH_PAGE_MAP) or [],\n        "pages": [{"vol": str(p.get("vol", "1")), "page": p.get("page"),\n                   "text": p.get("text", "")}\n                  for p in raw.get("pages", [])],\n    }\n\n\ndef _turath_trim(text: str) -> str:\n    """Cap a file-name stem at a word boundary (the full title is kept separately)."""\n    if len(text) <= _TURATH_MAX_BASE:\n        return text\n    cut = text[:_TURATH_MAX_BASE].rsplit(" ", 1)[0].rstrip(" \u060C:\u061B-")\n    return cut or text[:_TURATH_MAX_BASE]\n\n\ndef _turath_page(text: str, headings: list[dict], section_level: int,\n                 drop: set[int]) -> str:\n    """A page\'s HTML as markdown, with `toc-N` spans as H2/H3 headings.\n\n    `drop` holds the section\'s own heading: the note title already carries it, so\n    its inline anchor vanishes. Deeper anchors become headings that can never\n    collide with the `#### p. N` page marks.\n    """\n    out: list[str] = []\n    pos = 0\n    for m in _TURATH_TITLE.finditer(text):\n        out.append(text[pos:m.start()])\n        pos = m.end()\n        try:\n            idx = int(m.group(1)) - 1\n        except ValueError:\n            continue\n        if idx in drop:\n            continue\n        level = int(headings[idx]["level"]) if 0 <= idx < len(headings) else section_level + 1\n        hashes = "#" * min(max(level - section_level + 1, 2), 3)\n        out.append(f"\\n\\n{hashes} {m.group(2).strip()}\\n\\n")\n    out.append(text[pos:])\n\n    body = html.unescape(re.sub(r"<[^>]+>", "", "".join(out)))\n    # Qur\'an quotes get the vault\'s marker; bracketed s\u016Bra:\u0101ya refs become links.\n    body = re.sub(r"\uFD3F(.+?)\uFD3E", lambda m: f"*\uFD3F{m.group(1)}\uFD3E{{.quran-quote}}*",\n                  body, flags=re.DOTALL)\n    body = link_verse_citations(body)\n    paragraphs = [re.sub(r"\\s+", " ", p).strip() for p in re.split(r"\\n\\s*\\n", body)]\n    paragraphs = [re.sub(r"\\s*\\n\\s*", " ", p) for p in paragraphs if p.strip()]\n    return smart_quotes("\\n\\n".join(paragraphs))\n\n\ndef _turath_span(blocks: list[dict], multi: bool) -> str:\n    if not blocks:\n        return ""\n    a, b = blocks[0], blocks[-1]\n    if multi:\n        left, right = f"{a[\'vol\']}:{a[\'page\']}", f"{b[\'vol\']}:{b[\'page\']}"\n    else:\n        left, right = str(a["page"]), str(b["page"])\n    return f"p. {left}" if left == right else f"p. {left}\u2013{right}"\n\n\ndef build_turath_units(work: dict, args: argparse.Namespace) -> list[dict]:\n    """One chapter per TOC heading at `section_level`; a volume index per volume."""\n    url = COLLECTIONS["turath"]["data"].format(id=work["id"])\n    emit("step", name=work["title"], status="downloading", detail="whole book")\n    book = _turath_decode(fetch_json(url, cache=not args.no_cache))\n    # Turath rebuilds each book file, so its `date_built` is the update signal;\n    # the volume count drives the hub\'s volume-index layer.\n    work["date_built"] = book["meta"].get("date_built")\n    work["volumes"] = len(book["volumes"])\n    headings, pages, page_map = book["headings"], book["pages"], book["page_map"]\n    volumes = book["volumes"]\n    multi = len(volumes) > 1\n\n    def loc(j: int) -> dict:\n        if j < len(page_map) and "," in page_map[j]:\n            vol, pg = page_map[j].split(",", 1)\n            return {"vol": vol, "page": int(pg)}\n        return {"vol": pages[j]["vol"], "page": pages[j]["page"]}\n\n    if not headings:\n        return _turath_by_volume(book, multi)\n\n    levels = [int(h["level"]) for h in headings]\n    level = min(max(int(work.get("section_level", 1)), min(levels)), max(levels))\n    starts = [(i, int(headings[i]["page"]) - 1) for i, h in enumerate(headings)\n              if int(h["level"]) == level]\n    chapters: list[dict] = []\n    for n, (head, start) in enumerate(starts, start=1):\n        end = starts[n][1] - 1 if n < len(starts) else len(pages) - 1\n        blocks = []\n        for j in range(start, end + 1):\n            text = pages[j]["text"]\n            if j == start and n > 1:\n                # A page may close one chapter and open the next; keep the part\n                # that follows this chapter\'s own anchor.\n                m = next((mm for mm in _TURATH_TITLE.finditer(text)\n                          if int(mm.group(1)) - 1 == head), None)\n                if m:\n                    text = text[m.start():]\n            body = _turath_page(text, headings, level, {head})\n            if body.strip():\n                where = loc(j)\n                blocks.append({"vol": where["vol"], "page": where["page"], "body": body})\n        if not blocks:\n            continue\n        title_ar = smart_quotes(headings[head]["title"]).strip()\n        base = f"{n:03d} {_turath_trim(title_ar)}"\n        chapters.append({\n            "kind": "book", "id": str(n), "base": base,\n            "title": title_ar, "arabic": title_ar,\n            "level": level, "volume": blocks[0]["vol"], "volume_end": blocks[-1]["vol"],\n            "page_from": blocks[0]["page"], "page_to": blocks[-1]["page"],\n            "span": _turath_span(blocks, multi), "pages": blocks,\n        })\n        if len(chapters) % 10 == 0:\n            emit("step", name=work["title"], status="parsing",\n                 detail=f"{len(chapters)} sections")\n    return _turath_volumes(chapters, volumes, work)\n\n\ndef _turath_by_volume(book: dict, multi: bool) -> list[dict]:\n    """No TOC: one chapter per volume, so the work still has linkable content."""\n    chapters = []\n    for n, vol in enumerate(book["volumes"], start=1):\n        blocks = []\n        for j, p in enumerate(book["pages"]):\n            if p["vol"] != vol:\n                continue\n            body = _turath_page(p["text"], [], 1, set())\n            if body.strip():\n                pm = (book["page_map"][j].split(",")\n                      if j < len(book["page_map"]) else [vol, p["page"]])\n                blocks.append({"vol": pm[0] or vol, "page": int(pm[1]), "body": body})\n        if blocks:\n            chapters.append({"kind": "book", "id": str(n), "base": f"{n:03d} \u0627\u0644\u0645\u062C\u0644\u062F {vol}",\n                             "title": f"\u0627\u0644\u0645\u062C\u0644\u062F {vol}", "arabic": f"\u0627\u0644\u0645\u062C\u0644\u062F {vol}",\n                             "level": 1, "volume": vol, "volume_end": vol,\n                             "page_from": blocks[0]["page"], "page_to": blocks[-1]["page"],\n                             "span": _turath_span(blocks, multi), "pages": blocks})\n    return chapters\n\n\ndef _turath_volumes(chapters: list[dict], volumes: list[str], work: dict) -> list[dict]:\n    """Prepend one volume-index note per volume for a multi-volume work.\n\n    A chapter is filed under the volume it *starts* in; it points `up` to that\n    volume note through `section_page` (the field a dictionary uses for its\n    letter pages), and the volume note points up to the work hub.\n    """\n    if len(volumes) <= 1:\n        return chapters\n    vol_units = []\n    for v in volumes:\n        chs = [c for c in chapters if c["volume"] == v]\n        span = ""\n        if chs:\n            a, b = chs[0], chs[-1]\n            left = f"{a[\'volume\']}:{a[\'page_from\']}"\n            right = f"{b[\'volume_end\']}:{b[\'page_to\']}"\n            span = f"p. {left}" if left == right else f"p. {left}\u2013{right}"\n        vol_units.append({\n            "kind": "book-volume", "id": v, "base": f"{int(v):03d} \u0627\u0644\u0645\u062C\u0644\u062F {v}",\n            "title": f"\u0627\u0644\u0645\u062C\u0644\u062F {v}", "arabic": f"\u0627\u0644\u0645\u062C\u0644\u062F {v}", "span": span,\n            "chapters": [{"base": c["base"], "title": c["title"], "span": c["span"]}\n                         for c in chs],\n        })\n    stem = {u["id"]: f"{work[\'dir\']} - {u[\'base\']}" for u in vol_units}\n    for c in chapters:\n        c["section_page"] = stem.get(c["volume"], "")\n    return vol_units + chapters\n\n\ndef work_model(work: dict, units: list[dict], created: str, layout: str) -> dict:\n    """Assemble the render model handed to the plugin\'s templates."""\n    is_hadith = work["collection"] == "hadith"\n    is_book = work["collection"] == "turath"\n    return {\n        "schema": MODEL_SCHEMA.get(work["collection"], BASE_MODEL_SCHEMA),\n        "generated": created,\n        "work": {\n            "key": work["key"],\n            "collection": work["collection"],\n            "collection_label": work.get("collection_label", ""),\n            "id": work["id"],\n            "name": work["name"],\n            "title": work["title"],\n            "dir": work["dir"],\n            "short": work.get("short", ""),\n            "title_ar": work.get("title_ar", ""),\n            "short_ar": work.get("short_ar", ""),\n            "title_plain": strip_diacritics(work["title"]),\n            "authors": work["authors"],\n            "translators": work["translators"],\n            "aliases": work["aliases"],\n            "language": work["language"],\n            "languages": work["languages"],\n            "language_links": work["language_links"],\n            "cssclass": work["cssclass"],\n            "moc": work["moc"],\n            "moc_sections": work["moc_sections"],\n            "up": work["up"],\n            "source": work.get("source", ""),\n            "repository_name": repository_name(work.get("source", "")),\n            "repo": repo_url(work),\n            "repo_name": repository_name(repo_url(work)),\n            "source_name": repository_name(work.get("source", "")),\n            "license_attribution": work.get("license_attribution", ""),\n            "repository_updated": work.get("repository_updated", ""),\n            "source_hash": work.get("source_hash", ""),\n            "author": work.get("author", ""),\n            "kind": ("dict" if work["collection"] == "dictionary"\n                     else "hadith" if is_hadith\n                     else "book" if is_book\n                     else "quran" if work["collection"] == "quran-text"\n                     else "surah"),\n            # A dictionary\'s body shape (`grid` senses or `prose` paragraphs) and\n            # the prefix its root notes carry (`HW \u2026`, `LL \u2026`), plus the id at\n            # which its source stops being one book and starts being a second\n            # (Lane\'s Supplement; 0 = no such split).\n            "body": work.get("body", "grid"),\n            "note_prefix": work.get("note_prefix", ""),\n            "supplement_from": work.get("supplement_from", 0),\n            # The named romanization path this work\'s names follow (`vault`,\n            # `wehr`, `full`) \u2014 so a note records which convention it is in.\n            "convention": work.get("convention", DEFAULT_ROMANIZATION),\n            "unit_label": ("Roots" if work["collection"] == "dictionary"\n                           else "Chapters" if is_hadith or is_book\n                           else "S\u016Brahs"),\n            "layout": layout,\n            # A book work\'s volume count and the TOC level that defines a chapter;\n            # its hub lists volumes when there is more than one.\n            "volumes": int(work.get("volumes", 1)),\n            "section_level": int(work.get("section_level", 1)),\n            # Turath\'s own build date, used by the upstream update check.\n            "date_built": work.get("date_built", 0),\n            # Every category MOC this work belongs to (Turath + its type).\n            "mocs": list(work.get("mocs") or ([work["moc"]] if work.get("moc") else [])),\n        },\n        "units": units,\n    }\n\n\n# \u2500\u2500 Commands \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n\ndef cmd_list(args: argparse.Namespace) -> int:\n    overrides = load_overrides()\n    works = list(all_works(\n        overrides, preserve_installed=not getattr(args, "fresh_dirs", False)).values())\n    if args.collection:\n        works = [w for w in works if w["collection"] == args.collection]\n    if args.language:\n        works = [w for w in works if w["language"] == args.language]\n    cache_files = _cache_files()\n    for w in works:\n        w["cache_bytes"] = cached_bytes(w, cache_files)\n    works.sort(key=lambda w: (w["collection"], w["language"], w["name"].lower()))\n    if args.json:\n        emit("works", works=works)\n        return 0\n    current = None\n    for w in works:\n        if w["collection"] != current:\n            current = w["collection"]\n            print(f"\\n== {w[\'collection_label\']} ==")\n        lang = w["language_label"].upper() if len(w["language_label"]) <= 3 else w["language_label"]\n        print(f"  [{lang}] {w[\'key\']:<45} {w[\'name\']}  \u2014 {w[\'author\']}")\n    print()\n    return 0\n\n\ndef cmd_fetch(args: argparse.Namespace) -> int:\n    """Download each work\'s source JSON and write its render model."""\n    global _CANONICAL_RIWAYA, _TRANS_SERVER, _TRANS_OFF\n    _CANONICAL_RIWAYA = (getattr(args, "canonical", None) or "hafs").strip() or "hafs"\n    # Entries with no transliteration in their source are named by romanizing the\n    # bare root. Prefer the transliteration service when one is given; otherwise\n    # use the engine in-process (standalone runs). `--no-transliteration` skips\n    # it, which is what "proceed without transliteration" does.\n    _TRANS_SERVER = (getattr(args, "transliteration_server", "") or "").strip()\n    _TRANS_OFF = bool(getattr(args, "no_transliteration", False))\n    overrides = load_overrides()\n    created = args.created or datetime.now().strftime("%Y-%m-%d")\n    layout = getattr(args, "layout", None) or DEFAULT_LAYOUT\n    wanted_surahs = None\n    if getattr(args, "surahs", None):\n        wanted_surahs = {int(x) for x in re.split(r"[,\\s]+", args.surahs.strip()) if x}\n\n    by_key = all_works(overrides)\n\n    keys = args.key or []\n    unknown = [k for k in keys if k not in by_key]\n    if unknown:\n        emit("error", message=f"Unknown work key(s): {\', \'.join(unknown)}")\n        return 1\n    if not keys:\n        emit("error", message="Nothing to fetch. Pass --key <collection:id>.")\n        return 1\n\n    table = surah_table()\n    models: list[str] = []\n    for key in keys:\n        work = by_key[key]\n        emit("step", name=work["title"], status="starting", detail=work["language"])\n        if work["collection"] == "hadith":\n            units = build_hadith_units(work, args)\n        elif work["collection"] == "quran-text":\n            units = build_quran_text_units(work, table, wanted_surahs, args)\n        elif work["collection"] == "tafsir-qul":\n            units = build_qul_units(work, table, wanted_surahs, args)\n        elif work["collection"] == "dictionary":\n            units = build_dictionary_units(work, args)\n        elif work["collection"] == "turath":\n            units = build_turath_units(work, args)\n        else:\n            units = build_surah_units(work, table, wanted_surahs, args)\n        work["repository_updated"] = repo_updated(work)\n        work["source_hash"] = repo_hash(work)\n        work["license_attribution"] = repo_license_attribution(work)\n        model = work_model(work, units, created, layout)\n        model_path = MODEL_DIR / work["collection"] / f"{slug_to_dir(work[\'id\'])}.json"\n        model_path.parent.mkdir(parents=True, exist_ok=True)\n        model_path.write_text(json.dumps(model, ensure_ascii=False, indent=1), encoding="utf-8")\n        models.append(str(model_path))\n        emit("step", name=work["title"], status="finished", detail=f"{len(units)} units")\n\n    emit("result", result={"models": models})\n    return 0\n\n\ndef _update_model_metadata(model_path: Path, date: str, source_hash: str) -> None:\n    """Record a new repository date (text unchanged) without re-downloading."""\n    try:\n        data = json.loads(model_path.read_text(encoding="utf-8"))\n    except Exception:  # noqa: BLE001\n        return\n    work = data.setdefault("work", {})\n    if date:\n        work["repository_updated"] = date\n    if source_hash:\n        work["source_hash"] = source_hash\n    model_path.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")\n\n\ndef cmd_check_updates(args: argparse.Namespace) -> int:\n    """Two-stage update check: repository date first, then the text hash.\n\n    Emits keys whose *text* changed (``changed``) and model paths whose\n    repository date moved but whose text did not (``date_only``).\n    """\n    overrides = load_overrides()\n    by_key = all_works(overrides)\n    changed: list[str] = []\n    date_only: list[str] = []\n    for key in (args.key or []):\n        work = by_key.get(key)\n        if not work:\n            continue\n        model_path = MODEL_DIR / work["collection"] / f"{slug_to_dir(work[\'id\'])}.json"\n        stored_hash = stored_date = ""\n        if model_path.exists():\n            try:\n                stored_work = json.loads(model_path.read_text(encoding="utf-8"))["work"]\n                stored_hash = stored_work.get("source_hash", "")\n                stored_date = stored_work.get("repository_updated", "")\n            except Exception:  # noqa: BLE001\n                pass\n        current_date = repo_updated(work)\n        # Stage 1: the repository\'s own date. Unchanged \u21D2 nothing to do.\n        if current_date and stored_date and current_date == stored_date:\n            emit("step", name=work["title"], status="current", detail=current_date)\n            continue\n        # Stage 2: compare the text hash, but only against a known baseline.\n        # A model with no stored hash (imported before this feature) is adopted\n        # rather than re-downloaded \u2014 assume it was current when installed.\n        current_hash = repo_hash(work)\n        if stored_hash and current_hash and current_hash != stored_hash:\n            emit("step", name=work["title"], status="text-changed",\n                 detail=f"{stored_date or \'?\'} -> {current_date or \'?\'}")\n            changed.append(key)\n        else:\n            # Repository changed (or baseline unknown), text the same: record it.\n            emit("step", name=work["title"], status="date-only",\n                 detail=f"{stored_date or \'?\'} -> {current_date or \'?\'}")\n            _update_model_metadata(model_path, current_date, current_hash)\n            date_only.append(str(model_path))\n    emit("result", result={"changed": changed, "date_only": date_only})\n    return 0\n\n\ndef build_parser() -> argparse.ArgumentParser:\n    p = argparse.ArgumentParser(description="Acquire text corpora and emit render models for the vault.")\n    sub = p.add_subparsers(dest="command", required=True)\n\n    lp = sub.add_parser("list", help="List available works.")\n    lp.add_argument("--collection", choices=list(COLLECTIONS))\n    lp.add_argument("--language", default=None, help="Filter by language code (e.g. ar, en, fr, fa).")\n    lp.add_argument("--json", action="store_true", help="Emit JSON instead of a table.")\n    lp.add_argument("--fresh-dirs", action="store_true",\n                    help="Compute the names the current scheme would give, ignoring "\n                         "folders already recorded for installed works (used by the "\n                         "plugin\'s naming migration).")\n    lp.set_defaults(func=cmd_list)\n\n    fp = sub.add_parser("fetch", help="Download a work and write its render model JSON.")\n    fp.add_argument("--key", action="append", help="<collection>:<id> (repeatable).")\n    fp.add_argument("--surahs", default=None, help="Comma-separated s\u016Brah numbers to limit to.")\n    fp.add_argument("--layout", default=DEFAULT_LAYOUT, choices=["stacked", "table"],\n                    help="Bilingual layout recorded in the model (used by \u1E25ad\u012Bth templates).")\n    fp.add_argument("--created", default=None, help="Override the model\'s generated date.")\n    fp.add_argument("--no-cache", action="store_true", help="Bypass the download cache.")\n    fp.add_argument("--canonical", default="hafs",\n                    help="Canonical riw\u0101ya id. Qur\'\u0101n citation links are added only "\n                         "when this is \'hafs\' (the reading almost all sources quote).")\n    fp.add_argument("--transliteration-server", default="",\n                    help="Transliteration service to use for entries whose source gives "\n                         "no transliteration (e.g. the dictionary roots).")\n    fp.add_argument("--no-transliteration", action="store_true",\n                    help="Skip transliteration; name such entries from their radicals.")\n    fp.set_defaults(func=cmd_fetch)\n\n    cp = sub.add_parser("check-updates", help="Report works whose source repository has changed.")\n    cp.add_argument("--key", action="append", help="<collection>:<id> (repeatable).")\n    cp.set_defaults(func=cmd_check_updates)\n\n    return p\n\n\ndef main(argv: list[str] | None = None) -> int:\n    args = build_parser().parse_args(argv)\n    try:\n        return args.func(args)\n    except KeyboardInterrupt:\n        emit("error", message="Interrupted.")\n        return 130\n    except Exception as exc:  # noqa: BLE001\n        emit("error", message=str(exc))\n        return 1\n\n\nif __name__ == "__main__":\n    sys.exit(main())\n' },
   { path: "scripts/transcription-batch-submit.py", content: `#!/usr/bin/env python3
 """
 Script 1: Submit a PDF for Gemini Batch OCR.
@@ -3660,53 +3905,30 @@ from pathlib import Path
 from google import genai
 from google.genai import types
 
+# The built-in prompt lives in midad_prompts.py so the plugin can seed and refresh
+# its "Default prompt" from the same text, and the general rules stay hardcoded.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from midad_prompts import build_transcription_prompt  # noqa: E402
+
 VAULT = Path(os.environ.get("OBSIDIAN_VAULT", os.path.expanduser("~/Documents/Obsidian Vault")))
 API_KEY = os.environ.get("GEMINI_API_KEY", os.environ.get("GOOGLE_API_KEY", ""))
 # Fix non-ASCII characters that sometimes creep into API keys (e.g. non-breaking hyphen)
 API_KEY = API_KEY.replace("\\u2011", "-").encode("ascii", errors="replace").decode("ascii")
 
-SYSTEM_PROMPT = (
-    "You are an expert editor specializing in classical Arabic literature. "
-    "OCR and transcribe the provided page of an Arabic book directly into clean, strict Obsidian Markdown. "
-    "Do not add, remove, reorder, or guess at text. Reproduce the tashk\u012Bl that is present in the source; do not invent tashk\u012Bl.\\n\\n"
+SYSTEM_PROMPT = build_transcription_prompt()
 
-    "PAGE HEADING\\n"
-    "- Begin the page with the PRINTED page number as a level-4 heading, in Western digits: '#### p. 12'. "
-    "For an unnumbered page use '#### Cover', '#### Copyright page', '#### Title page', etc.; if the number cannot be read use '#### p. ?'.\\n"
-    "- Do NOT output the PDF/file page number, the input filename, or a '---' separator; the pipeline adds those.\\n"
-    "- On a cover or title page, render the title as '# Title', the subtitle or author as '## ...', and the remaining cover text as plain paragraphs.\\n\\n"
 
-    "BLOCKS\\n"
-    "- Put exactly one empty line between every block element (page heading, headings, paragraphs, poetry, footnotes).\\n"
-    "- Keep each body paragraph on a single line, with no internal line breaks.\\n"
-    "- Format chapter headings (often bold or centred in the original) as '### Title'.\\n"
-    "- Format italics with *asterisks*, not _underscores_.\\n\\n"
-
-    "POETRY\\n"
-    "- Treat consecutive poetry lines as one block, with NO blank lines between them.\\n"
-    "- Format each couplet on one line exactly as '* hemistich 1%%hemistich 2' (leading asterisk and space, the two hemistiches joined by '%%').\\n"
-    "- A line with a single hemistich: '* hemistich'.\\n"
-    "- The leading '* ' and the '%%' marker are used ONLY for poetry, never for italics or list bullets.\\n\\n"
-
-    "QUR'AN QUOTES\\n"
-    "- Put every Qur'an verse or fragment between ornate parentheses wrapped in asterisks, like this: '*\\uFD3Fverse text\\uFD3E*'.\\n"
-    "- Mark a quote even when it is only a word or two, and even when the source does not set it off with quotation marks.\\n"
-    "- Do NOT add sura:verse references or wikilinks, and do not add tashk\u012Bl to Qur'an quotes; "
-    "post-processing adds the reference, the wikilink, and the tashk\u012Bl.\\n"
-    "- If the page ends mid-quote (opening bracket but no closing bracket), end the span with '*' and no closing bracket. "
-    "If the page begins with a quote continuation (closing bracket but no opening bracket), start the span with '*' and no opening bracket.\\n"
-    "- Do NOT use ornate parentheses for hadith or other non-Qur'anic quotations; use regular parentheses or the quotation marks used in the source.\\n\\n"
-
-    "FOOTNOTES\\n"
-    "- Put footnotes at the end of the page body, after a line containing only '***'.\\n"
-    "- Format each footnote as its own list item '- N \u2013 text' (using the printed footnote number and an en dash), one per line; "
-    "a footnote continuation line begins with '- '.\\n\\n"
-
-    "ACCURACY\\n"
-    "- Do not loop or repeat text if characters are blurry.\\n"
-    "- Check the result before returning: if it is implausibly long for a single page (for example, more than 800 words) "
-    "or highly repetitive, discard it and transcribe the page once more."
-)
+def read_prompt(path: str | None) -> str | None:
+    """The selected text-specific prompt, or None to use the built-in default."""
+    if path:
+        try:
+            text = Path(path).read_text(encoding="utf-8").strip()
+            if text:
+                return text
+            print(f"WARNING: prompt file is empty: {path}; using the built-in prompt.")
+        except Exception as e:
+            print(f"WARNING: could not read prompt file {path}: {e}; using the built-in prompt.")
+    return None
 
 
 def burst_pdf(pdf_path: Path, pages_dir: Path):
@@ -3780,7 +4002,7 @@ def upload_pages(pages_dir: Path, client: genai.Client) -> list:
     return uploaded
 
 
-def build_jsonl(uploaded: list, jsonl_path: Path):
+def build_jsonl(uploaded: list, jsonl_path: Path, system_prompt: str = SYSTEM_PROMPT):
     """Build the batch request JSONL."""
     with open(jsonl_path, "w", encoding="utf-8") as f:
         for item in uploaded:
@@ -3788,12 +4010,12 @@ def build_jsonl(uploaded: list, jsonl_path: Path):
                 "key": item["local_name"],
                 "request": {
                     "model": "models/gemini-3.5-flash-lite",
-                    "system_instruction": {"parts": [{"text": SYSTEM_PROMPT}]},
+                    "system_instruction": {"parts": [{"text": system_prompt}]},
                     "contents": [{
                         "role": "user",
                         "parts": [
                             {"file_data": {"file_uri": item["uri"], "mime_type": item["mime_type"]}},
-                            {"text": "OCR this Arabic PDF document page and output it as structural Markdown."}
+                            {"text": "OCR this PDF document page and output it as structural Markdown."}
                         ]
                     }]
                 }
@@ -3830,7 +4052,7 @@ def submit_batch(jsonl_path: Path, client: genai.Client, pdf_stem: str) -> str:
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("Usage: python3 gemini-batch-submit.py input.pdf")
+        print("Usage: python3 transcription-batch-submit.py input.pdf [--work-dir DIR] [--prompt-file PATH]")
         sys.exit(1)
     
     pdf_path = Path(sys.argv[1]).resolve()
@@ -3844,6 +4066,13 @@ if __name__ == "__main__":
         if idx + 1 < len(sys.argv):
             work_dir = Path(sys.argv[idx + 1]).expanduser()
     work_dir.mkdir(parents=True, exist_ok=True)
+
+    prompt_file = None
+    if "--prompt-file" in sys.argv:
+        idx = sys.argv.index("--prompt-file")
+        if idx + 1 < len(sys.argv):
+            prompt_file = sys.argv[idx + 1]
+    system_prompt = build_transcription_prompt(read_prompt(prompt_file))
 
     stem = pdf_path.stem
     pages_dir = work_dir / f"{stem}-pages"
@@ -3866,7 +4095,7 @@ if __name__ == "__main__":
     
     # 3. Build JSONL
     print(f"\\nBuilding batch JSONL...")
-    build_jsonl(uploaded, jsonl_path)
+    build_jsonl(uploaded, jsonl_path, system_prompt)
     
     # 4. Submit batch
     print(f"\\nSubmitting batch job...")
@@ -5112,6 +5341,22 @@ up:
         import json, google.genai as genai, google.genai.types as types
         client = genai.Client(api_key=API_KEY)
         lines = [l for l in open(jsonl_path) if l.strip()]
+
+        # The same selected prompt the batch used, so a re-OCR'd page keeps the
+        # custom format instead of falling back to the built-in assumptions.
+        # The prompt file holds only the text-specific part; the shared format
+        # and OCR rules are composed in midad_prompts.py.
+        user_prompt = None
+        if "--prompt-file" in sys.argv:
+            idx = sys.argv.index("--prompt-file")
+            if idx + 1 < len(sys.argv):
+                try:
+                    user_prompt = Path(sys.argv[idx + 1]).read_text(encoding="utf-8").strip() or None
+                except Exception as e:
+                    print(f"  WARNING: could not read prompt file: {e}")
+        sys.path.insert(0, str(SCRIPTS))
+        from midad_prompts import build_transcription_prompt
+        system_prompt = build_transcription_prompt(user_prompt)
         
         # Find previous JSONL (same stem without " - try X" suffix)
         prev_jsonl = None
@@ -5203,17 +5448,21 @@ up:
                     file = client.files.upload(file=str(pdf_path), config=types.UploadFileConfig(display_name=key, mime_type='application/pdf'))
                     # Sync re-OCR of a single page. Kept deliberately short to
                     # discourage reordering; 2.5 Flash is used because Flash-Lite
-                    # is not always available for synchronous calls.
+                    # is not always available for synchronous calls. The selected
+                    # prompt, when one was supplied, is used as the system
+                    # instruction so a custom format survives the retry.
                     sync_prompt = (
-                        "OCR this Arabic page and output clean markdown. Transcribe every word in "
+                        "OCR this page and output clean markdown. Transcribe every word in "
                         "EXACT order, left to right, top to bottom. DO NOT reorder, add, omit, or "
-                        "guess at text. Put \\uFD3F before any Qur'an text and \\uFD3E after it. "
-                        "Keep each paragraph on one line."
+                        "guess at text. Keep each paragraph on one line."
                     )
-                    response = client.models.generate_content(
-                        model='models/gemini-2.5-flash',
-                        contents=[sync_prompt, types.Part.from_uri(file_uri=file.uri, mime_type='application/pdf')],
-                    )
+                    kwargs = {
+                        "model": "models/gemini-2.5-flash",
+                        "contents": [sync_prompt, types.Part.from_uri(file_uri=file.uri, mime_type="application/pdf")],
+                    }
+                    if system_prompt:
+                        kwargs["config"] = types.GenerateContentConfig(system_instruction=system_prompt)
+                    response = client.models.generate_content(**kwargs)
                     new_text = getattr(response, 'text', '') or ''
                     data.setdefault('response', {})
                     data['response']['candidates'] = [{'content': {'parts': [{'text': new_text}]}}]
@@ -7806,6 +8055,11 @@ import re
 import sys
 from pathlib import Path
 
+# The built-in prompt lives in midad_prompts.py so the plugin can seed and refresh
+# its "Default prompt" from the same text, and the general rules stay hardcoded.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from midad_prompts import build_translation_prompt  # noqa: E402
+
 VAULT = Path(os.environ.get("OBSIDIAN_VAULT", os.path.expanduser("~/Documents/Obsidian Vault")))
 
 API_KEY = os.environ.get("GEMINI_API_KEY", os.environ.get("GOOGLE_API_KEY", ""))
@@ -7822,38 +8076,20 @@ MODEL = "models/gemini-3.5-flash-lite"
 _QO = "\\uFD3E"
 _QC = "\\uFD3F"
 
-TRANSLATION_PROMPT = (
-    "Translate the Arabic text below into scholarly, nuanced, and complete English, "
-    "making the output markdown as complete and as close as possible to the original in "
-    "format, structure, and meaning. Output only the English translation, not the Arabic. "
-    "If the text contains quotes from other languages such as Persian, translate those as well. \\n\\n"
-    "STRUCTURE (critical):\\n"
-    "- Keep every heading (#, ##, ###, ####) exactly where it is in the input.\\n"
-    "- The input uses '---' on its own line as a page separator, always immediately "
-    "before a '#### p. N' heading. Keep every '---' exactly; never drop, move, merge, "
-    "or invent one.\\n"
-    "- Put exactly one blank line between every block element (headings, paragraphs, "
-    "callouts, and '---' separators).\\n\\n"
-    "POETRY: in the input document, poetry is in '>[!arabic-poetry]' callouts, with two hemistiches "
-    "per stanza. Do not reproduce the callout. Output each couplet on one line as "
-    "'* hemistich1%%hemistich2', and a single hemistich as '* hemistich'. The leading "
-    "'*' must be followed by a space, and '%%' separates the two hemistiches. Never use "
-    "these detached markers for ordinary italics or any other purpose.\\n\\n"
-    "FOOTNOTES: preserve footnote callouts exactly as they appear in the input, including "
-    "the label '>[!arabic-footnotes]' and the '>-' list structure. Do not rename them.\\n\\n"
-    f"QUR'AN QUOTES: wrap each quote as *{_QO}translated text{_QC}{{.quran-quote}}* (sura:verse), "
-    f"adding '(sura:verse)' only if known. Use exactly these brackets: open with {_QO} and close "
-    f"with {_QC} \u2014 do not copy or mirror the bracket orientation from the Arabic input. The ornate "
-    "brackets and the {.quran-quote} class must both be inside the italic asterisks, and the class "
-    "must never be placed after the closing '*'.\\n\\n"
-    "INTERPOLATIONS: use (parentheses), never [square brackets].\\n\\n"
-    "ITALICS: use *asterisks*, never underscores. QUOTES: use curly single and double "
-    "quotes/apostrophes, never straight quotes.\\n\\n"
-    "TRANSLITERATION (IJMES): macrons for long vowels (\u0101, \u016B, \u012B); dots under emphatics "
-    "(\u1E25, \u1E63, \u1E0D, \u1E6D, \u1E93); \u02BF for \u02BFayn; \u02BE for hamza; no initial hamza (al-Isl\u0101m); no final 'h' "
-    "for t\u0101\u02BE marb\u016B\u1E6Da; \u1E93 = \u0638, \u1E63 = \u0635, \u1E0D = \u0636, \u1E25 = \u062D, \u1E6D = \u0637, th = \u062B, j = \u062C, sh = \u0634, kh = \u062E.\\n\\n"
-    "Do not hard-wrap lines: every paragraph and every footnote is a single line."
-)
+TRANSLATION_PROMPT = build_translation_prompt()
+
+
+def read_prompt(path: str | None) -> str | None:
+    """The selected text-specific prompt, or None to use the built-in default."""
+    if path:
+        try:
+            text = Path(path).read_text(encoding="utf-8").strip()
+            if text:
+                return text
+            print(f"WARNING: prompt file is empty: {path}; using the built-in prompt.")
+        except Exception as e:
+            print(f"WARNING: could not read prompt file {path}: {e}; using the built-in prompt.")
+    return None
 
 def split_pages(content: str) -> list[str]:
     """Split markdown into page chunks at #### headers, preserving order."""
@@ -7873,13 +8109,23 @@ def split_pages(content: str) -> list[str]:
     return pages
 
 def main():
-    if len(sys.argv) < 2:
-        print("Usage: python3 translate-batch-submit.py <transcription.md>")
+    argv = list(sys.argv[1:])
+    prompt_file = None
+    if "--prompt-file" in argv:
+        idx = argv.index("--prompt-file")
+        if idx + 1 < len(argv):
+            prompt_file = argv[idx + 1]
+        del argv[idx:idx + 2]
+
+    if not argv:
+        print("Usage: python3 translate-batch-submit.py <transcription.md> [--prompt-file PATH]")
         sys.exit(1)
     
-    filepath = Path(sys.argv[1]).resolve()
+    filepath = Path(argv[0]).resolve()
     if not filepath.exists():
         print(f"ERROR: {filepath} not found"); sys.exit(1)
+
+    system_prompt = build_translation_prompt(read_prompt(prompt_file))
     
     content = filepath.read_text(encoding="utf-8")
     
@@ -7920,7 +8166,7 @@ def main():
                 "key": key,
                 "request": {
                     "model": MODEL,
-                    "system_instruction": {"parts": [{"text": TRANSLATION_PROMPT}]},
+                    "system_instruction": {"parts": [{"text": system_prompt}]},
                     "contents": [{
                         "role": "user",
                         "parts": [{"text": batch_text}]
@@ -7989,13 +8235,15 @@ POST /transliterate
     -> {"romanized": "...", "unknown": [...]} | {"error": "..."}
 
 POST /romanize
-    body: {"text": "...", "provider": "gemini"|"deepseek", "translate": false,
+    body: {"text": "...", "provider": "gemini"|"deepseek"|"openai", "translate": false,
            "keep_case": false, "name": false, "model": "<optional override>",
-           "api_key": "<optional>"}
+           "base_url": "<openai only, optional>", "api_key": "<optional>"}
     -> {"romanized": "...", "translation": "..."} | {"error": "..."}
-    Keys come from the server's environment: GEMINI_API_KEY (or GOOGLE_API_KEY)
-    and DEEPSEEK_API_KEY, or from a per-request api_key. The provider SDKs are
-    imported lazily.
+    Keys come from the server's environment: GEMINI_API_KEY (or GOOGLE_API_KEY),
+    DEEPSEEK_API_KEY, or OPENAI_API_KEY, or from a per-request api_key. "openai"
+    is any OpenAI-compatible endpoint (OpenAI, OpenRouter, Groq, a local server):
+    set OPENAI_BASE_URL / OPENAI_MODEL, or pass base_url / model per request. The
+    provider SDKs are imported lazily.
 
 GET  /lexicon   -> {"lexicon": {...}}
 POST /lexicon   body: {"term": "...", "romanization": "..."} or {"entries": {...}}
@@ -8034,6 +8282,7 @@ def _load_engine_module():
 bw = _load_engine_module()
 
 _ENGINES = {}                    # engine name -> disambiguator (None for 'none')
+_ACTUAL = {}                     # requested engine -> engine actually loaded
 _ENGINE_LOCK = threading.Lock()  # guards _ENGINES while loading
 _CALL_LOCK = threading.Lock()    # serializes CAMeL calls
 
@@ -8044,7 +8293,15 @@ def get_engine(name):
     with _ENGINE_LOCK:
         if name not in _ENGINES:
             print(f'Loading {name} engine\u2026', file=sys.stderr)
-            _ENGINES[name] = None if name == 'none' else bw.load_disambiguator(name)
+            if name == 'none':
+                _ENGINES[name] = None
+                _ACTUAL[name] = 'none'
+            else:
+                # \`bert\` may resolve to \`mle\` if it cannot load; record what was
+                # actually loaded so the client can tell the user.
+                dis, actual = bw.load_disambiguator_result(name)
+                _ENGINES[name] = dis
+                _ACTUAL[name] = actual
         return _ENGINES[name]
 
 
@@ -8055,6 +8312,10 @@ def request_args(payload):
         keep_case=bool(payload.get('keep_case', False)),
         dotless_ya=payload.get('dotless_ya', 'maqsura'),
         name=bool(payload.get('name', False)),
+        # \`citation\` reads each word as a headword: a verb keeps its final
+        # inflection, a noun loses its case ending, even when the source is fully
+        # vocalised (which would otherwise preserve it).
+        citation=bool(payload.get('citation', False)),
         debug=False,
     )
 
@@ -8063,7 +8324,8 @@ def transliterate_payload(payload):
     text = payload.get('text', '')
     if not isinstance(text, str) or not text.strip():
         raise ValueError('field "text" is required')
-    disambiguator = get_engine(payload.get('engine', 'bert'))
+    requested = payload.get('engine', 'bert')
+    disambiguator = get_engine(requested)
     args = request_args(payload)
     # \`standalone\` reads the text as a word on its own (a citation form) rather
     # than an excerpt, so its last word is not given the pausal form.
@@ -8073,7 +8335,8 @@ def transliterate_payload(payload):
         terms = sorted(bw._UNKNOWN)
         unknown = [{'term': t, 'guess': bw.transliterate_document(t, disambiguator, args)}
                    for t in terms]
-    return {'romanized': romanized, 'unknown': unknown}
+    return {'romanized': romanized, 'unknown': unknown,
+            'engine': _ACTUAL.get(requested, requested)}
 
 
 def lexicon_payload(payload):
@@ -8108,13 +8371,17 @@ def place_payload(payload):
 GEMINI_DEFAULT_MODEL = os.environ.get('GEMINI_MODEL', 'gemini-3.5-flash-lite')
 DEEPSEEK_BASE_URL = os.environ.get('DEEPSEEK_BASE_URL', 'https://api.deepseek.com')
 DEEPSEEK_DEFAULT_MODEL = os.environ.get('DEEPSEEK_MODEL', 'deepseek-chat')
+# Any OpenAI-compatible endpoint (OpenAI itself, OpenRouter, Groq, a local
+# llama.cpp/Ollama/vLLM server, \u2026): base URL and model are configurable.
+OPENAI_DEFAULT_BASE_URL = os.environ.get('OPENAI_BASE_URL', 'https://api.openai.com/v1')
+OPENAI_DEFAULT_MODEL = os.environ.get('OPENAI_MODEL', 'gpt-4o-mini')
 
 ROMANIZE_SYSTEM = (
     "You romanize Arabic into Latin script following Islamic Africa's IAFR "
     "conventions, and optionally translate. Use exactly these mappings:\\n"
     "- Consonants: \u0628 b, \u062A t, \u062B th, \u062C j, \u062D \u1E25, \u062E kh, \u062F d, \u0630 dh, \u0631 r, \u0632 z, \u0634 sh, "
     "\u0635 \u1E63, \u0636 \u1E0D, \u0637 \u1E6D, \u0638 \u1E93, \u0639 \u02BF, \u063A gh, \u0641 f, \u0642 q, \u0643 k, \u0644 l, \u0645 m, \u0646 n, \u0647 h, \u0648 w, \u064A y, \u0621 \u02BE.\\n"
-    "- NEVER use the scientific letters \u0161, \u010D, \u017E, \u01E7, \u1E35, \u1E0F, \u1E6F, \u1E2B, \u0121, \u1E33; always write "
+    "- NEVER use the scientific letters \u0161, \u010D, \u017E, \u01E7, \u1E35, \u1E0F, \u1E6F, \u1E2B, \u1E21, \u1E33; always write "
     "sh, ch, zh, j, kh, dh, th, kh, gh, q.\\n"
     "- Short vowels a i u; long vowels \u0101 \u012B \u016B (macrons).\\n"
     "- Definite article is al-, hyphenated and invariant before sun letters; elision "
@@ -8153,8 +8420,10 @@ _LLM_LOCK = threading.Lock()
 def provider_available(name):
     if name == 'gemini':
         return bool(os.environ.get('GEMINI_API_KEY') or os.environ.get('GOOGLE_API_KEY'))
-    if name in ('deepseek', 'openai'):
+    if name == 'deepseek':
         return bool(os.environ.get('DEEPSEEK_API_KEY'))
+    if name == 'openai':
+        return bool(os.environ.get('OPENAI_API_KEY'))
     return False
 
 
@@ -8182,6 +8451,20 @@ def deepseek_client(api_key=None):
         return _LLM_CLIENTS[cache_key]
 
 
+def openai_client(api_key=None, base_url=None):
+    """A client for any OpenAI-compatible API (OpenAI, OpenRouter, Groq, local \u2026)."""
+    with _LLM_LOCK:
+        key = api_key or os.environ.get('OPENAI_API_KEY')
+        if not key:
+            raise ValueError('OPENAI_API_KEY is not set for the server process, and no key was supplied')
+        base = (base_url or OPENAI_DEFAULT_BASE_URL).rstrip('/')
+        cache_key = 'openai:' + base + ':' + key
+        if cache_key not in _LLM_CLIENTS:
+            from openai import OpenAI
+            _LLM_CLIENTS[cache_key] = OpenAI(api_key=key, base_url=base)
+        return _LLM_CLIENTS[cache_key]
+
+
 def parse_llm_json(text):
     cleaned = re.sub(r'^\`\`\`(?:json)?\\s*', '', (text or '').strip())
     cleaned = re.sub(r'\\s*\`\`\`$', '', cleaned)
@@ -8197,7 +8480,7 @@ _LLM_LATIN_FIXES = {
     '\u01E7': 'j', '\u01E6': 'J', '\u01F0': 'j',
     '\u1E35': 'kh', '\u1E34': 'Kh', '\u1E2B': 'kh', '\u1E2A': 'Kh', '\u1E96': 'kh',
     '\u1E0F': 'dh', '\u1E0E': 'Dh', '\u1E6F': 'th', '\u1E6E': 'Th',
-    '\u0121': 'gh', '\u0120': 'Gh', '\u1E33': 'q', '\u1E32': 'Q',
+    '\u0121': 'gh', '\u0120': 'Gh', '\u1E21': 'gh', '\u1E20': 'Gh', '\u1E33': 'q', '\u1E32': 'Q',
 }
 
 
@@ -8243,8 +8526,14 @@ def romanize_payload(payload):
             model=payload.get('model') or GEMINI_DEFAULT_MODEL, contents=user, config=config)
         result = parse_llm_json(response.text)
     elif provider in ('deepseek', 'openai'):
-        response = deepseek_client(api_key).chat.completions.create(
-            model=payload.get('model') or DEEPSEEK_DEFAULT_MODEL,
+        if provider == 'deepseek':
+            client = deepseek_client(api_key)
+            model = payload.get('model') or DEEPSEEK_DEFAULT_MODEL
+        else:
+            client = openai_client(api_key, payload.get('base_url'))
+            model = payload.get('model') or OPENAI_DEFAULT_MODEL
+        response = client.chat.completions.create(
+            model=model,
             temperature=0,
             response_format={'type': 'json_object'},
             messages=[
@@ -8338,10 +8627,12 @@ PAGE_HTML = """<!doctype html>
           <select id="provider">
             <option value="gemini">Gemini</option>
             <option value="deepseek">DeepSeek</option>
+            <option value="openai">OpenAI-compatible</option>
           </select>
         </label>
         <label>Model <input type="text" id="model" value="gemini-3.5-flash-lite" size="22"></label>
       </div>
+      <div class="row"><label>Base URL <input type="text" id="baseurl" size="30" placeholder="OpenAI-compatible only; else OPENAI_BASE_URL"></label></div>
       <div class="row"><label><input type="checkbox" id="translate"> Also translate to English</label></div>
       <div class="row"><label>API key <input type="password" id="apikey" size="30" placeholder="(optional; else server env)"></label></div>
     </fieldset>
@@ -8366,6 +8657,7 @@ async function run(opts) {
     body.keep_case = $('full').checked;
     body.name = $('name').checked;
     body.translate = $('translate').checked;
+    if ($('baseurl').value) body.base_url = $('baseurl').value;
     if ($('apikey').value) body.api_key = $('apikey').value;
   } else {
     body.engine = document.querySelector('input[name=engine]:checked').value;
@@ -8467,12 +8759,18 @@ class Handler(BaseHTTPRequestHandler):
         elif self.path == '/health':
             with _ENGINE_LOCK:
                 loaded = sorted(_ENGINES)
+                actual = dict(_ACTUAL)
             self._send(200, {
                 'status': 'ok',
+                'pid': os.getpid(),
                 'engines_loaded': loaded,
+                # What each requested engine actually resolved to (bert \u2192 mle on
+                # a machine without transformers/model data).
+                'engines_actual': actual,
                 'providers': {
                     'gemini': provider_available('gemini'),
                     'deepseek': provider_available('deepseek'),
+                    'openai': provider_available('openai'),
                 },
             })
         elif self.path == '/lexicon':
@@ -8507,7 +8805,9 @@ def main():
     parser.add_argument('--host', default='127.0.0.1')
     parser.add_argument('--port', type=int, default=8756)
     parser.add_argument('--preload', action='append', default=None, choices=('bert', 'mle', 'none'),
-                        help='engine to load at startup (repeatable; defaults to bert)')
+                        help='engine to load at startup (repeatable; defaults to bert). '
+                             'Preload mle only if you have chosen it: it is opt-in, '
+                             'not the default.')
     args = parser.parse_args()
 
     for engine in (args.preload if args.preload is not None else ['bert']):
@@ -8525,8 +8825,136 @@ def main():
 
 if __name__ == '__main__':
     main()
-` }
+` },
+  { path: "docs/commands.md", content: "# Commands\n\nEvery command is in the command palette under **Midad Arabic Sources**, grouped here by function. The guide for each group is linked from its heading.\n\n## Documentation\n\n- **Open documentation** \u2014 open the in-app guide (this collection of pages).\n\n## Transliteration\n\nSee [Transliteration](./transliteration.md).\n\n- **Transliterate selection to clipboard** \u2014 romanize the selection (or current line) to the clipboard.\n- **Transliterate note to new note** \u2014 romanize a whole note or selection into a sibling note.\n- **Transliteration server\u2026** \u2014 a dialog showing whether the service is running, which engines are loaded (and which is actually used), and the LLM providers, with one **Start** / **Stop** button.\n\n## Transcription and translation\n\nSee [Transcription](./transcription.md) and [Translation](./translation.md).\n\n- **Transcribe this item\u2019s PDF file(s)** \u2014 burst, OCR, and post-process.\n- **Translate this item\u2019s transcription(s)** \u2014 translate an existing transcription.\n- **Reprocess from archive\u2026** \u2014 re-run post-processing from an archived batch, without resubmitting.\n- **Check transcription pipeline** \u2014 list archived batches.\n- **Show pipeline status** \u2014 reveal the status panel, resume an interrupted job, or open the last log.\n- **Open last pipeline log** \u2014 open the newest job log.\n\n## Document import\n\nSee [Document import](./document-import.md) and [Templates](./templates.md).\n\n- **Manage text sources\u2026** \u2014 install, uninstall, or send works to Zotero.\n- **Add Turath work by URL\u2026** \u2014 add a Turath book to your personal list (see [Adding a work by URL](./document-import.md#adding-a-work-by-url)).\n- **Copy import templates to vault** \u2014 copy the editable ETA templates into your vault.\n- **Re-render imported sources** \u2014 regenerate every note from its cached model.\n- **Re-render this source** \u2014 regenerate one work (also on the note\u2019s right-click menu).\n- **Apply template changes to imported sources** \u2014 apply a detected template change on demand.\n- **Re-download imported sources (rebuild models)** \u2014 re-fetch the source JSON and rebuild every model.\n- **Migrate imported sources to the current naming scheme** \u2014 one-off rename to the repository-qualifier convention.\n- **Check imported sources** \u2014 find works whose notes or cached model are missing.\n- **Check for source updates** \u2014 ask each repository whether a text changed upstream.\n\n## Zotero\n\nSee [Zotero export](./zotero.md).\n\n- **Send all installed sources to Zotero**\n- **Send selected sources to Zotero\u2026**\n- **Send this source to Zotero**\n", extract: false },
+  { path: "docs/dependencies.md", content: "# Dependencies\n\nMidad Arabic Sources runs external Python for three of its four functions. Nothing has to be installed for the importer alone \u2014 it uses only Python\u2019s standard library \u2014 but the transliteration service, transcription, and translation each need packages.\n\nThe plugin finds a usable Python on its own (it probes common paths and virtual-environments), and you can pin one under **Transcription and translation \u2192 Python executable**.\n\n## Python 3\n\nAny reasonably recent Python 3 works. The plugin probes, in order: your configured interpreter, `python3`/`python`, a ScholarWeft virtualenv if present, the versioned `python3.13`/`3.12`/`3.11` names, Homebrew and system paths (`/opt/homebrew/bin/python3`, `/usr/local/bin/python3`, `/usr/bin/python3`), conda, and pyenv.\n\nIf auto-detection picks the wrong one, set the full path in **Python executable**.\n\n## Translations and transcription: Gemini\n\nScanned-PDF transcription and all translation call the **Gemini API**. You need an API key, from [Google AI Studio](https://aistudio.google.com/apikey), set in **Transcription and translation \u2192 Gemini API key**. It is passed to the pipeline as `GEMINI_API_KEY`; if you would rather not store it in the vault, launch Obsidian from a shell that already exports `GEMINI_API_KEY` (or `GOOGLE_API_KEY`) instead.\n\nPackages:\n\n```shell\npip install google-genai pymupdf requests\n```\n\n- `google-genai` \u2014 the Gemini client used for OCR and translation.\n- `pymupdf` (imported as `fitz`) \u2014 bursts a scanned PDF into page PDFs and reads page counts.\n- `requests` \u2014 used by the pipeline\u2019s helper scripts.\n\n## Transliteration: CAMeL Tools\n\nThe rule-based romanizer uses **CAMeL Tools**. The heavy model loads once into the resident server, so Obsidian does not pay for it on every call.\n\nInstall the recommended engine, **BERT**:\n\n```shell\npip install camel-tools transformers\ncamel_data -i disambig-bert-unfactored-msa\ncamel_data -i morphology-db-msa-r13\n```\n\nMLE is an optional, lighter alternative \u2014 install it **instead of** the bert package if you want it:\n\n```shell\npip install camel-tools\ncamel_data -i disambig-mle-calima-msa-r13\ncamel_data -i morphology-db-msa-r13\n```\n\n- `camel-tools` \u2014 the disambiguators and the morphological analyzer.\n- `transformers` \u2014 needed by the BERT engine to load its model. The model weights ship **inside** the `disambig-bert-unfactored-msa` package (`pytorch_model.bin`), so there is no separate download from Hugging Face.\n- `morphology-db-msa-r13` \u2014 the shared morphology database the romanizer's analyzer reads; both engines need it.\n- The `camel_data` package a machine lacks is the reason its engine will not load; the **Transliteration server\u2026** dialog reports which engines are actually loaded.\n\n### Which engine\n\n| | BERT (default, recommended) | MLE (optional) |\n| --- | --- | --- |\n| Quality on unvocalized classical text | Best \u2014 it reads context, so it resolves ambiguous diacritization | Rougher; a lexical/statistical model with no context |\n| Download | ~0.4 GB for the MSA model (the package here also carries the egy/glf/lev variants, ~1.7 GB total) | ~85 MB (`calima-msa`; ~110 MB for the whole package) |\n| Shared data | ~160 MB morphology DB | ~160 MB morphology DB |\n| Load into the server | ~16 s | ~2 s |\n\nBERT is the default and what the plugin's tuning targets; pick MLE under **Transliteration \u2192 Engine** only if you specifically prefer it. Nothing preloads or selects MLE for you, and if BERT cannot load the script falls back to MLE automatically and tells you (an Obsidian alert, or stderr at the CLI).\n\nStart the service from the plugin (**Transliteration server\u2026**) or by hand:\n\n```shell\npython3 scripts/transliterate-server.py --port 8756\n```\n\nIt loads `bert` at startup by default; do not pass `--preload mle` unless you have deliberately chosen MLE. `none` bypasses CAMeL entirely and only works on fully vocalized input. See [Transliteration](./transliteration.md).\n\n## LLM romanization (optional)\n\nIf you prefer an LLM over the rule engine for individual calls, the transliteration service can call **Gemini** or **DeepSeek**. Set the provider, model, and (optionally) an API key under **Transliteration \u2192 LLM romanization**, or export `GEMINI_API_KEY` / `GOOGLE_API_KEY` / `DEEPSEEK_API_KEY` for the server process. The provider SDKs are imported lazily, so a missing one only matters when you choose that provider.\n\n## Zotero (optional)\n\nSending imported works to Zotero needs either a running local Zotero (started and reachable on `127.0.0.1:23119`) or a Zotero web API key. No Python packages are involved. See [Zotero export](./zotero.md).\n\n## Troubleshooting\n\n- **\u201CNo usable Python found\u201D** \u2014 the plugin could not import `fitz`, `requests`, and `google.genai` from any candidate. Install them into the interpreter you want, then set its full path in **Python executable**.\n- **The BERT engine will not load** \u2014 install `transformers` and run `camel_data -i disambig-bert-unfactored-msa`; the first load also downloads the model and needs network access.\n- **Everything works, but the engine is out of date** \u2014 the resident server serves the code it loaded at startup. Restart it after any change to `arabic-bw-transliterate.py`. See [Troubleshooting](./troubleshooting.md).\n", extract: false },
+  { path: "docs/document-import.md", content: "# Document import (text sources)\n\nThe importer pulls born-digital Arabic texts from public repositories into your vault, one note per s\u016Bra, chapter, or dictionary root, with full frontmatter and links back to the Qur\u02BE\u0101n text. It is catalog-driven, so more repositories and genres can be wired in over time.\n\n## Manage text sources\n\n**Manage text sources\u2026** opens a two-pane dialogue with two tabs.\n\nUnder the tabs sit the collection description and a top bar: a **Show** filter (All / Installed / Not installed), a **filter box**, a **language** select, a \u21BB reload button, and **Add by URL\u2026**. On the left are **Kinds of sources** (toggle buttons, one per genre \u2014 Tafs\u012Br, \u1E24ad\u012Bth, Fiqh, U\u1E63\u016Bl al-Fiqh, Doctrine (\u02BFaq\u012Bda), T\u0101r\u012Bkh, Biography (rij\u0101l), Language (lugha), Lexicography, Grammar (na\u1E25w and \u1E63arf), Rhetoric, Adab, Dictionaries, and more; none selected means all) and **Repositories** (a selectable list). A work can sit in more than one kind (e.g. a \u1E25ad\u012Bth commentary is both \u1E24ad\u012Bth and \u1E24ad\u012Bth commentary). The right pane lists one clickable row per work \u2014 Language, Author, Title (with its subtitle beneath), Kind, Repository, Size, State \u2014 and the row is highlighted when selected, with no checkboxes.\n\n- In the **install/uninstall** tab, installed works start selected; deselecting one marks it for removal. There is no Select All, because there are far too many works to act on at once.\n- In the **Send references to Zotero** tab, a single **Select All/None** toggle selects, then clears, the visible installed works. See [Zotero export](./zotero.md).\n\nThe catalogue of available works is cached: per session and on disk (`.midad-arabic-sources/source-catalog.json`, 7 days). Opening the dialogue serves the cache immediately and refreshes it in the background when it is stale; the \u21BB button forces a fresh listing.\n\n## Adding a work by URL\n\nTurath has far more books than any catalogue can list. **Add by URL** (a tab in the manage dialog, or the **Add Turath work by URL\u2026** command) takes a link such as `https://app.turath.io/book/95864` (or just the numeric id), reads the book's metadata from Turath's API, and offers a **provisional romanization** in two editable fields \u2014 **Title (romanized)** and **Author (romanized)**. The title is sentence-cased for a non-English work (first word and proper nouns capitalised); review it before adding. **Add to list** stores the entry in `.midad-arabic-sources/turath-custom-works.json`; the tab lists everything you have added, with a **Remove** button, and keeps your current selections while you are in it. Added works then appear in the catalogue like any other \u2014 choose their kinds, install them, re-render them. The JSON entry carries the id, Roman title, Arabic title, author, type, genres, and URL; edit it directly if you want a different title or kind.\n\n## Collections\n\n- **Qur\u02BE\u0101n commentaries (tafs\u012Br)** \u2014 `spa5k/tafsir_api` (a mirror of quran.com / altafsir.com): about 60 Arabic and 13 English commentaries (al-Jal\u0101layn, al-\u1E6Cabar\u012B, al-Qur\u1E6Dub\u012B, al-Baghaw\u012B, Ibn Kath\u012Br, al-Sa\u02BFd\u012B, al-Muyassar, al-Kashsh\u0101f, and more).\n- **Qur\u02BE\u0101n commentaries (QUL)** \u2014 the Qur\u02BE\u0101nic Universal Library (`qul.tarteel.ai`): 111 further tafs\u012Brs across Arabic and 30+ languages. Keyless, fetched one s\u016Bra at a time; shares the **Tafs\u012Br Sources** MOC with the spa5k collection.\n- **Qur\u02BE\u0101n translations** \u2014 `fawazahmed0/quran-api`: 50+ English translations.\n- **\u1E24ad\u012Bth collections** \u2014 `AhmedBaset/hadith-json`: 17 collections (Bukh\u0101r\u012B, Muslim, Ab\u016B D\u0101w\u016Bd, Tirmidh\u012B, Nas\u0101\u02BE\u012B, Ibn M\u0101jah, M\u0101lik, A\u1E25mad, and the forties), Arabic and English.\n- **Qur\u02BE\u0101n texts (riw\u0101y\u0101t)** \u2014 `risan/quran-json`: Warsh, Q\u0101l\u016Bn, al-D\u016Br\u012B, Shu\u02BFbah, al-S\u016Bs\u012B, plus canonical \u1E24af\u1E63.\n- **Dictionaries** \u2014 Hans Wehr\u2019s *Dictionary of Modern Written Arabic* and Lane\u2019s *An Arabic-English Lexicon*, both read from their SQLite editions (one note per root).\n- **Classical texts (Turath.io)** \u2014 the public API covering ~8,500 books across fiqh, u\u1E63\u016Bl, \u02BFaq\u012Bda, \u1E25ad\u012Bth commentary, t\u0101r\u012Bkh, adab, and language. One note per table-of-contents heading, with the source\u2019s pages preserved as `#### p. N` markers.\n\n## Commands\n\n- **Manage text sources\u2026** \u2014 install, uninstall, or send to Zotero.\n- **Copy import templates to vault** \u2014 copy the editable ETA templates into your vault so you can change how notes render. See [Templates](./templates.md).\n- **Re-render imported sources** \u2014 regenerate every note from its cached model; a prompt asks first when a template change is involved.\n- **Re-render this source** \u2014 the same for one work, from its note or its right-click menu.\n- **Apply template changes to imported sources** \u2014 apply any detected template change on demand (the plugin also polls for changes when auto-update is on).\n- **Re-download imported sources (rebuild models)** \u2014 fetch the source JSON again and rebuild every model, for when a repository changes its format.\n- **Migrate imported sources to the current naming scheme** \u2014 one-off; moves works that predate the repository-qualifier convention to the current folder and file names.\n- **Check imported sources** \u2014 find works whose notes or cached model are missing and offer to restore them.\n- **Check for source updates** \u2014 ask each repository whether a text changed upstream (also on the **Check repositories every \u2026 days** cadence, default 7).\n\n## Re-rendering and your edits\n\nRegenerating a note never overwrites your work. Generated content lives inside a managed region (`<span class=\"mas-managed\">\u2026</span>`), and only template-declared frontmatter properties are reconciled. Everything else \u2014 including a `related:` property you edited \u2014 is preserved. See [Templates](./templates.md) for how the merge strategies work.\n\n## Naming and provenance\n\nEvery work\u2019s folder and hub carry a **repository qualifier** in parentheses (`Tafs\u012Br al-\u1E6Cabar\u012B (tafsir_api)`, `al-Arba\u02BF\u016Bn al-Nawawiyya (turath.io)`), so two editions of the same work can be installed side by side. A work known to exist only once across the imported repositories (the two dictionaries) is flagged `unique` and keeps its bare folder name. `title:` and the MOC/hub link aliases stay clean.\n\nEvery generated page carries `repository`, `license-attribution`, and `repository-updated` properties, and `[[Midad Arabic Sources]]` in its `up`, so the whole corpus is traceable to its source and to the plugin that imported it.\n\n## Where things go\n\n- **Notes**: under the **Import destination** (`_7 Sources` by default), one folder per work.\n- **Cached source JSON**: `.midad-arabic-sources/cache/text-sources/`.\n- **Render models**: `.midad-arabic-sources/source-models/<collection>/<id>.json`.\n- **Manifest**: `.midad-arabic-sources/source-imports.json` \u2014 the authoritative list of works and their status.\n\nRemoving a work is a **hard delete** of its cached model and notes (not a trash move); the source JSON stays cached, so re-installing is quick.\n", extract: false },
+  { path: "docs/setup.md", content: "# Setup\n\n**Midad Arabic Sources** brings classical Arabic texts into your Obsidian vault and turns them into a linkable, searchable part of your notes. This page covers installing it, the folders it uses and writes to, and the first run.\n\nThe plugin is **desktop only**: it runs local Python scripts and reads files outside the vault.\n\n## Requirements\n\n- **Obsidian 1.13 or later.** The settings use Obsidian\u2019s declarative settings API.\n- **Python 3** and a few packages, for transcription, translation, and the transliteration engine \u2014 see [Dependencies](./dependencies.md).\n- A **Gemini API key**, if you want to transcribe or translate scanned PDFs.\n- **Zotero** (optional), if you want to send imported works to your library \u2014 see [Zotero export](./zotero.md).\n\n## Install\n\nThe plugin is not yet in the community directory.\n\n### Via BRAT\n\n1. In Obsidian, enable **Community plugins** (turn off Restricted Mode), then install and enable [BRAT](https://github.com/TfTHacker/obsidian42-brat).\n2. In BRAT\u2019s settings, add `nebedaay/Midad-Arabic-Sources` to the **Beta plugin list**.\n3. Enable **Midad Arabic Sources** in **Settings \u2192 Community plugins**. BRAT keeps it up to date from each release.\n\n### Manually\n\nDownload `main.js`, `manifest.json`, and `styles.css` from the [latest release](https://github.com/nebedaay/Midad-Arabic-Sources/releases) and copy them into `.obsidian/plugins/midad-arabic-sources/`, then enable the plugin. The plugin extracts its Python scripts and import templates into the same folder on load, so nothing else needs copying.\n\n## What ships inside the plugin\n\nEverything the plugin needs is compiled into `main.js` and unpacked into `.obsidian/plugins/midad-arabic-sources/` on startup:\n\n- `scripts/` \u2014 the Python pipeline, the catalog-driven importer, and the transliteration service.\n- `midad-arabic-sources-import-templates/` \u2014 the default ETA templates the importer renders notes with.\n\nA plugin update therefore carries the new scripts and templates, which is what lets a template change trigger a re-render. See [Templates](./templates.md).\n\n## First run\n\n1. **Open the settings** (Settings \u2192 Community plugins \u2192 Midad Arabic Sources) and skim the five sections: Transliteration, Transcription and translation, Document import, Zotero, and Documentation. Each points to its guide here.\n2. Start the transliteration server if you will romanize Arabic: run **Transliteration server\u2026** from the command palette; it shows whether the service is running and gives one **Start** / **Stop** button. Restarting is only needed when the engine code changes \u2014 see [Transliteration](./transliteration.md).\n3. **Install some texts**: run **Manage text sources\u2026** and pick works from a repository. See [Document import](./document-import.md).\n4. **Set your import destination** under **Document import** if `_7 Sources` is not where you want the corpus. Every work gets its own subfolder there.\n\n## The folder layout\n\nNotes the plugin generates live under the **import destination** (`_7 Sources` by default), one folder per work:\n\n```text\n_7 Sources/\n  Tafs\u012Br al-\u1E6Cabar\u012B (tafsir_api)/\n    Tafs\u012Br al-\u1E6Cabar\u012B (tafsir_api).md    \u2190 the work hub (table of contents)\n    001 Al-Fatihah.md                   \u2190 one note per s\u016Bra / chapter / root\n    002 Al-Baqarah.md\n    \u2026\n  Tafs\u012Br Sources.md                     \u2190 a category MOC\n  \u1E24ad\u012Bth Sources.md\n  Sources.md                            \u2190 the parent note the MOCs point up to\n```\n\n- **A work hub** carries the bibliographic properties and links every note in the work.\n- **A content note** is one s\u016Bra, \u1E25ad\u012Bth chapter, book chapter, or dictionary root.\n- **A category MOC** lists every installed work of one kind (Tafs\u012Br Sources, \u1E24ad\u012Bth Sources, \u2026). The plugin rebuilds the list inside a managed region, so entries never duplicate.\n- **The parent note** (setting **Sources parent note**) is reused if a note with that name already exists anywhere in the vault; the plugin writes only its own managed region. Every generated page carries `[[Midad Arabic Sources]]` in its `up`.\n\nFile names are unique across the whole vault, so a work note carries its work name (`Tafs\u012Br al-\u1E6Cabar\u012B (tafsir_api) - 002 Al-Baqarah`) while its `title:` and the hub\u2019s link text stay clean (`2 Al-Baqarah`). A work whose folder name would collide can carry a **repository qualifier** in parentheses so two editions of the same work sit side by side. See [Document import](./document-import.md).\n\n## Where state lives\n\nThe plugin keeps its cache and bookkeeping in `.midad-arabic-sources/` at the vault root:\n\n| Path | Holds |\n| --- | --- |\n| `cache/text-sources/` | The raw source JSON downloaded from each repository. |\n| `source-models/<collection>/<id>.json` | The language-neutral **render model** each work is rendered from. |\n| `source-imports.json` | The manifest: every installed work and its status. |\n| `source-catalog.json` | The cached catalogue of available works (7-day TTL). |\n| `source-stats.json` | Measured sizes and the per-template render watermarks. |\n| `template-history.json` | The content-hash timeline that decides whether a template change affects notes. |\n| `archive/` | Archived transcription batches. |\n| `jobs/` | The persisted state of running pipeline jobs. |\n\nDeleting a work from the plugin removes its cached model and its notes (a hard delete, not a trash move); its source JSON stays cached, so re-installing is quick.\n\n## Updating and state\n\nRestart Obsidian after a plugin update \u2014 the plugin loads `main.js` only at startup. On the next run it unpacks the new scripts and templates, re-measures what changed, and re-renders only the notes whose templates moved. Your edits are preserved: generated content sits inside a managed region, and only template-declared frontmatter properties are reconciled. See [Templates](./templates.md).\n\nIf a source changes upstream, **Check for source updates** asks each repository whether the text moved and re-downloads only what did. See [Document import](./document-import.md).\n", extract: false },
+  { path: "docs/templates.md", content: '# Templates and the render model\n\nThese are the default ETA templates the plugin uses to turn acquired text corpora (tafs\u012Brs, Qur\u2019\u0101n translations, \u1E25ad\u012Bth collections, dictionaries, and Turath.io\u2019s classical books) into Obsidian notes. They are bundled with the plugin, can be copied into your vault and edited, and re-render every affected work from its cached model whenever you ask. See [Document import](./document-import.md) for installing and managing works; the rest of this page is the template and render-model reference.\n\n## The two-stage design\n\n1. **Acquisition** (Python, `scripts/text-source-import.py`): downloads a work\u2019s source JSON, caches it under `.midad-arabic-sources/cache/`, and writes a language-neutral **render model** to `.midad-arabic-sources/source-models/<collection>/<id>.json`.\n2. **Rendering** (this plugin, ETA): reads a model and writes one note per unit, plus a per-work hub note and a category MOC entry.\n\nBecause the model is cached, editing a template and running **\u201CRe-render imported sources\u201D** regenerates every affected note without re-downloading anything.\n\n## How to edit the templates\n\n1. In Midad Arabic Sources settings, set a **Template folder** (for example `Templates`).\n2. Run the command **\u201CCopy import templates to vault\u201D**. This copies these files into `<Template folder>/midad-arabic-sources-import-templates/`:\n   - `source-note.eta.md` \u2014 one note per s\u016Brah (tafs\u012Br, Qur\u2019\u0101n translations)\n   - `hadith-note.eta.md` \u2014 one note per chapter (kit\u0101b) of a \u1E25ad\u012Bth collection\n   - `quran-note.eta.md` \u2014 one note per s\u016Brah of a Qur\u2019\u0101n riw\u0101ya (Qur\u2019\u0101n text)\n   - `dictionary-note.eta.md` \u2014 one note per dictionary root (lexicons)\n   - `dictionary-index.eta.md` \u2014 one index note per first letter (a dictionary\u2019s roots)\n   - `book-note.eta.md` \u2014 one note per chapter of a book (Turath.io)\n   - `book-volume.eta.md` \u2014 one volume index per volume of a multi-volume book\n   - `hub.eta.md` \u2014 the per-work hub note that lists all units\n   - `moc.eta.md` \u2014 the skeleton for a category MOC (e.g. `Tafs\u012Br Sources`)\n   - `sources.eta.md` \u2014 the managed region of the top-level parent note (e.g. `Sources`)\n3. Edit the copies, then run **\u201CRe-render imported sources\u201D**.\n\nThe plugin reads your copies first and falls back to the bundled defaults.\n\nEach work\u2019s entry in its category MOC is just `- [[Work]]` \u2014 the work hub note, which carries the `repository:` property for provenance. A Turath work appears in **two** category MOCs \u2014 the repository MOC `Turath` and its work-type MOC (e.g. `Fiqh Sources`) \u2014 and carries both in the hub\u2019s `up:`. The category MOC\u2019s generated region is also a managed region: it is rebuilt from the full set of imported works on every render, so entries never duplicate, and a language heading (`# Arabic Texts`, `# English Texts`) appears only when it has content.\n\nEvery category MOC points up to one **parent note** (the setting **\u201CSources parent note\u201D**, default `Sources`). The plugin reuses whatever note already has that name \u2014 wherever it lives in the vault \u2014 or creates one. It writes only its own managed region there (an `>[!mas-sources-list]` callout listing the category MOCs that have content) and its `merge: keep` properties, so your hand-written content above and below the region is never touched. The callout type and its styling are the plugin\u2019s own (`mas-sources-list` in `styles.css`), so nothing depends on a callout defined elsewhere in your vault.\n\nEvery plugin-generated page carries `[[Midad Arabic Sources]]` as an `up` link, so the whole imported corpus is traceable back to the plugin that made it.\n\nA work with a single unit \u2014 for example a one-chapter \u1E25ad\u012Bth book such as al-Arba\u02BF\u016Bn al-Nawawiyya \u2014 keeps its content in the work note itself rather than a hub that links to one child note.\n\n## Heading convention\n\n- **A numbered unit is an H1.** A Qur\u2019\u0101n verse or a \u1E25ad\u012Bth number is always `# <number>` \u2014 in s\u016Brah notes, riw\u0101ya notes, and the single-unit hub alike.\n- **The link to the canonical Qur\u2019\u0101n is an H2.** S\u016Brah notes use `## [[002 Al-Baqarah#2|\u0627\u0644\u0628\u0642\u0631\u0629 : \u0662]]`; riw\u0101ya notes use the \u1E24af\u1E63 correspondence `## [[002 Al-Baqarah#3|\u1E24af\u1E63 3]]`.\n- **A content note\u2019s `title` is its own title, not its file name.** A file name must be unique across the vault, so it carries the work (`Hans Wehr Dictionary - \u0632 z`, `Tafs\u012Br al-Jal\u0101layn - 002 Al-Baqarah`) and the work\u2019s folder/hub carries its **repository qualifier** (`Tafs\u012Br al-\u1E6Cabar\u012B (tafsir_api)`), so two editions of one work can be installed side by side; a work known to exist only once across the imported repositories (the two dictionaries, for now) is flagged `unique` and keeps its bare folder name. `title:` and the hub/MOC link aliases stay clean (the book title for a work, the chapter heading for a chapter); the work is already named by `mas-up`, so `title` is what a table of contents would print \u2014 the chapter (`title: \u0632 z`, `title: 2 Al-Baqarah`, `title: 1 Revelation`), never `<work> - <unit>`. A title is for viewing, so a numeric prefix drops its leading zeros (`2 Al-Baqarah`); the *file name* keeps them, because that is what makes the s\u016Bra notes sort. A letter-index page is labelled with the letter and its romanized equivalent (`\u0632 z`), the same way a definition page carries both.\n- **A link that points into a work names the note\u2019s own title, not its file name.** An MOC or hub is outside the context of the notes it lists, so its links carry an alias that drops the work title and any other classifying prefix: the hub lists `- [[Lane\'s Lexicon - \u0627 \u0101|\u0627 \u0101]] \u2014 182`, and a letter index lists `- [[LL 3 \u0627\u0628 abba|\u0627\u0628 abba]]`. A dictionary entry\u2019s link also drops the `LL`/`HW` id, which the digitisation added rather than the book. The file name stays unique across the vault; only the *display* is the title proper. (The `title` property follows the same rule from the other side: a note\u2019s own `title` is its chapter, never `<work> - <chapter>`.)\n- **A content note carries no title/chapter heading.** The work (or \u1E25ad\u012Bth chapter) name lives in the `title` property, the file name, and `mas-up` \u2014 so it is not repeated as an H1. \u1E24ad\u012Bth chapter notes therefore title as just the chapter (`title: 1 Revelation`) and their `#` headings are the \u1E25ad\u012Bth numbers.\n- A **multi-unit hub** keeps `# <work title>` as its own heading, since it holds an index rather than numbered content.\n\nThis keeps every H1 a targetable unit number and every canonical link a targetable H2.\n\n## Qur\u2019\u0101n citations in source text\n\nArabic tafs\u012Brs cite *other* verses inline. Acquisition rewrites those citations into links to the canonical Qur\u2019\u0101n notes, in whatever shape the repository uses: `[\u064A\u064F\u0648\u0633\u064F\u0641\u064E: \u0661\u0660\u0663]`, `[ \u0627\u0644\u0623\u0639\u0631\u0627\u0641 : 3 ]`, `[\u0665\u0660: \u0663\u0668]` (s\u016Bra:\u0101ya, al-Qur\u1E6Dub\u012B), `(\u0627\u0644\u0642\u0635\u0635: \u0665)`, and `[\u0627\u0644\u0622\u064A\u0629: \u0661\u0662\u0663]` (a verse of the s\u016Bra being commented). A quote of the commented verse itself carries no citation and is left alone; editorial refs like `[\u062A\u0641\u0633\u064A\u0631 \u0627\u0628\u0646 \u0643\u062B\u064A\u0631: \u0662 / \u0661\u0663\u0665]` never match a s\u016Bra and are untouched.\n\nThis requires **\u1E24af\u1E63** to be the canonical riw\u0101ya, because the matcher reads the canonical s\u016Bra notes and almost every source quotes the \u1E24af\u1E63 reading \u2014 the setting says so. If a different riw\u0101ya is canonical, no citation linking is done.\n\n## Variables available in a template\n\nEvery template receives a data object. The engine destructures it for you, so you can use these names directly:\n\n| Name | Meaning |\n| --- | --- |\n| `work` | the work metadata (see the table below) |\n| `unit` | the current s\u016Brah or chapter (see unit fields) |\n| `units` | every unit in the work (used by the hub template) |\n| `bilingual` | `work.layout` \u2014 `"stacked"` or `"table"` (used by \u1E25ad\u012Bth) |\n| `generated` | the model\u2019s generation date (`YYYY-MM-DD`) |\n| `mocs` | the category MOC names (parent-note template) |\n| `parent` | the parent note name (MOC template) |\n\n### `work` fields\n\n| Field | Example | Notes |\n| --- | --- | --- |\n| `key` | `tafsir:ar-tafsir-al-jalalayn` | `<collection>:<id>` \u2014 also written to the hub as `mas-key` |\n| `collection` | `tafsir` | `tafsir`, `tafsir-qul`, `quran`, `hadith`, `quran-text`, `dictionary`, `turath` |\n| `collection_label` | `Qur\u02BE\u0101n commentaries (tafs\u012Br)` | for the import modal |\n| `id` | `ar-tafsir-al-jalalayn` | source id/slug |\n| `name` | `Tafsir Jalalayn` | source name (ASCII) |\n| `title` | `Tafs\u012Br al-Jal\u0101layn` | romanized, vault style |\n| `dir` | `Tafs\u012Br al-Jal\u0101layn` | output folder (unique) |\n| `short` | `al-Jal\u0101layn` | short title, if any |\n| `title_ar` | `\u062A\u0641\u0633\u064A\u0631 \u0627\u0644\u062C\u0644\u0627\u0644\u064A\u0646` | native Arabic title |\n| `short_ar` | `\u0627\u0644\u062C\u0644\u0627\u0644\u064A\u0646` | native short title, if any |\n| `title_plain` | `Tafsir al-Jalalayn` | diacritic-less romanized (for search) |\n| `authors` | `["Jal\u0101l al-D\u012Bn al-Ma\u1E25all\u012B", \u2026]` | romanized author names |\n| `translators` | `["Feras Hamza"]` | rendered as `translators:` under `authors:` (overridden by `publication.translators`) |\n| `publication` | `{ publisher: "Darussalam", \u2026, mas_note: "\u2026" }` | *injected by the plugin* from `publication-map.json`; adds `item-type`, `editors`, `publisher`, `place`, `year`, `edition`, `mas-note` to the hub YAML. A name may be a string, or `{first, last}` where the last-word split is wrong. `mas_note` is the map\u2019s `note` plus the provisional caveat \u2014 the same text the Zotero `extra` carries. |\n| `aliases` | `["Tafs\u012Br al-Jal\u0101layn", "al-Jal\u0101layn", "\u062A\u0641\u0633\u064A\u0631 \u0627\u0644\u062C\u0644\u0627\u0644\u064A\u0646", "\u0627\u0644\u062C\u0644\u0627\u0644\u064A\u0646", "Tafsir al-Jalalayn"]` | the parent alias set |\n| `language` | `ar` | primary language code |\n| `languages` | `["ar", "en"]` | every language the work contains (\u1E25ad\u012Bth are bilingual) |\n| `language_links` | `["Arabic", "English"]` | the `language:` property (`[[Arabic]]` alone, or a list) |\n| `cssclass` | `tafsir` | drives CSS (`quran`, `tafsir`, `hadith`, \u2026) |\n| `moc` | `Tafs\u012Br Sources` | category MOC note name |\n| `moc_sections` | `["Arabic Texts", \u2026]` | MOC headings, derived from `languages` |\n| `up` | `["[[Tafs\u012Br Sources]]"]` | parent links |\n| `source` | `https://qul.tarteel.ai/\u2026` | provenance URL |\n| `repository_name` | `qul.tarteel.ai` | short name for the `repository:` property |\n| `repository_updated` | `2026-06-04` | the repository\u2019s own last-updated date for this item |\n| `author` | `Mu\u1E25ammad b. Ism\u0101\u02BF\u012Bl al-Bukh\u0101r\u012B` | author line (hub) |\n| `kind` | `surah`, `hadith`, `quran`, `dict` or `book` | selects the note template |\n| `unit_label` | `S\u016Brahs` or `Chapters` | hub section heading |\n| `no_notes` | `true` | generate only the work note (canonical \u1E24af\u1E63 riw\u0101ya) |\n| `unit_prefix` | `Qur\u02BE\u0101n (riw\u0101yat Warsh)` | fallback prefix for unit links (`note_stem` supersedes it) |\n| `layout` | `stacked` or `table` | bilingual layout |\n| `body` | `grid` or `prose` | a dictionary\u2019s body shape: Wehr\u2019s label/content senses, or Lane\u2019s paragraphs |\n| `note_prefix` | `HW` or `LL` | a dictionary\u2019s root-note prefix (file name, `aliases:`, and the `<prefix>-id` property) |\n| `convention` | `vault`, `wehr` or `full` | the named romanization path the work\u2019s names follow (see below) |\n| `supplement_from` | `49881` or `0` | the id at which the source stops being one book and starts being a second (Lane\u2019s Supplement) |\n| `volumes` | `1` or `8` | a book work\u2019s volume count; the hub lists volumes when greater than 1 |\n| `section_level` | `1` | the TOC level that defines a chapter in a book work |\n| `mocs` | `["Turath", "Fiqh Sources"]` | every category MOC the work belongs to (the hub\u2019s `up`) |\n\n### Romanization conventions\n\nA work **declares** which transliteration path it follows, rather than letters being swapped ad hoc. The engine (`arabic-bw-transliterate.py`) emits the vault\u2019s own convention, so every other path is a recast of that:\n\n- **`vault`** \u2014 the house convention: no case endings, but a verb\u2019s inflection, a pronominal or prepositional ending and the two tanw\u012Bn exceptions are kept (`ba\u1E25r`, `kataba`, `minka`, `q\u0101\u1E0Din`, `\u1E6Dab\u02BFan`). Lane uses this: it transliterates nothing itself, so its names are ours.\n- **`wehr`** \u2014 Hans Wehr\u2019s own, the European Orientalist system of the printed dictionary (`\u0161`, `\u1E6F`, `\u1E35`, `\u1E0F`, `\u1E21`, `\u010D`, `\u017E`). Two letters need care, because its scanned text is unreliable about them. It writes q\u0101f as plain `q`, so the `\u1E33` that turns up is a mis-read kh\u0101\u02BE (`a\u1E33a\u1E0Da` for `a\u1E2Ba\u1E0Fa`) and is folded onto kh\u0101\u02BE when a reading is validated. And `th` is **not** recast to `\u1E6F` when converting: in a reading it may equally be \u062A + \u0647 (`\u062A\u0647\u062A\u0647` \u2192 `thth`), so that letter is converted positionally instead, where the Arabic is known (`_hw_fix_underlined`), and a reading the definition supplies is used as it stands. Wehr uses this convention so that a name the engine produced still matches the transliterations the note\u2019s own text carries.\n- **`full`** \u2014 fully vocalised, every case ending written. That is the service\u2019s `keep_case` mode (it changes how a reading is *produced*, not how its letters are written) and is what the vault uses for Qur\u2019\u0101n passages.\n\nThe convention is declared per work in `DICTIONARIES` (`scripts/text-source-import.py`), travels to the model as `work.convention`, and is applied by one function, `_hw_romanize`, everywhere a name is produced \u2014 including the letter-page labels, so `\u062B \u1E6F` in Wehr and `\u062B th` in Lane.\n\nLanguages are derived from the source catalogue: each work gets a code and its English name (e.g. `fr` \u2192 `French`), and its MOC section follows (`French Texts`). To add a language, extend `LANGUAGE_NAMES` in `scripts/text-source-import.py`.\n\n### S\u016Brah unit fields (`unit.kind === "surah"`)\n\n| Field | Example |\n| --- | --- |\n| `id` | `2` |\n| `base` | `002 Al-Baqarah` (matches the `_7 Sources/Quran` note name) |\n| `translit` | `Al-Baqarah` |\n| `arabic` | `\u0627\u0644\u0628\u0642\u0631\u0629` |\n| `blocks[]` | one per \u0101ya: `{ number, ref, body }` |\n| `note_stem` | `Tafs\u012Br al-Jal\u0101layn - 002 Al-Baqarah` |\n\n`note_stem` is added at render time and is the **authoritative name of the unit\u2019s note** \u2014 the same value is used for the file and for the hub\u2019s link to it, so a link can never name a note that was not written. (For the canonical riw\u0101ya it is the bare `base`, since its s\u016Bra notes are unprefixed in `canonical_root`.)\n\n`blocks[].ref` is a ready-made link such as `[[002 Al-Baqarah#2|\u0627\u0644\u0628\u0642\u0631\u0629 : \u0662]]`, so `[[Tafs\u012Br al-Jal\u0101layn - 002 Al-Baqarah#2]]` parallels `[[002 Al-Baqarah#2]]`. `blocks[].body` already has Qur\u2019\u0101n spans marked as `*\uFD3F\u2026\uFD3E{.quran-quote}*`.\n\n### \u1E24ad\u012Bth unit fields (`unit.kind === "hadith"`)\n\n| Field | Example |\n| --- | --- |\n| `id` | `1` |\n| `base` | `1 Revelation` |\n| `label` | `1 Revelation` |\n| `arabic` | `\u0643\u062A\u0627\u0628 \u0628\u062F\u0621 \u0627\u0644\u0648\u062D\u0649` |\n| `english` | `Revelation` |\n| `hadiths[]` | one per hadith: `{ number, narrator, english, arabic }` |\n\n### Dictionary unit fields (`unit.kind === "dict"`)\n\nOne unit per dictionary **root**; the note is named `<prefix> <id> <arabic> <roman>` (unprefixed, as the vault already keeps these). The prefix is per-work \u2014 `HW` for Hans Wehr, `LL` for Lane\u2019s Lexicon \u2014 so the two dictionaries never collide, and a re-render prunes only its own work\u2019s stale names. It is also the property prefix (`hw-id` / `ll-id`) and the `aliases:` prefix (`HW \u062D\u0631\u0628` / `LL \u062D\u0631\u0628`).\n\n| Field | Example |\n| --- | --- |\n| `id` | `24102` (the root\u2019s `ID`) |\n| `base` | `HW 24102 \u0648\u0633\u062E wasaka` |\n| `root` | the root entry `{ id, arabic, roman, verb_form, bullets[] }` (grid) or `{ id, arabic, roman, verb_form, paragraphs[] }` (prose) |\n| `entries[]` | the derived entries, same shape |\n\n`bullets[]` are the definition\u2019s bullets: the rendered template emits the entry\u2019s `arabic` as the first `> - \u2026`, then each of `bullets`. The source marks sense numbers with `<b>II</b>`; a `<b>`/`</b>` pair becomes a line, and a fully-vocalised Arabic parenthetical (`(\u0648\u064E\u0633\u064E\u0651\u062E\u064E)`) is dropped while a Latin one (`(\u0647\u0640 s.th.)`) is kept. A vocalised Arabic parenthetical immediately after a **form label** is dropped too (`<b>III</b> (\u0627\u064E\u0627\u064E\u062E\u064E\u0630\u064E) \u2026` \u2192 `<b>III</b> \u2026`): the digitisation generated one for every derived form, and it is corrupt where the print gives none, while the print\u2019s own form \u2014 when it gives one \u2014 sits *after* that parenthetical and is kept (`(\u0627\u0650\u0627\u0652\u062A\u064E\u062E\u064E\u0630\u064E) \u0627\u062A\u062E\u0630 itta\u1E33ada \u2026` \u2192 `\u0627\u062A\u062E\u0630 itta\u1E33ada \u2026`).\n\n`paragraphs[]` are the same thing for a **prose** work: the source\u2019s own paragraphs, in markdown. A note whose source folds a second book into the first \u2014 Lane\u2019s database carries the Supplement (Book II) as a suffix block in the scan\u2019s own numbering, from id 49,881 on \u2014 marks the boundary: the first unit at or above that id is preceded by a `# Supplement` heading, once per note, so the two books stay distinguishable inside one root\u2019s page. The id is the work\u2019s `supplement_from` in the acquisition config, and is also written to the model\u2019s `work` (0 = no such split, as for Wehr). `work.body` selects which the template renders (`grid` or `prose`), and a prose note also carries the `mas-prose` class in `cssclasses` \u2014 Obsidian resolves a paragraph that starts with Arabic to RTL (and to the Arabic size and leading), which is wrong for Lane\u2019s English prose, so the CSS needs a hook to reset it. Lane\u2019s definitions are English prose with `<i>`/`<h3>`/`<center>` markup and no Latin transliteration at all: `<i>\u2026</i>` becomes `*\u2026*`, a `<center>` block becomes the vault\u2019s poetry callout (`>[!arabic-poetry]`, one `>- ` hemistich per line \u2014 2,159 of the 2,160 blocks are Arabic verse), the source\u2019s dividers (`===`, `___`) become paragraph breaks, the cross-reference arrow (`\u{1F87B}`) becomes `\u2193`, a lone aorist vowel mark (`aor. \uFE79`) becomes the vowel itself (`aor. u`), the rare `<table>` is flattened, and the remaining tags are dropped. Lane\u2019s own `*` \u2014 a separator inside a reference list, `(S, * M, A, K;)` \u2014 is padded with spaces on both sides, because Obsidian has no working escape for it and an unpadded `*` pairs with another one and italicises everything between them; a `*` with a space on either side can neither open nor close emphasis. Lane\u2019s square brackets \u2014 editorial additions \u2014 become round ones, and the leading headword is wrapped in `<span class="mas-hw">` so the CSS can size it as Arabic while the prose stays at text size. The source\u2019s quotes are already correct curly ones, so a prose body turns only the stray straight quote (`smart_quotes` re-decides every mark and would reverse a closing quote that follows a space: `\u2026 war \u201D]` \u2192 `\u2026 war \u201C]`).\n\nThe definition callout is `[!mas-dictionary-definition]` (renamed from `hans-wehr-definition`, which is still accepted as a CSS alias so un-rerendered notes keep their styling).\n\nThe **transliteration** (`term`, the heading, and the note name) is taken from the definition after HTML tags are stripped. The only tag in the corpus is `<b>` \u2014 the verb-form sense marker \u2014 and stripping it is essential: otherwise `<b>` supplies a stray `b` that passes for the romanisation (`\u0627\u0628\u0646` \u2192 `b`). The scan is character by character over a transliteration alphabet that includes the dotted consonants and the hyphen, so `al-y\u016Bn\u0101n` survives whole rather than truncating to `al`. A leading parenthetical is skipped when it is an etymology pointer \u2014 no Arabic inside (`(Fr.)`), or opening with a language/grammar abbreviation (`(Turk. \u0628\u0648\u0631\u063A\u0649 bur\u011F\u0173)`, `(pl. of \u2026)`, `(also \u2026)`) \u2014 but **kept** when it holds the transliteration itself, as Wehr does for noun roots: `\u062D\u0631\u0628 (\u1E25arb f., pl. \u062D\u0631\u0648\u0628 \u1E25ur\u016Bb \u2026)` \u2192 `\u1E25arb`.\n\nWhen a root\u2019s own definition is itself a verb form \u2014 it *starts* with a sense marker, e.g. `\u0627\u0628\u0646 <b>II</b> \u2026 \u2026` \u2014 there is no transliteration to take, so it comes from the first **derived** entry that is not itself a verb form (`\u0627\u0628\u0646` \u2192 `ubna`, `\u0627\u062E\u0648` \u2192 `a\u1E33`).\n\nOnly if that fails too is the entry named by transliterating the bare root. That is done with the plugin\u2019s own engine (`arabic-bw-transliterate.py`, the one behind the *Transliterate* commands) rather than letter by letter \u2014 a real reading beats `\u02BFbrwd`. It is asked **`standalone`** (a word on its own, not an excerpt\u2019s final word, so it is not read in pausal form) and **without case endings**, i.e. the citation form, which is what `AI OS/Arabic transliteration guidelines.md` wants for a headword: no tanw\u012Bn on nouns (`ba\u1E25r`, not `ba\u1E25run`) \u2014 guideline 4\u2019s defective-root and adverbial exceptions (`q\u0101\u1E0Din`, `\u1E6Dab\u02BFan`) come from the lexicon \u2014 while a verb\u2019s final inflection is kept (`kataba`, guideline 5) and a suffixed word keeps its vowel (`minka`).\n\nThat last step \u2014 and everything that follows it \u2014 is the **same machinery both dictionaries use** (`_hw_root_romanization`). The two differ only in what comes before: Wehr\u2019s definitions and entries carry transliterations, so those are taken first; Lane\u2019s carry none, so it goes straight to the shared reading. Either way the order is the root itself, then the root\u2019s own entries (a term that *is* the root, then one that merely contains its radicals), then \u2014 only if nothing was found \u2014 letter by letter. A bare cluster carrying a **hamza seat** tries the entries first, since the engine cannot know the vowel of an unvocalised hamza \u2014 a seat being an explicit hamza-bearing letter (\u0623 \u0625 \u0622 \u0624 \u0626 \u0621 \u0671) or a bare alif in first position, *not* a medial or final alif, which is simply a long \u0101 (`\u063A\u0627\u063A\u0629` reads `gh\u0101gha`; treating its alif as a seat once made the note take a different entry word\u2019s reading instead of its own). The gates key off the *input* being an unvocalised cluster, not off which dictionary it came from. The Lane paragraph below spells the rules out.\n\nA reading is accepted only when it **is the root itself**: the analysis behind it must be a single morpheme (the engine marks proclitic/enclitic boundaries with `+_`/`_+`), and its consonant skeleton \u2014 a case ending aside \u2014 must equal the root\u2019s. So `bajjana`, `a\u1E63udd` and `wabaytuhu` are rejected rather than named. A doubled consonant is the one exception, because it is not an added morpheme: it marks the intensive form (II, `fa\u02BF\u02BFala`), so the engine\u2019s bare `battak` is completed to the perfect `battaka` (`\u0634\u062F` \u2192 `shadda`, `\u0645\u062F` \u2192 `madda`). Only when nothing qualifies does the character-by-character radical transliteration stand in. A printed diptote marker (mamn\u016B\u02BF min al-\u1E63arf) arrived as a literal digit glued to the transliteration and is re-emitted as a superscript: `\u0627\u062D\u0645\u062F a\u1E25mad2 \u2026` \u2192 `*a\u1E25mad*<sup>2</sup> \u2026`.\n\nFor a **prose** work the engine is the *primary* name source, not a fallback \u2014 Lane\u2019s definitions carry no transliteration at all \u2014 and there it is reading a bare, unvocalised cluster, so a short or vowel-less result (`th`, `khr`) is a guess rather than a word and is rejected (`\u0627\u062B` \u2192 `\u0101th`). And a bare root that yields nothing is named from the root\u2019s own entries, in two passes over the Arabic words of the entry in order \u2014 the term Lane gives first, with its subject or object after it (`\u0623\u064E\u062B\u064E\u0641\u064E \u0627\u0644\u0642\u0650\u062F\u0652\u0631\u064E`), then the examples that follow, so a word carrying the radicals may be found anywhere in the article. The first pass takes a word that **is** the root: an equality test on the skeleton, with gemination collapsed, the hamza ignored and the weak letters dropped (`\u0623\u064E\u062B\u064E\u0641\u064E` for `\u0627\u062B\u0641` \u2192 `athafa`, `\u0638\u064E\u0644\u064E\u0651` for `\u0638\u0644` \u2192 `\u1E93alla`, `\u0646\u064E\u0623\u064E\u062A\u064E` for `\u0646\u0623\u062A` \u2192 `na\u02BEata`, and `\u0622\u062F\u0649` for `\u0627\u062F\u0648`, whose \u0648 the derived verb loses). The second pass, since many entries never give the plain term at all (`\u0623\u064E\u062A\u0652\u0623\u064E\u0631\u0652\u062A\u064F \u0625\u0650\u0644\u064E\u064A\u0652\u0647\u0650 \u0627\u0644\u0646\u064E\u0651\u0638\u064E\u0631\u064E` for `\u062A\u0623\u0631`), accepts a word that merely **contains** the radicals \u2014 a conjugated verb, which the conventions allow as a last resort before the letter-by-letter fallback; a one-letter skeleton is refused, since it would match almost anything. The reading is then brought to the vault\u2019s citation form: no tanw\u012Bn (`\u0623\u064E\u062A\u0652\u0645\u064C` \u2192 `atmun` \u2192 `atm`), except `-an` and a defective root\u2019s indefinite (`\u0642\u064E\u0627\u0636\u064D` \u2192 `q\u0101\u1E0Din`), and the short vowel the engine drops from a citation form is restored from the source (`\u0646\u064E\u0623\u064E\u062A\u064E` \u2192 `na\u02BEat` \u2192 `na\u02BEata`, per the guideline keeping a verb\u2019s final inflection). That is a *restoration*, not a rule that every name ends in `a`. The one place a vowel is supplied rather than restored is the doubled-consonant completion: a reading with a doubled consonant is a form-II verb (`fa\u02BF\u02BFala`), whose dictionary form is the perfect, so `battak` is written `battaka` \u2014 the `a` is the perfect\u2019s own inflection, not a product of the doubling. It fires only on a genuine doubled consonant, so `\u062A\u0647\u062A\u0647` names as `tahtaha`, not `\u1E6F\u1E6Fa`. The skeletons that decide all this are built **one character per Arabic letter** \u2014 \u062B maps to `\u1E6F`, never `th` \u2014 so a digraph written for one letter can never be confused with two letters that happen to spell the same thing. Two things make that work for Lane\u2019s hamza roots. The validation ignores the hamza on both sides, because a vocalised word writes it (`\u0646\u064E\u0623\u064E\u062A\u064E`) while Lane\u2019s bare root drops the carrier (`\u0646\u0627\u062A`) and the engine spells it (`na\u02BEat`). And a root carrying a hamza tries the entries *first*: the engine cannot know a bare hamza\u2019s vowel, reading `\u0646\u0623\u062A` as the vowel-less `n\u02BEat` (or, from the carrier-less `\u0646\u0627\u062A`, as `n\u0101t`). The letter-by-letter fallback \u2014 reached only when no reading exists at all \u2014 writes a hamza as `\u02BE` (`\u062B\u0623\u0641` \u2192 `th\u02BEf`, never `\u0101`) and reads an *initial* one as the vowel it carries (`\u0627\u062B\u0641` \u2192 `athf`, the bare root `\u0627` \u2192 `a`), since a hamza is a seat rather than a consonant and a root cannot begin with a long vowel. (A letter page\u2019s own label is a different matter and still reads `\u0627 \u0101`.) The comparison folds the variants the sources use and the scans confuse \u2014 a j\u012Bm or ghayn written `g` (`\u0101te\u0161g\u012B` for `\u0622\u062A\u0634\u062C\u064A`, `g\u0101ga` for `\u063A\u0627\u063A\u0629`, `wagd` for `\u0648\u063A\u062F` \u2014 the comparison tries both readings of an ambiguous `g`), a q\u0101f written `\u1E33`, a kh\u0101\u02BE written `\u1E35` \u2014 and, since the weak letters are dropped from both sides, a w\u0101w or y\u0101\u02BE written as the vowel it sounds (`ibr\u012Bz`, `\u1E33\u014Dl`, `b\u0113t`), and a `\u1E6F` (\u062B) whose underline the scan lost as plain `t`. What the comparison accepts, the rendering then writes in the work\u2019s own convention: `_hw_fix_underlined` walks the reading\u2019s consonants against the Arabic\u2019s radicals in step and rewrites the ambiguous ones \u2014 a `t` standing where a \u062B does (`tabata` \u2192 `\u1E6Fabata` in Wehr, `thabata` in Lane; `kataba` untouched), and a `g` standing where a \u063A or a \u062C does (`g\u0101ga` \u2192 `\u1E21\u0101\u1E21a` / `gh\u0101gha`, `\u0101te\u0161g\u012B` \u2192 `\u0101te\u0161j\u012B`). A **derived** entry is a derivative, not the root, so it is shown in the vocalised Arabic alone; no transliterated heading is invented for it (that would need one engine call per derived row \u2014 47,000 of them \u2014 and the conventions bar a derivative from standing as a name anyway).\n\nA dictionary also carries one `dict-index` unit per first letter (Arabic order, alef variants folded), listed by the hub; each index note links the roots filed under that letter. These notes are **prefixed** (`<work dir> - <letter>`), unlike the roots. The bottom page names its letter page **first** in `mas-up` (`[[Hans Wehr Dictionary - \u062D \u1E25]]`, then the work, then the plugin), so you can step to the adjacent entries of the same letter.\n\nThe source database is not one row per root: 548 root words have several `IS_ROOT` rows (the verb and the noun \u2014 `\u062D\u0631\u0628` is both `\u1E25ariba` 4457 and `\u1E25arb` 4458), 246 rows are pointers ("look up alphabetically") paired with the row carrying the entry, and a few rows sit three levels deep. Acquisition **merges** a root\u2019s rows into the one note that print has \u2014 the first row with real content is the note, the rest join it as sections, and every derived form of the group nests beneath \u2014 so nothing with content is dropped and no root is split across pages.\n\n### Book unit fields (`unit.kind === "book"`)\n\nTurath.io serves a whole book as one JSON whose TOC is a flat list of headings. One chapter note is generated per heading at the work\u2019s `section_level` (default 1); deeper headings become `##`/`###` inside it, and every page gets a `#### p. N` marker (the same page heading the transcription pipeline uses). In a multi-volume work the page marker carries the volume (`#### p. 1:7`), and one `book-volume` index note is generated per volume; a chapter points `up` to the volume it starts in.\n\n| Field | Example |\n| --- | --- |\n| `id` | `3` (the chapter\u2019s ordinal) |\n| `base` | `003 [\u0627\u0644\u0623\u0631\u0628\u0639\u0648\u0646 \u0627\u0644\u0646\u0648\u0648\u064A\u0629]` (file name; capped at a word boundary) |\n| `title` | `3 [\u0627\u0644\u0623\u0631\u0628\u0639\u0648\u0646 \u0627\u0644\u0646\u0648\u0648\u064A\u0629]` (full heading, for display) |\n| `arabic` | `[\u0627\u0644\u0623\u0631\u0628\u0639\u0648\u0646 \u0627\u0644\u0646\u0648\u0648\u064A\u0629]` |\n| `level` | the TOC level the chapter was cut at |\n| `volume`, `volume_end` | the volume the chapter starts/ends in |\n| `page_from`, `page_to` | printed page numbers |\n| `span` | `p. 4\u201358` (or `p. 1:221\u20132:889`) |\n| `section_page` | the volume note\u2019s name (multi-volume only; used by `mas-up`) |\n| `pages[]` | `{ vol, page, body }` \u2014 body is ready markdown |\n\n`toc-N` anchors are `<span data-type="title" id=toc-N>`; the chapter\u2019s own anchor is dropped (the title carries it) and deeper ones become `##`/`###`. `\uFD3F\u2026\uFD3E` becomes the vault\u2019s `{.quran-quote}` span, and bracketed `s\u016Bra: \u0101ya` refs are linked to the canonical Qur\u2019\u0101n notes.\n\n### Book volume unit fields (`unit.kind === "book-volume"`)\n\nOne per volume of a multi-volume work, listing the chapters that start in it.\n\n| Field | Example |\n| --- | --- |\n| `id` | `1` |\n| `base` | `001 \u0627\u0644\u0645\u062C\u0644\u062F 1` |\n| `title` | `\u0627\u0644\u0645\u062C\u0644\u062F 1` |\n| `span` | `p. 1:7\u20132:889` |\n| `chapters[]` | `{ base, title, span }` (`note_stem` is set at render time) |\n\n## Helper functions\n\nExposed as bare globals (the same pattern as ScholarWeft):\n\n| Helper | Purpose |\n| --- | --- |\n| `start_YAML()` | begins a frontmatter block |\n| `add_property(key, value, opts?)` | adds a YAML property; `value` may be a string or a list |\n| `end_YAML()` | returns the assembled frontmatter block (including `---` fences) |\n| `wikilink(target, alias?)` | `[[target]]` or `[[target|alias]]` |\n| `heading(level, text)` | a `#`\u2026`######` heading |\n| `escape_md(text)` | escapes markdown metacharacters |\n| `updated()` / `import_date()` | local timestamp / date |\n\n`add_property` options: `quote` (`"auto"` | `"always"` | `"never"`) and `force` (emit even when empty). Lists render as `key:` plus two-space `- item` lines.\n\n## Re-rendering and merging\n\nRe-rendering is non-destructive:\n\n- **Managed region.** The generated body is wrapped in `<span class="mas-managed">mas-managed</span>` \u2026 `<span class="mas-managed">/mas-managed</span>`. A re-render replaces exactly that span; anything you write above or below it is preserved.\n- **Frontmatter merge.** Only the properties the template declares are touched. Every other property \u2014 including anything you add by hand \u2014 is preserved verbatim and in place.\n- **`related:`** is declared with `merge: \'keep\'`: the template inserts it once (empty), then your value always wins. Use it for topics you want linked.\n- **`updated:`** is the volatile render timestamp; it is ignored when deciding whether a re-render actually changed anything.\n\nPer-property merge strategies: `replace` (default \u2014 the template wins), `append` (union with your list), `keep` (write once, then never touch), and `subtract` (migration only).\n\n## Auto-update when a template changes\n\nThe plugin keeps a template-hash timeline in `.midad-arabic-sources/template-history.json`. Each note records when it was rendered (`updated:`), so the plugin can tell which notes predate the current template.\n\nWhen you edit a template, the plugin offers to re-render the affected notes (the setting **\u201CUpdate notes when templates change\u201D** controls *Ask* / *Always* / *Never*). You can always re-render manually with **\u201CRe-render imported sources\u201D**.\n\n## Upstream changes\n\nEach work records the repository\u2019s own `repository-updated` date. **\u201CCheck for source updates\u201D** runs a two-stage check: it first asks the repository for that date, and only if it moved does it fetch the item\u2019s **content hash** (a git blob SHA returned by the server \u2014 no download). If the hash changed the text changed and it re-downloads and re-renders; if only the date moved (schema/metadata churn) it just records the new date. The check runs at most every **\u201CCheck repositories every \u2026 days\u201D** (default 7; 0 = command only).\n\n## Annotations (planned)\n\nA future version may scrape your highlights (Obsidian\u2019s colored `==highlight==`) and markdown footnotes from an imported note and reapply them after a re-render, giving a Zotero-annotation-like workflow. For now, put your own commentary below the managed region and it will survive.\n\n## Layouts\n\n`work.layout` is set at acquisition time (`fetch --layout stacked|table`). The bundled \u1E25ad\u012Bth template renders the Arabic and English of each hadith as separate paragraphs by default (`stacked`), or as facing-page table cells when set to `table`. Edit `hadith-note.eta.md` to try grids/flexboxes; the genre is exposed as `cssclasses` so your CSS can target it.\n\n## Source JSON shapes (for reference)\n\n| Collection | Source | Shape |\n| --- | --- | --- |\n| `tafsir` | spa5k/tafsir_api (quran.com mirror) | per-s\u016Brah JSON: `[{ text, ayah, surah }]` or `{ ayahs: [...] }` |\n| `quran` | fawazahmed0/quran-api | per-chapter JSON: `{ chapter: [{ chapter, verse, text }] }` |\n| `hadith` | AhmedBaset/hadith-json | per-book JSON: `{ metadata, chapters[], hadiths[] }` |\n| `quran-text` | risan/quran-json | per-s\u016Bra JSON: `{ id, verses: [{ id, text, number_in_hafs }] }` |\n| `turath` | turath.io | whole-book JSON (`books-v3`, Arabic-diacritic keys): `{ meta, indexes, pages }`; `headings[]`, `page_map[]`, `pages[{text,vol,page}]` |\n\nThe acquisition script hides these differences; templates only ever see the normalized model.\n', extract: false },
+  { path: "docs/transcription.md", content: "# Transcription (scanned PDFs)\n\n**Transcribe this item\u2019s PDF file(s)** turns a literature item\u2019s scanned PDFs into page-separated Arabic markdown, using a Gemini OCR pipeline with local post-processing. Run it from a `@citekey` note (the command reads that note\u2019s Zotero attachments).\n\n## What happens\n\nFor each PDF the pipeline:\n\n1. **Bursts** the PDF into one PDF per page.\n2. **Submits** a Gemini batch job over the pages (batch mode is cheaper and handles a whole book at once).\n3. **Collects** the raw OCR output and re-OCRs any page the model flagged as a hallucination.\n4. **Post-processes** locally.\n\nThe intermediates live under `.midad-arabic-sources/work/` and are removed once the vault note is written; the batch archive under `.midad-arabic-sources/archive/` is kept, and it is what **Reprocess from archive\u2026** re-runs without resubmitting.\n\nThe finished note is written to `_2 Bibliographic notes/Arabic transcriptions/` as `@<citekey> - transcription.md`, with one `#### p. N` heading per page. A multi-volume item gets `@<citekey> - transcription vol. N.md`, and the volume number is inferred from the PDF filename when the dialog does not supply one.\n\n## Post-processing\n\nLocal scripts run after OCR and never call Gemini:\n\n- **Qur\u02BE\u0101n quotes** \u2014 `\uFD3F \u2026 \uFD3E` spans are detected and rendered as the vault\u2019s `quran-quote` callout, with tashk\u012Bl reconciled against the canonical Qur\u02BE\u0101n notes.\n- **Poetry** \u2014 verse is wrapped in the `>[!arabic-poetry]` callout, one hemistich per `>- ` line.\n- **Footnotes** \u2014 the source\u2019s footnote markers and bodies are reconstructed as markdown footnotes.\n- **Tashk\u012Bl** \u2014 the transcription\u2019s vocalization is normalised (for example the wa\u1E63la alif and dagger alif), matching the transliteration engine\u2019s conventions.\n\n`transcription-format.py` and `transcription-quran.py` are the two scripts behind this step; the orchestrator runs them in order.\n\n## Prompts\n\nThe dialog has a **Prompt** dropdown to the left of **Select all** / **Select none**, listing the available transcription prompts. **Default prompt** is the built-in OCR instruction; it can be edited but not deleted.\n\n- **Modify selected** opens the editor for the chosen prompt. **Save** replaces it; **Save as** adds a copy under a new name.\n- **Create a new prompt from selected** starts a copy of the chosen prompt, which is useful for adapting the pipeline to a different language, script, or page layout.\n- **Delete selected prompt** removes a custom prompt; it is disabled for **Default prompt**.\n\nThe prompts live in `.midad-arabic-sources/transcription-prompts.json`. An unmodified **Default prompt** is refreshed from the plugin's built-in text after an update; once you edit it, your version is kept. The selected prompt is passed to the batch job as its system instruction.\n\nThe editor holds only the **text-specific** part. The pipeline appends it to a shared, hardcoded format contract (page headings such as `#### p. N`, `---` page separators, one blank line between blocks, no hard wrapping) and the general transcription rules (accuracy, poetry, footnotes). Those general parts stay consistent across every text; the editable part describes the document in front of you.\n\n## Commands\n\n- **Transcribe this item\u2019s PDF file(s)** \u2014 the full pipeline above.\n- **Check transcription pipeline** \u2014 list the archived batches on disk.\n- **Show pipeline status** \u2014 reveal the live status panel while a job runs, resume a job that was interrupted, or open the last log when nothing is running.\n- **Open last pipeline log** \u2014 open the most recent job log.\n- **Reprocess from archive\u2026** \u2014 pick an archived batch and re-run post-processing only (no Gemini resubmission). Use this after a change to the post-processing scripts, or to recover an interrupted job.\n\n## Progress and logs\n\nA running job shows a **non-modal status panel** pinned to the corner of the window: one line per pipeline event, with `step/steps` progress. It stays until you close it, and it is what **Show pipeline status** reveals.\n\nEach job writes a log and a state file under `.midad-arabic-sources/jobs/`. The state file is removed on success and kept on failure, which is how the plugin offers to **resume** a job after a reload or a crash \u2014 it will not resume a job whose recorded process is still alive.\n\n## Requirements\n\n- A **Gemini API key** (setting or `GEMINI_API_KEY`/`GOOGLE_API_KEY`).\n- Python 3 with `pymupdf`, `requests`, and `google-genai`.\n- The PDFs themselves, resolved from the item\u2019s Zotero attachments (the local Zotero API, the ScholarWeft `zlinks` cache, or the Zotero storage folder, in that order).\n\nSee [Dependencies](./dependencies.md) for the install lines, and [Translation](./translation.md) for translating a finished transcription.\n", extract: false },
+  { path: "docs/translation.md", content: "# Translation\n\n**Translate this item\u2019s transcription(s)** turns a finished Arabic transcription into an English translation, one page per page, using the same Gemini pipeline.\n\nRun it from a `@citekey` note. A dialog lists that item\u2019s transcriptions (all checked by default) plus any PDFs it found; deselect the ones you do not want, optionally set a **Volume** number, and click **Translate**.\n\n- The translation is submitted as a Gemini batch job and written to `_2 Bibliographic notes/Arabic translations/` as `@<citekey> - translation.md` (or `\u2026 - translation vol. N.md`).\n- A translation mirrors its transcription note\u2019s aliases and is linked from it, so the two sit side by side.\n- The batch is archived under `.midad-arabic-sources/archive/`, so it can be reprocessed later.\n- The same progress panel and log apply as for [transcription](./transcription.md).\n\n## Prompts\n\nThe dialog has the same **Prompt** controls as transcription: a dropdown beside **Select all** / **Select none**, with **Modify selected**, **Create a new prompt from selected**, and **Delete selected prompt**. Prompts live in `.midad-arabic-sources/translation-prompts.json`, and the selected prompt is sent as the batch job's system instruction. **Default prompt** can be edited but not deleted.\n\nThe editor holds only the **text-specific** part. The pipeline appends it to the shared, hardcoded format contract (page headings, `---` separators, blank lines, no hard wrapping) and the general translation rules (structure, poetry, footnotes, italics and quotes). The default text-specific part names the source language, the target language, Qur'an-quote formatting, and IJMES transliteration.\n\nThere is no separate \u201Cre-translate selected pages\u201D command yet; re-running **Translate this item\u2019s transcription(s)** on a transcription replaces its translation. Page-level re-translation is on the roadmap.\n\nTranslation needs the same prerequisites as transcription: a **Gemini API key** and Python 3 with `google-genai`, `requests`, and `pymupdf` \u2014 see [Dependencies](./dependencies.md).\n", extract: false },
+  { path: "docs/transliteration.md", content: "# Transliteration\n\nMidad Arabic Sources romanizes Arabic from Obsidian. A resident Python service does the work, so the model loads once and Obsidian does not pay for it on every call.\n\n## Commands\n\n- **Transliterate selection to clipboard** \u2014 romanize the selection, or the current line if nothing is selected, and copy the result.\n- **Transliterate note to new note** \u2014 romanize a whole note (or the selection) into a sibling note named `<note> (romanized)`.\n- **Transliteration server\u2026** \u2014 one dialog that shows the server's status (running or not, engines loaded, which engine is actually being used, and the LLM providers) with a single button that **Starts** or **Stops** it. The **Transliteration** settings page carries the same status line and the same button, so you never have to check before knowing whether to start or stop.\n\nBoth transliteration commands open a small dialog first, with two toggles:\n\n- **Full vocalization** \u2014 retain case endings and tanw\u012Bn (with pausal shortening at the end of a passage).\n- **Use LLM** \u2014 romanize with the configured API instead of the rule engine. Your choices are remembered as the new defaults.\n\nOnly Arabic-script runs are changed. Markdown, newlines, link targets, and `{.quran-quote}` attributes pass through untouched; a link\u2019s alias is transliterated.\n\n## The resident server\n\nThe service is `scripts/transliterate-server.py` and listens on `127.0.0.1:8756` by default. Start it from the command palette, or by hand:\n\n```shell\npython3 scripts/transliterate-server.py --port 8756\n```\n\nThe plugin's **Start transliteration server** loads only `bert` \u2014 it passes no `--preload`, so the script's `bert` default applies. When starting by hand, run it the same way: **no `--preload` flag**. `--preload` is repeatable, so a server started as `--preload bert --preload mle` loads both; that is how an `mle` engine ends up resident even though nothing asks for it. **Check transliteration server** reports what is *loaded*, not what is used, so `engines_loaded: [\"bert\",\"mle\"]` means the server was started with both preloads.\n\n**Restart the server whenever the engine changes.** A long-running server keeps serving the code it loaded at startup, so an older `arabic-bw-transliterate.py` can keep running while the file on disk is new. This is exactly how a stale engine once silently stripped final short vowels and tanw\u012Bn from every reading. **Check transliteration server** reports only the *loaded* engines, so it cannot see that the code is out of date. When in doubt, **Stop transliteration server** then **Start transliteration server**.\n\n## Engines\n\nSet the engine under **Transliteration \u2192 Engine**.\n\n| Engine | Startup | Use |\n| --- | --- | --- |\n| `bert` (default) | ~16 s | Best for unvocalized prose; the engine the plugin is tuned for. |\n| `mle` (opt-in) | ~2 s | Faster and rougher on classical text; choose it only if you prefer it. Needs the calima MLE data. |\n| `none` | ~1 s | No CAMeL at all; fully vocalized input only, and no proclitic hyphens. |\n\n`bert` is the default and what all the tuning targets: it reads **context**, so it diacritizes unvocalized classical prose far better than `mle`, at the cost of size and startup \u2014 ~0.4 GB and ~16 s for the MSA model, against ~85 MB and ~2 s for MLE (both share the ~160 MB morphology database). `mle` is never preloaded or selected for you \u2014 pick it under **Transliteration \u2192 Engine** only if you want it. If `bert` cannot load (missing `transformers` or its data) the script falls back to `mle` automatically and tells you \u2014 an Obsidian alert, or stderr at the CLI. See [Dependencies](./dependencies.md) for the install sizes.\n\nThe BERT load is per process, which is why the service exists: interactive use pays it once for the session instead of on every call.\n\n## Romanization options\n\n- **Sun-letter assimilation** \u2014 assimilate the article before sun letters (`ash-shams`); when off, the article is invariant (`al-shams`). Off by default.\n- **Keep case endings** \u2014 retain noun and adjective i\u02BFr\u0101b endings and `-un`/`-in` tanw\u012Bn. Off by default; verb inflections and pronominal-suffix vowels are always kept. Qur\u02BE\u0101n spans are always fully vocalized.\n- **Name mode** \u2014 capitalize each substantive word, for author and editor fields (`al-Q\u0101\u1E0D\u012B \u02BFIy\u0101\u1E0D`, `al-\u02BFA\u1E6D\u1E6D\u0101r`). `al-` stays lowercase unless it opens the field; `b.`/`bt.`/`wuld` stay lowercase.\n- **Final dotless y\u0101\u02BE** \u2014 read a final `\u0649` as alif maq\u1E63\u016Bra (`\u0101`), or let the analysis choose. After a kasra it is always read as a defective y\u0101\u02BE (`zidn\u012B`), never as `a\u012B`.\n\n## The convention\n\nThe engine implements the IAFR/vault transliteration guidelines, not a generic romanization:\n\n- The definite article is invariant `al-`, hyphenated, with elision on proclitics (`wa-l-`, `bi-l-`, `lil-`).\n- T\u0101\u02BE marb\u016B\u1E6Da is dropped after a short fat\u1E25a (`al-qiy\u0101ma`), kept as `h` after \u0101 (`al-\u1E25ay\u0101h`), and written `t` in i\u1E0D\u0101fa.\n- Feminine nisba `\u0640\u064A\u0651\u0629` is `-iyya`; masculine `\u0640\u064A\u0651` is `-\u012B`.\n- Word-initial `\u0622` is `\u0101`; elsewhere madda is `\u02BE\u0101` (`al-qur\u02BE\u0101n`).\n- Tanw\u012Bn `-an` is kept by default; `-un`/`-in` only with **Keep case endings**. A defective-root indefinite keeps `-in` (`q\u0101\u1E0Din`).\n- Provided tashk\u012Bl is authoritative: a fully vocalized token is transliterated from its own \u1E25arak\u0101t, and the engine is used only to segment proclitics.\n\n## The user lexicon\n\nWhen the engine has no credible morphological analysis for a term, the plugin can ask you for a romanization and remember it. After a note transliteration, a dialog lists the unknown terms with a suggested reading per row; edit any that are wrong and **Save** to add them to the lexicon (`scripts/transliteration-lexicon.json`). The next run uses them.\n\nThe lexicon is also the place to pin a term the engine misreads. It grows file by file.\n\n## LLM romanization\n\nUnder **Transliteration \u2192 LLM romanization** you can set:\n\n- **Provider** \u2014 Gemini, DeepSeek, or **OpenAI-compatible**.\n- **Model** \u2014 e.g. `gemini-3.5-flash-lite` (the default); for OpenAI-compatible, e.g. `gpt-4o-mini` or your local model.\n- **Base URL** \u2014 OpenAI-compatible only: the endpoint, e.g. `https://api.openai.com/v1`, `https://openrouter.ai/api/v1`, or `http://localhost:11434/v1`. Empty uses the server's `OPENAI_BASE_URL`.\n- **API key** \u2014 optional; used only when the server process has no `GEMINI_API_KEY` / `GOOGLE_API_KEY` / `DEEPSEEK_API_KEY` / `OPENAI_API_KEY` in its environment.\n\n**OpenAI-compatible** is any endpoint that speaks the OpenAI chat-completions API: OpenAI itself, OpenRouter, Groq, or a local llama.cpp / Ollama / vLLM server. Set the base URL, model, and key in settings (or the server's `OPENAI_BASE_URL` / `OPENAI_MODEL` / `OPENAI_API_KEY`); the CLI takes `--provider openai --base-url \u2026 --model \u2026`.\n\nTurn it on per call with **Use LLM** in the transliteration dialog. The LLM path lives in the server (`POST /romanize`), so it can also translate in the same call.\n\n## The browser interface\n\nThe server serves a self-contained interface at `http://127.0.0.1:8756/`. Arabic goes on the right, the result on the left, with route (rule engine or LLM) and the same options as the commands. Unknown terms are listed below the result with an editable romanization and an **Add** button that writes to the lexicon and refreshes the result in place. It is handy for working outside Obsidian, or for testing after an engine change.\n", extract: false },
+  { path: "docs/troubleshooting.md", content: "# Troubleshooting\n\n## Transliteration\n\n### \u201CTransliteration server not reachable\u201D\n\nThe service is not running, or it is on another port. Run **Transliteration server\u2026** and press **Start**, or start it by hand (`python3 scripts/transliterate-server.py --port 8756`). If you changed the port under **Transliteration \u2192 Server URL**, the setting and the running process must agree.\n\n### Readings lose their final short vowels and tanw\u012Bn\n\nThe resident server keeps serving the code it loaded at startup, so an older `arabic-bw-transliterate.py` can still be running while the file on disk is new. Open **Transliteration server\u2026** and press **Stop**, then **Start**. The dialog reports only the *loaded* engines, so it cannot by itself detect a stale one.\n\n### The BERT engine will not load\n\nThe `bert` engine needs `transformers` and its model data. Install them and fetch the data (`camel_data -i disambig-bert-unfactored-msa`); the model ships inside that package, so there is no separate download. If BERT still cannot load, the server falls back to `mle` and tells you; or choose **Engine** `mle` (faster, rougher) or `none` (fully vocalized input only). See [Dependencies](./dependencies.md).\n\n### \u201CThe transliteration server did not start\u201D / \u201CNo module named camel_tools\u201D\n\nThe plugin spawns the server with the same Python resolution it uses elsewhere: the **Transliteration \u2192 Python path** setting first, then PATH, the installer venv, conda/anaconda, pyenv, Homebrew and the distro interpreters, probing for `camel_tools`. A GUI-launched Obsidian has a much smaller PATH than your terminal, so it can miss a conda install that `python3` finds in the shell. Set **Transliteration \u2192 Python path** to the interpreter where `camel_tools` is installed (e.g. `~/miniconda3/bin/python3`); the failure notice prints the last lines of the server log, including the missing module.\n\n### \u201CNo usable Python found\u201D\n\nThe plugin could not import `fitz`, `requests`, and `google.genai` from any candidate interpreter. Install them into the Python you want and set its full path under **Transcription and translation \u2192 Python executable**.\n\n### A word is romanized wrongly every time\n\nAdd it to the user lexicon: after a note transliteration, a dialog lists the terms the engine had no analysis for, with an editable romanization per row. Words the engine *does* misread can be pinned there too. See [Transliteration](./transliteration.md).\n\n## Transcription and translation\n\n### \u201CGemini API key required\u201D\n\nSet a key under **Transcription and translation \u2192 Gemini API key**, or launch Obsidian from a shell that exports `GEMINI_API_KEY` (or `GOOGLE_API_KEY`).\n\n### \u201CNo PDF attachments found for this item\u201D\n\nThe command ran on something other than a `@citekey` note, or the item has no PDF. The pipeline resolves PDFs from the Zotero local API, the ScholarWeft `zlinks` cache, and the Zotero storage folder, in that order; a linked file whose absolute path is known only to a running Zotero may be missing when Zotero is closed.\n\n### A job seems frozen\n\nA Gemini batch has no per-page progress; the panel updates only when a page or step completes. **Show pipeline status** reveals the panel and offers to resume a job that stopped.\n\n### A job stopped, or Obsidian reloaded mid-run\n\nThe job\u2019s state file survives under `.midad-arabic-sources/jobs/`. **Show pipeline status** offers to resume it; the plugin refuses if the recorded process is still alive. To recover a finished batch without resubmitting, use **Reprocess from archive\u2026**.\n\n### Post-processing changed but the note did not\n\nRe-run **Reprocess from archive\u2026** on the batch to regenerate the note from the archived OCR, without paying for Gemini again.\n\n## Document import\n\n### \u201CThis source requires transliteration to render, but the transliteration server is not running\u201D\n\nThe dictionaries name entries by romanizing the bare root, which needs the service. Start it and **Try again**, or choose **Proceed without transliteration** (the entries are then named from their radicals).\n\n### A work\u2019s notes or cached model are missing\n\nRun **Check imported sources**. It compares the manifest against the vault and the model cache and offers to restore anything missing. An `installed` work is restored if any file is absent; a work mid-removal is never restored.\n\n### A template edit does not take effect\n\nThe bundled templates live in `.obsidian`, which Obsidian\u2019s file watcher ignores, and the plugin polls for changes only every 45 seconds (and only when **Update notes when templates change** is on). Run **Apply template changes to imported sources** to apply it at once. Remember the edit must be in the *user* template folder (`Copy import templates to vault`) or in the bundled copy that `npm run deploy` writes; editing the deployed copy is overwritten by the next deploy.\n\n### Editing a template re-rendered far more than expected\n\nRe-renders are scoped to the unit kinds whose template changed. A change to the dictionary note template still rewrites every root, because every root uses it; use **Re-render this source** to limit it to one work.\n\n### \u201CCheck for source updates\u201D re-rendered a work unexpectedly\n\nA changed upstream **content hash** (not just a moved date) triggers a re-download and re-render. A date-only move records the new date and changes nothing.\n\n### The plugin was updated but the old behaviour persists\n\nRestart Obsidian. The plugin loads `main.js` only at startup, and it unpacks the new scripts and templates on the next load.\n\n## Zotero\n\n### \u201CNo local Zotero found on port 23119\u201D\n\nStart Zotero, or choose the **Web API** method and enter a key and library ID. The **Detect** button only fills the library ID from a *running* local Zotero.\n\n### Items duplicate instead of updating\n\nUpdate-in-place relies on the stored item key and version. If you deleted the item in Zotero, it is recreated only when **Create Zotero items for all sources** is on; otherwise re-send it by hand.\n\n### A template re-render sent nothing\n\nThat is correct. Sends are decided by the content hash of the work model and the publication map, not the rendered note, so a pure template change needs no update.\n\n### Bibliographic details look wrong\n\nThey come from `publication-map.json` and are marked `verified: false` until checked. Edit your vault copy of the map, then re-send. See [Zotero export](./zotero.md).\n", extract: false },
+  { path: "docs/zotero.md", content: '# Zotero export\n\nInstalled works can be sent to Zotero as `book` items, each tagged **Midad Arabic Sources** and filed in a collection of that name. Only new or changed items are sent; an item the plugin sent before is **updated in place**, never duplicated.\n\nTurn it on under **Zotero \u2192 Enable Zotero export**.\n\n## Methods\n\nChoose the method under **Zotero \u2192 Method**:\n\n- **Local API (this computer)** \u2014 writes to the Zotero running on `127.0.0.1:23119`. The default. No key needed.\n- **Web API (zotero.org)** \u2014 writes to your online library. Needs an API key (from [zotero.org/settings/keys](https://www.zotero.org/settings/keys), with write access) and your numeric user or group ID. **Detect local Zotero** fills the library ID from a running local Zotero when it can.\n- **CSL-JSON file (manual import)** \u2014 writes `_7 Sources/zotero-export.csl.json`, which you import by hand through Zotero\u2019s **File \u2192 Import**.\n\n## Commands\n\n- **Send all installed sources to Zotero** \u2014 every installed work that has not been sent, or whose bibliographic fields changed.\n- **Send selected sources\u2026** \u2014 opens **Manage text sources** in its *Send to Zotero* tab, where a **Select All/None** toggle picks the works to send.\n- **Send this source to Zotero** \u2014 the work whose note is open.\n\nAll three share the collection and tag, and all three skip items that are already current.\n\n## Keeping Zotero up to date\n\nTwo settings wire the export into the automatic process. Both are silent: they run after any render (install, re-fetch, re-render) and once at startup.\n\n- **Keep Zotero items up to date** \u2014 re-send an already-exported item whenever its fields change.\n- **Create Zotero items for all sources** \u2014 send any installed work that was never exported, without asking. An item you deleted in Zotero is recreated.\n\nWhether a send is needed is decided by the **item\u2019s content hash**, built from the work model and the publication map \u2014 *not* the rendered note. So a pure template re-render changes no Zotero field and sends nothing; only a re-fetch (a new model) or an edit to the publication map does.\n\n## Where the bibliographic data comes from\n\nThe **publication map** (`midad-arabic-sources-import-templates/publication-map.json`, overridable in your vault copy) is the single source for both the work\u2019s hub YAML and its Zotero item. It is keyed by work (`<collection>:<id>`).\n\n- Entries are marked `verified: false` until you check them; an unverified entry adds a *\u201CBibliographic details are provisional \u2014 verify\u201D* line to the Zotero item\u2019s `extra`.\n- A creator is a name string (the last word becomes Zotero\u2019s last name) or, where that split is wrong, an object `{ "first": \u2026, "last": \u2026 }`. Creators are exported as `author`, `translator`, or `editor` by role.\n- A Better BibTeX citekey becomes `mas-up: [[@citekey]]` on the work hub.\n\nNothing that ends up in the Zotero item\u2019s `extra` lives only in Zotero: `mas-note` holds the map\u2019s edition note plus the provisional caveat, and `mas-key` holds the plugin\u2019s `<collection>:<id>`. The repository, attribution, and repository date are already the `repository`, `license-attribution`, and `repository-updated` properties on the hub.\n\n## Update-in-place details\n\nEach exported item\u2019s Zotero key and version are remembered. A later send uses `PUT` to update it; if the key no longer exists in the library, the item is recreated \u2014 but only when **Create Zotero items for all sources** is on. The CSL-JSON method always writes the whole file; re-import it in Zotero to update.\n', extract: false },
+  { path: "README.md", content: "# Midad Arabic Sources\n\n**Midad Arabic Sources** brings classical Arabic texts into your Obsidian vault and turns them into a linkable, searchable, annotated part of your notes. It removes the manual labour between *there is an Arabic text I want to study* and *it is in my vault*: it locates and imports born-digital texts, transcribes scanned PDFs, transliterates Arabic, and keeps every generated note current as templates and upstream sources change.\n\nThe plugin was built for research on Islam and Sufism \u2014 Qur\u02BE\u0101n commentaries, \u1E25ad\u012Bth, the Qur\u02BE\u0101n in its riw\u0101y\u0101t, and the classical dictionaries \u2014 but the importer is catalog-driven, so more repositories can be wired in over time.\n\n> [!note]\n> This plugin is **desktop only**. It runs local Python scripts and reads files outside the vault.\n\n## Documentation\n\nThe full guides are in [`docs/`](./docs/); this README is a summary. Every page is also bundled into the plugin and readable in-app with the command **Open documentation** (or from **Settings \u2192 Midad Arabic Sources \u2192 Documentation**).\n\n- [Setup](./docs/setup.md) \u2014 install, first run, the folder layout, and where state lives.\n- [Dependencies](./docs/dependencies.md) \u2014 Python, CAMeL Tools, a Gemini key, and the resident transliteration server.\n- [Transliteration](./docs/transliteration.md) \u2014 commands, engines, the romanization options, the lexicon, and LLM romanization.\n- [Transcription](./docs/transcription.md) \u2014 the Gemini OCR pipeline, post-processing, status, and reprocessing.\n- [Translation](./docs/translation.md) \u2014 translating a finished transcription.\n- [Document import](./docs/document-import.md) \u2014 collections, the Manage text sources dialogue, naming, and updates.\n- [Templates](./docs/templates.md) \u2014 the ETA templates and the render-model variable reference.\n- [Zotero](./docs/zotero.md) \u2014 Local / Web / CSL-JSON export, update-in-place, and auto-sync.\n- [Commands](./docs/commands.md) \u2014 every command, grouped by function.\n- [Troubleshooting](./docs/troubleshooting.md) \u2014 the common errors and how to fix them.\n\n## What it does\n\n### Transliteration\n\nThe rule-based/LLM romanizer talks to a resident Python service (CAMeL), so Obsidian and Zotero do not reload the model on every call.\n\n- **Transliterate selection to clipboard** \u2014 romanize the selection (or current line) to the clipboard.\n- **Transliterate note to new note** \u2014 romanize a whole note or selection into a sibling note.\n- **Check transliteration server** \u2014 report loaded engines and available LLM providers.\n- **Start transliteration server** / **Stop transliteration server** \u2014 launch or stop the service without a terminal.\n\nSettings cover the server URL and script, the engine (`bert` / `mle` / `none`), sun-letter assimilation, case endings, name mode, final dotless y\u0101\u02BE, and an LLM provider (Gemini / DeepSeek) with an optional per-request key. See [Transliteration](./docs/transliteration.md).\n\n### Transcription and translation (scanned PDFs)\n\nA Gemini pipeline turns a literature item\u2019s PDFs into page-separated Arabic markdown (and translations), with local post-processing for Qur\u02BE\u0101n quotes, poetry callouts, footnotes, and tashk\u012Bl. Run it from a `@citekey` note.\n\n- **Transcribe this item\u2019s PDF file(s)** \u2014 burst to page PDFs, OCR via Gemini batch mode, post-process.\n- **Translate this item\u2019s transcription(s)** \u2014 translate an existing transcription.\n- **Prompt dropdown** in both dialogs \u2014 choose a named prompt, or edit, copy, and delete prompts for texts the built-in one does not suit.\n- **Reprocess from archive\u2026** \u2014 re-run post-processing from an archived batch without resubmitting.\n- **Check transcription pipeline**, **Show pipeline status**, **Open last pipeline log** \u2014 status and diagnostics (non-modal corner panel).\n\nSee [Transcription](./docs/transcription.md) and [Translation](./docs/translation.md).\n\n### Text sources (born-digital corpora)\n\nA catalog-driven importer pulls classical texts from public repositories into your vault, one note per s\u016Bra, chapter, or dictionary root, with full frontmatter and links back to the Qur\u02BE\u0101n text.\n\n- **Manage text sources\u2026** \u2014 a two-pane dialogue (install/uninstall, or send references to Zotero) with a genre sidebar, a repository list, and one clickable row per work.\n- **Copy import templates to vault** \u2014 copy the editable ETA templates into your vault.\n- **Re-render imported sources** \u2014 regenerate every note from its cached model.\n- **Check imported sources** \u2014 find works whose notes or cached model are missing.\n- **Check for source updates** \u2014 ask the repositories whether a text changed upstream.\n\nCollections currently wired in: Qur\u02BE\u0101n commentaries (tafs\u012Br) from `spa5k/tafsir_api` and the Qur\u02BE\u0101nic Universal Library; Qur\u02BE\u0101n translations from `fawazahmed0/quran-api`; \u1E25ad\u012Bth collections from `AhmedBaset/hadith-json`; the Qur\u02BE\u0101n in its riw\u0101y\u0101t from `risan/quran-json`; two dictionaries, Hans Wehr\u2019s *Dictionary of Modern Written Arabic* and Lane\u2019s *An Arabic-English Lexicon* (both read from their SQLite editions, one note per root); and classical books from [Turath.io](https://app.turath.io) (one note per TOC chapter, a volume index per volume, two category MOCs \u2014 `Turath` and the work type). Imports are cached, and re-rendering never overwrites your edits: generated content sits in a managed region and only template-declared frontmatter properties are reconciled. See [Document import](./docs/document-import.md) and [Templates](./docs/templates.md).\n\n### Zotero export\n\nInstalled works can be sent to Zotero as `book` items, each tagged **Midad Arabic Sources** and filed in a collection of that name. Settings choose the method \u2014 **Local API** (the Zotero running on `:23119`), **Web API** (key + library id), or **CSL-JSON** (writes a file for a manual File \u2192 Import). Already-exported items are updated in place rather than duplicated. See [Zotero](./docs/zotero.md).\n\n## Requirements\n\n- **Obsidian 1.13** or later.\n- **Python 3** with `PyMuPDF` (`fitz`), `requests`, and `google-genai`. The plugin finds a usable interpreter automatically and lets you pin one in settings.\n- **CAMeL Tools** for the transliteration engine, with its model data.\n- A **Gemini API key** for transcription, translation, and optional LLM romanization.\n- **Zotero** (optional) for sending imported works to your library.\n\nSee [Dependencies](./docs/dependencies.md) for the exact install lines.\n\n## Install\n\nThe plugin is not yet in the community directory.\n\n### Via BRAT\n\n1. Disable Restricted Mode, then install and enable [BRAT](https://github.com/TfTHacker/obsidian42-brat) from the Community Plugins list.\n2. In BRAT\u2019s settings, add `nebedaay/Midad-Arabic-Sources` to the **Beta plugin list**.\n3. Enable **Midad Arabic Sources** in Community Plugins. BRAT keeps it updated.\n\n### Manual\n\nDownload `main.js`, `manifest.json`, and `styles.css` from the [latest release](https://github.com/nebedaay/Midad-Arabic-Sources/releases) and copy them into `.obsidian/plugins/midad-arabic-sources/` in your vault, then enable the plugin in **Settings \u2192 Community plugins**. The plugin extracts its Python scripts and import templates into that folder on load.\n\n## Network use and file access\n\nCore importing and rendering use only the repositories you import from. The following features contact services; nothing is sent anywhere else, and the plugin collects **no telemetry**.\n\n| Feature | Contacts | Why |\n| --- | --- | --- |\n| Text source import | The public repositories listed above (GitHub, `qul.tarteel.ai`, `turath.io`) | Downloads the source texts you choose to import. |\n| Transliteration | `transliterate-server.py` on `127.0.0.1` | Romanizes Arabic. Optionally calls Gemini or DeepSeek when LLM mode is on. |\n| Transcription / translation | The Gemini API | OCRs and translates scanned PDFs you submit. |\n| Zotero export | Your local Zotero (`127.0.0.1:23119`) or `api.zotero.org` | Reads and writes the bibliographic items you export. |\n| Fonts | `cdn.jsdelivr.net` (Fontsource) | Loads the Arabic and Latin typefaces the generated notes expect. |\n\n**Files outside your vault:** the transcription pipeline runs external programs and reads and writes the source PDFs and output files you choose, including absolute paths. This is required to OCR and translate documents.\n\n## How it works\n\nThe importer is **acquisition only**: it downloads a work\u2019s source, normalises it into a language-neutral *render model*, and renders that model into notes with **ETA templates** \u2014 the same template language used by [ScholarWeft](https://github.com/nebedaay/ScholarWeft). Regenerating a note never overwrites your edits. A content-hash timeline decides whether a template change affects notes, and a two-stage check asks each repository whether a text changed upstream. The plugin ships its Python scripts, ETA templates, and CSS inside `main.js`, so a release is self-contained.\n\n## Building from source\n\n```bash\nnpm install\nnpm run check-types   # tsc --noemit\nnpm run lint          # eslint (Obsidian community-plugin rules)\nnpm run build         # esbuild \u2192 main.js\n```\n\nCopy `main.js`, `manifest.json`, and `styles.css` into `.obsidian/plugins/midad-arabic-sources/`, or run `npm run deploy` from inside a vault. Restart Obsidian after every build \u2014 the plugin loads `main.js` only at startup.\n\n## Credits\n\nMidad Arabic Sources\u2019 ETA templating, managed-region merge, and note conventions follow **[ScholarWeft](https://github.com/nebedaay/ScholarWeft)**, which pioneered them. The importer draws on the public corpora of [spa5k/tafsir_api](https://github.com/spa5k/tafsir_api), the [Qur\u02BE\u0101nic Universal Library](https://qul.tarteel.ai/), [fawazahmed0/quran-api](https://github.com/fawazahmed0/quran-api), [AhmedBaset/hadith-json](https://github.com/AhmedBaset/hadith-json), [risan/quran-json](https://github.com/risan/quran-json), [Turath.io](https://app.turath.io), and GibreelAbdullah\u2019s [Hans Wehr](https://github.com/GibreelAbdullah/HansWehrDictionary) and [Lane](https://github.com/GibreelAbdullah/LaneLexicon) dictionary editions. Transliteration uses [CAMeL Tools](https://github.com/CAMeL-Lab/camel_tools).\n\n## License\n\n[GPL-3.0-or-later](./LICENSE).\n", extract: false }
 ];
+
+// src/docs.ts
+var import_obsidian2 = __toModule(require("obsidian"));
+var GITHUB_DOCS_BASE = "https://github.com/nebedaay/Midad-Arabic-Sources/blob/main/docs/";
+var GITHUB_README_URL = "https://github.com/nebedaay/Midad-Arabic-Sources/blob/main/README.md";
+var DOC_ORDER = [
+  ["setup.md", "Setup"],
+  ["dependencies.md", "Dependencies"],
+  ["transliteration.md", "Transliteration"],
+  ["transcription.md", "Transcription"],
+  ["translation.md", "Translation"],
+  ["document-import.md", "Document import"],
+  ["templates.md", "Templates"],
+  ["zotero.md", "Zotero"],
+  ["commands.md", "Commands"],
+  ["troubleshooting.md", "Troubleshooting"]
+];
+var ASSET_MAP = {};
+for (const asset of BUNDLED_ASSETS)
+  ASSET_MAP[asset.path] = asset.content;
+function getDocs() {
+  const out = [];
+  const seen = new Set();
+  const readme = ASSET_MAP["README.md"];
+  if (readme) {
+    out.push({ name: "README.md", title: "Overview", markdown: readme });
+    seen.add("README.md");
+  }
+  const take = (name, title) => {
+    const markdown = ASSET_MAP[`docs/${name}`];
+    if (!markdown)
+      return;
+    out.push({ name, title, markdown });
+    seen.add(name);
+  };
+  for (const [name, title] of DOC_ORDER)
+    take(name, title);
+  for (const key of Object.keys(ASSET_MAP)) {
+    if (!key.startsWith("docs/"))
+      continue;
+    const name = key.slice("docs/".length);
+    if (seen.has(name))
+      continue;
+    take(name, name.replace(/\.md$/, ""));
+  }
+  return out;
+}
+function githubDocUrl(name) {
+  return name === "README.md" ? GITHUB_README_URL : GITHUB_DOCS_BASE + name;
+}
+var DocsModal = class extends import_obsidian2.Modal {
+  constructor(app, initial = "README.md") {
+    super(app);
+    this.initial = initial;
+    this.navItems = new Map();
+    this.component = new import_obsidian2.Component();
+  }
+  onOpen() {
+    this.component.load();
+    this.modalEl.addClass("mas-docs-modal");
+    const { contentEl } = this;
+    contentEl.addClass("mas-docs-modal");
+    contentEl.createEl("h3", { text: "Midad Arabic Sources documentation" });
+    const wrap = contentEl.createDiv({ cls: "mas-docs-wrap" });
+    const nav = wrap.createDiv({ cls: "mas-docs-nav" });
+    this.body = wrap.createDiv({ cls: "mas-docs-body" });
+    for (const doc of getDocs()) {
+      const item = nav.createEl("a", { text: doc.title, cls: "mas-docs-nav-item" });
+      item.addEventListener("click", (e) => {
+        e.preventDefault();
+        this.show(doc.name);
+      });
+      this.navItems.set(doc.name, item);
+    }
+    this.show(this.initial);
+  }
+  show(name) {
+    var _a;
+    const docs = getDocs();
+    const doc = (_a = docs.find((d) => d.name === name)) != null ? _a : docs[0];
+    if (!doc)
+      return;
+    for (const [n, el] of this.navItems) {
+      el.toggleClass("is-active", n === doc.name);
+    }
+    this.body.empty();
+    const gh = this.body.createDiv({ cls: "mas-docs-gh" });
+    gh.createEl("a", {
+      text: "Open on GitHub",
+      href: githubDocUrl(doc.name)
+    }).setAttr("target", "_blank");
+    const content = this.body.createDiv({ cls: "mas-docs-content" });
+    content.addEventListener("click", (e) => {
+      var _a2;
+      const a = e.target.closest("a");
+      if (!a)
+        return;
+      const href = (_a2 = a.getAttribute("href")) != null ? _a2 : "";
+      if (/^https?:/i.test(href))
+        return;
+      const m = href.match(/([\w-]+\.md)(?:#.*)?$/);
+      if (m && docs.some((d) => d.name === m[1])) {
+        e.preventDefault();
+        this.show(m[1]);
+      }
+    });
+    void import_obsidian2.MarkdownRenderer.render(this.app, doc.markdown, content, "", this.component);
+    this.body.scrollTop = 0;
+  }
+  onClose() {
+    this.component.unload();
+    this.contentEl.empty();
+  }
+};
+function openDocs(app, name = "README.md") {
+  new DocsModal(app, name).open();
+}
 
 // src/main.ts
 async function execProbe(file, args) {
@@ -8593,8 +9021,13 @@ function frontmatterTimeMs(value) {
 var SOURCE_CATALOG_TTL = 7 * 864e5;
 var SOURCE_CATALOG_SCHEMA = 2;
 var COLLECTION_MODEL_SCHEMA = {
-  dictionary: 4
+  dictionary: 6
 };
+var COLLECTION_RENDER_VERSION = {};
+function requiredRenderVersion(collection) {
+  var _a;
+  return (_a = COLLECTION_RENDER_VERSION[collection]) != null ? _a : 0;
+}
 var BASE_MODEL_SCHEMA = 1;
 function requiredModelSchema(collection) {
   var _a;
@@ -8607,7 +9040,18 @@ var SOURCE_TEMPLATE_KIND = {
   hadith: "hadith",
   quran: "quran",
   dictionary: "dict",
-  dictionaryIndex: "dict-index"
+  dictionaryIndex: "dict-index",
+  book: "book",
+  bookVolume: "book-volume"
+};
+var DEFAULT_PROMPT_NAME = "Default prompt";
+var PROMPT_FILES = {
+  transcription: ".midad-arabic-sources/transcription-prompts.json",
+  translation: ".midad-arabic-sources/translation-prompts.json"
+};
+var PROMPT_KIND_LABEL = {
+  transcription: "transcription",
+  translation: "translation"
 };
 var DEFAULT_SETTINGS = {
   serverUrl: "http://127.0.0.1:8756",
@@ -8622,6 +9066,7 @@ var DEFAULT_SETTINGS = {
   llmProvider: "gemini",
   llmModel: "gemini-3.5-flash-lite",
   llmApiKey: "",
+  llmBaseUrl: "",
   pythonPath: "",
   pipelineScript: "scripts/midad-arabic-sources-pipeline.py",
   geminiApiKey: "",
@@ -8642,7 +9087,7 @@ var DEFAULT_SETTINGS = {
   zoteroAutoCreate: false,
   sourceUpdateCheckDays: 7
 };
-var ArabicSupportPlugin = class extends import_obsidian2.Plugin {
+var ArabicSupportPlugin = class extends import_obsidian3.Plugin {
   constructor() {
     super(...arguments);
     this.lastUnknown = [];
@@ -8650,10 +9095,20 @@ var ArabicSupportPlugin = class extends import_obsidian2.Plugin {
     this.sourceCatalog = null;
     this.zoteroSyncRunning = false;
     this.zoteroSyncAgain = false;
+    this.sourceCancelled = false;
+    this.sourceOperationId = 0;
+    this.sourceOperationActive = false;
+    this.sourceOperationKind = null;
+    this.activeSourceProc = null;
     this.pythonPromise = null;
+    this.serverPythonPromise = null;
+    this.promptDefaults = null;
     this.sourceCatalogRefreshing = false;
     this.sourceTemplateCheckTimer = null;
     this.templateCheckRunning = false;
+    this.maintenanceInFlight = false;
+    this.awaitingSourceConsent = false;
+    this.engineFallbackWarned = false;
     this.translitServerPid = null;
   }
   async onload() {
@@ -8666,12 +9121,12 @@ var ArabicSupportPlugin = class extends import_obsidian2.Plugin {
       editorCallback: async (editor) => {
         const text = editor.getSelection() || editor.getLine(editor.getCursor().line);
         if (!text.trim()) {
-          new import_obsidian2.Notice("Nothing selected.");
+          new import_obsidian3.Notice("Nothing selected.");
           return;
         }
         new TransliterateModal(this.app, this, text, async (result) => {
           await navigator.clipboard.writeText(result);
-          new import_obsidian2.Notice("Romanized text copied to clipboard.");
+          new import_obsidian3.Notice("Romanized text copied to clipboard.");
         }).open();
       }
     });
@@ -8680,9 +9135,9 @@ var ArabicSupportPlugin = class extends import_obsidian2.Plugin {
       name: "Transliterate note to new note",
       callback: async () => {
         var _a, _b;
-        const view = this.app.workspace.getActiveViewOfType(import_obsidian2.MarkdownView);
+        const view = this.app.workspace.getActiveViewOfType(import_obsidian3.MarkdownView);
         if (!view || !view.file) {
-          new import_obsidian2.Notice("No active note.");
+          new import_obsidian3.Notice("No active note.");
           return;
         }
         const editor = view.editor;
@@ -8697,39 +9152,17 @@ var ArabicSupportPlugin = class extends import_obsidian2.Plugin {
         const folder = (_b = (_a = view.file.parent) == null ? void 0 : _a.path) != null ? _b : "";
         const path2 = this.uniquePath(folder, `${view.file.basename} (romanized)`);
         const file = await this.app.vault.create(path2, result);
-        new import_obsidian2.Notice(`Created ${path2}`);
+        new import_obsidian3.Notice(`Created ${path2}`);
         this.maybePromptUnknown(source, async (r) => {
           await this.app.vault.modify(file, r);
         }, opts);
       }
     });
     this.addCommand({
-      id: "check-transliteration-server",
-      name: "Check transliteration server",
-      callback: async () => {
-        var _a;
-        const health = await this.health();
-        if (!health) {
-          new import_obsidian2.Notice(`Transliteration server not reachable at ${this.settings.serverUrl}.`);
-          return;
-        }
-        const engines = ((_a = health.engines_loaded) == null ? void 0 : _a.join(", ")) || "none loaded yet";
-        const providers = health.providers ? Object.entries(health.providers).filter(([, v]) => v).map(([k]) => k).join(", ") || "none" : "unknown";
-        new import_obsidian2.Notice(`Server OK. Engines: ${engines}. LLM providers (env): ${providers}.`);
-      }
-    });
-    this.addCommand({
-      id: "start-transliteration-server",
-      name: "Start transliteration server",
-      callback: async () => {
-        await this.startTransliterationServer();
-      }
-    });
-    this.addCommand({
-      id: "stop-transliteration-server",
-      name: "Stop transliteration server",
-      callback: async () => {
-        await this.stopTransliterationServer();
+      id: "transliteration-server",
+      name: "Transliteration server\u2026",
+      callback: () => {
+        new TransliterationServerModal(this.app, this).open();
       }
     });
     this.addCommand({
@@ -8791,6 +9224,13 @@ var ArabicSupportPlugin = class extends import_obsidian2.Plugin {
       }
     });
     this.addCommand({
+      id: "add-turath-work-by-url",
+      name: "Add Turath work by URL\u2026",
+      callback: () => {
+        new TurathUrlModal(this.app, this).open();
+      }
+    });
+    this.addCommand({
       id: "copy-import-templates",
       name: "Copy import templates to vault",
       callback: async () => {
@@ -8805,11 +9245,35 @@ var ArabicSupportPlugin = class extends import_obsidian2.Plugin {
       }
     });
     this.addCommand({
+      id: "stop-source-operation",
+      name: "Stop source import or render",
+      callback: () => {
+        this.cancelSourceOperation();
+      }
+    });
+    this.addCommand({
+      id: "rerender-this-source",
+      name: "Re-render this source",
+      callback: async () => {
+        await this.rerenderCurrentSource();
+      }
+    });
+    this.registerEvent(this.app.workspace.on("file-menu", (menu, file) => {
+      void (async () => {
+        const work = await this.workForPath(file.path);
+        if (!work)
+          return;
+        menu.addItem((item) => item.setTitle("Re-render this source").setIcon("refresh-cw").onClick(() => {
+          void this.rerenderCurrentSource(file);
+        }));
+      })();
+    }));
+    this.addCommand({
       id: "apply-template-changes",
       name: "Apply template changes to imported sources",
       callback: async () => {
         const n = await this.applyTemplateChanges();
-        new import_obsidian2.Notice(n ? `Re-rendered ${n} source(s) for template changes.` : "No template changes to apply.");
+        new import_obsidian3.Notice(n ? `Re-rendered ${n} source(s) for template changes.` : "No template changes to apply.");
       }
     });
     this.addCommand({
@@ -8820,12 +9284,19 @@ var ArabicSupportPlugin = class extends import_obsidian2.Plugin {
       }
     });
     this.addCommand({
+      id: "migrate-source-naming",
+      name: "Migrate imported sources to the current naming scheme",
+      callback: async () => {
+        await this.migrateSourceNaming();
+      }
+    });
+    this.addCommand({
       id: "reconcile-sources",
       name: "Check imported sources",
       callback: async () => {
         const incomplete = await this.findIncompleteSources();
         if (!incomplete.length) {
-          new import_obsidian2.Notice("All imported sources are complete.");
+          new import_obsidian3.Notice("All imported sources are complete.");
           return;
         }
         new ReconcileSourcesModal(this.app, this, incomplete).open();
@@ -8859,6 +9330,13 @@ var ArabicSupportPlugin = class extends import_obsidian2.Plugin {
         await this.sendActiveSource();
       }
     });
+    this.addCommand({
+      id: "open-documentation",
+      name: "Open documentation",
+      callback: () => {
+        openDocs(this.app);
+      }
+    });
     window.setTimeout(() => {
       void this.maintainSources();
     }, 4e3);
@@ -8875,12 +9353,21 @@ var ArabicSupportPlugin = class extends import_obsidian2.Plugin {
       void this.pollTemplateChanges();
     }, 45e3));
     this.registerEvent(this.app.vault.on("modify", (file) => {
-      if (file instanceof import_obsidian2.TFile && this.isSourceTemplateFile(file.path)) {
+      if (file instanceof import_obsidian3.TFile && this.isSourceTemplateFile(file.path)) {
         void this.recordSourceTemplateAndCheck();
       }
     }));
   }
   onunload() {
+    var _a;
+    this.sourceCancelled = true;
+    this.sourceOperationId += 1;
+    this.sourceOperationActive = false;
+    this.sourceOperationKind = null;
+    try {
+      (_a = this.activeSourceProc) == null ? void 0 : _a.kill("SIGTERM");
+    } catch (e) {
+    }
     this.statusPanels.forEach((p) => p.destroy());
     this.statusPanels = [];
   }
@@ -8901,6 +9388,8 @@ var ArabicSupportPlugin = class extends import_obsidian2.Plugin {
       return;
     const base = (_a = this.manifest.dir) != null ? _a : `${this.app.vault.configDir}/plugins/midad-arabic-sources`;
     for (const asset of BUNDLED_ASSETS) {
+      if (asset.extract === false)
+        continue;
       try {
         const dest = `${vault}/${base}/${asset.path}`;
         if (fs2.existsSync(dest) && fs2.readFileSync(dest, "utf8") === asset.content)
@@ -8922,6 +9411,16 @@ var ArabicSupportPlugin = class extends import_obsidian2.Plugin {
     }
     return this.pythonPromise;
   }
+  resolveServerPython() {
+    var _a;
+    const configured = (_a = this.settings.pythonPath) != null ? _a : "";
+    if (configured.trim())
+      return Promise.resolve(configured.trim());
+    if (this.serverPythonPromise == null) {
+      this.serverPythonPromise = findPython3("", ["camel_tools"]).then((p) => p != null ? p : this.resolvePython());
+    }
+    return this.serverPythonPromise;
+  }
   swPdfPaths(citekey) {
     var _a, _b, _c, _d;
     const sw = (_b = (_a = this.app.plugins) == null ? void 0 : _a.plugins) == null ? void 0 : _b["scholar-weft"];
@@ -8941,7 +9440,7 @@ var ArabicSupportPlugin = class extends import_obsidian2.Plugin {
       s.open();
       s.openTabById("midad-arabic-sources");
     } else {
-      new import_obsidian2.Notice("Open Settings \u2192 Community plugins \u2192 Midad Arabic Sources.");
+      new import_obsidian3.Notice("Open Settings \u2192 Community plugins \u2192 Midad Arabic Sources.");
     }
   }
   ensureApiKey() {
@@ -8951,7 +9450,7 @@ var ArabicSupportPlugin = class extends import_obsidian2.Plugin {
     return false;
   }
   activeItem() {
-    const view = this.app.workspace.getActiveViewOfType(import_obsidian2.MarkdownView);
+    const view = this.app.workspace.getActiveViewOfType(import_obsidian3.MarkdownView);
     if (!(view == null ? void 0 : view.file))
       return null;
     const base = view.file.basename;
@@ -8990,6 +9489,9 @@ var ArabicSupportPlugin = class extends import_obsidian2.Plugin {
           ...this.settings.geminiApiKey ? { GEMINI_API_KEY: this.settings.geminiApiKey } : {}
         }
       });
+      const isSourceScript = scriptRel === this.settings.sourceImportScript || /text-source-import\.py$/.test(scriptRel);
+      if (isSourceScript)
+        this.activeSourceProc = proc;
       let buf = "";
       const handle = (chunk) => {
         buf += chunk.toString();
@@ -9009,8 +9511,14 @@ var ArabicSupportPlugin = class extends import_obsidian2.Plugin {
       };
       proc.stdout.on("data", handle);
       proc.stderr.on("data", handle);
-      proc.on("close", (code) => resolve({ code: code != null ? code : 0, lines }));
+      proc.on("close", (code) => {
+        if (this.activeSourceProc === proc)
+          this.activeSourceProc = null;
+        resolve({ code: code != null ? code : 0, lines });
+      });
       proc.on("error", (e) => {
+        if (this.activeSourceProc === proc)
+          this.activeSourceProc = null;
         onEvent({ event: "error", message: String(e) });
         resolve({ code: 1, lines });
       });
@@ -9030,10 +9538,43 @@ var ArabicSupportPlugin = class extends import_obsidian2.Plugin {
     });
     if (!result) {
       const tail = lines.slice(-3).join("  |  ");
-      new import_obsidian2.Notice(`Midad Arabic Sources: no result (exit ${code}). ${lastError || tail || "no output"}`);
+      new import_obsidian3.Notice(`Midad Arabic Sources: no result (exit ${code}). ${lastError || tail || "no output"}`);
       console.error("[midad-arabic-sources] pipeline", args, { code, lines });
     }
     return result;
+  }
+  beginSourceOperation(kind = "explicit") {
+    if (this.sourceOperationActive) {
+      if (kind === "auto" && this.sourceOperationKind === "explicit")
+        return null;
+      this.cancelSourceOperation();
+    }
+    this.sourceCancelled = false;
+    this.sourceOperationId += 1;
+    this.sourceOperationActive = true;
+    this.sourceOperationKind = kind;
+    return this.sourceOperationId;
+  }
+  isSourceCancelled(id) {
+    return this.sourceCancelled || id !== this.sourceOperationId;
+  }
+  endSourceOperation(id) {
+    if (id === this.sourceOperationId) {
+      this.sourceOperationActive = false;
+      this.sourceOperationKind = null;
+    }
+  }
+  cancelSourceOperation() {
+    var _a;
+    this.sourceCancelled = true;
+    this.sourceOperationId += 1;
+    this.sourceOperationActive = false;
+    this.sourceOperationKind = null;
+    try {
+      (_a = this.activeSourceProc) == null ? void 0 : _a.kill("SIGTERM");
+    } catch (e) {
+    }
+    new import_obsidian3.Notice("Stopping source operation\u2026");
   }
   async runWithProgress(title, args, scriptRel) {
     var _a, _b;
@@ -9054,9 +9595,9 @@ var ArabicSupportPlugin = class extends import_obsidian2.Plugin {
     panel.finish(code === 0);
     panel.addResultLinks((_b = (_a = result == null ? void 0 : result.notes) != null ? _a : result == null ? void 0 : result.sources) != null ? _b : []);
     if (code === 0)
-      new import_obsidian2.Notice(`${title}: finished.`);
+      new import_obsidian3.Notice(`${title}: finished.`);
     else
-      new import_obsidian2.Notice(`${title}: failed \u2014 use \u201CShow pipeline status\u201D to see the log.`);
+      new import_obsidian3.Notice(`${title}: failed \u2014 use \u201CShow pipeline status\u201D to see the log.`);
     return result;
   }
   async runResume(statePath) {
@@ -9074,7 +9615,7 @@ var ArabicSupportPlugin = class extends import_obsidian2.Plugin {
     });
     panel.finish(code === 0);
     panel.addResultLinks((_b = (_a = result == null ? void 0 : result.notes) != null ? _a : result == null ? void 0 : result.sources) != null ? _b : []);
-    new import_obsidian2.Notice(code === 0 ? "Resume: finished." : "Resume: failed \u2014 see the log.");
+    new import_obsidian3.Notice(code === 0 ? "Resume: finished." : "Resume: failed \u2014 see the log.");
     return result;
   }
   jobPath(title, ext) {
@@ -9106,25 +9647,112 @@ var ArabicSupportPlugin = class extends import_obsidian2.Plugin {
     try {
       const dir = `${this.vaultPath()}/.midad-arabic-sources/jobs`;
       if (!fs2.existsSync(dir)) {
-        new import_obsidian2.Notice("No pipeline logs yet.");
+        new import_obsidian3.Notice("No pipeline logs yet.");
         return;
       }
       const files = fs2.readdirSync(dir).filter((f) => f.endsWith(".log")).sort();
       if (!files.length) {
-        new import_obsidian2.Notice("No pipeline logs yet.");
+        new import_obsidian3.Notice("No pipeline logs yet.");
         return;
       }
       const name = files[files.length - 1];
       new LogModal(this.app, name, fs2.readFileSync(`${dir}/${name}`, "utf8")).open();
     } catch (e) {
-      new import_obsidian2.Notice("Could not read the pipeline logs.");
+      new import_obsidian3.Notice("Could not read the pipeline logs.");
+    }
+  }
+  async loadDefaultPrompts() {
+    if (this.promptDefaults)
+      return this.promptDefaults;
+    const result = await this.pipelineResult(["default-prompts"]);
+    const transcription = typeof (result == null ? void 0 : result.transcription) === "string" ? result.transcription : "";
+    const translation = typeof (result == null ? void 0 : result.translation) === "string" ? result.translation : "";
+    if (!transcription || !translation)
+      return null;
+    this.promptDefaults = { transcription, translation };
+    return this.promptDefaults;
+  }
+  promptPath(kind) {
+    return (0, import_obsidian3.normalizePath)(PROMPT_FILES[kind]);
+  }
+  async savePromptSet(kind, prompts) {
+    const dir = (0, import_obsidian3.normalizePath)(".midad-arabic-sources");
+    try {
+      if (!await this.app.vault.adapter.exists(dir))
+        await this.app.vault.adapter.mkdir(dir);
+    } catch (e) {
+    }
+    const data = { version: 1, prompts };
+    await this.app.vault.adapter.write(this.promptPath(kind), JSON.stringify(data, null, 2) + "\n");
+  }
+  async loadPromptSet(kind) {
+    var _a;
+    const path2 = this.promptPath(kind);
+    let prompts = [];
+    let fileExists = false;
+    try {
+      fileExists = await this.app.vault.adapter.exists(path2);
+      if (fileExists) {
+        const parsed = JSON.parse(await this.app.vault.adapter.read(path2));
+        if (Array.isArray(parsed == null ? void 0 : parsed.prompts)) {
+          prompts = parsed.prompts.filter((p) => !!p && typeof p.name === "string" && typeof p.text === "string").map((p) => ({ ...p }));
+        }
+      }
+    } catch (e) {
+      console.error("[midad-arabic-sources] prompt file", kind, e);
+      new import_obsidian3.Notice(`Could not read the ${PROMPT_KIND_LABEL[kind]} prompts file; it will be recreated.`);
+      prompts = [];
+    }
+    const seen = new Set();
+    prompts = prompts.filter((p) => {
+      const name = p.name.trim();
+      if (!name || seen.has(name))
+        return false;
+      seen.add(name);
+      return true;
+    });
+    const builtin = prompts.find((p) => p.builtin);
+    const needDefaults = !builtin || !builtin.modified;
+    const defaults = needDefaults ? await this.loadDefaultPrompts() : null;
+    const defaultText = (_a = defaults == null ? void 0 : defaults[kind]) != null ? _a : "";
+    let changed = !fileExists;
+    if (!builtin) {
+      if (!defaultText)
+        throw new Error(`Could not load the built-in ${PROMPT_KIND_LABEL[kind]} prompt.`);
+      prompts.unshift({ name: DEFAULT_PROMPT_NAME, text: defaultText, builtin: true });
+      changed = true;
+    } else if (defaultText && !builtin.modified && builtin.text !== defaultText) {
+      builtin.text = defaultText;
+      changed = true;
+    }
+    const defaultEntry = prompts.find((p) => p.builtin);
+    if (defaultEntry && !defaultEntry.text.trim() && !defaultText) {
+      throw new Error(`Could not load the built-in ${PROMPT_KIND_LABEL[kind]} prompt.`);
+    }
+    if (defaultEntry && defaultEntry.name !== DEFAULT_PROMPT_NAME) {
+      defaultEntry.name = DEFAULT_PROMPT_NAME;
+      changed = true;
+    }
+    if (changed)
+      await this.savePromptSet(kind, prompts);
+    return prompts;
+  }
+  writePromptFile(kind, text) {
+    try {
+      const path2 = this.jobPath(`Prompt ${PROMPT_KIND_LABEL[kind]}`, "txt");
+      fs2.writeFileSync(path2, text, "utf8");
+      return path2;
+    } catch (e) {
+      console.error("[midad-arabic-sources] prompt file", kind, e);
+      new import_obsidian3.Notice("Could not write the prompt file \u2014 see the developer console.");
+      return null;
     }
   }
   async openTranscribe() {
     var _a, _b;
     const item = this.activeItem();
     if (!item) {
-      new import_obsidian2.Notice("Open a literature note (@citekey) first.");
+      new import_obsidian3.Notice("Open a literature note (@citekey) first.");
       return;
     }
     if (!this.ensureApiKey())
@@ -9140,32 +9768,49 @@ var ArabicSupportPlugin = class extends import_obsidian2.Plugin {
       }
     }
     if (!pdfs.length) {
-      new import_obsidian2.Notice("No PDF attachments found for this item.");
+      new import_obsidian3.Notice("No PDF attachments found for this item.");
       return;
     }
-    new TranscribeModal(this.app, this, item.citekey, pdfs).open();
+    let prompts;
+    try {
+      prompts = await this.loadPromptSet("transcription");
+    } catch (e) {
+      console.error("[midad-arabic-sources] transcription prompts", e);
+      new import_obsidian3.Notice("Could not load the transcription prompts \u2014 see the developer console.");
+      return;
+    }
+    new TranscribeModal(this.app, this, item.citekey, pdfs, prompts).open();
   }
   async openTranslate() {
     var _a, _b, _c, _d;
     const item = this.activeItem();
     if (!item) {
-      new import_obsidian2.Notice("Open a literature note (@citekey) first.");
+      new import_obsidian3.Notice("Open a literature note (@citekey) first.");
       return;
     }
     if (!this.ensureApiKey())
       return;
     const notes = (_b = (_a = await this.pipelineResult(["list-transcriptions", item.path])) == null ? void 0 : _a.notes) != null ? _b : [];
     const pdfs = (_d = (_c = await this.pipelineResult(["list-pdfs", item.path])) == null ? void 0 : _c.pdfs) != null ? _d : [];
-    new TranslateModal(this.app, this, item.citekey, notes, pdfs).open();
+    let prompts;
+    try {
+      prompts = await this.loadPromptSet("translation");
+    } catch (e) {
+      console.error("[midad-arabic-sources] translation prompts", e);
+      new import_obsidian3.Notice("Could not load the translation prompts \u2014 see the developer console.");
+      return;
+    }
+    new TranslateModal(this.app, this, item.citekey, notes, pdfs, prompts).open();
   }
   async openReprocess() {
     var _a, _b;
     const zips = (_b = (_a = await this.pipelineResult(["list-archive"])) == null ? void 0 : _a.zips) != null ? _b : [];
     new ReprocessModal(this.app, this, zips).open();
   }
-  async listSources() {
+  async listSources(freshDirs = false) {
     let works = [];
-    const { code, lines } = await this.runScript(this.settings.sourceImportScript, ["list", "--json"], (ev) => {
+    const args = ["list", "--json", ...freshDirs ? ["--fresh-dirs"] : []];
+    const { code, lines } = await this.runScript(this.settings.sourceImportScript, args, (ev) => {
       if (ev.event === "works")
         works = ev.works;
     });
@@ -9173,11 +9818,106 @@ var ArabicSupportPlugin = class extends import_obsidian2.Plugin {
       console.error("[midad-arabic-sources] source list", { code, lines });
     return works;
   }
+  customWorksPath() {
+    return (0, import_obsidian3.normalizePath)(".midad-arabic-sources/turath-custom-works.json");
+  }
+  async loadCustomWorks() {
+    try {
+      const text = await this.app.vault.adapter.read(this.customWorksPath());
+      const data = JSON.parse(text);
+      const rows = Array.isArray(data) ? data : data.works;
+      return Array.isArray(rows) ? rows.filter((w) => w && w.id) : [];
+    } catch (e) {
+      return [];
+    }
+  }
+  async saveCustomWorks(works) {
+    await this.app.vault.adapter.write(this.customWorksPath(), JSON.stringify({ works }, null, 2));
+    this.sourceCatalog = null;
+  }
+  parseTurathId(input) {
+    const text = String(input || "").trim();
+    const m = text.match(/\/book\/(\d+)/i) || text.match(/^(\d+)$/);
+    return m ? m[1] : "";
+  }
+  async romanizeName(text) {
+    var _a;
+    const value = String(text || "").trim();
+    if (!value)
+      return "";
+    try {
+      const res = await (0, import_obsidian3.requestUrl)({
+        url: this.baseUrl() + "/transliterate",
+        method: "POST",
+        contentType: "application/json",
+        body: JSON.stringify({ text: value, engine: "bert", name: true, standalone: true, citation: true })
+      });
+      const out = (_a = res.json) == null ? void 0 : _a.romanized;
+      return typeof out === "string" ? out.trim() : "";
+    } catch (e) {
+      return "";
+    }
+  }
+  async previewTurathWork(input) {
+    var _a, _b, _c;
+    const id = this.parseTurathId(input);
+    if (!id) {
+      new import_obsidian3.Notice("Paste a Turath book URL (or its numeric ID).");
+      return null;
+    }
+    let meta;
+    try {
+      const res = await (0, import_obsidian3.requestUrl)({ url: `https://api.turath.io/book?id=${id}&include=indexes&ver=3`, method: "GET" });
+      meta = (_a = res.json) == null ? void 0 : _a.meta;
+    } catch (e) {
+      new import_obsidian3.Notice(`Could not fetch Turath book ${id}: ${e instanceof Error ? e.message : e}`);
+      return null;
+    }
+    if (!(meta == null ? void 0 : meta.name)) {
+      new import_obsidian3.Notice(`Turath book ${id} was not found (or has no metadata).`);
+      return null;
+    }
+    const cat = Number((_b = meta.cat_id) != null ? _b : 0);
+    const type = (_c = TURATH_CAT_TYPES[cat]) != null ? _c : "other";
+    const authorAr = this.authorFromInfo(meta.info);
+    const [titleRoman, authorRoman] = await Promise.all([
+      this.romanizeName(meta.name),
+      this.romanizeName(authorAr)
+    ]);
+    return {
+      id,
+      title: titleRoman ? sentenceCaseTitle(titleRoman) : meta.name,
+      arabic: meta.name,
+      author: authorRoman || authorAr,
+      type,
+      genres: genresForCat(cat, type),
+      url: `https://app.turath.io/book/${id}`
+    };
+  }
+  async saveTurathWork(work) {
+    const list = await this.loadCustomWorks();
+    const i = list.findIndex((w) => String(w.id) === work.id);
+    if (i >= 0)
+      list[i] = work;
+    else
+      list.push(work);
+    await this.saveCustomWorks(list);
+    new import_obsidian3.Notice(`Added \u201C${work.title}\u201D. Open Manage text sources to install it.`);
+  }
+  async removeTurathWork(id) {
+    await this.saveCustomWorks((await this.loadCustomWorks()).filter((w) => String(w.id) !== String(id)));
+  }
+  authorFromInfo(info) {
+    const m = String(info || "").match(/(?:المؤلف|تأليف)\s*[:：]\s*(.+)/);
+    if (!m)
+      return "";
+    return m[1].replace(/\s*\(ت.*$/, "").trim().replace(/^[-–—\s]+|[-–—\s]+$/g, "");
+  }
   async listSourcesCached(force = false) {
     var _a;
     if (!force && this.sourceCatalog)
       return this.sourceCatalog;
-    const path2 = (0, import_obsidian2.normalizePath)(".midad-arabic-sources/source-catalog.json");
+    const path2 = (0, import_obsidian3.normalizePath)(".midad-arabic-sources/source-catalog.json");
     let cached = null;
     try {
       cached = JSON.parse(await this.app.vault.adapter.read(path2));
@@ -9209,7 +9949,7 @@ var ArabicSupportPlugin = class extends import_obsidian2.Plugin {
       const works = await this.listSources();
       if (works.length) {
         this.sourceCatalog = works;
-        await this.app.vault.adapter.write((0, import_obsidian2.normalizePath)(".midad-arabic-sources/source-catalog.json"), JSON.stringify({ at: Date.now(), schema: SOURCE_CATALOG_SCHEMA, works }));
+        await this.app.vault.adapter.write((0, import_obsidian3.normalizePath)(".midad-arabic-sources/source-catalog.json"), JSON.stringify({ at: Date.now(), schema: SOURCE_CATALOG_SCHEMA, works }));
       }
     } catch (e) {
       console.error("[midad-arabic-sources] catalogue refresh", e);
@@ -9220,7 +9960,7 @@ var ArabicSupportPlugin = class extends import_obsidian2.Plugin {
   async maybeRefreshSourceCatalog() {
     var _a;
     try {
-      const text = await this.app.vault.adapter.read((0, import_obsidian2.normalizePath)(".midad-arabic-sources/source-catalog.json"));
+      const text = await this.app.vault.adapter.read((0, import_obsidian3.normalizePath)(".midad-arabic-sources/source-catalog.json"));
       const cached = JSON.parse(text);
       if (Date.now() - ((_a = cached.at) != null ? _a : 0) >= SOURCE_CATALOG_TTL)
         await this.refreshSourceCatalogInBackground();
@@ -9233,7 +9973,7 @@ var ArabicSupportPlugin = class extends import_obsidian2.Plugin {
   async loadZoteroState() {
     var _a;
     try {
-      const text = await this.app.vault.adapter.read((0, import_obsidian2.normalizePath)(this.zoteroStatePath()));
+      const text = await this.app.vault.adapter.read((0, import_obsidian3.normalizePath)(this.zoteroStatePath()));
       const parsed = JSON.parse(text);
       return (_a = parsed.items) != null ? _a : {};
     } catch (e) {
@@ -9242,13 +9982,13 @@ var ArabicSupportPlugin = class extends import_obsidian2.Plugin {
   }
   async saveZoteroState(items) {
     try {
-      await this.app.vault.adapter.write((0, import_obsidian2.normalizePath)(this.zoteroStatePath()), JSON.stringify({ items }, null, 1));
+      await this.app.vault.adapter.write((0, import_obsidian3.normalizePath)(this.zoteroStatePath()), JSON.stringify({ items }, null, 1));
     } catch (e) {
     }
   }
   async loadSourceStats() {
     try {
-      const text = await this.app.vault.adapter.read((0, import_obsidian2.normalizePath)(".midad-arabic-sources/source-stats.json"));
+      const text = await this.app.vault.adapter.read((0, import_obsidian3.normalizePath)(".midad-arabic-sources/source-stats.json"));
       const parsed = JSON.parse(text);
       return (parsed == null ? void 0 : parsed.works) && typeof parsed.works === "object" ? parsed.works : {};
     } catch (e) {
@@ -9257,15 +9997,15 @@ var ArabicSupportPlugin = class extends import_obsidian2.Plugin {
   }
   async saveSourceStats(works) {
     try {
-      await this.app.vault.adapter.write((0, import_obsidian2.normalizePath)(".midad-arabic-sources/source-stats.json"), JSON.stringify({ works }, null, 1));
+      await this.app.vault.adapter.write((0, import_obsidian3.normalizePath)(".midad-arabic-sources/source-stats.json"), JSON.stringify({ works }, null, 1));
     } catch (e) {
     }
   }
   hubUpdatedMs(work) {
     var _a, _b;
     const outRoot = this.settings.sourceImportRoot.trim() || "_7 Sources";
-    const file = this.app.vault.getAbstractFileByPath((0, import_obsidian2.normalizePath)(`${outRoot}/${work.dir}.md`));
-    const fm = file instanceof import_obsidian2.TFile ? (_a = this.app.metadataCache.getFileCache(file)) == null ? void 0 : _a.frontmatter : null;
+    const file = this.app.vault.getAbstractFileByPath((0, import_obsidian3.normalizePath)(`${outRoot}/${work.dir}.md`));
+    const fm = file instanceof import_obsidian3.TFile ? (_a = this.app.metadataCache.getFileCache(file)) == null ? void 0 : _a.frontmatter : null;
     return (_b = frontmatterTimeMs(fm == null ? void 0 : fm["updated"])) != null ? _b : 0;
   }
   workRenderedMs(work, stat) {
@@ -9306,7 +10046,7 @@ var ArabicSupportPlugin = class extends import_obsidian2.Plugin {
       if (!p)
         continue;
       try {
-        const text = await this.app.vault.adapter.read((0, import_obsidian2.normalizePath)(p));
+        const text = await this.app.vault.adapter.read((0, import_obsidian3.normalizePath)(p));
         return (_a = JSON.parse(text)) != null ? _a : {};
       } catch (e) {
       }
@@ -9460,7 +10200,7 @@ var ArabicSupportPlugin = class extends import_obsidian2.Plugin {
       text = r.text;
       hdrs = r.headers;
     } else {
-      const resp = await (0, import_obsidian2.requestUrl)({
+      const resp = await (0, import_obsidian3.requestUrl)({
         method,
         url,
         headers,
@@ -9522,7 +10262,7 @@ var ArabicSupportPlugin = class extends import_obsidian2.Plugin {
   }
   async addCitekeyUp(work, citekey) {
     const outRoot = this.settings.sourceImportRoot.trim() || "_7 Sources";
-    const hub = (0, import_obsidian2.normalizePath)(`${outRoot}/${work.dir}.md`);
+    const hub = (0, import_obsidian3.normalizePath)(`${outRoot}/${work.dir}.md`);
     try {
       const text = await this.app.vault.adapter.read(hub);
       if (text.includes(`[[@${citekey}]]`))
@@ -9633,14 +10373,14 @@ var ArabicSupportPlugin = class extends import_obsidian2.Plugin {
         note: it.extra || void 0
       };
     });
-    const path2 = (0, import_obsidian2.normalizePath)("_7 Sources/zotero-export.csl.json");
+    const path2 = (0, import_obsidian3.normalizePath)("_7 Sources/zotero-export.csl.json");
     await this.app.vault.adapter.write(path2, JSON.stringify(csl, null, 2));
     return path2;
   }
   async exportToZotero(onlyKeys, silent = false) {
     if (!this.settings.zoteroExport) {
       if (!silent)
-        new import_obsidian2.Notice("Enable Zotero export in settings first.");
+        new import_obsidian3.Notice("Enable Zotero export in settings first.");
       return;
     }
     const method = this.settings.zoteroMethod;
@@ -9649,10 +10389,10 @@ var ArabicSupportPlugin = class extends import_obsidian2.Plugin {
       pending = pending.filter((p) => onlyKeys.has(String(p.work.key)));
     if (!pending.length) {
       if (!silent)
-        new import_obsidian2.Notice("Nothing to send \u2014 the selection is already up to date.");
+        new import_obsidian3.Notice("Nothing to send \u2014 the selection is already up to date.");
       return;
     }
-    const progress = silent ? null : new import_obsidian2.Notice(`Sending ${pending.length} source(s) to Zotero\u2026`, 0);
+    const progress = silent ? null : new import_obsidian3.Notice(`Sending ${pending.length} source(s) to Zotero\u2026`, 0);
     try {
       const state = await this.loadZoteroState();
       if (method === "csl") {
@@ -9660,7 +10400,7 @@ var ArabicSupportPlugin = class extends import_obsidian2.Plugin {
         for (const p of pending)
           state[String(p.work.key)] = { itemKey: "", hash: p.hash };
         if (!silent)
-          new import_obsidian2.Notice(`Wrote ${pending.length} item(s) to ${path2}. Import it in Zotero (File \u2192 Import).`);
+          new import_obsidian3.Notice(`Wrote ${pending.length} item(s) to ${path2}. Import it in Zotero (File \u2192 Import).`);
       } else {
         progress == null ? void 0 : progress.setMessage(`Sending ${pending.length} source(s) to Zotero (${method} API)\u2026`);
         const coll = await this.ensureZoteroCollection(method);
@@ -9673,12 +10413,12 @@ var ArabicSupportPlugin = class extends import_obsidian2.Plugin {
         });
         await this.applyCitekeys(pending, keys, method);
         if (!silent)
-          new import_obsidian2.Notice(`Sent ${pending.length} item(s) to Zotero.`);
+          new import_obsidian3.Notice(`Sent ${pending.length} item(s) to Zotero.`);
       }
       await this.saveZoteroState(state);
     } catch (e) {
       if (!silent)
-        new import_obsidian2.Notice(`Zotero export failed: ${e instanceof Error ? e.message : e}`);
+        new import_obsidian3.Notice(`Zotero export failed: ${e instanceof Error ? e.message : e}`);
       console.error("[midad-arabic-sources] zotero export", e);
     } finally {
       progress == null ? void 0 : progress.hide();
@@ -9719,29 +10459,29 @@ var ArabicSupportPlugin = class extends import_obsidian2.Plugin {
   }
   async openZoteroSend() {
     if (!this.settings.zoteroExport) {
-      new import_obsidian2.Notice("Enable Zotero export in settings first.");
+      new import_obsidian3.Notice("Enable Zotero export in settings first.");
       return;
     }
     const entries = await this.zoteroEntries();
     if (!entries.length) {
-      new import_obsidian2.Notice("No installed sources to send.");
+      new import_obsidian3.Notice("No installed sources to send.");
       return;
     }
     new ZoteroSendModal(this.app, this, entries).open();
   }
   async sendActiveSource() {
     if (!this.settings.zoteroExport) {
-      new import_obsidian2.Notice("Enable Zotero export in settings first.");
+      new import_obsidian3.Notice("Enable Zotero export in settings first.");
       return;
     }
     const file = this.app.workspace.getActiveFile();
     if (!file) {
-      new import_obsidian2.Notice("Open a source note first.");
+      new import_obsidian3.Notice("Open a source note first.");
       return;
     }
     const work = await this.workForPath(file.path);
     if (!work) {
-      new import_obsidian2.Notice("That note is not an imported source.");
+      new import_obsidian3.Notice("That note is not an imported source.");
       return;
     }
     await this.exportToZotero(new Set([this.workKey(work)]));
@@ -9766,7 +10506,7 @@ var ArabicSupportPlugin = class extends import_obsidian2.Plugin {
     var _a;
     const id = (_a = key.split(":")[1]) != null ? _a : key;
     try {
-      const listed = await this.app.vault.adapter.list((0, import_obsidian2.normalizePath)(".midad-arabic-sources/cache/text-sources"));
+      const listed = await this.app.vault.adapter.list((0, import_obsidian3.normalizePath)(".midad-arabic-sources/cache/text-sources"));
       const needle = new RegExp(`_${id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?:_|\\.json$)`);
       return listed.files.some((f) => needle.test(f));
     } catch (e) {
@@ -9775,11 +10515,11 @@ var ArabicSupportPlugin = class extends import_obsidian2.Plugin {
   }
   async openManageSources(force = false) {
     var _a;
-    const loading = new import_obsidian2.Notice("Loading available sources\u2026", 0);
+    const loading = new import_obsidian3.Notice("Loading available sources\u2026", 0);
     try {
       const works = await this.listSourcesCached(force);
       if (!works.length) {
-        new import_obsidian2.Notice("No sources found. Is Python configured and the importer script present?");
+        new import_obsidian3.Notice("No sources found. Is Python configured and the importer script present?");
         return;
       }
       const manifest = await this.loadSourceManifest();
@@ -9827,9 +10567,9 @@ var ArabicSupportPlugin = class extends import_obsidian2.Plugin {
     const key = this.workKey(work);
     await this.markPendingDeletion(key);
     try {
-      const modelPath = (0, import_obsidian2.normalizePath)(`.midad-arabic-sources/source-models/${work.collection}/${work.id}.json`);
-      const hubPath = (0, import_obsidian2.normalizePath)(`${outRoot}/${dir}.md`);
-      const folderPath = (0, import_obsidian2.normalizePath)(`${outRoot}/${dir}`);
+      const modelPath = (0, import_obsidian3.normalizePath)(`.midad-arabic-sources/source-models/${work.collection}/${work.id}.json`);
+      const hubPath = (0, import_obsidian3.normalizePath)(`${outRoot}/${dir}.md`);
+      const folderPath = (0, import_obsidian3.normalizePath)(`${outRoot}/${dir}`);
       if (await adapter.exists(modelPath)) {
         try {
           await adapter.remove(modelPath);
@@ -9870,7 +10610,7 @@ var ArabicSupportPlugin = class extends import_obsidian2.Plugin {
     }
     if (problems.length) {
       console.error("[midad-arabic-sources] removeSource", key, problems);
-      new import_obsidian2.Notice(`Removed \u201C${work.title || dir}\u201D with problems: ${problems.join("; ")}`);
+      new import_obsidian3.Notice(`Removed \u201C${work.title || dir}\u201D with problems: ${problems.join("; ")}`);
     }
   }
   async listFilesUnder(path2) {
@@ -9897,13 +10637,13 @@ var ArabicSupportPlugin = class extends import_obsidian2.Plugin {
     const adapter = this.app.vault.adapter;
     let total = Number((_a = work.cache_bytes) != null ? _a : 0);
     try {
-      const s = await adapter.stat((0, import_obsidian2.normalizePath)(`.midad-arabic-sources/source-models/${work.collection}/${work.id}.json`));
+      const s = await adapter.stat((0, import_obsidian3.normalizePath)(`.midad-arabic-sources/source-models/${work.collection}/${work.id}.json`));
       if (s)
         total += s.size;
     } catch (e) {
     }
-    const hub = (0, import_obsidian2.normalizePath)(`${outRoot}/${work.dir}.md`);
-    const prefix = (0, import_obsidian2.normalizePath)(`${outRoot}/${work.dir}/`);
+    const hub = (0, import_obsidian3.normalizePath)(`${outRoot}/${work.dir}.md`);
+    const prefix = (0, import_obsidian3.normalizePath)(`${outRoot}/${work.dir}/`);
     for (const f of this.app.vault.getFiles()) {
       if (f.path === hub || f.path.startsWith(prefix))
         total += f.stat.size;
@@ -9915,17 +10655,21 @@ var ArabicSupportPlugin = class extends import_obsidian2.Plugin {
     const outRoot = this.settings.sourceImportRoot.trim() || "_7 Sources";
     const dir = String((_a = work.dir) != null ? _a : "");
     const title = String((_b = work.title) != null ? _b : "");
-    if (!dir || !title || dir === title)
+    const key = this.workKey(work);
+    if (!dir || !title || !key || dir === title)
       return;
     const adapter = this.app.vault.adapter;
-    const hub = (0, import_obsidian2.normalizePath)(`${outRoot}/${title}.md`);
+    const hub = (0, import_obsidian3.normalizePath)(`${outRoot}/${title}.md`);
     try {
       if (!await adapter.exists(hub))
         return;
-      if (!(await adapter.read(hub)).includes("text-source"))
+      const content = await adapter.read(hub);
+      if (!content.includes("text-source"))
+        return;
+      if (!content.includes(`mas-key: ${key}`) && !content.includes(`mas-key: "${key}"`))
         return;
       await adapter.remove(hub);
-      const folder = (0, import_obsidian2.normalizePath)(`${outRoot}/${title}`);
+      const folder = (0, import_obsidian3.normalizePath)(`${outRoot}/${title}`);
       if (await adapter.exists(folder))
         await adapter.rmdir(folder, true);
     } catch (e) {
@@ -9948,7 +10692,7 @@ var ArabicSupportPlugin = class extends import_obsidian2.Plugin {
       if (byKey.has(key))
         continue;
       try {
-        const rel = (0, import_obsidian2.normalizePath)(`.midad-arabic-sources/source-models/${key.replace(":", "/")}.json`);
+        const rel = (0, import_obsidian3.normalizePath)(`.midad-arabic-sources/source-models/${key.replace(":", "/")}.json`);
         const m = JSON.parse(await this.app.vault.adapter.read(rel));
         byKey.set(key, m.work);
       } catch (e) {
@@ -9959,7 +10703,7 @@ var ArabicSupportPlugin = class extends import_obsidian2.Plugin {
     const installed = works.filter((w) => this.workStatus(w) === "installed");
     const today = new Date().toISOString().slice(0, 10);
     const written = await renderMocs(this.app, templates, installed, outRoot, today, this.settings.sourceMocParent.trim() || "Sources", true);
-    const mocNames = [...new Set(installed.map((w) => typeof w.moc === "string" ? w.moc : "").filter(Boolean))].sort();
+    const mocNames = [...new Set(installed.flatMap((w) => Array.isArray(w.mocs) ? w.mocs : typeof w.moc === "string" ? [w.moc] : []))].filter(Boolean).sort();
     const parentPath = await this.updateSourceParent(templates, mocNames, today);
     if (parentPath)
       written.push(parentPath);
@@ -9988,7 +10732,7 @@ var ArabicSupportPlugin = class extends import_obsidian2.Plugin {
       }
       let model;
       try {
-        const rel = (0, import_obsidian2.normalizePath)(`.midad-arabic-sources/source-models/${work.collection}/${work.id}.json`);
+        const rel = (0, import_obsidian3.normalizePath)(`.midad-arabic-sources/source-models/${work.collection}/${work.id}.json`);
         model = JSON.parse(await this.app.vault.adapter.read(rel));
       } catch (e) {
         out.push({ work, missing: 0, total: 0, reason: "model" });
@@ -10001,7 +10745,7 @@ var ArabicSupportPlugin = class extends import_obsidian2.Plugin {
       const paths = expectedNotePaths(model, outRoot, canonicalRoot, canonicalId);
       let missing = 0;
       for (const p of paths)
-        if (!this.app.vault.getAbstractFileByPath((0, import_obsidian2.normalizePath)(p)))
+        if (!this.app.vault.getAbstractFileByPath((0, import_obsidian3.normalizePath)(p)))
           missing++;
       if (missing > 0)
         out.push({ work, missing, total: paths.length, reason: "notes" });
@@ -10010,8 +10754,8 @@ var ArabicSupportPlugin = class extends import_obsidian2.Plugin {
   }
   countWorkFiles(work) {
     const outRoot = this.settings.sourceImportRoot.trim() || "_7 Sources";
-    const hub = (0, import_obsidian2.normalizePath)(`${outRoot}/${work.dir}.md`);
-    const prefix = (0, import_obsidian2.normalizePath)(`${outRoot}/${work.dir}/`);
+    const hub = (0, import_obsidian3.normalizePath)(`${outRoot}/${work.dir}.md`);
+    const prefix = (0, import_obsidian3.normalizePath)(`${outRoot}/${work.dir}/`);
     let n = 0;
     for (const f of this.app.vault.getFiles()) {
       if (f.path === hub || f.path.startsWith(prefix))
@@ -10025,41 +10769,52 @@ var ArabicSupportPlugin = class extends import_obsidian2.Plugin {
       return;
     new ReconcileSourcesModal(this.app, this, incomplete).open();
   }
-  async reinstallSource(work) {
-    await this.importSources([`${work.collection}:${work.id}`]);
+  async reinstallSource(work, kind = "explicit") {
+    await this.importSources([`${work.collection}:${work.id}`], false, void 0, kind);
   }
-  async checkSourceUpdates() {
+  async checkSourceUpdates(kind = "explicit") {
     var _a, _b;
-    const manifest = await this.loadSourceManifest();
-    const pending = await this.loadPendingDeletions();
-    const keys = new Set();
-    for (const w of manifest)
-      keys.add(`${w.collection}:${w.id}`);
-    for (const k of await this.listModelKeys())
-      keys.add(k);
-    for (const k of pending)
-      keys.delete(k);
-    if (!keys.size) {
-      new import_obsidian2.Notice("No imported sources to check.");
+    const op = this.beginSourceOperation(kind);
+    if (op === null)
       return [];
+    try {
+      const manifest = await this.loadSourceManifest();
+      const pending = await this.loadPendingDeletions();
+      const keys = new Set();
+      for (const w of manifest)
+        keys.add(`${w.collection}:${w.id}`);
+      for (const k of await this.listModelKeys())
+        keys.add(k);
+      for (const k of pending)
+        keys.delete(k);
+      if (!keys.size) {
+        new import_obsidian3.Notice("No imported sources to check.");
+        return [];
+      }
+      const args = ["check-updates"];
+      for (const k of keys)
+        args.push("--key", k);
+      const result = await this.runWithProgress("Checking for updates", args, this.settings.sourceImportScript);
+      if (this.isSourceCancelled(op))
+        return [];
+      const changed = (_a = result == null ? void 0 : result.changed) != null ? _a : [];
+      const dateOnly = (_b = result == null ? void 0 : result.date_only) != null ? _b : [];
+      if (!changed.length && !dateOnly.length) {
+        new import_obsidian3.Notice("All imported sources are up to date.");
+        return [];
+      }
+      if (dateOnly.length)
+        await this.renderWithProgress(dateOnly, false, "Refreshing source details", op);
+      if (this.isSourceCancelled(op))
+        return [];
+      if (changed.length) {
+        new import_obsidian3.Notice(`Text changed in ${changed.length} work(s); updating\u2026`);
+        await this.importSources(changed, true, op);
+      }
+      return changed;
+    } finally {
+      this.endSourceOperation(op);
     }
-    const args = ["check-updates"];
-    for (const k of keys)
-      args.push("--key", k);
-    const result = await this.runWithProgress("Checking for updates", args, this.settings.sourceImportScript);
-    const changed = (_a = result == null ? void 0 : result.changed) != null ? _a : [];
-    const dateOnly = (_b = result == null ? void 0 : result.date_only) != null ? _b : [];
-    if (!changed.length && !dateOnly.length) {
-      new import_obsidian2.Notice("All imported sources are up to date.");
-      return [];
-    }
-    if (dateOnly.length)
-      await this.renderWithProgress(dateOnly, false, "Refreshing source details");
-    if (changed.length) {
-      new import_obsidian2.Notice(`Text changed in ${changed.length} work(s); updating\u2026`);
-      await this.importSources(changed, true);
-    }
-    return changed;
   }
   async confirmTransliteration(keys) {
     let needs;
@@ -10083,6 +10838,7 @@ var ArabicSupportPlugin = class extends import_obsidian2.Plugin {
         return true;
       if (choice === "cancel")
         return null;
+      await this.startTransliterationServer();
     }
   }
   async maybeScheduledUpdateCheck() {
@@ -10090,7 +10846,7 @@ var ArabicSupportPlugin = class extends import_obsidian2.Plugin {
     const days = (_a = this.settings.sourceUpdateCheckDays) != null ? _a : 7;
     if (!days || days <= 0)
       return;
-    const path2 = (0, import_obsidian2.normalizePath)(".midad-arabic-sources/last-update-check.json");
+    const path2 = (0, import_obsidian3.normalizePath)(".midad-arabic-sources/last-update-check.json");
     let last = 0;
     try {
       const parsed = JSON.parse(await this.app.vault.adapter.read(path2));
@@ -10104,7 +10860,7 @@ var ArabicSupportPlugin = class extends import_obsidian2.Plugin {
       await this.app.vault.adapter.write(path2, JSON.stringify({ at: Date.now() }));
     } catch (e) {
     }
-    await this.checkSourceUpdates();
+    await this.checkSourceUpdates("auto");
   }
   bundledTemplateDir() {
     var _a;
@@ -10114,50 +10870,79 @@ var ArabicSupportPlugin = class extends import_obsidian2.Plugin {
   async isSourceInstalled(dir) {
     const outRoot = this.settings.sourceImportRoot.trim() || "_7 Sources";
     try {
-      return await this.app.vault.adapter.exists((0, import_obsidian2.normalizePath)(`${outRoot}/${dir}.md`));
+      return await this.app.vault.adapter.exists((0, import_obsidian3.normalizePath)(`${outRoot}/${dir}.md`));
     } catch (e) {
       return false;
     }
   }
-  async importSources(keys, refresh = false) {
+  async importSources(keys, refresh = false, operationId, kind = "explicit") {
     var _a;
     if (!keys.length) {
-      new import_obsidian2.Notice("Select at least one source.");
+      new import_obsidian3.Notice("Select at least one source.");
       return;
     }
-    await this.unmarkPendingDeletion(...keys);
-    if (!this.settings.canonicalQuranRiw\u0101ya.trim()) {
-      const firstQuranText = keys.find((k) => k.startsWith("quran-text:"));
-      if (firstQuranText) {
-        this.settings.canonicalQuranRiw\u0101ya = firstQuranText.slice("quran-text:".length);
-        await this.saveSettings();
+    const op = operationId != null ? operationId : this.beginSourceOperation(kind);
+    if (op === null)
+      return;
+    const owns = operationId === void 0;
+    try {
+      void this.maybeWarnEngineFallback();
+      await this.unmarkPendingDeletion(...keys);
+      if (!this.settings.canonicalQuranRiw\u0101ya.trim()) {
+        const firstQuranText = keys.find((k) => k.startsWith("quran-text:"));
+        if (firstQuranText) {
+          this.settings.canonicalQuranRiw\u0101ya = firstQuranText.slice("quran-text:".length);
+          await this.saveSettings();
+        }
       }
+      const args = ["fetch"];
+      if (refresh)
+        args.push("--no-cache");
+      args.push("--canonical", this.resolveCanonicalQuran());
+      const noTransliteration = await this.confirmTransliteration(keys);
+      if (noTransliteration === null)
+        return;
+      if (noTransliteration)
+        args.push("--no-transliteration");
+      else
+        args.push("--transliteration-server", this.baseUrl());
+      for (const k of keys)
+        args.push("--key", k);
+      const allCached = !refresh && (await Promise.all(keys.map((k) => this.sourceIsCached(k)))).every(Boolean);
+      const result = await this.runWithProgress(allCached ? "Preparing sources (from cache)" : "Downloading sources", args, this.settings.sourceImportScript);
+      if (this.isSourceCancelled(op)) {
+        new import_obsidian3.Notice("Stopped. The work is not installed; install it again to resume.");
+        return;
+      }
+      const models = (_a = result == null ? void 0 : result.models) != null ? _a : [];
+      if (!models.length) {
+        new import_obsidian3.Notice("No models were produced \u2014 see the pipeline status.");
+        return;
+      }
+      const written = await this.renderWithProgress(models, false, "Rendering notes", op);
+      if (this.isSourceCancelled(op)) {
+        new import_obsidian3.Notice("Stopped. Partial notes remain; install again to finish.");
+        return;
+      }
+      new import_obsidian3.Notice(`Rendered ${written.length} notes.`);
+      void this.maybeWarnEngineFallback();
+    } finally {
+      if (owns)
+        this.endSourceOperation(op);
     }
-    const args = ["fetch"];
-    if (refresh)
-      args.push("--no-cache");
-    args.push("--canonical", this.resolveCanonicalQuran());
-    const noTransliteration = await this.confirmTransliteration(keys);
-    if (noTransliteration === null)
-      return;
-    if (noTransliteration)
-      args.push("--no-transliteration");
-    else
-      args.push("--transliteration-server", this.baseUrl());
-    for (const k of keys)
-      args.push("--key", k);
-    const allCached = !refresh && (await Promise.all(keys.map((k) => this.sourceIsCached(k)))).every(Boolean);
-    const result = await this.runWithProgress(allCached ? "Preparing sources (from cache)" : "Downloading sources", args, this.settings.sourceImportScript);
-    const models = (_a = result == null ? void 0 : result.models) != null ? _a : [];
-    if (!models.length) {
-      new import_obsidian2.Notice("No models were produced \u2014 see the pipeline status.");
-      return;
-    }
-    const written = await this.renderWithProgress(models, false, "Rendering notes");
-    new import_obsidian2.Notice(`Rendered ${written.length} notes.`);
   }
-  async renderWithProgress(modelPaths, force, title) {
-    const progress = new import_obsidian2.Notice(`${title}\u2026`, 0);
+  async renderWithProgress(modelPaths, force, title, operationId, kind = "explicit") {
+    const op = operationId != null ? operationId : this.beginSourceOperation(kind);
+    if (op === null)
+      return [];
+    const owns = operationId === void 0;
+    const progress = new import_obsidian3.Notice(`${title}\u2026`, 0);
+    const stop = progress.messageEl.createEl("button", { text: "Stop" });
+    stop.addEventListener("click", () => {
+      stop.disabled = true;
+      progress.setMessage(`${title}: stopping\u2026`);
+      this.cancelSourceOperation();
+    });
     let filesDone = 0;
     let lastIndex = -1;
     let lastSteps = 0;
@@ -10180,20 +10965,22 @@ var ArabicSupportPlugin = class extends import_obsidian2.Plugin {
         if (left > 0)
           parts.push(`${left} work${left === 1 ? "" : "s"} left`);
         progress.setMessage(`${title}: ${parts.join(" \u2014 ")}`);
-      });
+      }, () => this.isSourceCancelled(op));
     } finally {
       progress.hide();
+      if (owns)
+        this.endSourceOperation(op);
     }
   }
-  async renderModels(modelPaths, force = false, onProgress) {
-    var _a, _b, _c, _d, _e;
+  async renderModels(modelPaths, force = false, onProgress, shouldCancel) {
+    var _a, _b, _c, _d, _e, _f, _g, _h;
     const vault = this.vaultPath();
     const userFolder = this.settings.sourceTemplateFolder.trim() || null;
     let templates;
     try {
       templates = await loadTemplates(this.app, this.bundledTemplateDir(), userFolder);
     } catch (e) {
-      new import_obsidian2.Notice(`Import templates could not be loaded: ${e instanceof Error ? e.message : e}`);
+      new import_obsidian3.Notice(`Import templates could not be loaded: ${e instanceof Error ? e.message : e}`);
       return [];
     }
     const outRoot = this.settings.sourceImportRoot.trim() || "_7 Sources";
@@ -10232,6 +11019,8 @@ var ArabicSupportPlugin = class extends import_obsidian2.Plugin {
     const pubs = await this.loadPublicationMap();
     const stats = await this.loadSourceStats();
     for (let i = 0; i < batch.length; i++) {
+      if (shouldCancel == null ? void 0 : shouldCancel())
+        break;
       const model = batch[i];
       const pub = (_a = pubs[this.workKey(model.work)]) != null ? _a : {};
       model.work.publication = { ...pub, mas_note: this.masNote(pub) };
@@ -10239,21 +11028,33 @@ var ArabicSupportPlugin = class extends import_obsidian2.Plugin {
       const emit = (step, steps) => onProgress == null ? void 0 : onProgress({ index: i, total: batch.length, work, step, steps });
       emit(0, 0);
       try {
-        const w = await renderModelToVault(this.app, templates, model, outRoot, force, emit);
+        const seen = new Map(Object.entries((_c = (_b = stats[this.workKey(model.work)]) == null ? void 0 : _b.units) != null ? _c : {}));
+        const w = await renderModelToVault(this.app, templates, model, outRoot, force, emit, void 0, seen, shouldCancel);
         written.push(...w);
         const key = this.workKey(model.work);
         const now = Date.now();
-        const rendered = { ...(_c = (_b = stats[key]) == null ? void 0 : _b.rendered) != null ? _c : {} };
-        for (const tkey of this.templateKeysFor(String((_d = model.work.collection) != null ? _d : "")))
+        const rendered = { ...(_e = (_d = stats[key]) == null ? void 0 : _d.rendered) != null ? _e : {} };
+        for (const tkey of this.templateKeysFor(String((_f = model.work.collection) != null ? _f : "")))
           rendered[tkey] = now;
-        stats[key] = { ...stats[key], rendered, notes: w.length, schema: Number((_e = model.schema) != null ? _e : 0) };
+        stats[key] = {
+          ...stats[key],
+          rendered,
+          units: Object.fromEntries(seen),
+          notes: expectedNotePaths(model, outRoot, canonicalRoot, canonicalId).length,
+          schema: Number((_g = model.schema) != null ? _g : 0),
+          render: requiredRenderVersion(String((_h = model.work.collection) != null ? _h : ""))
+        };
       } catch (e) {
+        if (shouldCancel == null ? void 0 : shouldCancel())
+          break;
         console.error("[midad-arabic-sources] render failed", this.workKey(model.work), e);
-        new import_obsidian2.Notice(`Could not render ${work}: ${e instanceof Error ? e.message : e}`);
+        new import_obsidian3.Notice(`Could not render ${work}: ${e instanceof Error ? e.message : e}`);
       }
       await this.pruneRenamedFolder(model.work);
     }
     await this.saveSourceStats(stats);
+    if (shouldCancel == null ? void 0 : shouldCancel())
+      return written;
     written.push(...await this.refreshSourcesIndex());
     await this.autoSyncZotero();
     return written;
@@ -10265,9 +11066,9 @@ var ArabicSupportPlugin = class extends import_obsidian2.Plugin {
     let file = this.app.metadataCache.getFirstLinkpathDest(name, "");
     if (!file) {
       const outRoot = this.settings.sourceImportRoot.trim() || "_7 Sources";
-      const path2 = (0, import_obsidian2.normalizePath)(`${outRoot}/${name}.md`);
+      const path2 = (0, import_obsidian3.normalizePath)(`${outRoot}/${name}.md`);
       const existing = this.app.vault.getAbstractFileByPath(path2);
-      if (existing instanceof import_obsidian2.TFile)
+      if (existing instanceof import_obsidian3.TFile)
         file = existing;
       else {
         try {
@@ -10283,7 +11084,7 @@ var ArabicSupportPlugin = class extends import_obsidian2.Plugin {
   }
   async loadSourceManifest() {
     try {
-      const text = await this.app.vault.adapter.read((0, import_obsidian2.normalizePath)(".midad-arabic-sources/source-imports.json"));
+      const text = await this.app.vault.adapter.read((0, import_obsidian3.normalizePath)(".midad-arabic-sources/source-imports.json"));
       const parsed = JSON.parse(text);
       return Array.isArray(parsed.works) ? parsed.works : [];
     } catch (e) {
@@ -10292,7 +11093,7 @@ var ArabicSupportPlugin = class extends import_obsidian2.Plugin {
   }
   async saveSourceManifest(works) {
     try {
-      await this.app.vault.adapter.write((0, import_obsidian2.normalizePath)(".midad-arabic-sources/source-imports.json"), JSON.stringify({ works }, null, 1));
+      await this.app.vault.adapter.write((0, import_obsidian3.normalizePath)(".midad-arabic-sources/source-imports.json"), JSON.stringify({ works }, null, 1));
     } catch (e) {
     }
   }
@@ -10387,21 +11188,21 @@ var ArabicSupportPlugin = class extends import_obsidian2.Plugin {
   async copyImportTemplates() {
     const folder = this.settings.sourceTemplateFolder.trim();
     if (!folder) {
-      new import_obsidian2.Notice("Set a template folder in the Midad Arabic Sources settings first.");
+      new import_obsidian3.Notice("Set a template folder in the Midad Arabic Sources settings first.");
       return;
     }
     const src = this.bundledTemplateDir();
-    const dest = (0, import_obsidian2.normalizePath)(`${folder}/${TEMPLATE_FOLDER}`);
+    const dest = (0, import_obsidian3.normalizePath)(`${folder}/${TEMPLATE_FOLDER}`);
     try {
       if (!await this.app.vault.adapter.exists(dest))
         await this.app.vault.createFolder(dest);
       for (const file of Object.values(TEMPLATE_FILES)) {
-        const text = await this.app.vault.adapter.read((0, import_obsidian2.normalizePath)(`${src}/${file}`));
-        await this.app.vault.adapter.write((0, import_obsidian2.normalizePath)(`${dest}/${file}`), text);
+        const text = await this.app.vault.adapter.read((0, import_obsidian3.normalizePath)(`${src}/${file}`));
+        await this.app.vault.adapter.write((0, import_obsidian3.normalizePath)(`${dest}/${file}`), text);
       }
-      new import_obsidian2.Notice(`Copied import templates to ${dest}.`);
+      new import_obsidian3.Notice(`Copied import templates to ${dest}.`);
     } catch (e) {
-      new import_obsidian2.Notice(`Could not copy templates: ${e}`);
+      new import_obsidian3.Notice(`Could not copy templates: ${e}`);
     }
   }
   async redownloadSources() {
@@ -10409,11 +11210,126 @@ var ArabicSupportPlugin = class extends import_obsidian2.Plugin {
     const pending = await this.loadPendingDeletions();
     const keys = manifest.filter((w) => this.workStatus(w) === "installed" && !pending.has(this.workKey(w))).map((w) => this.workKey(w));
     if (!keys.length) {
-      new import_obsidian2.Notice("No installed sources to re-download.");
+      new import_obsidian3.Notice("No installed sources to re-download.");
       return;
     }
-    new import_obsidian2.Notice(`Re-downloading ${keys.length} source(s)\u2026`);
+    new import_obsidian3.Notice(`Re-downloading ${keys.length} source(s)\u2026`);
     await this.importSources(keys);
+  }
+  async migrateSourceNaming() {
+    var _a, _b;
+    const adapter = this.app.vault.adapter;
+    const canonicalId = this.resolveCanonicalQuran();
+    let catalogue;
+    try {
+      catalogue = await this.listSources(true);
+    } catch (e) {
+      new import_obsidian3.Notice(`Could not read the catalogue: ${e instanceof Error ? e.message : e}`);
+      return;
+    }
+    const targets = new Map(catalogue.map((w) => [w.key, w.dir]));
+    const manifest = await this.loadSourceManifest();
+    const pending = await this.loadPendingDeletions();
+    const migrated = [];
+    const models = [];
+    const problems = [];
+    const notice = new import_obsidian3.Notice("Checking source names\u2026", 0);
+    try {
+      for (const work of manifest) {
+        if (this.workStatus(work) !== "installed" || pending.has(this.workKey(work)))
+          continue;
+        const key = this.workKey(work);
+        const oldDir = String((_a = work.dir) != null ? _a : "");
+        const newDir = String((_b = targets.get(key)) != null ? _b : "");
+        if (!oldDir || !newDir || oldDir === newDir)
+          continue;
+        const modelRel = (0, import_obsidian3.normalizePath)(`.midad-arabic-sources/source-models/${work.collection}/${work.id}.json`);
+        let text;
+        try {
+          text = await adapter.read(modelRel);
+        } catch (e) {
+          problems.push(`${key}: model missing`);
+          continue;
+        }
+        let model;
+        try {
+          model = JSON.parse(text);
+        } catch (e) {
+          problems.push(`${key}: model unreadable`);
+          continue;
+        }
+        try {
+          await this.moveWorkFiles(work, model, oldDir, newDir, canonicalId);
+        } catch (e) {
+          problems.push(`${key}: ${e instanceof Error ? e.message : e}`);
+          continue;
+        }
+        model.work.dir = newDir;
+        await adapter.write(modelRel, JSON.stringify(model));
+        work.dir = newDir;
+        migrated.push(key);
+        models.push(`${this.vaultPath()}/${modelRel}`);
+        notice.setMessage(`Renaming sources: ${migrated.length} moved \u2014 ${newDir}`);
+      }
+    } finally {
+      notice.hide();
+    }
+    if (migrated.length) {
+      await this.saveSourceManifest(manifest);
+      await this.renderWithProgress(models, false, "Renaming imported sources");
+    }
+    const summary = migrated.length ? `Renamed ${migrated.length} source(s) and re-rendered their notes.` : "No source folders needed renaming.";
+    new import_obsidian3.Notice(problems.length ? `${summary} Problems: ${problems.join("; ")}` : summary);
+  }
+  async moveWorkFiles(work, model, oldDir, newDir, canonicalId) {
+    var _a;
+    const outRoot = this.settings.sourceImportRoot.trim() || "_7 Sources";
+    const adapter = this.app.vault.adapter;
+    const oldHub = (0, import_obsidian3.normalizePath)(`${outRoot}/${oldDir}.md`);
+    const newHub = (0, import_obsidian3.normalizePath)(`${outRoot}/${newDir}.md`);
+    const oldFolder = (0, import_obsidian3.normalizePath)(`${outRoot}/${oldDir}`);
+    const newFolder = (0, import_obsidian3.normalizePath)(`${outRoot}/${newDir}`);
+    if (await adapter.exists(newHub) || await adapter.exists(newFolder)) {
+      throw new Error(`\u201C${newDir}\u201D already exists`);
+    }
+    if (await adapter.exists(oldHub))
+      await adapter.rename(oldHub, newHub);
+    if (await adapter.exists(oldFolder))
+      await adapter.rename(oldFolder, newFolder);
+    const isDict = work.collection === "dictionary";
+    const isCanonical = work.collection === "quran-text" && String(work.id) === canonicalId;
+    if (isDict || isCanonical || !await adapter.exists(newFolder))
+      return;
+    for (const unit of model.units) {
+      const base = String((_a = unit.base) != null ? _a : "");
+      if (!base)
+        continue;
+      const from = (0, import_obsidian3.normalizePath)(`${newFolder}/${oldDir} - ${base}.md`);
+      const to = (0, import_obsidian3.normalizePath)(`${newFolder}/${newDir} - ${base}.md`);
+      if (from !== to && await adapter.exists(from))
+        await adapter.rename(from, to);
+    }
+  }
+  async rerenderCurrentSource(file) {
+    var _a, _b;
+    const target = file != null ? file : this.app.workspace.getActiveFile();
+    if (!target) {
+      new import_obsidian3.Notice("Open a note that belongs to an imported source first.");
+      return;
+    }
+    const work = await this.workForPath(target.path);
+    if (!work) {
+      new import_obsidian3.Notice("That note does not belong to an imported source.");
+      return;
+    }
+    const rel = (0, import_obsidian3.normalizePath)(`.midad-arabic-sources/source-models/${work.collection}/${work.id}.json`);
+    if (!await this.app.vault.adapter.exists(rel)) {
+      new import_obsidian3.Notice("That source has no cached model \u2014 install it again from Manage text sources.");
+      return;
+    }
+    const label = String((_b = (_a = work.title) != null ? _a : work.dir) != null ? _b : work.id);
+    await this.renderWithProgress([`${this.vaultPath()}/${rel}`], true, `Re-rendering ${label}`);
+    new import_obsidian3.Notice(`Re-rendered ${label}.`);
   }
   async rerenderAllSources() {
     const root = `${this.vaultPath()}/.midad-arabic-sources/source-models`;
@@ -10432,11 +11348,11 @@ var ArabicSupportPlugin = class extends import_obsidian2.Plugin {
     } catch (e) {
     }
     if (!models.length) {
-      new import_obsidian2.Notice("No cached source models found.");
+      new import_obsidian3.Notice("No cached source models found.");
       return [];
     }
     const written = await this.renderWithProgress(models, true, "Re-rendering imported sources");
-    new import_obsidian2.Notice(`Re-rendered ${written.length} notes.`);
+    new import_obsidian3.Notice(`Re-rendered ${written.length} notes.`);
     return written;
   }
   sourceHistoryPath() {
@@ -10450,7 +11366,8 @@ var ArabicSupportPlugin = class extends import_obsidian2.Plugin {
       quran: ["source"],
       hadith: ["hadith"],
       "quran-text": ["quran"],
-      dictionary: ["dictionary", "dictionaryIndex"]
+      dictionary: ["dictionary", "dictionaryIndex"],
+      turath: ["book", "bookVolume"]
     };
     return ["hub", ...(_a = unit[collection]) != null ? _a : ["source"]];
   }
@@ -10463,6 +11380,8 @@ var ArabicSupportPlugin = class extends import_obsidian2.Plugin {
       quran: hashString(t.quran),
       dictionary: hashString(t.dictionary),
       dictionaryIndex: hashString(t.dictionaryIndex),
+      book: hashString(t.book),
+      bookVolume: hashString(t.bookVolume),
       hub: hashString(t.hub),
       moc: hashString(t.moc),
       sources: hashString(t.sources)
@@ -10470,7 +11389,7 @@ var ArabicSupportPlugin = class extends import_obsidian2.Plugin {
   }
   async loadSourceHashes() {
     try {
-      const text = await this.app.vault.adapter.read((0, import_obsidian2.normalizePath)(this.sourceHistoryPath()));
+      const text = await this.app.vault.adapter.read((0, import_obsidian3.normalizePath)(this.sourceHistoryPath()));
       const parsed = JSON.parse(text);
       const templates = parsed == null ? void 0 : parsed.templates;
       return { templates: templates && typeof templates === "object" ? templates : {} };
@@ -10480,7 +11399,7 @@ var ArabicSupportPlugin = class extends import_obsidian2.Plugin {
   }
   async saveSourceHashes(store) {
     try {
-      await this.app.vault.adapter.write((0, import_obsidian2.normalizePath)(this.sourceHistoryPath()), JSON.stringify(store, null, 1));
+      await this.app.vault.adapter.write((0, import_obsidian3.normalizePath)(this.sourceHistoryPath()), JSON.stringify(store, null, 1));
     } catch (e) {
     }
   }
@@ -10498,7 +11417,7 @@ var ArabicSupportPlugin = class extends import_obsidian2.Plugin {
     const folder = this.settings.sourceTemplateFolder.trim();
     if (!folder)
       return false;
-    return path2.startsWith((0, import_obsidian2.normalizePath)(`${folder}/${TEMPLATE_FOLDER}/`));
+    return path2.startsWith((0, import_obsidian3.normalizePath)(`${folder}/${TEMPLATE_FOLDER}/`));
   }
   scheduleSourceTemplateCheck() {
     if (this.sourceTemplateCheckTimer != null)
@@ -10508,7 +11427,7 @@ var ArabicSupportPlugin = class extends import_obsidian2.Plugin {
     }, 3e3);
   }
   async findStaleSourceWorks() {
-    var _a;
+    var _a, _b, _c;
     const store = await this.loadSourceHashes();
     const manifest = await this.loadSourceManifest();
     const pending = await this.loadPendingDeletions();
@@ -10544,38 +11463,61 @@ var ArabicSupportPlugin = class extends import_obsidian2.Plugin {
         if (kind)
           kinds.add(kind);
       }
+      if (((_b = stat == null ? void 0 : stat.render) != null ? _b : 0) < requiredRenderVersion(String((_c = work.collection) != null ? _c : ""))) {
+        out.push({ work, kinds: null });
+        continue;
+      }
+      const modelRel = (0, import_obsidian3.normalizePath)(`.midad-arabic-sources/source-models/${work.collection}/${work.id}.json`);
+      const modelStat = await this.app.vault.adapter.stat(modelRel).catch(() => null);
+      const renderedAt = hasRendered ? Math.max(0, ...Object.values(rendered != null ? rendered : {})) : legacyMs;
+      if (renderedAt > 0 && modelStat && modelStat.mtime > 0 && modelStat.mtime > renderedAt) {
+        out.push({ work, kinds: null });
+        continue;
+      }
       if (!kinds.size && !stale("hub"))
         continue;
       out.push({ work, kinds });
     }
     return out;
   }
-  async renderStaleScoped(items) {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _i;
+  async renderStaleScoped(items, kind = "auto") {
+    var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l;
     if (!items.length)
+      return;
+    const op = this.beginSourceOperation(kind);
+    if (op === null)
       return;
     const userFolder = this.settings.sourceTemplateFolder.trim() || null;
     let templates;
     try {
       templates = await loadTemplates(this.app, this.bundledTemplateDir(), userFolder);
     } catch (e) {
-      new import_obsidian2.Notice(`Import templates could not be loaded: ${e instanceof Error ? e.message : e}`);
+      new import_obsidian3.Notice(`Import templates could not be loaded: ${e instanceof Error ? e.message : e}`);
+      this.endSourceOperation(op);
       return;
     }
     const outRoot = this.settings.sourceImportRoot.trim() || "_7 Sources";
     const canonicalId = this.resolveCanonicalQuran();
     const canonicalRoot = this.settings.canonicalQuranFolder.trim() || `${outRoot}/Quran`;
     const stats = await this.loadSourceStats();
-    const notice = new import_obsidian2.Notice("Updating imported sources\u2026", 0);
+    const notice = new import_obsidian3.Notice("Updating imported sources\u2026", 0);
+    const stop = notice.messageEl.createEl("button", { text: "Stop" });
+    stop.addEventListener("click", () => {
+      stop.disabled = true;
+      notice.setMessage("Updating imported sources: stopping\u2026");
+      this.cancelSourceOperation();
+    });
     let done = 0;
     try {
       for (const it of items) {
+        if (this.isSourceCancelled(op))
+          break;
         const label = String((_b = (_a = it.work.title) != null ? _a : it.work.dir) != null ? _b : it.work.id);
         const nth = `${++done}/${items.length}`;
         notice.setMessage(`Updating imported sources: ${nth} \u2014 ${label}`);
         const key = this.workKey(it.work);
         const legacy = this.hubUpdatedMs(it.work);
-        const rel = (0, import_obsidian2.normalizePath)(`.midad-arabic-sources/source-models/${it.work.collection}/${it.work.id}.json`);
+        const rel = (0, import_obsidian3.normalizePath)(`.midad-arabic-sources/source-models/${it.work.collection}/${it.work.id}.json`);
         try {
           if (!await this.app.vault.adapter.exists(rel))
             continue;
@@ -10590,38 +11532,52 @@ var ArabicSupportPlugin = class extends import_obsidian2.Plugin {
             const pct = steps ? Math.floor(step / steps * 100) : 0;
             notice.setMessage(`Updating imported sources: ${nth} \u2014 ${label} \u2014 ${step}/${steps} notes (${pct}%)`);
           };
-          await renderModelToVault(this.app, templates, model, outRoot, false, onStep, (_c = it.kinds) != null ? _c : void 0);
+          const seen = new Map(Object.entries((_d = (_c = stats[key]) == null ? void 0 : _c.units) != null ? _d : {}));
+          await renderModelToVault(this.app, templates, model, outRoot, false, onStep, (_e = it.kinds) != null ? _e : void 0, seen, () => this.isSourceCancelled(op));
           const now = Date.now();
-          const rendered = { ...(_e = (_d = stats[key]) == null ? void 0 : _d.rendered) != null ? _e : {} };
-          if (!((_f = stats[key]) == null ? void 0 : _f.rendered)) {
-            for (const tkey of this.templateKeysFor(String((_g = it.work.collection) != null ? _g : "")))
+          const rendered = { ...(_g = (_f = stats[key]) == null ? void 0 : _f.rendered) != null ? _g : {} };
+          if (!((_h = stats[key]) == null ? void 0 : _h.rendered)) {
+            for (const tkey of this.templateKeysFor(String((_i = it.work.collection) != null ? _i : "")))
               rendered[tkey] = legacy;
           }
           rendered["hub"] = now;
-          for (const tkey of this.templateKeysFor(String((_h = it.work.collection) != null ? _h : ""))) {
+          for (const tkey of this.templateKeysFor(String((_j = it.work.collection) != null ? _j : ""))) {
             if (tkey === "hub")
               continue;
-            const kind = SOURCE_TEMPLATE_KIND[tkey];
-            if (it.kinds === null || kind && it.kinds.has(kind))
+            const kind2 = SOURCE_TEMPLATE_KIND[tkey];
+            if (it.kinds === null || kind2 && it.kinds.has(kind2))
               rendered[tkey] = now;
           }
-          stats[key] = { ...stats[key], rendered, notes: expectedNotePaths(model, outRoot, canonicalRoot, canonicalId).length, schema: Number((_i = model.schema) != null ? _i : 0) };
+          stats[key] = {
+            ...stats[key],
+            rendered,
+            units: Object.fromEntries(seen),
+            notes: expectedNotePaths(model, outRoot, canonicalRoot, canonicalId).length,
+            schema: Number((_k = model.schema) != null ? _k : 0),
+            render: requiredRenderVersion(String((_l = model.work.collection) != null ? _l : ""))
+          };
         } catch (e) {
+          if (this.isSourceCancelled(op))
+            break;
           console.error("[midad-arabic-sources] scoped render", it.work.key, e);
         }
       }
     } finally {
       notice.hide();
       await this.saveSourceStats(stats);
+      const cancelled = this.isSourceCancelled(op);
+      this.endSourceOperation(op);
+      if (cancelled)
+        new import_obsidian3.Notice("Stopped updating sources.");
     }
   }
-  async applyTemplateChanges() {
+  async applyTemplateChanges(kind = "explicit") {
     const changedKeys = await this.recordSourceTemplate();
     const stale = await this.findStaleSourceWorks();
     const indexDirty = changedKeys.some((k) => k === "moc" || k === "sources");
     if (!stale.length && !indexDirty)
       return 0;
-    await this.renderStaleScoped(stale.map((s) => ({ work: s.work, kinds: s.kinds })));
+    await this.renderStaleScoped(stale.map((s) => ({ work: s.work, kinds: s.kinds })), kind);
     if (indexDirty)
       await this.refreshSourcesIndex();
     return stale.length;
@@ -10640,13 +11596,23 @@ var ArabicSupportPlugin = class extends import_obsidian2.Plugin {
         return h && ((_a = store.templates[k]) == null ? void 0 : _a.hash) !== h;
       });
       if (changed)
-        await this.applyTemplateChanges();
+        await this.applyTemplateChanges("auto");
     } catch (e) {
     } finally {
       this.templateCheckRunning = false;
     }
   }
   async maintainSources() {
+    if (this.maintenanceInFlight || this.awaitingSourceConsent)
+      return;
+    this.maintenanceInFlight = true;
+    try {
+      await this.maintainSourcesOnce();
+    } finally {
+      this.maintenanceInFlight = false;
+    }
+  }
+  async maintainSourcesOnce() {
     for (const w of await this.findPendingDeletions()) {
       try {
         await this.removeSource(w);
@@ -10663,20 +11629,20 @@ var ArabicSupportPlugin = class extends import_obsidian2.Plugin {
     const apply = async () => {
       const rerender = [];
       for (const it of incomplete) {
-        const rel = (0, import_obsidian2.normalizePath)(`.midad-arabic-sources/source-models/${it.work.collection}/${it.work.id}.json`);
+        const rel = (0, import_obsidian3.normalizePath)(`.midad-arabic-sources/source-models/${it.work.collection}/${it.work.id}.json`);
         if (it.reason === "notes" && await this.app.vault.adapter.exists(rel)) {
           rerender.push({ work: it.work, kinds: null });
           continue;
         }
         try {
-          await this.reinstallSource(it.work);
+          await this.reinstallSource(it.work, "auto");
         } catch (e) {
           console.error("[midad-arabic-sources] restore", it.work.key, e);
         }
       }
       for (const s of stale)
         rerender.push({ work: s.work, kinds: s.kinds });
-      await this.renderStaleScoped(rerender);
+      await this.renderStaleScoped(rerender, "auto");
       if (indexDirty)
         await this.refreshSourcesIndex();
     };
@@ -10685,15 +11651,20 @@ var ArabicSupportPlugin = class extends import_obsidian2.Plugin {
     } else if (this.settings.autoUpdateSourceTemplates === false) {
       return;
     } else {
+      this.awaitingSourceConsent = true;
       new SourceTemplateUpdateConsentModal(this.app, incomplete.length + stale.length + (indexDirty ? 1 : 0), (choice) => {
         void (async () => {
-          if (choice === "yes") {
-            this.settings.autoUpdateSourceTemplates = true;
-            await this.saveSettings();
-            await apply();
-          } else if (choice === "no") {
-            this.settings.autoUpdateSourceTemplates = false;
-            await this.saveSettings();
+          try {
+            if (choice === "yes") {
+              this.settings.autoUpdateSourceTemplates = true;
+              await this.saveSettings();
+              await apply();
+            } else if (choice === "no") {
+              this.settings.autoUpdateSourceTemplates = false;
+              await this.saveSettings();
+            }
+          } finally {
+            this.awaitingSourceConsent = false;
           }
         })();
       }).open();
@@ -10701,7 +11672,7 @@ var ArabicSupportPlugin = class extends import_obsidian2.Plugin {
   }
   async runTransliteration(text, opts) {
     var _a, _b;
-    const loading = new import_obsidian2.Notice("Transliterating\u2026", 0);
+    const loading = new import_obsidian3.Notice("Transliterating\u2026", 0);
     try {
       const body = { text };
       let path2 = "/transliterate";
@@ -10711,6 +11682,8 @@ var ArabicSupportPlugin = class extends import_obsidian2.Plugin {
         body.model = this.settings.llmModel;
         body.keep_case = opts.fullVocalization;
         body.name = this.settings.nameMode;
+        if (this.settings.llmBaseUrl)
+          body.base_url = this.settings.llmBaseUrl;
         if (this.settings.llmApiKey)
           body.api_key = this.settings.llmApiKey;
       } else {
@@ -10720,7 +11693,7 @@ var ArabicSupportPlugin = class extends import_obsidian2.Plugin {
         body.dotless_ya = this.settings.dotlessYa;
         body.name = this.settings.nameMode;
       }
-      const res = await (0, import_obsidian2.requestUrl)({
+      const res = await (0, import_obsidian3.requestUrl)({
         url: this.baseUrl() + path2,
         method: "POST",
         contentType: "application/json",
@@ -10729,12 +11702,12 @@ var ArabicSupportPlugin = class extends import_obsidian2.Plugin {
       const data = (_a = res.json) != null ? _a : {};
       this.lastUnknown = Array.isArray(data.unknown) ? data.unknown : [];
       if (data.error) {
-        new import_obsidian2.Notice(`Transliteration error: ${data.error}`);
+        new import_obsidian3.Notice(`Transliteration error: ${data.error}`);
         return null;
       }
       return (_b = data.romanized) != null ? _b : "";
     } catch (e) {
-      new import_obsidian2.Notice(`Transliteration server not reachable at ${this.settings.serverUrl}. Start it with: python3 scripts/transliterate-server.py`);
+      new import_obsidian3.Notice(`Transliteration server not reachable at ${this.settings.serverUrl}. Start it with: python3 scripts/transliterate-server.py`);
       return null;
     } finally {
       loading.hide();
@@ -10753,34 +11726,60 @@ var ArabicSupportPlugin = class extends import_obsidian2.Plugin {
   }
   async saveLexicon(entries) {
     try {
-      await (0, import_obsidian2.requestUrl)({
+      await (0, import_obsidian3.requestUrl)({
         url: this.baseUrl() + "/lexicon",
         method: "POST",
         contentType: "application/json",
         body: JSON.stringify({ entries })
       });
-      new import_obsidian2.Notice(`Lexicon updated (${Object.keys(entries).length} term(s)).`);
+      new import_obsidian3.Notice(`Lexicon updated (${Object.keys(entries).length} term(s)).`);
     } catch (e) {
-      new import_obsidian2.Notice("Could not update the lexicon.");
+      new import_obsidian3.Notice("Could not update the lexicon.");
     }
   }
   async health() {
     try {
-      const res = await (0, import_obsidian2.requestUrl)({ url: this.baseUrl() + "/health", method: "GET" });
+      const res = await (0, import_obsidian3.requestUrl)({ url: this.baseUrl() + "/health", method: "GET" });
       return res.json;
     } catch (e) {
       return null;
     }
   }
-  async startTransliterationServer() {
+  async maybeWarnEngineFallback() {
+    var _a;
+    if (this.engineFallbackWarned)
+      return;
+    const actual = (_a = await this.health()) == null ? void 0 : _a.engines_actual;
+    if (!actual || !actual.bert || actual.bert === "bert")
+      return;
+    this.engineFallbackWarned = true;
+    new import_obsidian3.Notice("Transliteration is using the MLE engine because BERT could not be loaded. For best results, install `transformers` and the BERT model data (`camel_data -i disambig-bert-unfactored-msa`), then restart the transliteration server.", 15e3);
+  }
+  async serverStatusSummary() {
     var _a, _b;
+    const h = await this.health();
+    if (!h) {
+      return { running: false, action: "start", text: `Not running at ${this.settings.serverUrl}.` };
+    }
+    const engines = ((_a = h.engines_loaded) == null ? void 0 : _a.join(", ")) || "none loaded yet";
+    const actual = (_b = h.engines_actual) != null ? _b : {};
+    const fallback = actual.bert && actual.bert !== "bert" ? ` \u2014 bert unavailable, running ${actual.bert}` : "";
+    const providers = h.providers ? Object.entries(h.providers).filter(([, v]) => v).map(([k]) => k).join(", ") || "none" : "unknown";
+    return {
+      running: true,
+      action: "stop",
+      text: `Running at ${this.settings.serverUrl}. Engines: ${engines}${fallback}. LLM providers: ${providers}.`
+    };
+  }
+  async startTransliterationServer() {
+    var _a;
     if (await this.health()) {
-      new import_obsidian2.Notice(`Transliteration server already running at ${this.settings.serverUrl}.`);
+      new import_obsidian3.Notice(`Transliteration server already running at ${this.settings.serverUrl}.`);
       return;
     }
     const vault = this.vaultPath();
     const script = this.resolveScript(this.settings.transliterationServerScript || "scripts/transliterate-server.py");
-    const python = ((_a = this.settings.pythonPath) != null ? _a : "").trim() || "python3";
+    const python = await this.resolveServerPython();
     let port = "8756";
     try {
       port = new URL(this.settings.serverUrl).port || "8756";
@@ -10804,43 +11803,64 @@ var ArabicSupportPlugin = class extends import_obsidian2.Plugin {
         stdio: logFd != null ? ["ignore", logFd, logFd] : "ignore"
       });
       proc.unref();
-      this.translitServerPid = (_b = proc.pid) != null ? _b : null;
+      this.translitServerPid = (_a = proc.pid) != null ? _a : null;
     } catch (e) {
-      new import_obsidian2.Notice(`Could not start the transliteration server: ${e}`);
+      new import_obsidian3.Notice(`Could not start the transliteration server: ${e}`);
       return;
     }
-    const loading = new import_obsidian2.Notice("Starting transliteration server\u2026", 0);
+    const loading = new import_obsidian3.Notice("Starting transliteration server\u2026", 0);
     try {
       for (let i = 0; i < 40; i++) {
         await new Promise((resolve) => window.setTimeout(resolve, 1e3));
         if (await this.health()) {
-          new import_obsidian2.Notice("Transliteration server started.");
+          new import_obsidian3.Notice("Transliteration server started.");
+          await this.maybeWarnEngineFallback();
           return;
         }
       }
-      new import_obsidian2.Notice(`Server did not become ready. See ${logPath}.`);
+      let tail = "";
+      try {
+        tail = fs2.readFileSync(logPath, "utf8").trim().split("\n").slice(-4).join("\n");
+      } catch (e) {
+      }
+      new import_obsidian3.Notice("The transliteration server did not start." + (tail ? `
+
+${tail}` : "") + "\n\nIf it mentions a missing module, set the Python path under Transliteration \u2192 Python path.", 2e4);
     } finally {
       loading.hide();
     }
   }
   async stopTransliterationServer() {
-    if (this.translitServerPid != null) {
+    var _a;
+    let pid = this.translitServerPid;
+    if (pid == null) {
+      const reported = (_a = await this.health()) == null ? void 0 : _a.pid;
+      if (typeof reported === "number")
+        pid = reported;
+    }
+    let found = true;
+    if (pid != null) {
       try {
-        process.kill(-this.translitServerPid);
+        process.kill(-pid);
       } catch (e) {
         try {
-          process.kill(this.translitServerPid);
+          process.kill(pid);
         } catch (e2) {
         }
       }
       this.translitServerPid = null;
-      new import_obsidian2.Notice("Transliteration server stopped.");
-      return;
+    } else {
+      const script = this.resolveScript(this.settings.transliterationServerScript || "scripts/transliterate-server.py");
+      found = await new Promise((resolve) => {
+        (0, import_child_process.execFile)("pkill", ["-f", script], (err) => resolve(!err));
+      });
     }
-    const name = (this.settings.transliterationServerScript || "transliterate-server.py").split("/").pop();
-    (0, import_child_process.execFile)("pkill", ["-f", String(name)], (err) => {
-      new import_obsidian2.Notice(err ? "No running transliteration server found." : "Transliteration server stopped.");
-    });
+    for (let i = 0; i < 20; i++) {
+      if (!await this.health())
+        break;
+      await new Promise((resolve) => window.setTimeout(resolve, 150));
+    }
+    new import_obsidian3.Notice(found ? "Transliteration server stopped." : "No running transliteration server found.");
   }
   baseUrl() {
     return this.settings.serverUrl.replace(/\/+$/, "");
@@ -10860,7 +11880,7 @@ var ArabicSupportPlugin = class extends import_obsidian2.Plugin {
     this.settings = Object.assign({}, DEFAULT_SETTINGS, data != null ? data : {});
     if (!this.settings.canonicalQuranRiw\u0101ya.trim()) {
       try {
-        if (await this.app.vault.adapter.exists((0, import_obsidian2.normalizePath)(".midad-arabic-sources/source-models/quran-text/hafs.json"))) {
+        if (await this.app.vault.adapter.exists((0, import_obsidian3.normalizePath)(".midad-arabic-sources/source-models/quran-text/hafs.json"))) {
           this.settings.canonicalQuranRiw\u0101ya = "hafs";
           await this.saveSettings();
         }
@@ -10872,7 +11892,43 @@ var ArabicSupportPlugin = class extends import_obsidian2.Plugin {
     await this.saveData(this.settings);
   }
 };
-var TransliterateModal = class extends import_obsidian2.Modal {
+var TransliterationServerModal = class extends import_obsidian3.Modal {
+  constructor(app, plugin) {
+    super(app);
+    this.button = null;
+    this.running = false;
+    this.plugin = plugin;
+  }
+  onOpen() {
+    this.contentEl.createEl("h2", { text: "Transliteration server" });
+    this.statusEl = this.contentEl.createEl("p", { text: "Checking\u2026" });
+    new import_obsidian3.Setting(this.contentEl).addButton((button) => {
+      this.button = button;
+      button.onClick(async () => {
+        button.setDisabled(true);
+        if (this.running)
+          await this.plugin.stopTransliterationServer();
+        else
+          await this.plugin.startTransliterationServer();
+        button.setDisabled(false);
+        await this.refresh();
+        await this.plugin.maybeWarnEngineFallback();
+      });
+    });
+    void this.refresh();
+  }
+  async refresh() {
+    var _a;
+    const status = await this.plugin.serverStatusSummary();
+    this.running = status.running;
+    this.statusEl.setText(status.text);
+    (_a = this.button) == null ? void 0 : _a.setButtonText(status.running ? "Stop server" : "Start server");
+  }
+  onClose() {
+    this.contentEl.empty();
+  }
+};
+var TransliterateModal = class extends import_obsidian3.Modal {
   constructor(app, plugin, text, onDone) {
     super(app);
     this.plugin = plugin;
@@ -10884,13 +11940,13 @@ var TransliterateModal = class extends import_obsidian2.Modal {
   onOpen() {
     const { contentEl } = this;
     contentEl.createEl("h3", { text: "Transliterate" });
-    new import_obsidian2.Setting(contentEl).setName("Full vocalization").setDesc("Retain case endings and tanw\u012Bn (pausal shortening at the end of a passage).").addToggle((toggle) => toggle.setValue(this.fullVocalization).onChange((value) => {
+    new import_obsidian3.Setting(contentEl).setName("Full vocalization").setDesc("Retain case endings and tanw\u012Bn (pausal shortening at the end of a passage).").addToggle((toggle) => toggle.setValue(this.fullVocalization).onChange((value) => {
       this.fullVocalization = value;
     }));
-    new import_obsidian2.Setting(contentEl).setName("Use LLM").setDesc("Romanize with the configured API instead of the rule engine.").addToggle((toggle) => toggle.setValue(this.useLlm).onChange((value) => {
+    new import_obsidian3.Setting(contentEl).setName("Use LLM").setDesc("Romanize with the configured API instead of the rule engine.").addToggle((toggle) => toggle.setValue(this.useLlm).onChange((value) => {
       this.useLlm = value;
     }));
-    new import_obsidian2.Setting(contentEl).addButton((button) => button.setButtonText("Transliterate").setCta().onClick(async () => {
+    new import_obsidian3.Setting(contentEl).addButton((button) => button.setButtonText("Transliterate").setCta().onClick(async () => {
       this.plugin.settings.useLlm = this.useLlm;
       this.plugin.settings.fullVocalization = this.fullVocalization;
       await this.plugin.saveSettings();
@@ -10908,7 +11964,7 @@ var TransliterateModal = class extends import_obsidian2.Modal {
     this.contentEl.empty();
   }
 };
-var LexiconModal = class extends import_obsidian2.Modal {
+var LexiconModal = class extends import_obsidian3.Modal {
   constructor(app, plugin, unknown, onSaved = null) {
     super(app);
     this.inputs = [];
@@ -10923,12 +11979,12 @@ var LexiconModal = class extends import_obsidian2.Modal {
       text: "These terms had no morphological analysis. Edit or confirm their romanization to remember them for next time."
     });
     for (const item of this.unknown) {
-      new import_obsidian2.Setting(contentEl).setName(item.term).addText((text) => {
+      new import_obsidian3.Setting(contentEl).setName(item.term).addText((text) => {
         text.setValue(item.guess || "");
         this.inputs.push({ term: item.term, comp: text });
       });
     }
-    new import_obsidian2.Setting(contentEl).addButton((button) => button.setButtonText("Save").setCta().onClick(async () => {
+    new import_obsidian3.Setting(contentEl).addButton((button) => button.setButtonText("Save").setCta().onClick(async () => {
       const entries = {};
       for (const { term, comp } of this.inputs) {
         const value = comp.getValue().trim();
@@ -10949,183 +12005,350 @@ var LexiconModal = class extends import_obsidian2.Modal {
     this.contentEl.empty();
   }
 };
-var ArabicSupportSettingTab = class extends import_obsidian2.PluginSettingTab {
+var ArabicSupportSettingTab = class extends import_obsidian3.PluginSettingTab {
   constructor(app, plugin) {
     super(app, plugin);
+    this.zoteroProbed = false;
     this.plugin = plugin;
   }
-  display() {
-    const { containerEl } = this;
-    containerEl.empty();
-    new import_obsidian2.Setting(containerEl).setName("Server URL").setDesc("Address of the resident transliteration service.").addText((text) => text.setValue(this.plugin.settings.serverUrl).onChange(async (value) => {
-      this.plugin.settings.serverUrl = value.trim();
-      await this.plugin.saveSettings();
-    }));
-    new import_obsidian2.Setting(containerEl).setName("Server script").setDesc("Path (relative to the vault) of transliterate-server.py, used by the start/stop commands.").addText((text) => text.setValue(this.plugin.settings.transliterationServerScript).onChange(async (value) => {
-      this.plugin.settings.transliterationServerScript = value.trim();
-      await this.plugin.saveSettings();
-    }));
-    new import_obsidian2.Setting(containerEl).setName("Engine").setDesc("BERT: best for unvocalized prose. MLE: faster, rougher. None: no CAMeL; fully vocalized text only.").addDropdown((drop) => drop.addOptions({ bert: "bert", mle: "mle", none: "none" }).setValue(this.plugin.settings.engine).onChange(async (value) => {
-      this.plugin.settings.engine = value;
-      await this.plugin.saveSettings();
-    }));
-    new import_obsidian2.Setting(containerEl).setName("Sun-letter assimilation").setDesc("Assimilate the article before sun letters (off means invariant al-).").addToggle((toggle) => toggle.setValue(this.plugin.settings.sunLetters).onChange(async (value) => {
-      this.plugin.settings.sunLetters = value;
-      await this.plugin.saveSettings();
-    }));
-    new import_obsidian2.Setting(containerEl).setName("Keep case endings").setDesc("Retain noun/adjective case endings and tanw\u012Bn (used automatically inside Qur\u2019an spans).").addToggle((toggle) => toggle.setValue(this.plugin.settings.keepCase).onChange(async (value) => {
-      this.plugin.settings.keepCase = value;
-      await this.plugin.saveSettings();
-    }));
-    new import_obsidian2.Setting(containerEl).setName("Name mode").setDesc("Capitalize each substantive word (for author/editor name fields).").addToggle((toggle) => toggle.setValue(this.plugin.settings.nameMode).onChange(async (value) => {
-      this.plugin.settings.nameMode = value;
-      await this.plugin.saveSettings();
-    }));
-    new import_obsidian2.Setting(containerEl).setName("Final dotless y\u0101\u02BE").setDesc("How to read a final dotless y\u0101\u02BE (\u0649).").addDropdown((drop) => drop.addOptions({ maqsura: "alif maq\u1E63\u016Bra (\u0101)", ya: "let the analysis choose" }).setValue(this.plugin.settings.dotlessYa).onChange(async (value) => {
-      this.plugin.settings.dotlessYa = value;
-      await this.plugin.saveSettings();
-    }));
-    new import_obsidian2.Setting(containerEl).setName("LLM romanization").setHeading();
-    new import_obsidian2.Setting(containerEl).setName("Provider").setDesc("Used when \u201CUse LLM\u201D is checked in the transliterate modal.").addDropdown((drop) => drop.addOptions({ gemini: "Gemini", deepseek: "DeepSeek" }).setValue(this.plugin.settings.llmProvider).onChange(async (value) => {
-      this.plugin.settings.llmProvider = value;
-      await this.plugin.saveSettings();
-    }));
-    new import_obsidian2.Setting(containerEl).setName("Model").setDesc("Model name for the selected provider.").addText((text) => text.setValue(this.plugin.settings.llmModel).onChange(async (value) => {
-      this.plugin.settings.llmModel = value.trim();
-      await this.plugin.saveSettings();
-    }));
-    new import_obsidian2.Setting(containerEl).setName("API key").setDesc("Optional. Used only if the server process has no GEMINI_API_KEY/GOOGLE_API_KEY.").addText((text) => {
-      text.setValue(this.plugin.settings.llmApiKey).onChange(async (value) => {
-        this.plugin.settings.llmApiKey = value.trim();
-        await this.plugin.saveSettings();
-      });
-      text.inputEl.type = "password";
-    });
-    new import_obsidian2.Setting(containerEl).setName("Transcription & translation pipeline").setHeading();
-    new import_obsidian2.Setting(containerEl).setName("Python executable").setDesc("Python used to run the Gemini batch pipeline scripts. Leave blank to auto-detect.").addText((text) => text.setPlaceholder("Auto-detect").setValue(this.plugin.settings.pythonPath).onChange(async (value) => {
-      this.plugin.settings.pythonPath = value.trim();
+  getControlValue(key) {
+    if (key === "autoUpdateSourceTemplates") {
+      const v = this.plugin.settings.autoUpdateSourceTemplates;
+      return v === true ? "yes" : v === false ? "no" : "ask";
+    }
+    return this.plugin.settings[key];
+  }
+  async setControlValue(key, value) {
+    const settings = this.plugin.settings;
+    if (key === "autoUpdateSourceTemplates") {
+      settings[key] = value === "ask" ? void 0 : value === "yes";
+    } else {
+      settings[key] = value;
+    }
+    if (key === "pythonPath") {
       this.plugin.pythonPromise = null;
-      await this.plugin.saveSettings();
-    }));
-    new import_obsidian2.Setting(containerEl).setName("Pipeline script").setDesc("Path (relative to the vault) of the Midad Arabic Sources pipeline orchestrator.").addText((text) => text.setValue(this.plugin.settings.pipelineScript).onChange(async (value) => {
-      this.plugin.settings.pipelineScript = value.trim();
-      await this.plugin.saveSettings();
-    }));
-    new import_obsidian2.Setting(containerEl).setName("Gemini API key").setDesc("Passed to the pipeline as GEMINI_API_KEY. Needed when Obsidian was launched without shell environment variables.").addText((text) => {
-      text.setValue(this.plugin.settings.geminiApiKey).onChange(async (value) => {
-        this.plugin.settings.geminiApiKey = value.trim();
-        await this.plugin.saveSettings();
-      });
-      text.inputEl.type = "password";
-    });
-    new import_obsidian2.Setting(containerEl).setName("Text source importer").setHeading();
-    new import_obsidian2.Setting(containerEl).setName("Importer script").setDesc("Path (relative to the vault) of the catalog-driven importer script.").addText((text) => text.setValue(this.plugin.settings.sourceImportScript).onChange(async (value) => {
-      this.plugin.settings.sourceImportScript = value.trim();
-      await this.plugin.saveSettings();
-    }));
-    new import_obsidian2.Setting(containerEl).setName("Import destination").setDesc("Folder imported works are written under (one subfolder per work).").addText((text) => text.setValue(this.plugin.settings.sourceImportRoot).onChange(async (value) => {
-      this.plugin.settings.sourceImportRoot = value.trim();
-      await this.plugin.saveSettings();
-    }));
-    new import_obsidian2.Setting(containerEl).setName("Template folder").setDesc("Vault folder holding your edited import templates (blank = bundled defaults). Use \u201CCopy import templates to vault\u201D.").addText((text) => text.setPlaceholder("Templates").setValue(this.plugin.settings.sourceTemplateFolder).onChange(async (value) => {
-      this.plugin.settings.sourceTemplateFolder = value.trim();
-      await this.plugin.saveSettings();
-    }));
-    new import_obsidian2.Setting(containerEl).setName("Canonical Qur\u02BE\u0101n riw\u0101ya").setDesc("Riw\u0101ya whose s\u016Bra notes are unprefixed (the main reference). Set once, to the first riw\u0101ya you install; edit here to switch. Qur\u02BE\u0101n citation linking in source notes requires \u1E24af\u1E63 (hafs): almost all source texts quote the \u1E24af\u1E63 reading, so citations cannot be matched against another riw\u0101ya.").addText((text) => text.setPlaceholder("\u1E24af\u1E63").setValue(this.plugin.settings.canonicalQuranRiw\u0101ya).onChange(async (value) => {
-      this.plugin.settings.canonicalQuranRiw\u0101ya = value.trim();
-      await this.plugin.saveSettings();
-    }));
-    new import_obsidian2.Setting(containerEl).setName("Canonical Qur\u02BE\u0101n folder").setDesc("Vault folder that holds the canonical riw\u0101ya's s\u016Bra notes.").addText((text) => text.setValue(this.plugin.settings.canonicalQuranFolder).onChange(async (value) => {
-      this.plugin.settings.canonicalQuranFolder = value.trim();
-      await this.plugin.saveSettings();
-    }));
-    new import_obsidian2.Setting(containerEl).setName("Sources parent note").setDesc("Top-level note every category MOC points up to. The plugin lists each category in its managed region, reusing your existing note if one exists.").addText((text) => text.setPlaceholder("Sources").setValue(this.plugin.settings.sourceMocParent).onChange(async (value) => {
-      this.plugin.settings.sourceMocParent = value.trim();
-      await this.plugin.saveSettings();
-    }));
-    new import_obsidian2.Setting(containerEl).setName("Update notes when templates change").setDesc("Re-render imported source notes automatically when an import template changes.").addDropdown((drop) => drop.addOptions({ ask: "Ask", yes: "Always", no: "Never" }).setValue(this.plugin.settings.autoUpdateSourceTemplates === true ? "yes" : this.plugin.settings.autoUpdateSourceTemplates === false ? "no" : "ask").onChange(async (value) => {
-      this.plugin.settings.autoUpdateSourceTemplates = value === "ask" ? void 0 : value === "yes";
-      await this.plugin.saveSettings();
-    }));
-    new import_obsidian2.Setting(containerEl).setName("Check repositories every \u2026 days").setDesc("How often to ask the repositories whether an imported text changed (0 = only on the command).").addText((text) => {
-      var _a;
-      return text.setPlaceholder("7").setValue(String((_a = this.plugin.settings.sourceUpdateCheckDays) != null ? _a : 7)).onChange(async (value) => {
-        const n = parseInt(value.trim(), 10);
-        this.plugin.settings.sourceUpdateCheckDays = Number.isFinite(n) ? n : 7;
-        await this.plugin.saveSettings();
-      });
-    });
-    new import_obsidian2.Setting(containerEl).setName("Zotero export").setHeading();
-    let methodSetting;
-    let keySetting;
-    let libSetting;
-    let detectSetting;
-    let autoUpdateSetting;
-    let autoCreateSetting;
-    const refreshZotero = () => {
-      const on = this.plugin.settings.zoteroExport;
-      const web = this.plugin.settings.zoteroMethod === "web";
-      methodSetting.settingEl.style.display = on ? "" : "none";
-      keySetting.settingEl.style.display = on && web ? "" : "none";
-      libSetting.settingEl.style.display = on && web ? "" : "none";
-      detectSetting.settingEl.style.display = on && web ? "" : "none";
-      autoUpdateSetting.settingEl.style.display = on ? "" : "none";
-      autoCreateSetting.settingEl.style.display = on ? "" : "none";
-    };
-    new import_obsidian2.Setting(containerEl).setName("Enable Zotero export").setDesc("Adds a command that sends imported sources to Zotero.").addToggle((t) => t.setValue(this.plugin.settings.zoteroExport).onChange(async (v) => {
-      this.plugin.settings.zoteroExport = v;
-      await this.plugin.saveSettings();
-      refreshZotero();
-    }));
-    autoUpdateSetting = new import_obsidian2.Setting(containerEl).setName("Keep Zotero items up to date").setDesc("Re-send an already-exported item whenever its bibliographic fields change \u2014 after a re-fetch, or an edit to the publication map. Items update in place; a plain template re-render changes nothing.").addToggle((t) => t.setValue(this.plugin.settings.zoteroAutoUpdate === true).onChange(async (v) => {
-      this.plugin.settings.zoteroAutoUpdate = v;
-      await this.plugin.saveSettings();
-    }));
-    autoCreateSetting = new import_obsidian2.Setting(containerEl).setName("Create Zotero items for all sources").setDesc("Send every installed source to Zotero automatically, without asking; an item you deleted there is recreated.").addToggle((t) => t.setValue(this.plugin.settings.zoteroAutoCreate === true).onChange(async (v) => {
-      this.plugin.settings.zoteroAutoCreate = v;
-      await this.plugin.saveSettings();
-      if (v)
-        void this.plugin.autoSyncZotero();
-    }));
-    methodSetting = new import_obsidian2.Setting(containerEl).setName("Method").setDesc("Local API writes to the Zotero on this computer; Web API writes to your online library; CSL-JSON downloads a file you import by hand.").addDropdown((d) => d.addOptions({
-      local: "Local API (this computer)",
-      web: "Web API (zotero.org)",
-      csl: "CSL-JSON file (manual import)"
-    }).setValue(this.plugin.settings.zoteroMethod).onChange(async (v) => {
-      this.plugin.settings.zoteroMethod = v;
-      await this.plugin.saveSettings();
-      refreshZotero();
-    }));
-    libSetting = new import_obsidian2.Setting(containerEl).setName("Zotero library ID").setDesc("Detected from the local Zotero when it is running; otherwise enter your numeric user (or group) ID.").addText((t) => t.setPlaceholder("649").setValue(this.plugin.settings.zoteroLibraryId).onChange(async (v) => {
-      this.plugin.settings.zoteroLibraryId = v.trim();
-      await this.plugin.saveSettings();
-    }));
-    keySetting = new import_obsidian2.Setting(containerEl).setName("Zotero web API key").setDesc("From Zotero.org/settings/keys, with write access. Stored in this vault's plugin data.").addText((t) => t.setValue(this.plugin.settings.zoteroApiKey).onChange(async (v) => {
-      this.plugin.settings.zoteroApiKey = v.trim();
-      await this.plugin.saveSettings();
-    }));
-    detectSetting = new import_obsidian2.Setting(containerEl).setName("Detect local Zotero").setDesc("Fill the library ID from a running local Zotero.").addButton((b) => b.setButtonText("Detect").onClick(async () => {
-      const found = await this.plugin.detectZoteroLocal();
-      if (!found) {
-        new import_obsidian2.Notice("No local Zotero found on port 23119.");
+      this.plugin.serverPythonPromise = null;
+    }
+    await this.plugin.saveSettings();
+    if (key === "zoteroExport" || key === "zoteroMethod")
+      this.refreshDomState();
+    if (key === "zoteroAutoCreate" && value === true)
+      void this.plugin.autoSyncZotero();
+  }
+  async detectZotero() {
+    const found = await this.plugin.detectZoteroLocal();
+    if (!found) {
+      new import_obsidian3.Notice("No local Zotero found on port 23119.");
+      return;
+    }
+    this.plugin.settings.zoteroLibraryId = String(found.libraryId);
+    this.plugin.settings.zoteroServerId = found.serverId;
+    await this.plugin.saveSettings();
+    this.update();
+    new import_obsidian3.Notice(`Local Zotero: library ${found.libraryId}.`);
+  }
+  probeZotero() {
+    if (this.zoteroProbed)
+      return;
+    this.zoteroProbed = true;
+    void this.plugin.detectZoteroLocal().then(async (found) => {
+      if (!found || this.plugin.settings.zoteroLibraryId)
         return;
-      }
       this.plugin.settings.zoteroLibraryId = String(found.libraryId);
       this.plugin.settings.zoteroServerId = found.serverId;
       await this.plugin.saveSettings();
-      const input = libSetting.settingEl.querySelector("input");
-      if (input)
-        input.value = String(found.libraryId);
-      new import_obsidian2.Notice(`Local Zotero: library ${found.libraryId}.`);
-    }));
-    refreshZotero();
-    void this.plugin.detectZoteroLocal().then(async (found) => {
-      if (found && !this.plugin.settings.zoteroLibraryId) {
-        this.plugin.settings.zoteroLibraryId = String(found.libraryId);
-        this.plugin.settings.zoteroServerId = found.serverId;
-        await this.plugin.saveSettings();
+      this.update();
+    });
+  }
+  getSettingDefinitions() {
+    this.probeZotero();
+    const zoteroOn = () => this.plugin.settings.zoteroExport;
+    const zoteroWeb = () => zoteroOn() && this.plugin.settings.zoteroMethod === "web";
+    const password = (get, set) => (setting) => {
+      setting.addText((text) => {
+        text.setValue(get()).onChange(async (value) => {
+          set(value.trim());
+          await this.plugin.saveSettings();
+        });
+        text.inputEl.type = "password";
+      });
+    };
+    const doc = (label, file, desc) => ({
+      name: label,
+      desc,
+      action: () => {
+        openDocs(this.app, file);
       }
     });
+    return [
+      {
+        type: "page",
+        name: "Transliteration",
+        desc: "Romanize Arabic: the resident server, the engine, and the naming options.",
+        items: [
+          {
+            name: "Transliteration server",
+            render: (setting) => {
+              const status = setting.descEl.createDiv({ text: "Checking\u2026" });
+              let running = false;
+              setting.addButton((button) => {
+                const refresh = async () => {
+                  const s = await this.plugin.serverStatusSummary();
+                  running = s.running;
+                  status.setText(s.text);
+                  button.setButtonText(s.running ? "Stop server" : "Start server");
+                };
+                button.onClick(async () => {
+                  button.setDisabled(true);
+                  if (running)
+                    await this.plugin.stopTransliterationServer();
+                  else
+                    await this.plugin.startTransliterationServer();
+                  button.setDisabled(false);
+                  await refresh();
+                  await this.plugin.maybeWarnEngineFallback();
+                });
+                void refresh();
+              });
+            }
+          },
+          {
+            name: "Server URL",
+            desc: "Address of the resident transliteration service.",
+            control: { type: "text", key: "serverUrl", placeholder: "http://127.0.0.1:8756" }
+          },
+          {
+            name: "Server script",
+            desc: "Path (relative to the vault) of transliterate-server.py, used by the start/stop commands.",
+            control: { type: "text", key: "transliterationServerScript" }
+          },
+          {
+            name: "Engine",
+            desc: "BERT (default): best for unvocalized prose; this is what the plugin is tuned for. MLE: opt-in only, rougher on classical text, and requires the calima MLE data. None: no CAMeL; fully vocalized text only.",
+            control: { type: "dropdown", key: "engine", options: { bert: "bert", mle: "mle", none: "none" } }
+          },
+          {
+            name: "Sun-letter assimilation",
+            desc: "Assimilate the article before sun letters (off means invariant al-).",
+            control: { type: "toggle", key: "sunLetters" }
+          },
+          {
+            name: "Keep case endings",
+            desc: "Retain noun/adjective case endings and tanw\u012Bn (used automatically inside Qur\u2019an spans).",
+            control: { type: "toggle", key: "keepCase" }
+          },
+          {
+            name: "Name mode",
+            desc: "Capitalize each substantive word (for author/editor name fields).",
+            control: { type: "toggle", key: "nameMode" }
+          },
+          {
+            name: "Final dotless y\u0101\u02BE",
+            desc: "How to read a final dotless y\u0101\u02BE (\u0649).",
+            control: {
+              type: "dropdown",
+              key: "dotlessYa",
+              options: { maqsura: "alif maq\u1E63\u016Bra (\u0101)", ya: "let the analysis choose" }
+            }
+          },
+          {
+            type: "page",
+            name: "LLM romanization",
+            desc: "Used when \u201CUse LLM\u201D is checked in the transliterate dialog.",
+            items: [
+              {
+                name: "Provider",
+                desc: "The API to call for LLM romanization. OpenAI-compatible covers OpenAI, OpenRouter, Groq, and local servers.",
+                control: {
+                  type: "dropdown",
+                  key: "llmProvider",
+                  options: { gemini: "Gemini", deepseek: "DeepSeek", openai: "OpenAI-compatible" }
+                }
+              },
+              {
+                name: "Model",
+                desc: "Model name for the selected provider (for OpenAI-compatible: e.g. gpt-4o-mini, or your local model name).",
+                control: { type: "text", key: "llmModel" }
+              },
+              {
+                name: "Base URL",
+                desc: "OpenAI-compatible only: the API endpoint, e.g. https://api.openai.com/v1 or http://localhost:11434/v1. Empty uses the server's OPENAI_BASE_URL.",
+                control: { type: "text", key: "llmBaseUrl" }
+              },
+              {
+                name: "API key",
+                desc: "Optional. Used only if the server process has no key in its environment.",
+                render: password(() => this.plugin.settings.llmApiKey, (v) => {
+                  this.plugin.settings.llmApiKey = v;
+                })
+              }
+            ]
+          },
+          doc("Transliteration guide", "transliteration.md", "Commands, engines, the server, the lexicon, and LLM romanization.")
+        ]
+      },
+      {
+        type: "page",
+        name: "Transcription and translation",
+        desc: "The Gemini OCR and translation pipeline for scanned PDFs.",
+        items: [
+          {
+            name: "Python executable",
+            desc: "Python used to run the Gemini batch pipeline scripts. Leave blank to auto-detect.",
+            control: { type: "text", key: "pythonPath", placeholder: "Auto-detect" }
+          },
+          {
+            name: "Pipeline script",
+            desc: "Path (relative to the vault) of the Midad Arabic Sources pipeline orchestrator.",
+            control: { type: "text", key: "pipelineScript" }
+          },
+          {
+            name: "Gemini API key",
+            desc: "Passed to the pipeline as GEMINI_API_KEY. Needed when Obsidian was launched without shell environment variables.",
+            render: password(() => this.plugin.settings.geminiApiKey, (v) => {
+              this.plugin.settings.geminiApiKey = v;
+            })
+          },
+          doc("Transcription guide", "transcription.md", "The Gemini OCR pipeline, its post-processing, status, and reprocessing."),
+          doc("Translation guide", "translation.md", "Translating a finished transcription.")
+        ]
+      },
+      {
+        type: "page",
+        name: "Document import",
+        desc: "Install, name, and maintain imported text sources.",
+        items: [
+          {
+            name: "Importer script",
+            desc: "Path (relative to the vault) of the catalog-driven importer script.",
+            control: { type: "text", key: "sourceImportScript" }
+          },
+          {
+            name: "Import destination",
+            desc: "Folder imported works are written under (one subfolder per work).",
+            control: { type: "text", key: "sourceImportRoot" }
+          },
+          {
+            name: "Template folder",
+            desc: "Vault folder holding your edited import templates (blank = bundled defaults). Use \u201CCopy import templates to vault\u201D.",
+            control: { type: "text", key: "sourceTemplateFolder", placeholder: "Templates" }
+          },
+          {
+            name: "Canonical Qur\u02BE\u0101n riw\u0101ya",
+            desc: "Riw\u0101ya whose s\u016Bra notes are unprefixed (the main reference). Set once, to the first riw\u0101ya you install; edit here to switch. Qur\u02BE\u0101n citation linking in source notes requires \u1E24af\u1E63 (hafs): almost all source texts quote the \u1E24af\u1E63 reading, so citations cannot be matched against another riw\u0101ya.",
+            control: { type: "text", key: "canonicalQuranRiw\u0101ya", placeholder: "\u1E24af\u1E63" }
+          },
+          {
+            name: "Canonical Qur\u02BE\u0101n folder",
+            desc: "Vault folder that holds the canonical riw\u0101ya\u2019s s\u016Bra notes.",
+            control: { type: "text", key: "canonicalQuranFolder" }
+          },
+          {
+            name: "Sources parent note",
+            desc: "Top-level note every category MOC points up to. The plugin lists each category in its managed region, reusing your existing note if one exists.",
+            control: { type: "text", key: "sourceMocParent", placeholder: "Sources" }
+          },
+          {
+            name: "Update notes when templates change",
+            desc: "Re-render imported source notes automatically when an import template changes.",
+            control: {
+              type: "dropdown",
+              key: "autoUpdateSourceTemplates",
+              options: { ask: "Ask", yes: "Always", no: "Never" }
+            }
+          },
+          {
+            name: "Check repositories every \u2026 days",
+            desc: "How often to ask the repositories whether an imported text changed (0 = only on the command).",
+            control: { type: "number", key: "sourceUpdateCheckDays", defaultValue: 7, placeholder: "7", min: 0 }
+          },
+          doc("Document import guide", "document-import.md", "Collections, the Manage text sources dialogue, naming, and updates."),
+          doc("Templates guide", "templates.md", "The ETA templates and the render-model reference.")
+        ]
+      },
+      {
+        type: "page",
+        name: "Zotero",
+        desc: "Send imported works to your Zotero library, and keep them up to date.",
+        items: [
+          {
+            name: "Enable Zotero export",
+            desc: "Adds commands that send imported sources to Zotero.",
+            control: { type: "toggle", key: "zoteroExport" }
+          },
+          {
+            name: "Method",
+            desc: "Local API writes to the Zotero on this computer; Web API writes to your online library; CSL-JSON downloads a file you import by hand.",
+            visible: zoteroOn,
+            control: {
+              type: "dropdown",
+              key: "zoteroMethod",
+              options: {
+                local: "Local API (this computer)",
+                web: "Web API (zotero.org)",
+                csl: "CSL-JSON file (manual import)"
+              }
+            }
+          },
+          {
+            name: "Zotero library ID",
+            desc: "Detected from the local Zotero when it is running; otherwise enter your numeric user (or group) ID.",
+            visible: zoteroWeb,
+            control: { type: "text", key: "zoteroLibraryId", placeholder: "649" }
+          },
+          {
+            name: "Zotero web API key",
+            desc: "From Zotero.org/settings/keys, with write access. Stored in this vault\u2019s plugin data.",
+            visible: zoteroWeb,
+            render: password(() => this.plugin.settings.zoteroApiKey, (v) => {
+              this.plugin.settings.zoteroApiKey = v;
+            })
+          },
+          {
+            name: "Detect local Zotero",
+            desc: "Fill the library ID from a running local Zotero.",
+            visible: zoteroWeb,
+            action: () => {
+              void this.detectZotero();
+            }
+          },
+          {
+            name: "Keep Zotero items up to date",
+            desc: "Re-send an already-exported item whenever its bibliographic fields change \u2014 after a re-fetch, or an edit to the publication map. Items update in place; a plain template re-render changes nothing.",
+            visible: zoteroOn,
+            control: { type: "toggle", key: "zoteroAutoUpdate" }
+          },
+          {
+            name: "Create Zotero items for all sources",
+            desc: "Send every installed source to Zotero automatically, without asking; an item you deleted there is recreated.",
+            visible: zoteroOn,
+            control: { type: "toggle", key: "zoteroAutoCreate" }
+          },
+          doc("Zotero guide", "zotero.md", "Methods, the collection and tag, update-in-place, and the publication map.")
+        ]
+      },
+      {
+        type: "page",
+        name: "Documentation",
+        desc: "Read the plugin's guides in Obsidian.",
+        items: [
+          {
+            name: "Open documentation",
+            desc: "Read the plugin's guides in Obsidian.",
+            action: () => {
+              openDocs(this.app);
+            }
+          },
+          ...getDocs().map((entry) => ({
+            name: entry.title,
+            desc: entry.name === "README.md" ? "The plugin at a glance." : `docs/${entry.name}`,
+            action: () => {
+              openDocs(this.app, entry.name);
+            }
+          }))
+        ]
+      }
+    ];
   }
 };
 function formatEvent(ev) {
@@ -11243,7 +12466,7 @@ var StatusPanel = class {
     const vault = (_b = (_a = adapter == null ? void 0 : adapter.getBasePath) == null ? void 0 : _a.call(adapter)) != null ? _b : "";
     const rel = vault && path2.startsWith(vault) ? path2.slice(vault.length + 1) : path2;
     const file = this.app.vault.getAbstractFileByPath(rel);
-    if (file instanceof import_obsidian2.TFile)
+    if (file instanceof import_obsidian3.TFile)
       void this.app.workspace.getLeaf("tab").openFile(file);
     else
       void this.app.workspace.openLinkText(rel, "", true);
@@ -11270,7 +12493,7 @@ var StatusPanel = class {
       this.onClose();
   }
 };
-var LogModal = class extends import_obsidian2.Modal {
+var LogModal = class extends import_obsidian3.Modal {
   constructor(app, title, text) {
     super(app);
     this.title = title;
@@ -11292,7 +12515,7 @@ var LogModal = class extends import_obsidian2.Modal {
     this.contentEl.empty();
   }
 };
-var ApiKeyModal = class extends import_obsidian2.Modal {
+var ApiKeyModal = class extends import_obsidian3.Modal {
   constructor(app, plugin) {
     super(app);
     this.plugin = plugin;
@@ -11306,7 +12529,7 @@ var ApiKeyModal = class extends import_obsidian2.Modal {
     contentEl.createEl("p", {
       text: "Set it in the Midad Arabic Sources plugin settings (recommended): it is passed to the pipeline automatically. Alternatively, provide GEMINI_API_KEY (or GOOGLE_API_KEY) in the environment Obsidian was launched from."
     });
-    new import_obsidian2.Setting(contentEl).addButton((b) => b.setButtonText("Open plugin settings").setCta().onClick(() => {
+    new import_obsidian3.Setting(contentEl).addButton((b) => b.setButtonText("Open plugin settings").setCta().onClick(() => {
       this.close();
       this.plugin.openSettings();
     })).addButton((b) => b.setButtonText("Cancel").onClick(() => this.close()));
@@ -11315,7 +12538,7 @@ var ApiKeyModal = class extends import_obsidian2.Modal {
     this.contentEl.empty();
   }
 };
-var ResumeModal = class extends import_obsidian2.Modal {
+var ResumeModal = class extends import_obsidian3.Modal {
   constructor(app, plugin, state) {
     super(app);
     this.plugin = plugin;
@@ -11334,7 +12557,7 @@ var ResumeModal = class extends import_obsidian2.Modal {
       overflow: "auto",
       fontSize: "var(--font-ui-smaller)"
     });
-    const setting = new import_obsidian2.Setting(contentEl);
+    const setting = new import_obsidian3.Setting(contentEl);
     let alive = false;
     try {
       if (this.state.pid) {
@@ -11362,13 +12585,209 @@ var ResumeModal = class extends import_obsidian2.Modal {
     this.contentEl.empty();
   }
 };
-var TranscribeModal = class extends import_obsidian2.Modal {
-  constructor(app, plugin, citekey, pdfs) {
+function uniquePromptName(base, entries) {
+  const taken = new Set(entries.map((e) => e.name));
+  if (!taken.has(base))
+    return base;
+  for (let i = 2; ; i++) {
+    const candidate = `${base} ${i}`;
+    if (!taken.has(candidate))
+      return candidate;
+  }
+}
+var PromptPicker = class {
+  constructor(plugin, kind, containerEl, entries, opts = {}) {
+    this.deleteButton = null;
+    var _a, _b, _c;
+    this.plugin = plugin;
+    this.kind = kind;
+    this.containerEl = containerEl;
+    this.entries = entries;
+    this.onSelectAll = opts.onSelectAll;
+    this.onSelectNone = opts.onSelectNone;
+    const builtin = entries.find((e) => e.builtin);
+    this.selectedName = (_c = (_b = builtin == null ? void 0 : builtin.name) != null ? _b : (_a = entries[0]) == null ? void 0 : _a.name) != null ? _c : "";
+    this.render();
+  }
+  selectedEntry() {
+    var _a, _b;
+    return (_b = (_a = this.entries.find((e) => e.name === this.selectedName)) != null ? _a : this.entries[0]) != null ? _b : null;
+  }
+  render() {
+    this.containerEl.empty();
+    const row = new import_obsidian3.Setting(this.containerEl).setName("Prompt");
+    row.addDropdown((dd) => {
+      for (const p of this.entries)
+        dd.addOption(p.name, p.name);
+      dd.setValue(this.selectedName);
+      dd.onChange((value) => {
+        this.selectedName = value;
+        this.updateDeleteButton();
+      });
+    });
+    row.addButton((b) => b.setButtonText("Select all").onClick(() => {
+      var _a;
+      return (_a = this.onSelectAll) == null ? void 0 : _a.call(this);
+    }));
+    row.addButton((b) => b.setButtonText("Select none").onClick(() => {
+      var _a;
+      return (_a = this.onSelectNone) == null ? void 0 : _a.call(this);
+    }));
+    const actions = new import_obsidian3.Setting(this.containerEl).setName("Manage prompts");
+    actions.addButton((b) => b.setButtonText("Modify selected").onClick(() => this.openEditor("edit")));
+    actions.addButton((b) => b.setButtonText("Create a new prompt from selected").onClick(() => this.openEditor("new")));
+    actions.addButton((b) => {
+      this.deleteButton = b;
+      b.setButtonText("Delete selected prompt").onClick(() => {
+        void this.deleteSelected().catch((e) => {
+          console.error("[midad-arabic-sources] delete prompt", e);
+          new import_obsidian3.Notice("Could not delete the prompt \u2014 see the developer console.");
+        });
+      });
+    });
+    this.updateDeleteButton();
+  }
+  updateDeleteButton() {
+    var _a, _b;
+    (_b = this.deleteButton) == null ? void 0 : _b.setDisabled(((_a = this.selectedEntry()) == null ? void 0 : _a.builtin) === true);
+  }
+  openEditor(mode) {
+    const source = this.selectedEntry();
+    if (!source)
+      return;
+    const initialName = mode === "new" ? uniquePromptName(`${source.name} copy`, this.entries) : source.name;
+    new PromptEditorModal(this.plugin, this.kind, mode, source, initialName, async (savedName) => {
+      var _a, _b, _c, _d;
+      this.entries = await this.plugin.loadPromptSet(this.kind);
+      this.selectedName = this.entries.some((e) => e.name === savedName) ? savedName : (_d = (_c = (_a = this.entries.find((e) => e.builtin)) == null ? void 0 : _a.name) != null ? _c : (_b = this.entries[0]) == null ? void 0 : _b.name) != null ? _d : "";
+      this.render();
+    }).open();
+  }
+  async deleteSelected() {
+    var _a, _b, _c, _d;
+    const entry = this.selectedEntry();
+    if (!entry || entry.builtin)
+      return;
+    const entries = await this.plugin.loadPromptSet(this.kind);
+    const remaining = entries.filter((e) => e.name !== entry.name);
+    await this.plugin.savePromptSet(this.kind, remaining);
+    this.entries = remaining;
+    this.selectedName = (_d = (_c = (_a = remaining.find((e) => e.builtin)) == null ? void 0 : _a.name) != null ? _c : (_b = remaining[0]) == null ? void 0 : _b.name) != null ? _d : "";
+    this.render();
+    new import_obsidian3.Notice(`Deleted prompt \u201C${entry.name}\u201D.`);
+  }
+};
+var PromptEditorModal = class extends import_obsidian3.Modal {
+  constructor(plugin, kind, mode, source, initialName, onSaved) {
+    super(plugin.app);
+    this.plugin = plugin;
+    this.kind = kind;
+    this.mode = mode;
+    this.source = source;
+    this.originalName = source.name;
+    this.onSaved = onSaved;
+    this.name = initialName;
+    this.text = source.text;
+  }
+  onOpen() {
+    this.modalEl.addClass("mas-prompt-editor-modal");
+    const { contentEl } = this;
+    const kindLabel = PROMPT_KIND_LABEL[this.kind];
+    contentEl.createEl("h3", {
+      text: this.mode === "new" ? `New ${kindLabel} prompt` : `Edit ${kindLabel} prompt`
+    });
+    contentEl.createEl("p", {
+      text: this.mode === "edit" && this.source.builtin ? "This is the built-in default. Save updates it in place (its name stays \u201CDefault prompt\u201D); Save as keeps it and adds a copy under the name above. It cannot be deleted." : "Save replaces this prompt; Save as adds a copy under the name above."
+    });
+    contentEl.createEl("p", {
+      text: `The text below is appended to the pipeline's built-in page-formatting and ${kindLabel} instructions. Describe the document and any text-specific handling here.`
+    });
+    new import_obsidian3.Setting(contentEl).setName("Name").addText((t) => {
+      t.setValue(this.name).onChange((v) => this.name = v);
+      t.inputEl.setCssStyles({ width: "100%" });
+    });
+    const textarea = contentEl.createEl("textarea");
+    textarea.value = this.text;
+    textarea.spellcheck = false;
+    textarea.setCssStyles({
+      width: "100%",
+      minHeight: "48vh",
+      resize: "vertical",
+      fontFamily: "var(--font-monospace)",
+      fontSize: "var(--font-ui-smaller)",
+      lineHeight: "1.45"
+    });
+    textarea.addEventListener("input", () => this.text = textarea.value);
+    new import_obsidian3.Setting(contentEl).addButton((b) => b.setButtonText("Save").setCta().onClick(() => {
+      void this.save(false).catch((e) => {
+        console.error("[midad-arabic-sources] save prompt", e);
+        new import_obsidian3.Notice("Could not save the prompt \u2014 see the developer console.");
+      });
+    })).addButton((b) => b.setButtonText("Save as").onClick(() => {
+      void this.save(true).catch((e) => {
+        console.error("[midad-arabic-sources] save prompt copy", e);
+        new import_obsidian3.Notice("Could not save the prompt \u2014 see the developer console.");
+      });
+    })).addButton((b) => b.setButtonText("Cancel").onClick(() => this.close()));
+  }
+  async save(asCopy) {
+    const name = this.name.trim();
+    if (!name) {
+      new import_obsidian3.Notice("Enter a prompt name.");
+      return;
+    }
+    if (!this.text.trim()) {
+      new import_obsidian3.Notice("The prompt cannot be empty.");
+      return;
+    }
+    if (asCopy && this.mode === "edit" && name === this.originalName) {
+      new import_obsidian3.Notice("Enter a different name in the name field to save a copy.");
+      return;
+    }
+    const entries = await this.plugin.loadPromptSet(this.kind);
+    const existing = entries.find((e) => e.name === name);
+    if (this.mode === "edit" && !asCopy) {
+      const target = entries.find((e) => e.name === this.originalName);
+      if (!target) {
+        new import_obsidian3.Notice("This prompt no longer exists.");
+        return;
+      }
+      if (!target.builtin && name !== this.originalName && existing) {
+        new import_obsidian3.Notice(`A prompt named \u201C${name}\u201D already exists.`);
+        return;
+      }
+      target.text = this.text;
+      if (target.builtin) {
+        target.name = DEFAULT_PROMPT_NAME;
+        target.modified = true;
+      } else {
+        target.name = name;
+      }
+      await this.plugin.savePromptSet(this.kind, entries);
+      await this.onSaved(target.name);
+    } else {
+      if (existing) {
+        new import_obsidian3.Notice(`A prompt named \u201C${name}\u201D already exists.`);
+        return;
+      }
+      entries.push({ name, text: this.text });
+      await this.plugin.savePromptSet(this.kind, entries);
+      await this.onSaved(name);
+    }
+    this.close();
+  }
+  onClose() {
+    this.contentEl.empty();
+  }
+};
+var TranscribeModal = class extends import_obsidian3.Modal {
+  constructor(app, plugin, citekey, pdfs, prompts) {
     super(app);
     this.checks = [];
     this.plugin = plugin;
     this.citekey = citekey;
     this.pdfs = pdfs;
+    this.prompts = prompts;
   }
   onOpen() {
     const { contentEl } = this;
@@ -11376,7 +12795,11 @@ var TranscribeModal = class extends import_obsidian2.Modal {
     contentEl.createEl("p", {
       text: "Choose the PDF file(s) to transcribe. The volume is inferred from the filename and can be edited."
     });
-    new import_obsidian2.Setting(contentEl).addButton((b) => b.setButtonText("Select all").onClick(() => this.checks.forEach((c) => c.el.checked = !c.el.disabled))).addButton((b) => b.setButtonText("Select none").onClick(() => this.checks.forEach((c) => c.el.checked = false)));
+    const promptRow = contentEl.createDiv();
+    this.picker = new PromptPicker(this.plugin, "transcription", promptRow, this.prompts, {
+      onSelectAll: () => this.checks.forEach((c) => c.el.checked = !c.el.disabled),
+      onSelectNone: () => this.checks.forEach((c) => c.el.checked = false)
+    });
     for (const pdf of this.pdfs) {
       const row = contentEl.createDiv();
       const cb = row.createEl("input");
@@ -11385,15 +12808,20 @@ var TranscribeModal = class extends import_obsidian2.Modal {
       cb.disabled = !pdf.exists;
       row.createSpan({ text: ` ${pdf.filename}${pdf.exists ? "" : " (file not found)"} ` });
       row.createSpan({ text: "vol." });
-      const vol = new import_obsidian2.TextComponent(row);
+      const vol = new import_obsidian3.TextComponent(row);
       vol.setValue(pdf.volume != null ? String(pdf.volume) : "").setPlaceholder("\u2014");
       vol.inputEl.setCssStyles({ width: "3.5em" });
       this.checks.push({ pdf, el: cb, vol });
     }
-    new import_obsidian2.Setting(contentEl).addButton((b) => b.setButtonText("Transcribe").setCta().onClick(async () => {
+    new import_obsidian3.Setting(contentEl).addButton((b) => b.setButtonText("Transcribe").setCta().onClick(async () => {
       const chosen = this.checks.filter((c) => c.el.checked);
       if (!chosen.length) {
-        new import_obsidian2.Notice("Select at least one PDF.");
+        new import_obsidian3.Notice("Select at least one PDF.");
+        return;
+      }
+      const prompt = this.picker.selectedEntry();
+      if (!prompt) {
+        new import_obsidian3.Notice("Select a prompt.");
         return;
       }
       const args = ["transcribe", "--citekey", this.citekey];
@@ -11401,6 +12829,10 @@ var TranscribeModal = class extends import_obsidian2.Modal {
         const v = c.vol.getValue().trim();
         args.push("--pdf", v ? `${c.pdf.path}::${v}` : c.pdf.path);
       }
+      const promptFile = this.plugin.writePromptFile("transcription", prompt.text);
+      if (!promptFile)
+        return;
+      args.push("--prompt-file", promptFile);
       this.close();
       await this.plugin.runWithProgress("Transcribing", args);
     }));
@@ -11409,8 +12841,8 @@ var TranscribeModal = class extends import_obsidian2.Modal {
     this.contentEl.empty();
   }
 };
-var TranslateModal = class extends import_obsidian2.Modal {
-  constructor(app, plugin, citekey, notes, pdfs) {
+var TranslateModal = class extends import_obsidian3.Modal {
+  constructor(app, plugin, citekey, notes, pdfs, prompts) {
     super(app);
     this.checks = [];
     this.volume = "";
@@ -11418,16 +12850,21 @@ var TranslateModal = class extends import_obsidian2.Modal {
     this.citekey = citekey;
     this.notes = notes;
     this.pdfs = pdfs;
+    this.prompts = prompts;
   }
   onOpen() {
     const { contentEl } = this;
     contentEl.createEl("h3", { text: `Translate \u2014 @${this.citekey}` });
+    const promptRow = contentEl.createDiv();
+    this.picker = new PromptPicker(this.plugin, "translation", promptRow, this.prompts, {
+      onSelectAll: () => this.checks.forEach((c) => c.el.checked = true),
+      onSelectNone: () => this.checks.forEach((c) => c.el.checked = false)
+    });
     const transcriptions = this.notes.filter((n) => n.type === "transcription");
     if (!transcriptions.length) {
       contentEl.createEl("p", { text: "No transcription exists yet. Run \u201Ctranscribe this item's PDF file(s)\u201D first." });
     } else {
       contentEl.createEl("p", { text: "Choose the transcription(s) to translate." });
-      new import_obsidian2.Setting(contentEl).addButton((b) => b.setButtonText("Select all").onClick(() => this.checks.forEach((c) => c.el.checked = true))).addButton((b) => b.setButtonText("Select none").onClick(() => this.checks.forEach((c) => c.el.checked = false)));
       for (const n of transcriptions) {
         const row = contentEl.createDiv();
         const cb = row.createEl("input");
@@ -11444,11 +12881,16 @@ var TranslateModal = class extends import_obsidian2.Modal {
         ul.createEl("li", { text: `${p.filename}${p.exists ? "" : " (file not found)"}` });
       }
     }
-    new import_obsidian2.Setting(contentEl).setName("Volume").setDesc("Optional volume number.").addText((t) => t.setPlaceholder("E.g. 2").onChange((v) => this.volume = v.trim()));
-    new import_obsidian2.Setting(contentEl).addButton((b) => b.setButtonText("Translate").setCta().onClick(async () => {
+    new import_obsidian3.Setting(contentEl).setName("Volume").setDesc("Optional volume number.").addText((t) => t.setPlaceholder("E.g. 2").onChange((v) => this.volume = v.trim()));
+    new import_obsidian3.Setting(contentEl).addButton((b) => b.setButtonText("Translate").setCta().onClick(async () => {
       const chosen = this.checks.filter((c) => c.el.checked).map((c) => c.note.path);
       if (!chosen.length) {
-        new import_obsidian2.Notice("Select at least one transcription.");
+        new import_obsidian3.Notice("Select at least one transcription.");
+        return;
+      }
+      const prompt = this.picker.selectedEntry();
+      if (!prompt) {
+        new import_obsidian3.Notice("Select a prompt.");
         return;
       }
       const args = ["translate", "--citekey", this.citekey];
@@ -11456,6 +12898,10 @@ var TranslateModal = class extends import_obsidian2.Modal {
         args.push("--source", p);
       if (this.volume)
         args.push("--volume", this.volume);
+      const promptFile = this.plugin.writePromptFile("translation", prompt.text);
+      if (!promptFile)
+        return;
+      args.push("--prompt-file", promptFile);
       this.close();
       await this.plugin.runWithProgress("Translating", args);
     }));
@@ -11464,7 +12910,7 @@ var TranslateModal = class extends import_obsidian2.Modal {
     this.contentEl.empty();
   }
 };
-var ReprocessModal = class extends import_obsidian2.Modal {
+var ReprocessModal = class extends import_obsidian3.Modal {
   constructor(app, plugin, zips) {
     super(app);
     this.checks = [];
@@ -11486,10 +12932,10 @@ var ReprocessModal = class extends import_obsidian2.Modal {
       row.createSpan({ text: ` ${z.name}` });
       this.checks.push({ zip: z, el: cb });
     }
-    new import_obsidian2.Setting(contentEl).addButton((b) => b.setButtonText("Reprocess").setCta().onClick(async () => {
+    new import_obsidian3.Setting(contentEl).addButton((b) => b.setButtonText("Reprocess").setCta().onClick(async () => {
       const chosen = this.checks.filter((c) => c.el.checked).map((c) => c.zip.path);
       if (!chosen.length) {
-        new import_obsidian2.Notice("Select at least one archive.");
+        new import_obsidian3.Notice("Select at least one archive.");
         return;
       }
       this.close();
@@ -11501,7 +12947,7 @@ var ReprocessModal = class extends import_obsidian2.Modal {
     this.contentEl.empty();
   }
 };
-var SourceTemplateUpdateConsentModal = class extends import_obsidian2.Modal {
+var SourceTemplateUpdateConsentModal = class extends import_obsidian3.Modal {
   constructor(app, count, onChoose) {
     super(app);
     this.count = count;
@@ -11513,7 +12959,7 @@ var SourceTemplateUpdateConsentModal = class extends import_obsidian2.Modal {
     contentEl.createEl("p", {
       text: `The import templates changed. ${this.count} note(s) were rendered with an older version. Re-render them now? Your own edits and out-of-template properties are preserved.`
     });
-    new import_obsidian2.Setting(contentEl).addButton((b) => b.setButtonText("Yes, update").setCta().onClick(() => {
+    new import_obsidian3.Setting(contentEl).addButton((b) => b.setButtonText("Yes, update").setCta().onClick(() => {
       this.close();
       this.onChoose("yes");
     })).addButton((b) => b.setButtonText("Not now").onClick(() => {
@@ -11528,7 +12974,7 @@ var SourceTemplateUpdateConsentModal = class extends import_obsidian2.Modal {
     this.contentEl.empty();
   }
 };
-var ReconcileSourcesModal = class extends import_obsidian2.Modal {
+var ReconcileSourcesModal = class extends import_obsidian3.Modal {
   constructor(app, plugin, items) {
     super(app);
     this.checks = [];
@@ -11550,33 +12996,33 @@ var ReconcileSourcesModal = class extends import_obsidian2.Modal {
       row.createSpan({ text: ` ${it.work.title} \u2014 ${detail}` });
       this.checks.push({ work: it.work, el: cb });
     }
-    new import_obsidian2.Setting(contentEl).addButton((b) => b.setButtonText("Reinstall selected").setCta().onClick(async () => {
+    new import_obsidian3.Setting(contentEl).addButton((b) => b.setButtonText("Reinstall selected").setCta().onClick(async () => {
       const chosen = this.checks.filter((c) => c.el.checked);
       if (!chosen.length) {
-        new import_obsidian2.Notice("Select at least one work.");
+        new import_obsidian3.Notice("Select at least one work.");
         return;
       }
       this.close();
       for (const c of chosen)
         await this.plugin.reinstallSource(c.work);
-      new import_obsidian2.Notice(`Reinstalled ${chosen.length} work(s).`);
+      new import_obsidian3.Notice(`Reinstalled ${chosen.length} work(s).`);
     })).addButton((b) => b.setButtonText("Remove selected").setDestructive().onClick(async () => {
       const chosen = this.checks.filter((c) => c.el.checked);
       if (!chosen.length) {
-        new import_obsidian2.Notice("Select at least one work.");
+        new import_obsidian3.Notice("Select at least one work.");
         return;
       }
       this.close();
       for (const c of chosen)
         await this.plugin.removeSource(c.work);
-      new import_obsidian2.Notice(`Removed ${chosen.length} work(s).`);
+      new import_obsidian3.Notice(`Removed ${chosen.length} work(s).`);
     })).addButton((b) => b.setButtonText("Decide later").onClick(() => this.close()));
   }
   onClose() {
     this.contentEl.empty();
   }
 };
-var TransliterationUnavailableModal = class extends import_obsidian2.Modal {
+var TransliterationUnavailableModal = class extends import_obsidian3.Modal {
   constructor(app, sourceName, resolve) {
     super(app);
     this.answered = false;
@@ -11586,12 +13032,12 @@ var TransliterationUnavailableModal = class extends import_obsidian2.Modal {
   onOpen() {
     this.titleEl.setText("Transliteration unavailable");
     this.contentEl.createEl("p", {
-      text: `This source, ${this.sourceName}, requires transliteration to render, but the transliteration server is not running. Would you like to start the server before rendering this source, or would you like to proceed with simpler transliteration?`
+      text: `This source, ${this.sourceName}, requires transliteration to render, but the transliteration server is not running. Start it now, or proceed without transliteration.`
     });
-    const footer = new import_obsidian2.Setting(this.contentEl);
-    footer.addButton((b) => b.setButtonText("Try again").setCta().onClick(() => {
+    const footer = new import_obsidian3.Setting(this.contentEl);
+    footer.addButton((b) => b.setButtonText("Start server").setCta().onClick(async () => {
       this.answered = true;
-      this.resolve("retry");
+      this.resolve("start");
       this.close();
     }));
     footer.addButton((b) => b.setButtonText("Proceed without transliteration").onClick(() => {
@@ -11616,8 +13062,198 @@ var GENRE_LABELS = {
   tafsir: "Tafs\u012Br",
   quran: "Translations",
   hadith: "\u1E24ad\u012Bth",
-  "quran-text": "Qur\u02BE\u0101n text"
+  "hadith-commentary": "\u1E24ad\u012Bth commentary",
+  "quran-text": "Qur\u02BE\u0101n text",
+  dictionary: "Dictionaries",
+  fiqh: "Fiqh",
+  usul: "U\u1E63\u016Bl al-Fiqh",
+  aqida: "Doctrine (\u02BFaq\u012Bda)",
+  theology: "Theology",
+  tarikh: "T\u0101r\u012Bkh",
+  biography: "Biography (rij\u0101l)",
+  language: "Language (lugha)",
+  lexicography: "Lexicography",
+  grammar: "Grammar (na\u1E25w and \u1E63arf)",
+  rhetoric: "Rhetoric",
+  adab: "Adab",
+  linguistics: "Linguistics",
+  maqasid: "Maq\u0101\u1E63id",
+  "quran-sciences": "\u02BFUl\u016Bm al-Qur\u02BE\u0101n",
+  other: "Other"
 };
+function workGenres(w) {
+  if (Array.isArray(w.genres) && w.genres.length)
+    return w.genres.map(normalizeGenre);
+  return [normalizeGenre(w.genre || "other")];
+}
+function genreLabelOf(g) {
+  return GENRE_LABELS[g] || g.replace(/-/g, " ");
+}
+var TURATH_CAT_TYPES = {
+  1: "aqida",
+  3: "tafsir",
+  4: "quran-sciences",
+  6: "hadith",
+  7: "hadith",
+  11: "usul",
+  14: "fiqh",
+  15: "fiqh",
+  16: "fiqh",
+  17: "fiqh",
+  18: "fiqh",
+  19: "fiqh",
+  20: "fiqh",
+  21: "fiqh",
+  22: "fiqh",
+  23: "adab",
+  24: "tarikh",
+  25: "tarikh",
+  26: "biography",
+  27: "tarikh",
+  28: "tarikh",
+  29: "language",
+  30: "language",
+  31: "language",
+  32: "adab",
+  33: "language",
+  34: "adab",
+  35: "language",
+  36: "other",
+  37: "other",
+  38: "other",
+  39: "other",
+  40: "other"
+};
+function genresForCat(cat, type) {
+  if (cat === 30)
+    return ["language", "lexicography", "dictionary"];
+  if (cat === 31)
+    return ["language", "grammar"];
+  if (cat === 35)
+    return ["language", "rhetoric"];
+  if (cat === 26)
+    return ["biography"];
+  if (cat === 32)
+    return ["adab"];
+  return [type];
+}
+var TITLE_PROPER = new Set([
+  "ibn",
+  "ab\u012B",
+  "ab\u016B",
+  "bint",
+  "ban\u016B",
+  "\u1E6Dabar\u012B",
+  "qur\u1E6Dub\u012B",
+  "kath\u012Br",
+  "zamakhshar\u012B",
+  "r\u0101z\u012B",
+  "andalus\u012B",
+  "suy\u016B\u1E6D\u012B",
+  "ma\u1E25all\u012B",
+  "jal\u0101layn",
+  "shinq\u012B\u1E6D\u012B",
+  "q\u0101sim\u012B",
+  "sa\u02BFd\u012B",
+  "buk\u0101r\u012B",
+  "bukhari",
+  "muslim",
+  "d\u0101w\u016Bd",
+  "tirmidh\u012B",
+  "m\u0101jah",
+  "m\u0101lik",
+  "a\u1E25mad",
+  "\u1E25anbal",
+  "\u1E25ajar",
+  "\u02BFasqal\u0101n\u012B",
+  "nawaw\u012B",
+  "qud\u0101ma",
+  "sh\u0101fi\u02BF\u012B",
+  "k\u0101s\u0101n\u012B",
+  "margh\u012Bn\u0101n\u012B",
+  "rushd",
+  "buh\u016Bt\u012B",
+  "qayraw\u0101n\u012B",
+  "akh\u1E0Dar\u012B",
+  "qud\u016Br\u012B",
+  "\u1E25a\u1E0Dram\u012B",
+  "tha\u02BFlab\u012B",
+  "\u0101jurr\u016Bm",
+  "\u1E25\u0101jib",
+  "khal\u012Bl",
+  "kharash\u012B",
+  "\u1E25a\u1E6D\u1E6D\u0101b",
+  "maww\u0101q",
+  "\u02BFulaysh",
+  "bil\u02BF\u0101lam",
+  "s\u012Bbawayh",
+  "j\u0101\u1E25i\u1E93",
+  "man\u1E93\u016Br",
+  "f\u012Br\u016Bz\u0101b\u0101d\u012B",
+  "jawhar\u012B",
+  "f\u0101ris",
+  "qutayba",
+  "jurj\u0101n\u012B",
+  "mizz\u012B",
+  "dhahab\u012B",
+  "khallik\u0101n",
+  "sa\u02BFd",
+  "zirikl\u012B",
+  "ath\u012Br",
+  "taymiyya",
+  "\u02BFizz",
+  "ash\u02BFar\u012B",
+  "\u0101jurr\u012B",
+  "marwaz\u012B",
+  "sarakhs\u012B",
+  "juwayn\u012B",
+  "sh\u0101\u1E6Dib\u012B",
+  "qayyim",
+  "jawziyya",
+  "qur\u02BE\u0101n",
+  "qur\u2019\u0101n",
+  "qur'\u0101n",
+  "all\u0101h",
+  "ra\u1E25m\u0101n",
+  "b\u0101r\u012B",
+  "\u02BFarab",
+  "\u02BFarabiyya",
+  "nawawiyya",
+  "qayraw\u0101niyya",
+  "\u1E25a\u1E0Dramiyya",
+  "\u0101jurr\u016Bmiyya",
+  "m\u0101lik\u012B",
+  "\u1E25anaf\u012B",
+  "\u1E25anbal\u012B",
+  "baghd\u0101d\u012B",
+  "qazw\u012Bn\u012B",
+  "sijist\u0101n\u012B",
+  "nas\u0101\u02BE\u012B",
+  "d\u0101rim\u012B",
+  "tibr\u012Bz\u012B",
+  "dihlaw\u012B",
+  "jal\u012Bl",
+  "khald\u016Bn",
+  "zahr\u012B",
+  "\u1E6Da\u1E25\u0101wiyya",
+  "w\u0101si\u1E6Diyya"
+]);
+function normalizeGenre(g) {
+  return g === "grammar-syntax" || g === "grammar-inflection" ? "grammar" : g;
+}
+function sentenceCaseTitle(text) {
+  const cap = (s) => s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
+  return String(text || "").trim().split(/\s+/).map((tok, i) => {
+    const bare = tok.toLowerCase().replace(/^[^\p{L}]+|[^\p{L}]+$/gu, "");
+    const stem = bare.replace(/^al-/, "");
+    if (TITLE_PROPER.has(stem)) {
+      return /^al-/i.test(tok) ? "al-" + cap(tok.slice(3)) : cap(tok);
+    }
+    if (i === 0)
+      return /^al-/i.test(tok) ? "al-" + cap(tok.slice(3)) : cap(tok);
+    return tok.toLowerCase();
+  }).join(" ");
+}
 function header(resp, name) {
   var _a;
   const h = (_a = resp.headers) != null ? _a : {};
@@ -11628,7 +13264,84 @@ function header(resp, name) {
   }
   return "";
 }
-var ManageSourcesModal = class extends import_obsidian2.Modal {
+function buildUrlAdder(plugin, container) {
+  container.createEl("p", {
+    text: "Paste a Turath book URL (or its numeric ID). The plugin reads its metadata and offers a provisional romanization you can edit before adding."
+  });
+  let inputEl;
+  let titleEl;
+  let authorEl;
+  let pending = null;
+  const preview = container.createDiv();
+  preview.classList.add("mas-manage__hidden");
+  const listEl = container.createDiv();
+  const renderList = async () => {
+    listEl.empty();
+    listEl.createEl("h3", { text: "Your list" });
+    const works = await plugin.loadCustomWorks();
+    if (!works.length) {
+      listEl.createEl("p", { text: "No works added yet." });
+      return;
+    }
+    for (const w of works) {
+      new import_obsidian3.Setting(listEl).setName(w.title || w.arabic || w.id).setDesc(w.author ? `${w.author} \u2014 ${w.url}` : w.url).addButton((b) => b.setButtonText("Remove").setDestructive().onClick(async () => {
+        await plugin.removeTurathWork(w.id);
+        await renderList();
+      }));
+    }
+  };
+  const pull = async () => {
+    const work = await plugin.previewTurathWork(inputEl.value);
+    if (!work)
+      return;
+    pending = work;
+    titleEl.value = work.title;
+    authorEl.value = work.author;
+    preview.classList.remove("mas-manage__hidden");
+  };
+  new import_obsidian3.Setting(container).addText((text) => {
+    inputEl = text.inputEl;
+    text.setPlaceholder("https://app.turath.io/book/95864");
+    text.inputEl.addEventListener("keydown", (ev) => {
+      if (ev.key === "Enter") {
+        ev.preventDefault();
+        void pull();
+      }
+    });
+  }).addButton((b) => b.setButtonText("Fetch").setCta().onClick(() => void pull()));
+  new import_obsidian3.Setting(preview).setName("Title (romanized)").addText((text) => {
+    titleEl = text.inputEl;
+  });
+  new import_obsidian3.Setting(preview).setName("Author (romanized)").addText((text) => {
+    authorEl = text.inputEl;
+  });
+  new import_obsidian3.Setting(preview).addButton((b) => b.setButtonText("Add to list").onClick(async () => {
+    if (!pending)
+      return;
+    pending.title = titleEl.value.trim() || pending.title;
+    pending.author = authorEl.value.trim() || pending.author;
+    await plugin.saveTurathWork(pending);
+    pending = null;
+    inputEl.value = "";
+    preview.classList.add("mas-manage__hidden");
+    await renderList();
+  }));
+  void renderList();
+}
+var TurathUrlModal = class extends import_obsidian3.Modal {
+  constructor(app, plugin) {
+    super(app);
+    this.plugin = plugin;
+  }
+  onOpen() {
+    this.titleEl.setText("Add Turath works by URL");
+    buildUrlAdder(this.plugin, this.contentEl);
+  }
+  onClose() {
+    this.contentEl.empty();
+  }
+};
+var ManageSourcesModal = class extends import_obsidian3.Modal {
   constructor(app, plugin, works, installed, deleting = new Set(), sizes = new Map(), zoteroStatus = new Map(), onReload) {
     super(app);
     this.rows = [];
@@ -11662,6 +13375,7 @@ var ManageSourcesModal = class extends import_obsidian2.Modal {
     const tabs = contentEl.createDiv({ cls: "mas-manage__tabs" });
     const manageTab = tabs.createEl("button", { cls: "mas-manage__tab", text: "Install/uninstall sources" });
     const zoteroTab = tabs.createEl("button", { cls: "mas-manage__tab", text: "Send references to Zotero" });
+    const urlTab = tabs.createEl("button", { cls: "mas-manage__tab", text: "Add by URL" });
     const desc = contentEl.createEl("p", { cls: "mas-manage__desc" });
     const topbar = contentEl.createDiv({ cls: "mas-manage__searchrow" });
     topbar.createSpan({ cls: "mas-manage__label", text: "Show:" });
@@ -11692,6 +13406,8 @@ var ManageSourcesModal = class extends import_obsidian2.Modal {
         (_a = this.onReload) == null ? void 0 : _a.call(this);
       };
     }
+    const addByUrl = topbar.createEl("button", { text: "Add by URL\u2026" });
+    addByUrl.title = "Add a Turath work by URL";
     const body = contentEl.createDiv({ cls: "mas-manage__body" });
     const side = body.createDiv({ cls: "mas-manage__side" });
     side.createDiv({ cls: "mas-manage__group", text: "Kinds of sources" });
@@ -11699,11 +13415,12 @@ var ManageSourcesModal = class extends import_obsidian2.Modal {
     const genres = [];
     const genreLabel = new Map();
     for (const w of this.works) {
-      const g = w.genre || w.collection;
-      if (genreLabel.has(g))
-        continue;
-      genres.push(g);
-      genreLabel.set(g, GENRE_LABELS[g] || w.collection_label || g);
+      for (const g of workGenres(w)) {
+        if (genreLabel.has(g))
+          continue;
+        genres.push(g);
+        genreLabel.set(g, genreLabelOf(g));
+      }
     }
     for (const g of [...this.activeGenres])
       if (!genreLabel.has(g))
@@ -11747,10 +13464,10 @@ var ManageSourcesModal = class extends import_obsidian2.Modal {
     }
     const pane = body.createDiv({ cls: "mas-manage__pane" });
     const list = pane.createDiv({ cls: "mas-manage__list" });
-    const COLS = "8ch minmax(110px,0.9fr) minmax(190px,1.8fr) minmax(120px,0.9fr) 76px 96px";
+    const COLS = "7ch minmax(90px,0.8fr) minmax(190px,1.8fr) minmax(100px,0.9fr) minmax(100px,0.8fr) 70px 90px";
     const head = list.createDiv({ cls: "mas-manage__head" });
     head.style.gridTemplateColumns = COLS;
-    for (const label of ["Lang", "Author", "Title", "Repository", "Size", "State"])
+    for (const label of ["Lang", "Author", "Title", "Kind", "Repository", "Size", "State"])
       head.createSpan({ text: label });
     let lastCollection = "";
     for (const w of this.works) {
@@ -11763,7 +13480,11 @@ var ManageSourcesModal = class extends import_obsidian2.Modal {
       const isInstalled = this.installed.has(w.key);
       row.createSpan({ cls: "mas-manage__lang", text: w.language.toUpperCase() });
       row.createSpan({ text: w.author || "" });
-      row.createSpan({ text: w.title || w.name });
+      const titleCell = row.createDiv({ cls: "mas-manage__title" });
+      titleCell.createDiv({ cls: "mas-manage__title-main", text: w.title || w.name });
+      if (w.subtitle)
+        titleCell.createDiv({ cls: "mas-manage__subtitle", text: w.subtitle });
+      row.createSpan({ cls: "mas-manage__kind", text: workGenres(w).map(genreLabelOf).join(", ") });
       row.createSpan({ cls: "mas-manage__mut", text: w.repository || "" });
       const known = this.sizes.get(w.key);
       const size = row.createSpan({
@@ -11786,7 +13507,7 @@ var ManageSourcesModal = class extends import_obsidian2.Modal {
         work: w,
         el: row,
         isInstalled,
-        genre: w.genre || w.collection,
+        genres: workGenres(w),
         repo: w.repository || "Other",
         collection: w.collection
       });
@@ -11813,7 +13534,7 @@ var ManageSourcesModal = class extends import_obsidian2.Modal {
         const w = r.work;
         const hay = `${w.title} ${w.name} ${w.author} ${w.id} ${w.repository || ""}`.toLowerCase();
         const showOk = this.show === "all" || (this.show === "installed" ? r.isInstalled : !r.isInstalled);
-        const genreOk = !this.activeGenres.size || this.activeGenres.has(r.genre);
+        const genreOk = !this.activeGenres.size || r.genres.some((g) => this.activeGenres.has(g));
         const repoOk = !this.offRepos.has(r.repo);
         const visible = showOk && genreOk && repoOk && (!q || hay.includes(q)) && (!lg || w.language === lg);
         r.el.classList.toggle("is-hidden", !visible);
@@ -11848,7 +13569,7 @@ var ManageSourcesModal = class extends import_obsidian2.Modal {
       if (this.mode === "zotero") {
         const keys = new Set(this.works.filter((w) => this.selected.has(w.key) && this.installed.has(w.key)).map((w) => w.key));
         if (!keys.size) {
-          new import_obsidian2.Notice("Nothing selected.");
+          new import_obsidian3.Notice("Nothing selected.");
           return;
         }
         this.close();
@@ -11866,11 +13587,11 @@ var ManageSourcesModal = class extends import_obsidian2.Modal {
           toRemove.push(w);
       }
       if (!toInstall.length && !toRemove.length) {
-        new import_obsidian2.Notice("Nothing to change.");
+        new import_obsidian3.Notice("Nothing to change.");
         return;
       }
       this.close();
-      const progress = new import_obsidian2.Notice(`Applying\u2026 (${toInstall.length} to install, ${toRemove.length} to remove)`, 0);
+      const progress = new import_obsidian3.Notice(`Applying\u2026 (${toInstall.length} to install, ${toRemove.length} to remove)`, 0);
       const failed = [];
       try {
         let n = 0;
@@ -11895,14 +13616,27 @@ var ManageSourcesModal = class extends import_obsidian2.Modal {
       } finally {
         progress.hide();
       }
-      new import_obsidian2.Notice(`Applied: ${toInstall.length} installed, ${toRemove.length} removed.` + (failed.length ? ` ${failed.length} failed \u2014 see the console.` : ""));
+      new import_obsidian3.Notice(`Applied: ${toInstall.length} installed, ${toRemove.length} removed.` + (failed.length ? ` ${failed.length} failed \u2014 see the console.` : ""));
       if (failed.length)
         console.error("[midad-arabic-sources] apply failures", failed);
     };
+    const urlPane = contentEl.createDiv({ cls: "mas-manage__urlpane" });
+    urlPane.classList.add("mas-manage__hidden");
+    buildUrlAdder(this.plugin, urlPane);
     const setMode = (m) => {
+      const prev = this.mode;
       this.mode = m;
+      const isUrl = m === "url";
       manageTab.classList.toggle("is-active", m === "manage");
       zoteroTab.classList.toggle("is-active", m === "zotero");
+      urlTab.classList.toggle("is-active", isUrl);
+      topbar.classList.toggle("mas-manage__hidden", isUrl);
+      body.classList.toggle("mas-manage__hidden", isUrl);
+      urlPane.classList.toggle("mas-manage__hidden", !isUrl);
+      if (isUrl) {
+        desc.setText("Add a Turath work by URL. Your current selections are kept while you are here.");
+        return;
+      }
       desc.setText(m === "manage" ? "Selected works are kept installed; deselect one to remove it. Apply installs the newly selected and removes the newly deselected." : "Select the sources to send; new and changed entries start selected. Only installed sources are listed.");
       applyBtn.setText(m === "manage" ? "Apply" : "Send to Zotero");
       selectAllBtn.classList.toggle("is-hidden", m === "manage");
@@ -11912,19 +13646,23 @@ var ManageSourcesModal = class extends import_obsidian2.Modal {
         showSel.value = "installed";
       }
       showSel.disabled = m === "zotero";
-      this.selected = new Set(this.works.filter((w) => m === "manage" ? this.initial.get(w.key) === true : this.installed.has(w.key) && this.zoteroStatus.get(w.key) !== "current").map((w) => w.key));
+      if (prev !== "url" || m === "zotero") {
+        this.selected = new Set(this.works.filter((w) => m === "manage" ? this.initial.get(w.key) === true : this.installed.has(w.key) && this.zoteroStatus.get(w.key) !== "current").map((w) => w.key));
+      }
       this.refreshSelection();
       this.updateFilter();
     };
     manageTab.onclick = () => setMode("manage");
     zoteroTab.onclick = () => setMode("zotero");
+    urlTab.onclick = () => setMode("url");
+    addByUrl.onclick = () => setMode("url");
     setMode(this.mode);
   }
   onClose() {
     this.contentEl.empty();
   }
 };
-var ZoteroSendModal = class extends import_obsidian2.Modal {
+var ZoteroSendModal = class extends import_obsidian3.Modal {
   constructor(app, plugin, entries) {
     super(app);
     this.checks = [];
@@ -11971,11 +13709,11 @@ var ZoteroSendModal = class extends import_obsidian2.Modal {
     }
     all.onclick = () => this.checks.forEach((c) => c.el.checked = true);
     none.onclick = () => this.checks.forEach((c) => c.el.checked = false);
-    const footer = new import_obsidian2.Setting(contentEl);
+    const footer = new import_obsidian3.Setting(contentEl);
     footer.addButton((b) => b.setButtonText("Send to Zotero").setCta().onClick(async () => {
       const keys = new Set(this.checks.filter((c) => c.el.checked).map((c) => c.key));
       if (!keys.size) {
-        new import_obsidian2.Notice("Nothing selected.");
+        new import_obsidian3.Notice("Nothing selected.");
         return;
       }
       this.close();
