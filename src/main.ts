@@ -43,6 +43,7 @@ import {
 } from "./sourceImport/history";
 import { BUNDLED_ASSETS } from "./assets.generated";
 import { openDocs, getDocs } from "./docs";
+import { registerAnnotationSpike } from "./sourceAnnotations/spike";
 
 // ── External tool resolution (mirrors ScholarWeft's tools.ts) ────────────────
 // Electron's renderer does not inherit the shell PATH, so we probe candidates
@@ -482,6 +483,8 @@ export default class ArabicSupportPlugin extends Plugin {
 		// (they ship inside main.js; see gen-assets.mjs).
 		this.extractBundledAssets();
 		this.addSettingTab(new ArabicSupportSettingTab(this.app, this));
+		// Phase 0 annotation spike: read the sharded store and paint annotations.
+		registerAnnotationSpike(this);
 
 		this.addCommand({
 			id: "transliterate-selection-to-clipboard",

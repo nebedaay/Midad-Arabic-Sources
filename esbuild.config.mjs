@@ -17,6 +17,8 @@ const options = {
 	external: [
 		"obsidian",
 		"electron",
+		"@codemirror/state",
+		"@codemirror/view",
 		...builtins,
 		...builtins.map((m) => `node:${m}`),
 	],
