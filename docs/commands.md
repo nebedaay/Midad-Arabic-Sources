@@ -49,7 +49,7 @@ See [Document import](./document-import.md#annotations).
 - **Edit annotation** / **Delete annotation** — act on the annotation under the cursor.
 - **Re-anchor orphaned annotation…** — use the current selection as the new anchor for an unanchored annotation.
 - **Delete annotations for this source…** — move a work's annotation store and note to the plugin trash.
-- **Open annotation sidebar** — reveal the active source's annotation cards.
+- **Open Midad sidebar** — reveal the active annotatable note's cards, MOC links, and Manage sources button.
 - **Copy source with annotations** — copy the managed source text plus a colour-callout annotation section.
 - **Adopt note for annotations** — make an arbitrary Markdown note annotatable by adding a stable work/unit identity and a managed body region. Known Midad transcriptions/translations are adopted automatically.
 - **Open source annotations** — open the generated per-work annotation note.

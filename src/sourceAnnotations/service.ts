@@ -5,6 +5,7 @@ import {
 	Notice,
 	Plugin,
 	SuggestModal,
+	addIcon,
 	TFile,
 	normalizePath,
 } from "obsidian";
@@ -50,6 +51,8 @@ import type {
 	SourceAnnotation,
 } from "./types";
 import { applyReadingAnnotations } from "./wrap";
+
+const MIDAD_ICON = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5.5 4h13A2.5 2.5 0 0 1 21 6.5v11a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 17.5v-11A2.5 2.5 0 0 1 5.5 4Z"/><path d="M8 14c0-2.2 1.5-4 3.5-4s3.5 1.8 3.5 4c0 1.9-1.4 3.2-3.2 3.2h-1.3v2.3"/></svg>`;
 
 export interface AnnotationHost {
 	app: App;
@@ -162,11 +165,12 @@ export class AnnotationService {
 			selectionWatcher((view) => this.onEditorSelection(view)),
 		]);
 		registerReadingAnnotations(this.plugin, (path) => this.pathAnnotations.get(normalizePath(path)) ?? null);
+		addIcon("midad", MIDAD_ICON);
 		this.plugin.registerView(
 			ANNOTATION_SIDEBAR_VIEW,
 			(leaf) => new AnnotationSidebarView(leaf, this)
 		);
-		this.plugin.addRibbonIcon("highlighter", "Open annotation sidebar", () => { void this.openSidebar(); });
+		this.plugin.addRibbonIcon("midad", "Open Midad sidebar", () => { void this.openSidebar(); });
 		this.registerCommands();
 		this.registerEvents();
 		window.setTimeout(() => {
@@ -373,7 +377,7 @@ export class AnnotationService {
 
 		this.plugin.addCommand({
 			id: "open-annotation-sidebar",
-			name: "Open annotation sidebar",
+			name: "Open Midad sidebar",
 			callback: () => { void this.openSidebar(); },
 		});
 
@@ -1499,6 +1503,22 @@ export class AnnotationService {
 			return true;
 		};
 		if (!run()) window.setTimeout(run, Math.max(60, delay));
+	}
+
+	async openNamedNote(names: string[]): Promise<void> {
+		for (const name of names) {
+			const file = this.app.metadataCache.getFirstLinkpathDest(name, "");
+			if (file instanceof TFile) {
+				await this.app.workspace.getLeaf().openFile(file);
+				return;
+			}
+		}
+		new Notice(`Could not find ${names[0]}.`);
+	}
+
+	openManageSources(): void {
+		const plugin = this.plugin as unknown as { openManageSources?: () => void };
+		plugin.openManageSources?.();
 	}
 
 	async openMoc(): Promise<void> {

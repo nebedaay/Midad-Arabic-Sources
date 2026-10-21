@@ -64,13 +64,8 @@ export async function renderAnnotationCard(
 		card.setCssStyles({ background: annotationTint(annotation.color, 92, 0.55) });
 	}
 
-	if (variant === "sidebar") {
-		const quote = card.createDiv({ cls: "mas-ann-card-quote" });
-		quote.setText(annotation.quoteText || annotation.quote || "Empty quote");
-		quote.setCssStyles({ background: annotationTint(annotation.color, 84, 0.65) });
-		if (annotation.anchorStatus === "orphaned") {
-			card.createSpan({ cls: "mas-ann-card-badge", text: "Unanchored" });
-		}
+	if (variant === "sidebar" && annotation.anchorStatus === "orphaned") {
+		card.createSpan({ cls: "mas-ann-card-badge", text: "Unanchored" });
 	}
 
 	const dot = card.createSpan({ cls: "mas-ann-card-dot" });
@@ -85,6 +80,10 @@ export async function renderAnnotationCard(
 	}
 	if (variant === "sidebar") {
 		comment.setCssStyles({ background: annotationTint(annotation.color, 96, 0.32) });
+		// The comment leads; the highlighted excerpt sits directly beneath it.
+		const quote = body.createDiv({ cls: "mas-ann-card-quote" });
+		quote.setText(annotation.quoteText || annotation.quote || "Empty quote");
+		quote.setCssStyles({ background: annotationTint(annotation.color, 84, 0.65) });
 	}
 
 	if (options.onEdit || options.onDelete || options.onOpenNote) {

@@ -1,4 +1,4 @@
-import { Component, ItemView, WorkspaceLeaf } from "obsidian";
+import { Component, ItemView, WorkspaceLeaf, setIcon } from "obsidian";
 import { renderAnnotationCard } from "./cards";
 import type { AnnotationService } from "./service";
 import type { AnnotationTarget, SourceAnnotation } from "./types";
@@ -32,11 +32,11 @@ export class AnnotationSidebarView extends ItemView {
 	}
 
 	getDisplayText(): string {
-		return "Source annotations";
+		return "Midad";
 	}
 
 	getIcon(): string {
-		return "highlighter";
+		return "midad";
 	}
 
 	async onOpen(): Promise<void> {
@@ -63,9 +63,12 @@ export class AnnotationSidebarView extends ItemView {
 
 		const root = this.contentEl;
 		root.empty();
+		const brand = root.createDiv({ cls: "mas-ann-sidebar__brand" });
+		setIcon(brand.createSpan({ cls: "mas-ann-sidebar__brand-icon" }), "midad");
+		brand.createSpan({ text: "Midad" });
 		const head = root.createDiv({ cls: "mas-ann-sidebar__head" });
 		if (!data) {
-			head.createDiv({ cls: "mas-ann-sidebar__empty", text: "Open a source note to see its annotations." });
+			head.createDiv({ cls: "mas-ann-sidebar__empty", text: "Open an annotatable note to see its annotations." });
 		} else {
 			head.createDiv({ cls: "mas-ann-sidebar__title", text: data.noteName });
 			const count = data.annotations.length;
@@ -77,7 +80,7 @@ export class AnnotationSidebarView extends ItemView {
 				text: `${data.workTitle} · ${count} ${plural}${extra}`,
 			});
 			if (!count) {
-				root.createDiv({ cls: "mas-ann-sidebar__empty", text: "No annotations on this note yet. Select text in the source to add one." });
+				root.createDiv({ cls: "mas-ann-sidebar__empty", text: "No annotations on this note yet. Select text to add one." });
 			} else {
 				const list = root.createDiv({ cls: "mas-ann-sidebar__list" });
 				for (const annotation of data.annotations) {
@@ -97,18 +100,16 @@ export class AnnotationSidebarView extends ItemView {
 			}
 		}
 
-		const actions = root.createDiv({ cls: "mas-ann-sidebar__actions" });
-		if (data && data.annotations.length) {
-			const note = actions.createEl("button", { text: "Annotation note" });
-			note.onclick = () => { void this.service.openAnnotationNoteForTarget(data.target); };
-		}
-		if (data) {
-			const copy = actions.createEl("button", { text: "Copy with annotations" });
-			copy.onclick = () => { void this.service.copySourceWithAnnotations(data.target); };
-		}
-		const moc = actions.createEl("button", { text: "Source annotations MOC" });
-		moc.onclick = () => { void this.service.openMoc(); };
-		const trash = actions.createEl("button", { text: "Annotation trash" });
-		trash.onclick = () => { this.service.openTrash(); };
+		const nav = root.createDiv({ cls: "mas-ann-sidebar__mocs" });
+		const link = (label: string, run: () => void): void => {
+			const button = nav.createEl("button", { cls: "mas-ann-sidebar__moc", text: label });
+			button.onclick = run;
+		};
+		link("Source annotations", () => { void this.service.openMoc(); });
+		link("Transcriptions", () => { void this.service.openNamedNote(["Transcriptions", "Arabic transcriptions"]); });
+		link("Translations", () => { void this.service.openNamedNote(["Translations", "Arabic translations"]); });
+		link("Sources", () => { void this.service.openNamedNote(["Sources"]); });
+		const manage = nav.createEl("button", { cls: "mas-ann-sidebar__moc is-manage", text: "Manage sources" });
+		manage.onclick = () => { this.service.openManageSources(); };
 	}
 }
