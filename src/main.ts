@@ -145,6 +145,7 @@ interface MidadArabicSourcesSettings {
 	annotationNoteFolder: string;
 	annotationDefaultColor: AnnotationColor;
 	annotationTrashDays: number;
+	annotateOnSelection: boolean;
 	manageShowFilter?: string;
 	manageGenreFilter?: string[];
 	sourceUpdateCheckDays?: number;
@@ -455,6 +456,7 @@ const DEFAULT_SETTINGS: MidadArabicSourcesSettings = {
 	annotationNoteFolder: "_7 Sources/Notes",
 	annotationDefaultColor: "yellow",
 	annotationTrashDays: 30,
+	annotateOnSelection: true,
 	manageShowFilter: "all",
 	manageGenreFilter: [],
 	zoteroExport: false,
@@ -4135,8 +4137,13 @@ class MidadArabicSourcesSettingTab extends PluginSettingTab {
 				desc: "Highlights, comments, the annotation note, and the Source Annotations MOC.",
 				items: [
 					{
+						name: "Annotate on selection",
+						desc: "Open the annotation dialog when text is selected inside a source note, after a short pause. Copying or opening the context menu suppresses it.",
+						control: { type: "toggle", key: "annotateOnSelection" },
+					},
+					{
 						name: "Annotation note folder",
-						desc: "Folder for the generated per-work annotation notes. They are ordinary notes; the plugin only owns their annotations region.",
+						desc: "Folder for the generated per-work annotation notes. They are ordinary notes; the plugin only owns their annotations regions.",
 						control: { type: "text", key: "annotationNoteFolder", placeholder: "_7 Sources/Notes" },
 					},
 					{

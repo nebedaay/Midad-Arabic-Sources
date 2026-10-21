@@ -18,6 +18,7 @@ export interface AnnotationModalOptions {
 	onSubmit: (color: AnnotationColor, comment: string) => Promise<void> | void;
 	onCancel?: () => void;
 	onDelete?: () => Promise<void> | void;
+	onClosed?: () => void;
 }
 
 const COLORS: AnnotationColor[] = [
@@ -266,5 +267,6 @@ export class AnnotationModal extends Modal {
 	onClose(): void {
 		this.contentEl.empty();
 		if (!this.submitted) this.options.onCancel?.();
+		this.options.onClosed?.();
 	}
 }

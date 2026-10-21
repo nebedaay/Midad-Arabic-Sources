@@ -105,6 +105,7 @@ export interface AnnotationSettings {
 	annotationNoteFolder: string;
 	annotationDefaultColor: AnnotationColor;
 	annotationTrashDays: number;
+	annotateOnSelection: boolean;
 }
 
 /** Where a source note belongs in the annotation store. */

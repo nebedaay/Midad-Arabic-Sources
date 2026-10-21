@@ -135,6 +135,13 @@ export const annotationField = StateField.define<DecorationSet>({
 
 export const annotationEditorExtension: Extension = [annotationField];
 
+/** Report selection changes so the service can offer the creation dialog. */
+export function selectionWatcher(onSelection: (view: EditorView) => void): Extension {
+	return EditorView.updateListener.of((update) => {
+		if (update.selectionSet || update.docChanged) onSelection(update.view);
+	});
+}
+
 export function resolveForEditor(doc: string, annotations: SourceAnnotation[]): ResolvedAnnotation[] {
 	return resolveAnnotations(doc, annotations, false);
 }

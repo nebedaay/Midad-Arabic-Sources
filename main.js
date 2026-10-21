@@ -9189,6 +9189,12 @@ var annotationField = import_state.StateField.define({
   provide: (field) => import_view.EditorView.decorations.from(field)
 });
 var annotationEditorExtension = [annotationField];
+function selectionWatcher(onSelection) {
+  return import_view.EditorView.updateListener.of((update) => {
+    if (update.selectionSet || update.docChanged)
+      onSelection(update.view);
+  });
+}
 function resolveForEditor(doc, annotations) {
   return resolveAnnotations(doc, annotations, false);
 }
@@ -9416,10 +9422,11 @@ var AnnotationModal = class extends import_obsidian3.Modal {
     }
   }
   onClose() {
-    var _a, _b;
+    var _a, _b, _c, _d;
     this.contentEl.empty();
     if (!this.submitted)
       (_b = (_a = this.options).onCancel) == null ? void 0 : _b.call(_a);
+    (_d = (_c = this.options).onClosed) == null ? void 0 : _d.call(_c);
   }
 };
 
@@ -10678,6 +10685,10 @@ var AnnotationService = class {
   constructor(host) {
     this.pathAnnotations = new Map();
     this.verifyTimers = new Map();
+    this.autoTimers = new WeakMap();
+    this.suppressAutoUntil = 0;
+    this.suppressAutoSignature = "";
+    this.modalOpen = false;
     this.disposed = false;
     this.host = host;
     this.app = host.app;
@@ -10694,7 +10705,10 @@ var AnnotationService = class {
     } catch (error) {
       console.error("[midad-arabic-sources] annotation startup", error);
     }
-    this.plugin.registerEditorExtension(annotationEditorExtension);
+    this.plugin.registerEditorExtension([
+      annotationEditorExtension,
+      selectionWatcher((view) => this.onEditorSelection(view))
+    ]);
     registerReadingAnnotations(this.plugin, (path2) => {
       var _a;
       return (_a = this.pathAnnotations.get((0, import_obsidian8.normalizePath)(path2))) != null ? _a : null;
@@ -10832,6 +10846,14 @@ var AnnotationService = class {
     });
   }
   registerEvents() {
+    this.plugin.registerDomEvent(document, "keydown", (event) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "c") {
+        this.suppressAutoUntil = Date.now() + 1500;
+      }
+    }, true);
+    this.plugin.registerDomEvent(document, "copy", () => {
+      this.suppressAutoUntil = Date.now() + 1500;
+    });
     this.plugin.registerEvent(this.app.workspace.on("active-leaf-change", () => {
       window.setTimeout(() => {
         if (!this.disposed)
@@ -10839,6 +10861,7 @@ var AnnotationService = class {
       }, 150);
     }));
     this.plugin.registerEvent(this.app.workspace.on("editor-menu", (menu, editor, view) => {
+      this.suppressAutoUntil = Date.now() + 2e3;
       const draft = this.draftFromEditor(editor, view.file);
       if (draft) {
         menu.addItem((item) => item.setTitle("Annotate selection").setIcon("highlighter").onClick(() => {
@@ -10938,6 +10961,61 @@ var AnnotationService = class {
       await this.syncArtifacts(target.workKey);
     await this.refreshViews();
   }
+  anyModalOpen() {
+    const container = document.querySelector(".modal-container");
+    return !!container && !!container.querySelector(".modal");
+  }
+  onEditorSelection(view) {
+    if (this.disposed)
+      return;
+    const active = this.app.workspace.getActiveViewOfType(import_obsidian8.MarkdownView);
+    if (!(active == null ? void 0 : active.file) || cmOf(active) !== view)
+      return;
+    const existing = this.autoTimers.get(view);
+    if (existing) {
+      window.clearTimeout(existing);
+      this.autoTimers.delete(view);
+    }
+    const selection = view.state.selection.main;
+    if (selection.from === selection.to) {
+      this.suppressAutoSignature = "";
+      return;
+    }
+    if (!this.settings.annotateOnSelection)
+      return;
+    if (this.modalOpen || this.anyModalOpen())
+      return;
+    if (Date.now() < this.suppressAutoUntil)
+      return;
+    const signature = `${selection.from}:${selection.to}`;
+    if (this.suppressAutoSignature && this.suppressAutoSignature !== signature) {
+      this.suppressAutoSignature = "";
+    }
+    if (this.suppressAutoSignature === signature)
+      return;
+    const from = selection.from;
+    const to = selection.to;
+    const timer = window.setTimeout(() => {
+      this.autoTimers.delete(view);
+      if (this.disposed || !this.settings.annotateOnSelection)
+        return;
+      if (this.modalOpen || this.anyModalOpen())
+        return;
+      if (Date.now() < this.suppressAutoUntil)
+        return;
+      const current = view.state.selection.main;
+      if (current.from !== from || current.to !== to)
+        return;
+      const activeNow = this.app.workspace.getActiveViewOfType(import_obsidian8.MarkdownView);
+      if (!(activeNow == null ? void 0 : activeNow.file) || cmOf(activeNow) !== view)
+        return;
+      const draft = this.draftFromEditor(activeNow.editor, activeNow.file);
+      if (!draft)
+        return;
+      void this.openAnnotate(activeNow.editor, activeNow.file, signature);
+    }, 420);
+    this.autoTimers.set(view, timer);
+  }
   draftFromEditor(editor, file) {
     if (!file)
       return null;
@@ -10977,7 +11055,17 @@ var AnnotationService = class {
       segments
     };
   }
-  async openAnnotate(editor, file) {
+  selectionSignatureForEditor(editor) {
+    const cm = editor.cm;
+    if (cm) {
+      const selection = cm.state.selection.main;
+      return `${selection.from}:${selection.to}`;
+    }
+    const from = editor.posToOffset(editor.getCursor("from"));
+    const to = editor.posToOffset(editor.getCursor("to"));
+    return `${from}:${to}`;
+  }
+  async openAnnotate(editor, file, autoSignature) {
     if (!file)
       return;
     const draft = this.draftFromEditor(editor, file);
@@ -10985,22 +11073,37 @@ var AnnotationService = class {
       new import_obsidian8.Notice("Select text inside a source note\u2019s managed region.");
       return;
     }
+    const signature = autoSignature != null ? autoSignature : this.selectionSignatureForEditor(editor);
     const target = await this.targetForPath(file.path);
     if (!target) {
       new import_obsidian8.Notice("Could not identify the source work. Re-render the source and try again.");
       return;
     }
+    const bounds = managedBounds(editor.getValue());
+    if (bounds) {
+      const expectedFrom = bounds.bodyStart + draft.position.start;
+      const expectedTo = bounds.bodyStart + draft.position.end;
+      if (editor.posToOffset(editor.getCursor("from")) !== expectedFrom || editor.posToOffset(editor.getCursor("to")) !== expectedTo) {
+        return;
+      }
+    }
     const from = editor.getCursor("from");
     const to = editor.getCursor("to");
+    this.modalOpen = true;
     new AnnotationModal(this.app, {
       draft,
       defaultColor: this.settings.annotationDefaultColor,
       onSubmit: async (color, comment) => {
         await this.createAnnotation(target, draft, color, comment);
+        this.suppressAutoSignature = signature;
       },
       onCancel: () => {
+        this.suppressAutoSignature = signature;
         editor.focus();
         editor.setSelection(from, to);
+      },
+      onClosed: () => {
+        this.modalOpen = false;
       }
     }).open();
   }
@@ -11061,6 +11164,8 @@ var AnnotationService = class {
     };
     const from = editor.getCursor("from");
     const to = editor.getCursor("to");
+    const signature = this.selectionSignatureForEditor(editor);
+    this.modalOpen = true;
     new AnnotationModal(this.app, {
       draft,
       defaultColor: hit.color,
@@ -11070,6 +11175,7 @@ var AnnotationService = class {
         this.pathAnnotations.set((0, import_obsidian8.normalizePath)(target.notePath), updated);
         await this.syncArtifacts(target.workKey);
         await this.refreshViews();
+        this.suppressAutoSignature = signature;
         new import_obsidian8.Notice("Annotation updated.");
       },
       onDelete: async () => {
@@ -11078,11 +11184,16 @@ var AnnotationService = class {
         this.pathAnnotations.set((0, import_obsidian8.normalizePath)(target.notePath), kept);
         await this.syncArtifacts(target.workKey);
         await this.refreshViews();
+        this.suppressAutoSignature = signature;
         new import_obsidian8.Notice("Annotation deleted.");
       },
       onCancel: () => {
+        this.suppressAutoSignature = signature;
         editor.focus();
         editor.setSelection(from, to);
+      },
+      onClosed: () => {
+        this.modalOpen = false;
       }
     }).open();
   }
@@ -11397,6 +11508,7 @@ var DEFAULT_SETTINGS = {
   annotationNoteFolder: "_7 Sources/Notes",
   annotationDefaultColor: "yellow",
   annotationTrashDays: 30,
+  annotateOnSelection: true,
   manageShowFilter: "all",
   manageGenreFilter: [],
   zoteroExport: false,
@@ -14648,8 +14760,13 @@ var MidadArabicSourcesSettingTab = class extends import_obsidian9.PluginSettingT
         desc: "Highlights, comments, the annotation note, and the Source Annotations MOC.",
         items: [
           {
+            name: "Annotate on selection",
+            desc: "Open the annotation dialog when text is selected inside a source note, after a short pause. Copying or opening the context menu suppresses it.",
+            control: { type: "toggle", key: "annotateOnSelection" }
+          },
+          {
             name: "Annotation note folder",
-            desc: "Folder for the generated per-work annotation notes. They are ordinary notes; the plugin only owns their annotations region.",
+            desc: "Folder for the generated per-work annotation notes. They are ordinary notes; the plugin only owns their annotations regions.",
             control: { type: "text", key: "annotationNoteFolder", placeholder: "_7 Sources/Notes" }
           },
           {

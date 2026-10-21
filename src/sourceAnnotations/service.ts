@@ -13,6 +13,7 @@ import {
 	applyEditorAnnotations,
 	clearEditorAnnotations,
 	resolveForEditor,
+	selectionWatcher,
 } from "./editor";
 import { AnnotationModal, ConfirmModal, type AnnotationDraft } from "./modal";
 import {
@@ -82,6 +83,10 @@ export class AnnotationService {
 	private readonly resolver: AnnotationTargetResolver;
 	private readonly pathAnnotations = new Map<string, SourceAnnotation[]>();
 	private readonly verifyTimers = new Map<string, number>();
+	private readonly autoTimers = new WeakMap<EditorView, number>();
+	private suppressAutoUntil = 0;
+	private suppressAutoSignature = "";
+	private modalOpen = false;
 	private disposed = false;
 
 	constructor(host: AnnotationHost) {
@@ -101,7 +106,10 @@ export class AnnotationService {
 		} catch (error) {
 			console.error("[midad-arabic-sources] annotation startup", error);
 		}
-		this.plugin.registerEditorExtension(annotationEditorExtension);
+		this.plugin.registerEditorExtension([
+			annotationEditorExtension,
+			selectionWatcher((view) => this.onEditorSelection(view)),
+		]);
 		registerReadingAnnotations(this.plugin, (path) => this.pathAnnotations.get(normalizePath(path)) ?? null);
 		this.registerCommands();
 		this.registerEvents();
@@ -241,6 +249,15 @@ export class AnnotationService {
 	}
 
 	private registerEvents(): void {
+		this.plugin.registerDomEvent(document, "keydown", (event) => {
+			if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "c") {
+				this.suppressAutoUntil = Date.now() + 1500;
+			}
+		}, true);
+		this.plugin.registerDomEvent(document, "copy", () => {
+			this.suppressAutoUntil = Date.now() + 1500;
+		});
+
 		this.plugin.registerEvent(this.app.workspace.on("active-leaf-change", () => {
 			window.setTimeout(() => {
 				if (!this.disposed) void this.refreshViews();
@@ -248,6 +265,7 @@ export class AnnotationService {
 		}));
 
 		this.plugin.registerEvent(this.app.workspace.on("editor-menu", (menu, editor, view) => {
+			this.suppressAutoUntil = Date.now() + 2000;
 			const draft = this.draftFromEditor(editor, view.file);
 			if (draft) {
 				menu.addItem((item) => item
@@ -352,6 +370,51 @@ export class AnnotationService {
 		await this.refreshViews();
 	}
 
+	private anyModalOpen(): boolean {
+		const container = document.querySelector(".modal-container");
+		return !!container && !!container.querySelector(".modal");
+	}
+
+	private onEditorSelection(view: EditorView): void {
+		if (this.disposed) return;
+		const active = this.app.workspace.getActiveViewOfType(MarkdownView);
+		if (!active?.file || cmOf(active) !== view) return;
+		const existing = this.autoTimers.get(view);
+		if (existing) {
+			window.clearTimeout(existing);
+			this.autoTimers.delete(view);
+		}
+		const selection = view.state.selection.main;
+		if (selection.from === selection.to) {
+			this.suppressAutoSignature = "";
+			return;
+		}
+		if (!this.settings.annotateOnSelection) return;
+		if (this.modalOpen || this.anyModalOpen()) return;
+		if (Date.now() < this.suppressAutoUntil) return;
+		const signature = `${selection.from}:${selection.to}`;
+		if (this.suppressAutoSignature && this.suppressAutoSignature !== signature) {
+			this.suppressAutoSignature = "";
+		}
+		if (this.suppressAutoSignature === signature) return;
+		const from = selection.from;
+		const to = selection.to;
+		const timer = window.setTimeout(() => {
+			this.autoTimers.delete(view);
+			if (this.disposed || !this.settings.annotateOnSelection) return;
+			if (this.modalOpen || this.anyModalOpen()) return;
+			if (Date.now() < this.suppressAutoUntil) return;
+			const current = view.state.selection.main;
+			if (current.from !== from || current.to !== to) return;
+			const activeNow = this.app.workspace.getActiveViewOfType(MarkdownView);
+			if (!activeNow?.file || cmOf(activeNow) !== view) return;
+			const draft = this.draftFromEditor(activeNow.editor, activeNow.file);
+			if (!draft) return;
+			void this.openAnnotate(activeNow.editor, activeNow.file, signature);
+		}, 420);
+		this.autoTimers.set(view, timer);
+	}
+
 	private draftFromEditor(editor: Editor, file: TFile | null): AnnotationDraft | null {
 		if (!file) return null;
 		const cache = this.app.metadataCache.getFileCache(file);
@@ -383,29 +446,58 @@ export class AnnotationService {
 		};
 	}
 
-	private async openAnnotate(editor: Editor, file: TFile | null): Promise<void> {
+	private selectionSignatureForEditor(editor: Editor): string {
+		const cm = (editor as unknown as { cm?: EditorView }).cm;
+		if (cm) {
+			const selection = cm.state.selection.main;
+			return `${selection.from}:${selection.to}`;
+		}
+		const from = editor.posToOffset(editor.getCursor("from"));
+		const to = editor.posToOffset(editor.getCursor("to"));
+		return `${from}:${to}`;
+	}
+
+	private async openAnnotate(editor: Editor, file: TFile | null, autoSignature?: string): Promise<void> {
 		if (!file) return;
 		const draft = this.draftFromEditor(editor, file);
 		if (!draft) {
 			new Notice("Select text inside a source note’s managed region.");
 			return;
 		}
+		const signature = autoSignature ?? this.selectionSignatureForEditor(editor);
 		const target = await this.targetForPath(file.path);
 		if (!target) {
 			new Notice("Could not identify the source work. Re-render the source and try again.");
 			return;
 		}
+		const bounds = managedBounds(editor.getValue());
+		if (bounds) {
+			const expectedFrom = bounds.bodyStart + draft.position.start;
+			const expectedTo = bounds.bodyStart + draft.position.end;
+			if (
+				editor.posToOffset(editor.getCursor("from")) !== expectedFrom ||
+				editor.posToOffset(editor.getCursor("to")) !== expectedTo
+			) {
+				return;
+			}
+		}
 		const from = editor.getCursor("from");
 		const to = editor.getCursor("to");
+		this.modalOpen = true;
 		new AnnotationModal(this.app, {
 			draft,
 			defaultColor: this.settings.annotationDefaultColor,
 			onSubmit: async (color, comment) => {
 				await this.createAnnotation(target, draft, color, comment);
+				this.suppressAutoSignature = signature;
 			},
 			onCancel: () => {
+				this.suppressAutoSignature = signature;
 				editor.focus();
 				editor.setSelection(from, to);
+			},
+			onClosed: () => {
+				this.modalOpen = false;
 			},
 		}).open();
 	}
@@ -477,6 +569,8 @@ export class AnnotationService {
 		};
 		const from = editor.getCursor("from");
 		const to = editor.getCursor("to");
+		const signature = this.selectionSignatureForEditor(editor);
+		this.modalOpen = true;
 		new AnnotationModal(this.app, {
 			draft,
 			defaultColor: hit.color,
@@ -488,6 +582,7 @@ export class AnnotationService {
 				this.pathAnnotations.set(normalizePath(target.notePath), updated);
 				await this.syncArtifacts(target.workKey);
 				await this.refreshViews();
+				this.suppressAutoSignature = signature;
 				new Notice("Annotation updated.");
 			},
 			onDelete: async () => {
@@ -496,11 +591,16 @@ export class AnnotationService {
 				this.pathAnnotations.set(normalizePath(target.notePath), kept);
 				await this.syncArtifacts(target.workKey);
 				await this.refreshViews();
+				this.suppressAutoSignature = signature;
 				new Notice("Annotation deleted.");
 			},
 			onCancel: () => {
+				this.suppressAutoSignature = signature;
 				editor.focus();
 				editor.setSelection(from, to);
+			},
+			onClosed: () => {
+				this.modalOpen = false;
 			},
 		}).open();
 	}
