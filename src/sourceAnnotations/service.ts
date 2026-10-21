@@ -16,6 +16,7 @@ import {
 	selectionWatcher,
 } from "./editor";
 import { AnnotationPopup, ConfirmModal, type AnnotationDraft, type PopupAnchor } from "./modal";
+import { AnnotationTrashModal } from "./trashModal";
 import { ANNOTATION_EVENTS, type AnnotationEventDetail } from "./events";
 import {
 	annotationMocPath,
@@ -24,7 +25,7 @@ import {
 } from "./note";
 import { refreshReadingViews, registerReadingAnnotations } from "./reading";
 import { findNormalized, resolveAnnotations, visibleSegments } from "./resolve";
-import { AnnotationStore, annotationNow, newAnnotationId } from "./store";
+import { AnnotationStore, annotationNow, newAnnotationId, type AnnotationTrashBatch } from "./store";
 import { AnnotationTargetResolver } from "./target";
 import { AnnotationTooltip } from "./tooltip";
 import {
@@ -143,6 +144,8 @@ export class AnnotationService {
 			void this.refreshViews();
 			refreshReadingViews(this.app);
 		}, 900);
+		window.setTimeout(() => { void this.purgeTrash(); }, 4000);
+		this.plugin.registerInterval(window.setInterval(() => { void this.purgeTrash(); }, 24 * 60 * 60 * 1000));
 	}
 
 	dispose(): void {
@@ -237,6 +240,14 @@ export class AnnotationService {
 					return;
 				}
 				await this.openAnnotationNoteForTarget(target);
+			},
+		});
+
+		this.plugin.addCommand({
+			id: "open-annotation-trash",
+			name: "Open annotation trash",
+			callback: () => {
+				new AnnotationTrashModal(this.app, this).open();
 			},
 		});
 
@@ -941,6 +952,72 @@ export class AnnotationService {
 		this.resolver.invalidate();
 		await this.syncArtifacts(workKey);
 		await this.refreshViews();
+	}
+
+	annotationSummary(): Record<string, { count: number; orphanCount: number }> {
+		const out: Record<string, { count: number; orphanCount: number }> = {};
+		for (const entry of Object.values(this.store.getIndex().works)) {
+			out[entry.key] = { count: entry.count, orphanCount: entry.orphanCount };
+		}
+		return out;
+	}
+
+	annotationCount(workKey: string): number {
+		return this.store.getIndex().works[workKey]?.count ?? 0;
+	}
+
+	async listTrash(): Promise<AnnotationTrashBatch[]> {
+		return this.store.listTrash();
+	}
+
+	async restoreTrashBatch(batchPath: string): Promise<void> {
+		const key = await this.store.restoreTrash(batchPath);
+		if (!key) return;
+		await this.syncArtifacts(key);
+		await this.refreshViews();
+		refreshReadingViews(this.app);
+		new Notice("Annotations restored.");
+	}
+
+	async emptyTrash(batchPath?: string): Promise<void> {
+		const count = await this.store.emptyTrash(batchPath);
+		new Notice(count ? "Annotation trash emptied." : "Nothing to delete.");
+	}
+
+	async purgeTrash(): Promise<void> {
+		try {
+			await this.store.purgeTrash(this.settings.annotationTrashDays);
+		} catch (error) {
+			console.error("[midad-arabic-sources] purge annotation trash", error);
+		}
+	}
+
+	async trashAnnotationsForWork(workKey: string): Promise<void> {
+		await this.store.trashWork(workKey);
+		await renderAnnotationMoc(this.app, this.store, this.settings);
+		await this.refreshParent();
+		await this.refreshViews();
+		refreshReadingViews(this.app);
+		this.tooltip.hide();
+	}
+
+	async confirmDeleteAnnotations(workKey: string): Promise<void> {
+		const work = await this.store.getWork(workKey);
+		if (!work) return;
+		const count = Object.values(work.units).reduce((sum, unit) => sum + unit.count, 0);
+		if (!count) {
+			new Notice("No annotations for this source.");
+			return;
+		}
+		new ConfirmModal(this.app, {
+			title: "Delete annotations for this source",
+			message: `Move ${count} annotation(s) and the annotation note to the annotation trash? The source itself is not affected.`,
+			confirmText: "Move to trash",
+			onConfirm: async () => {
+				await this.trashAnnotationsForWork(workKey);
+				new Notice("Annotations moved to the annotation trash.");
+			},
+		}).open();
 	}
 
 	mocPath(): string {

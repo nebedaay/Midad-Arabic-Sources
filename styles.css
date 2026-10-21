@@ -1079,3 +1079,61 @@ body.theme-dark {
     color: var(--text-normal);
     unicode-bidi: plaintext;
 }
+
+/* ── Manage-sources annotation indicators and trash ───────────────────────── */
+
+.mas-manage__ann {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    margin-top: 2px;
+    color: var(--text-muted);
+    font-size: var(--font-ui-smaller);
+}
+
+.mas-manage__ann-icon {
+    display: flex;
+    --icon-size: var(--icon-xs);
+}
+
+.mas-manage__delete-ann {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    max-width: 100%;
+    color: var(--text-muted);
+    font-size: var(--font-ui-smaller);
+}
+
+.mas-trash-list {
+    margin: 10px 0;
+    border-top: 1px solid var(--background-modifier-border);
+}
+
+.mas-trash-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.mas-trash-info {
+    min-width: 0;
+}
+
+.mas-trash-title {
+    font-weight: var(--font-medium);
+}
+
+.mas-trash-meta {
+    color: var(--text-muted);
+    font-size: var(--font-ui-smaller);
+}
+
+.mas-trash-actions {
+    display: flex;
+    gap: 6px;
+    flex: 0 0 auto;
+}

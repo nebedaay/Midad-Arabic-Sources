@@ -8,6 +8,7 @@ import {
 	ButtonComponent,
 	Editor,
 	MarkdownView,
+	Menu,
 	Modal,
 	Notice,
 	Plugin,
@@ -17,6 +18,7 @@ import {
 	TAbstractFile,
 	TFile,
 	TextComponent,
+	setIcon,
 	normalizePath,
 	requestUrl,
 } from "obsidian";
@@ -44,6 +46,7 @@ import {
 import { BUNDLED_ASSETS } from "./assets.generated";
 import { openDocs, getDocs } from "./docs";
 import { registerAnnotations, AnnotationService } from "./sourceAnnotations/service";
+import { AnnotationTrashModal } from "./sourceAnnotations/trashModal";
 import type { AnnotationColor } from "./sourceAnnotations/types";
 
 // ── External tool resolution (mirrors ScholarWeft's tools.ts) ────────────────
@@ -2042,7 +2045,10 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			const manifest = await this.loadSourceManifest();
 			const statusKeys = (status: "installed" | "deleting") =>
 				new Set(manifest.filter((w) => this.workStatus(w) === status).map((w) => this.workKey(w)));
-			const installedKeys = statusKeys("installed");
+			const archivedKeys = new Set(manifest.filter((w) => w.status === "archived").map((w) => this.workKey(w)));
+			const installedKeys = new Set(
+				manifest.filter((w) => w.status !== "archived" && this.workStatus(w) === "installed").map((w) => this.workKey(w))
+			);
 			// A real footprint is known only for works we've downloaded (installed or
 			// cached); the repositories don't publish sizes, so the rest show "—".
 			// Measurements are cached (loadSourceStats): an installed work is
@@ -2075,7 +2081,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 				for (const e of await this.zoteroEntries()) zoteroStatus.set(String(e.work.key), e.status);
 			}
 			new ManageSourcesModal(
-				this.app, this, works, installedKeys, statusKeys("deleting"), sizes, zoteroStatus,
+				this.app, this, works, installedKeys, statusKeys("deleting"), archivedKeys, sizes, zoteroStatus,
 				() => { void this.openManageSources(true); }
 			).open();
 		} finally {
@@ -5334,15 +5340,17 @@ class ManageSourcesModal extends Modal {
 	works: SourceWork[];
 	installed: Set<string>;
 	deleting: Set<string>;
+	archived: Set<string>;
+	annotationCounts: Map<string, number>;
 	sizes: Map<string, number>;
 	onReload?: () => void;
 	initial: Map<string, boolean>;
 	zoteroStatus: Map<string, string>;
-	rows: Array<{ work: SourceWork; el: HTMLElement; isInstalled: boolean; genres: string[]; repo: string; collection: string }> = [];
+	rows: Array<{ work: SourceWork; el: HTMLElement; isInstalled: boolean; isArchived: boolean; annotationCount: number; genres: string[]; repo: string; collection: string }> = [];
 	headings: Map<string, HTMLElement> = new Map();
 	/** The works the user has highlighted; Apply acts on the difference. */
 	selected = new Set<string>();
-	show: "all" | "installed" | "not-installed";
+	show: "all" | "installed" | "not-installed" | "archived" | "annotated";
 	mode: "manage" | "zotero" | "url" = "manage";
 	activeGenres = new Set<string>();
 	offRepos = new Set<string>();
@@ -5350,18 +5358,24 @@ class ManageSourcesModal extends Modal {
 	refreshSelection: () => void = () => {};
 	updateFilter: () => void = () => {};
 
-	constructor(app: App, plugin: MidadArabicSourcesPlugin, works: SourceWork[], installed: Set<string>, deleting: Set<string> = new Set(), sizes: Map<string, number> = new Map(), zoteroStatus: Map<string, string> = new Map(), onReload?: () => void) {
+	constructor(app: App, plugin: MidadArabicSourcesPlugin, works: SourceWork[], installed: Set<string>, deleting: Set<string> = new Set(), archived: Set<string> = new Set(), sizes: Map<string, number> = new Map(), zoteroStatus: Map<string, string> = new Map(), onReload?: () => void) {
 		super(app);
 		this.plugin = plugin;
 		this.works = works;
 		this.installed = installed;
 		this.deleting = deleting;
+		this.archived = archived;
+		this.annotationCounts = new Map(
+			Object.entries(plugin.annotations?.annotationSummary() ?? {}).map(([key, value]) => [key, value.count])
+		);
 		this.sizes = sizes;
 		this.zoteroStatus = zoteroStatus;
 		this.onReload = onReload;
 		this.initial = new Map(works.map((w) => [w.key, installed.has(w.key)]));
 		const saved = plugin.settings.manageShowFilter;
-		this.show = saved === "installed" || saved === "not-installed" ? saved : "all";
+		this.show = saved === "installed" || saved === "not-installed" || saved === "archived" || saved === "annotated"
+			? saved
+			: "all";
 		this.activeGenres = new Set(plugin.settings.manageGenreFilter || []);
 	}
 
@@ -5382,7 +5396,13 @@ class ManageSourcesModal extends Modal {
 		const topbar = contentEl.createDiv({ cls: "mas-manage__searchrow" });
 		topbar.createSpan({ cls: "mas-manage__label", text: "Show:" });
 		const showSel = topbar.createEl("select");
-		for (const [val, label] of [["all", "All"], ["installed", "Installed"], ["not-installed", "Not installed"]] as const) {
+		for (const [val, label] of [
+			["all", "All"],
+			["installed", "Installed"],
+			["not-installed", "Not installed"],
+			["archived", "Archived"],
+			["annotated", "Annotated"],
+		] as const) {
 			showSel.createEl("option", { text: label }).value = val;
 		}
 		showSel.value = this.show;
@@ -5476,11 +5496,19 @@ class ManageSourcesModal extends Modal {
 			const row = list.createDiv({ cls: "mas-manage__row" });
 			row.style.gridTemplateColumns = COLS;
 			const isInstalled = this.installed.has(w.key);
+			const isArchived = this.archived.has(w.key);
+			const annotationCount = this.annotationCounts.get(w.key) ?? 0;
 			row.createSpan({ cls: "mas-manage__lang", text: w.language.toUpperCase() });
 			row.createSpan({ text: w.author || "" });
 			const titleCell = row.createDiv({ cls: "mas-manage__title" });
 			titleCell.createDiv({ cls: "mas-manage__title-main", text: w.title || w.name });
 			if (w.subtitle) titleCell.createDiv({ cls: "mas-manage__subtitle", text: w.subtitle });
+			if (annotationCount) {
+				const badge = titleCell.createDiv({ cls: "mas-manage__ann" });
+				setIcon(badge.createSpan({ cls: "mas-manage__ann-icon" }), "highlighter");
+				badge.createSpan({ cls: "mas-manage__ann-count", text: String(annotationCount) });
+				badge.title = `${annotationCount} annotation(s)`;
+			}
 			row.createSpan({ cls: "mas-manage__kind", text: workGenres(w).map(genreLabelOf).join(", ") });
 			row.createSpan({ cls: "mas-manage__mut", text: w.repository || "" });
 			const known = this.sizes.get(w.key);
@@ -5491,15 +5519,26 @@ class ManageSourcesModal extends Modal {
 			size.title = known ? "On disk" : w.est_bytes ? "Estimated" : "Unknown";
 			row.createSpan({
 				cls: "mas-manage__mut",
-				text: this.deleting.has(w.key) ? "being removed" : isInstalled ? "installed" : "",
+				text: this.deleting.has(w.key) ? "being removed" : isArchived ? "archived" : isInstalled ? "installed" : "",
 			});
+			if (annotationCount) {
+				row.oncontextmenu = (event) => {
+					event.preventDefault();
+					const menu = new Menu();
+					menu.addItem((item) => item
+						.setTitle("Delete annotations for this item…")
+						.setIcon("trash-2")
+						.onClick(() => { void this.plugin.annotations?.confirmDeleteAnnotations(w.key); }));
+					menu.showAtMouseEvent(event);
+				};
+			}
 			row.onclick = () => {
 				if (this.selected.has(w.key)) this.selected.delete(w.key);
 				else this.selected.add(w.key);
 				this.refreshSelection();
 			};
 			this.rows.push({
-				work: w, el: row, isInstalled,
+				work: w, el: row, isInstalled, isArchived, annotationCount,
 				genres: workGenres(w),
 				repo: w.repository || "Other",
 				collection: w.collection,
@@ -5508,8 +5547,16 @@ class ManageSourcesModal extends Modal {
 
 		const foot = pane.createDiv({ cls: "mas-manage__foot" });
 		const statusEl = foot.createDiv({ cls: "mas-manage__status" });
+		const deleteAnnotationsWrap = foot.createEl("label", { cls: "mas-manage__delete-ann" });
+		const deleteAnnotationsOnRemove = deleteAnnotationsWrap.createEl("input", { attr: { type: "checkbox" } });
+		deleteAnnotationsWrap.createSpan({ text: "Delete annotations for items removed while applying these changes" });
 		const actions = foot.createDiv({ cls: "mas-manage__actions" });
 		const selectAllBtn = actions.createEl("button", { cls: "mas-manage__toggle", text: "Select all/none" });
+		const trashBtn = actions.createEl("button", { text: "Annotation trash…" });
+		trashBtn.onclick = () => {
+			if (this.plugin.annotations) new AnnotationTrashModal(this.app, this.plugin.annotations).open();
+			else new Notice("The annotation layer is not running.");
+		};
 		const cancelBtn = actions.createEl("button", { text: "Cancel" });
 		const applyBtn = actions.createEl("button", { cls: "mod-cta", text: "Apply" });
 
@@ -5527,7 +5574,15 @@ class ManageSourcesModal extends Modal {
 			for (const r of this.rows) {
 				const w = r.work;
 				const hay = `${w.title} ${w.name} ${w.author} ${w.id} ${w.repository || ""}`.toLowerCase();
-				const showOk = this.show === "all" || (this.show === "installed" ? r.isInstalled : !r.isInstalled);
+				const showOk = this.show === "all"
+					? true
+					: this.show === "installed"
+						? r.isInstalled
+						: this.show === "not-installed"
+							? !r.isInstalled && !r.isArchived
+							: this.show === "archived"
+								? r.isArchived
+								: r.annotationCount > 0;
 				const genreOk = !this.activeGenres.size || r.genres.some((g) => this.activeGenres.has(g));
 				const repoOk = !this.offRepos.has(r.repo);
 				const visible = showOk && genreOk && repoOk && (!q || hay.includes(q)) && (!lg || w.language === lg);
@@ -5598,6 +5653,9 @@ class ManageSourcesModal extends Modal {
 						await this.plugin.removeSource(w, (done, total) =>
 							progress.setMessage(`Removing ${nth}: ${name} — ${done}/${total} files…`)
 						);
+						if (deleteAnnotationsOnRemove.checked && this.plugin.annotations) {
+							await this.plugin.annotations.trashAnnotationsForWork(w.key);
+						}
 					} catch (e) {
 						failed.push(`${name}: ${e instanceof Error ? e.message : e}`);
 					}

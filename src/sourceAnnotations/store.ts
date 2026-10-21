@@ -14,6 +14,17 @@ export const ANNOTATION_ROOT = ".midad-arabic-sources/annotations";
 export const ANNOTATION_INDEX = `${ANNOTATION_ROOT}/index.json`;
 export const ANNOTATION_TRASH = ".midad-arabic-sources/trash/annotations";
 
+export interface AnnotationTrashBatch {
+	path: string;
+	deletedAt: string;
+	workKey: string;
+	workTitle: string;
+	count: number;
+	sourceStatus: SourceStatus;
+	originalNote: string;
+	trashedNote: string;
+}
+
 function safeSegment(value: string): string {
 	return String(value)
 		.replace(/[\\/:*?"<>|#^]/g, "-")
@@ -465,6 +476,103 @@ export class AnnotationStore {
 			if (target.workKey === workKey) this.paths.delete(path);
 		}
 		return batch;
+	}
+
+	async listTrash(): Promise<AnnotationTrashBatch[]> {
+		try {
+			const root = normalizePath(ANNOTATION_TRASH);
+			if (!(await this.app.vault.adapter.exists(root))) return [];
+			const listed = await this.app.vault.adapter.list(root);
+			const batches: AnnotationTrashBatch[] = [];
+			for (const folder of listed.folders) {
+				try {
+					const manifestPath = normalizePath(`${folder}/manifest.json`);
+					if (!(await this.app.vault.adapter.exists(manifestPath))) continue;
+					const parsed = parseJson<Partial<AnnotationTrashBatch>>(await this.app.vault.adapter.read(manifestPath));
+					if (!parsed || !parsed.workKey) continue;
+					batches.push({
+						path: folder,
+						deletedAt: String(parsed.deletedAt ?? ""),
+						workKey: parsed.workKey,
+						workTitle: String(parsed.workTitle ?? parsed.workKey),
+						count: Number(parsed.count ?? 0),
+						sourceStatus: parsed.sourceStatus ?? "removed",
+						originalNote: String(parsed.originalNote ?? ""),
+						trashedNote: String(parsed.trashedNote ?? ""),
+					});
+				} catch { /* skip a corrupt batch */ }
+			}
+			return batches.sort((a, b) => b.deletedAt.localeCompare(a.deletedAt));
+		} catch {
+			return [];
+		}
+	}
+
+	async restoreTrash(batchPath: string): Promise<string | null> {
+		try {
+			const manifestPath = normalizePath(`${batchPath}/manifest.json`);
+			const parsed = parseJson<Partial<AnnotationTrashBatch>>(await this.app.vault.adapter.read(manifestPath));
+			if (!parsed?.workKey) return null;
+			const folder = workFolder(parsed.workKey);
+			const dataPath = normalizePath(`${batchPath}/data`);
+			if (await this.app.vault.adapter.exists(folder)) {
+				throw new Error("The annotation store for this work already exists.");
+			}
+			if (await this.app.vault.adapter.exists(dataPath)) {
+				await this.app.vault.adapter.rename(dataPath, folder);
+			}
+			if (parsed.trashedNote && parsed.originalNote) {
+				const trashed = normalizePath(parsed.trashedNote);
+				const original = normalizePath(parsed.originalNote);
+				if (await this.app.vault.adapter.exists(trashed)) {
+					if (await this.app.vault.adapter.exists(original)) {
+						throw new Error("The original annotation note path is occupied.");
+					}
+					const parent = original.split("/").slice(0, -1).join("/");
+					if (parent) await this.ensureFolder(parent);
+					await this.app.vault.adapter.rename(trashed, original);
+				}
+			}
+			await this.rebuild();
+			return parsed.workKey;
+		} catch (error) {
+			throw error instanceof Error ? error : new Error(String(error));
+		}
+	}
+
+	async emptyTrash(batchPath?: string): Promise<number> {
+		const targets: string[] = [];
+		if (batchPath) {
+			targets.push(batchPath);
+		} else {
+			for (const batch of await this.listTrash()) targets.push(batch.path);
+		}
+		let removed = 0;
+		for (const target of targets) {
+			try {
+				if (await this.app.vault.adapter.exists(normalizePath(target))) {
+					await this.app.vault.adapter.rmdir(normalizePath(target), true);
+					removed += 1;
+				}
+			} catch { /* leave it for the next attempt */ }
+		}
+		return removed;
+	}
+
+	async purgeTrash(days: number): Promise<number> {
+		const cutoff = Date.now() - Math.max(1, days) * 24 * 60 * 60 * 1000;
+		let removed = 0;
+		for (const batch of await this.listTrash()) {
+			const time = Date.parse(batch.deletedAt);
+			if (!Number.isFinite(time) || time > cutoff) continue;
+			try {
+				if (await this.app.vault.adapter.exists(normalizePath(batch.path))) {
+					await this.app.vault.adapter.rmdir(normalizePath(batch.path), true);
+					removed += 1;
+				}
+			} catch { /* leave it for the next attempt */ }
+		}
+		return removed;
 	}
 
 	/**
