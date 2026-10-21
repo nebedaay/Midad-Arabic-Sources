@@ -827,15 +827,18 @@ body.theme-dark {
 
 .cm-scroller.mas-ann-scroller,
 .markdown-preview-sizer.mas-has-annotations {
+    --mas-ann-icon-gap: 8px;
+    --mas-ann-stack-step: 12px;
+    --mas-ann-gutter: 3rem;
     position: relative;
 }
 
 .cm-editor.mas-has-annotations .cm-content {
-    padding-right: 3rem;
+    padding-right: var(--mas-ann-gutter);
 }
 
 .markdown-preview-sizer.mas-has-annotations {
-    padding-right: 3rem;
+    padding-right: var(--mas-ann-gutter);
 }
 
 .mas-ann-margin {

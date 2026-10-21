@@ -158,9 +158,17 @@ class AnnotationRail {
 			this.view.dom.classList.remove("mas-has-annotations");
 			return;
 		}
+		scroller.classList.add("mas-ann-scroller");
+		this.view.dom.classList.add("mas-has-annotations");
 		const scrollerRect = scroller.getBoundingClientRect();
 		const contentRect = this.view.contentDOM.getBoundingClientRect();
+		const paddingRight =
+			Number.parseFloat(getComputedStyle(this.view.contentDOM).paddingRight) || 0;
 		const contentRight = contentRect.right - scrollerRect.left + scroller.scrollLeft;
+		const textRight = contentRight - paddingRight;
+		const style = getComputedStyle(scroller);
+		const gap = Number.parseFloat(style.getPropertyValue("--mas-ann-icon-gap")) || 8;
+		const step = Number.parseFloat(style.getPropertyValue("--mas-ann-stack-step")) || 12;
 		const records: Array<{ annotation: ResolvedAnnotation; top: number; left: number }> = [];
 		for (const annotation of annotations) {
 			if (!annotation.ranges.length) continue;
@@ -169,7 +177,7 @@ class AnnotationRail {
 			records.push({
 				annotation,
 				top: start.top - scrollerRect.top + scroller.scrollTop,
-				left: contentRight - 40,
+				left: textRight,
 			});
 		}
 		if (!records.length) {
@@ -177,54 +185,50 @@ class AnnotationRail {
 			this.view.dom.classList.remove("mas-has-annotations");
 			return;
 		}
-		scroller.classList.add("mas-ann-scroller");
-		this.view.dom.classList.add("mas-has-annotations");
 		const rail = scroller.createDiv({ cls: "mas-ann-rail" });
 		this.rail = rail;
 
-		const placed: Array<{ left: number; top: number }> = [];
-		for (const record of records) {
-			let left = record.left + 6;
-			let top = Math.max(0, record.top);
-			let guard = 0;
-			while (
-				guard++ < 20 &&
-				placed.some((other) => Math.abs(other.left - left) < 20 && Math.abs(other.top - top) < 20)
-			) {
-				left += 6;
-				top = Math.max(0, top - 6);
-			}
-			left = Math.max(6, Math.min(left, contentRight - 2));
-			placed.push({ left, top });
-			const icon = createEl("button", {
-				cls: "mas-ann-margin",
-				attr: { type: "button", "aria-label": "Annotation" },
-			});
-			icon.dataset.annIds = record.annotation.id;
-			icon.setCssStyles({
-				color: annotationTint(record.annotation.color, 65, 0.95),
-				top: `${top}px`,
-				left: `${left}px`,
-			});
-			icon.addEventListener("mouseenter", () => {
-				fire(icon, ANNOTATION_EVENTS.hover, [record.annotation.id]);
-			});
-			icon.addEventListener("mouseleave", () => {
-				fire(icon, ANNOTATION_EVENTS.leave, [record.annotation.id]);
-			});
-			icon.addEventListener("click", (event) => {
-				event.preventDefault();
-				event.stopPropagation();
-				fire(icon, ANNOTATION_EVENTS.open, [record.annotation.id]);
-			});
-			icon.addEventListener("keydown", (event) => {
-				if (event.key === "Enter" || event.key === " ") {
+		const groups: Array<typeof records> = [];
+		for (const record of [...records].sort((a, b) => a.top - b.top)) {
+			const group = groups.find((existing) => Math.abs(existing[0].top - record.top) <= 4);
+			if (group) group.push(record);
+			else groups.push([record]);
+		}
+		for (const group of groups) {
+			group.sort((a, b) => a.annotation.start - b.annotation.start);
+			group.forEach((record, index) => {
+				const left = Math.max(6, Math.min(record.left + gap + index * step, contentRight - 26));
+				const top = record.top + index * step;
+				const icon = createEl("button", {
+					cls: "mas-ann-margin",
+					attr: { type: "button", "aria-label": "Annotation" },
+				});
+				icon.dataset.annIds = record.annotation.id;
+				icon.setCssStyles({
+					color: annotationTint(record.annotation.color, 65, 0.95),
+					top: `${top}px`,
+					left: `${left}px`,
+				});
+				icon.addEventListener("mouseenter", () => {
+					fire(icon, ANNOTATION_EVENTS.hover, [record.annotation.id]);
+				});
+				icon.addEventListener("mouseleave", () => {
+					fire(icon, ANNOTATION_EVENTS.leave, [record.annotation.id]);
+				});
+				icon.addEventListener("click", (event) => {
 					event.preventDefault();
 					event.stopPropagation();
 					fire(icon, ANNOTATION_EVENTS.open, [record.annotation.id]);
-				}
+				});
+				icon.addEventListener("keydown", (event) => {
+					if (event.key === "Enter" || event.key === " ") {
+						event.preventDefault();
+						event.stopPropagation();
+						fire(icon, ANNOTATION_EVENTS.open, [record.annotation.id]);
+					}
+				});
+				rail.appendChild(icon);
 			});
-			rail.appendChild(icon);
 		}
 	}
 }

@@ -166,7 +166,13 @@ function makeSegment(
 
 function addMarginIcons(root: HTMLElement, dom: DomFactory, annotations: ResolvedAnnotation[]): void {
 	const marks = Array.from(root.querySelectorAll<HTMLElement>(".mas-annotation"));
+	root.classList.add("mas-has-annotations");
 	const rootRect = root.getBoundingClientRect();
+	const paddingRight = Number.parseFloat(getComputedStyle(root).paddingRight) || 0;
+	const textRight = root.clientWidth - paddingRight;
+	const style = getComputedStyle(root);
+	const gap = Number.parseFloat(style.getPropertyValue("--mas-ann-icon-gap")) || 8;
+	const step = Number.parseFloat(style.getPropertyValue("--mas-ann-stack-step")) || 12;
 	const records: Array<{ annotation: ResolvedAnnotation; top: number; left: number }> = [];
 	for (const annotation of [...annotations].sort((a, b) => a.start - b.start)) {
 		let first: HTMLElement | null = null;
@@ -178,62 +184,61 @@ function addMarginIcons(root: HTMLElement, dom: DomFactory, annotations: Resolve
 			}
 		}
 		if (!first) continue;
-		const rects = Array.from(first.getClientRects());
-		const startRect = rects[0] ?? first.getBoundingClientRect();
+		const startRect = first.getClientRects()[0] ?? first.getBoundingClientRect();
 		records.push({
 			annotation,
 			top: startRect.top - rootRect.top,
-			left: root.clientWidth - 40,
+			left: textRight,
 		});
 	}
-	if (!records.length) return;
-	root.classList.add("mas-has-annotations");
+	if (!records.length) {
+		root.classList.remove("mas-has-annotations");
+		return;
+	}
 	const rail = dom.el("div", { cls: "mas-ann-rail" });
-	const placed: Array<{ left: number; top: number }> = [];
-	for (const record of records) {
-		let left = record.left + 6;
-		let top = Math.max(0, record.top);
-		let guard = 0;
-		while (
-			guard++ < 20 &&
-			placed.some((other) => Math.abs(other.left - left) < 20 && Math.abs(other.top - top) < 20)
-		) {
-			left += 6;
-			top = Math.max(0, top - 6);
-		}
-		left = Math.max(6, Math.min(left, root.clientWidth - 26));
-		placed.push({ left, top });
-		const icon = dom.el("button", {
-			cls: "mas-ann-margin",
-			attr: { type: "button", "aria-label": "Annotation" },
-		});
-		icon.dataset.annIds = record.annotation.id;
-		dom.style(icon, {
-			color: annotationTint(record.annotation.color, 65, 0.95),
-			top: `${top}px`,
-			left: `${left}px`,
-		});
-		const fire = (type: string): void => {
-			icon.dispatchEvent(new CustomEvent<AnnotationEventDetail>(type, {
-				bubbles: true,
-				detail: { ids: [record.annotation.id] },
-			}));
-		};
-		icon.addEventListener("mouseenter", () => fire(ANNOTATION_EVENTS.hover));
-		icon.addEventListener("mouseleave", () => fire(ANNOTATION_EVENTS.leave));
-		icon.addEventListener("click", (event) => {
-			event.preventDefault();
-			event.stopPropagation();
-			fire(ANNOTATION_EVENTS.open);
-		});
-		icon.addEventListener("keydown", (event) => {
-			if (event.key === "Enter" || event.key === " ") {
+	const groups: Array<typeof records> = [];
+	for (const record of [...records].sort((a, b) => a.top - b.top)) {
+		const group = groups.find((existing) => Math.abs(existing[0].top - record.top) <= 4);
+		if (group) group.push(record);
+		else groups.push([record]);
+	}
+	for (const group of groups) {
+		group.sort((a, b) => a.annotation.start - b.annotation.start);
+		group.forEach((record, index) => {
+			const left = Math.max(6, Math.min(record.left + gap + index * step, root.clientWidth - 26));
+			const top = record.top + index * step;
+			const icon = dom.el("button", {
+				cls: "mas-ann-margin",
+				attr: { type: "button", "aria-label": "Annotation" },
+			});
+			icon.dataset.annIds = record.annotation.id;
+			dom.style(icon, {
+				color: annotationTint(record.annotation.color, 65, 0.95),
+				top: `${top}px`,
+				left: `${left}px`,
+			});
+			const fire = (type: string): void => {
+				icon.dispatchEvent(new CustomEvent<AnnotationEventDetail>(type, {
+					bubbles: true,
+					detail: { ids: [record.annotation.id] },
+				}));
+			};
+			icon.addEventListener("mouseenter", () => fire(ANNOTATION_EVENTS.hover));
+			icon.addEventListener("mouseleave", () => fire(ANNOTATION_EVENTS.leave));
+			icon.addEventListener("click", (event) => {
 				event.preventDefault();
 				event.stopPropagation();
 				fire(ANNOTATION_EVENTS.open);
-			}
+			});
+			icon.addEventListener("keydown", (event) => {
+				if (event.key === "Enter" || event.key === " ") {
+					event.preventDefault();
+					event.stopPropagation();
+					fire(ANNOTATION_EVENTS.open);
+				}
+			});
+			rail.appendChild(icon);
 		});
-		rail.appendChild(icon);
 	}
 	root.appendChild(rail);
 }
