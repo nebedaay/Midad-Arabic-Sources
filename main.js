@@ -14706,20 +14706,25 @@ var MidadArabicSourcesPlugin = class extends import_obsidian13.Plugin {
     const id = String((_b = work.id) != null ? _b : "work").replace(/[^\w.-]+/g, "_");
     return `${this.vaultPath()}/.midad-arabic-sources/source-archives/${collection}/${id}.json.gz`;
   }
-  async deleteRenderedNotes(work) {
+  async deleteRenderedNotes(work, model) {
     var _a;
     const outRoot = this.settings.sourceImportRoot.trim() || "_7 Sources";
     const dir = String((_a = work.dir) != null ? _a : "");
     const adapter = this.app.vault.adapter;
     const problems = [];
-    const hub = (0, import_obsidian13.normalizePath)(`${outRoot}/${dir}.md`);
-    const folder = (0, import_obsidian13.normalizePath)(`${outRoot}/${dir}`);
-    try {
-      if (await adapter.exists(hub))
-        await adapter.remove(hub);
-    } catch (e) {
-      problems.push(`hub: ${e instanceof Error ? e.message : e}`);
+    const canonicalRoot = this.settings.canonicalQuranFolder.trim() || `${outRoot}/Quran`;
+    const canonicalId = this.resolveCanonicalQuran();
+    const paths = model ? expectedNotePaths(model, outRoot, canonicalRoot, canonicalId) : [`${outRoot}/${dir}.md`];
+    for (const path2 of paths) {
+      try {
+        const rel = (0, import_obsidian13.normalizePath)(path2);
+        if (await adapter.exists(rel))
+          await adapter.remove(rel);
+      } catch (e) {
+        problems.push(`${path2}: ${e instanceof Error ? e.message : e}`);
+      }
     }
+    const folder = (0, import_obsidian13.normalizePath)(`${outRoot}/${dir}`);
     try {
       if (await adapter.exists(folder)) {
         for (const file of await this.listFilesUnder(folder)) {
@@ -14753,9 +14758,10 @@ var MidadArabicSourcesPlugin = class extends import_obsidian13.Plugin {
       return false;
     }
     const archive = this.sourceArchivePath(work);
+    let model;
     try {
       const text = fs2.readFileSync(modelAbs, "utf8");
-      JSON.parse(text);
+      model = JSON.parse(text);
       fs2.mkdirSync(archive.slice(0, archive.lastIndexOf("/")), { recursive: true });
       fs2.writeFileSync(archive, zlib.gzipSync(Buffer.from(text, "utf8")));
     } catch (e) {
@@ -14763,7 +14769,7 @@ var MidadArabicSourcesPlugin = class extends import_obsidian13.Plugin {
       return false;
     }
     await this.setWorkStatus(key, "archived");
-    const problems = await this.deleteRenderedNotes(work);
+    const problems = await this.deleteRenderedNotes(work, model);
     try {
       fs2.unlinkSync(modelAbs);
     } catch (e) {

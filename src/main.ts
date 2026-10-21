@@ -2214,19 +2214,28 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		return `${this.vaultPath()}/.midad-arabic-sources/source-archives/${collection}/${id}.json.gz`;
 	}
 
-	/** Remove a work's rendered hub and folder, returning any per-file errors. */
-	async deleteRenderedNotes(work: JsonObject): Promise<string[]> {
+	/** Remove a work's rendered notes, returning any per-file errors. */
+	async deleteRenderedNotes(work: JsonObject, model?: SourceModel): Promise<string[]> {
 		const outRoot = this.settings.sourceImportRoot.trim() || "_7 Sources";
 		const dir = String(work.dir ?? "");
 		const adapter = this.app.vault.adapter;
 		const problems: string[] = [];
-		const hub = normalizePath(`${outRoot}/${dir}.md`);
-		const folder = normalizePath(`${outRoot}/${dir}`);
-		try {
-			if (await adapter.exists(hub)) await adapter.remove(hub);
-		} catch (e) {
-			problems.push(`hub: ${e instanceof Error ? e.message : e}`);
+		const canonicalRoot = this.settings.canonicalQuranFolder.trim() || `${outRoot}/Quran`;
+		const canonicalId = this.resolveCanonicalQuran();
+		const paths = model
+			? expectedNotePaths(model, outRoot, canonicalRoot, canonicalId)
+			: [`${outRoot}/${dir}.md`];
+		for (const path of paths) {
+			try {
+				const rel = normalizePath(path);
+				if (await adapter.exists(rel)) await adapter.remove(rel);
+			} catch (e) {
+				problems.push(`${path}: ${e instanceof Error ? e.message : e}`);
+			}
 		}
+		// Clean the work folder, including any old-style names the model no longer
+		// lists. Canonical Qur'ān notes live outside it and were removed by path.
+		const folder = normalizePath(`${outRoot}/${dir}`);
 		try {
 			if (await adapter.exists(folder)) {
 				for (const file of await this.listFilesUnder(folder)) {
@@ -2265,9 +2274,10 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			return false;
 		}
 		const archive = this.sourceArchivePath(work);
+		let model: SourceModel;
 		try {
 			const text = fs.readFileSync(modelAbs, "utf8");
-			JSON.parse(text);
+			model = JSON.parse(text) as SourceModel;
 			fs.mkdirSync(archive.slice(0, archive.lastIndexOf("/")), { recursive: true });
 			fs.writeFileSync(archive, zlib.gzipSync(Buffer.from(text, "utf8")));
 		} catch (e) {
@@ -2275,7 +2285,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			return false;
 		}
 		await this.setWorkStatus(key, "archived");
-		const problems = await this.deleteRenderedNotes(work);
+		const problems = await this.deleteRenderedNotes(work, model);
 		try {
 			fs.unlinkSync(modelAbs);
 		} catch (e) {
