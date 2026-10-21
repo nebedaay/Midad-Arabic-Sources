@@ -114,7 +114,7 @@ type Engine = "bert" | "mle" | "none";
 type DotlessYa = "maqsura" | "ya";
 type LlmProvider = "gemini" | "deepseek" | "openai";
 
-interface ArabicSupportSettings {
+interface MidadArabicSourcesSettings {
 	serverUrl: string;
 	transliterationServerScript: string;
 	engine: Engine;
@@ -429,7 +429,7 @@ const PROMPT_KIND_LABEL: Record<PromptKind, string> = {
 	translation: "translation",
 };
 
-const DEFAULT_SETTINGS: ArabicSupportSettings = {
+const DEFAULT_SETTINGS: MidadArabicSourcesSettings = {
 	serverUrl: "http://127.0.0.1:8756",
 	transliterationServerScript: "scripts/transliterate-server.py",
 	engine: "bert",
@@ -467,8 +467,8 @@ const DEFAULT_SETTINGS: ArabicSupportSettings = {
 	sourceUpdateCheckDays: 7,
 };
 
-export default class ArabicSupportPlugin extends Plugin {
-	settings: ArabicSupportSettings;
+export default class MidadArabicSourcesPlugin extends Plugin {
+	settings: MidadArabicSourcesSettings;
 	lastUnknown: LexiconGuess[] = [];
 	statusPanels: StatusPanel[] = [];
 	/** Catalogue of available works, cached per session (and on disk for longer). */
@@ -492,7 +492,7 @@ export default class ArabicSupportPlugin extends Plugin {
 		// Extract the bundled templates and Python scripts into the plugin folder
 		// (they ship inside main.js; see gen-assets.mjs).
 		this.extractBundledAssets();
-		this.addSettingTab(new ArabicSupportSettingTab(this.app, this));
+		this.addSettingTab(new MidadArabicSourcesSettingTab(this.app, this));
 		try {
 			this.annotations = await registerAnnotations({
 				app: this.app,
@@ -3666,7 +3666,7 @@ export default class ArabicSupportPlugin extends Plugin {
 	}
 
 	async loadSettings() {
-		const data = (await this.loadData()) as Partial<ArabicSupportSettings> | null;
+		const data = (await this.loadData()) as Partial<MidadArabicSourcesSettings> | null;
 		this.settings = Object.assign({}, DEFAULT_SETTINGS, data ?? {});
 		// Pre-designation installs: Ḥafṣ was the first riwāya, so adopt it once and
 		// persist it, after which the designation is purely the setting.
@@ -3687,12 +3687,12 @@ export default class ArabicSupportPlugin extends Plugin {
 
 /** Start or stop the resident transliteration server, with its current status. */
 class TransliterationServerModal extends Modal {
-	plugin: ArabicSupportPlugin;
+	plugin: MidadArabicSourcesPlugin;
 	private statusEl!: HTMLElement;
 	private button: ButtonComponent | null = null;
 	private running = false;
 
-	constructor(app: App, plugin: ArabicSupportPlugin) {
+	constructor(app: App, plugin: MidadArabicSourcesPlugin) {
 		super(app);
 		this.plugin = plugin;
 	}
@@ -3727,7 +3727,7 @@ class TransliterationServerModal extends Modal {
 }
 
 class TransliterateModal extends Modal {
-	plugin: ArabicSupportPlugin;
+	plugin: MidadArabicSourcesPlugin;
 	text: string;
 	onDone: (romanized: string) => Promise<void> | void;
 	useLlm: boolean;
@@ -3735,7 +3735,7 @@ class TransliterateModal extends Modal {
 
 	constructor(
 		app: App,
-		plugin: ArabicSupportPlugin,
+		plugin: MidadArabicSourcesPlugin,
 		text: string,
 		onDone: (romanized: string) => Promise<void> | void
 	) {
@@ -3793,14 +3793,14 @@ class TransliterateModal extends Modal {
 }
 
 class LexiconModal extends Modal {
-	plugin: ArabicSupportPlugin;
+	plugin: MidadArabicSourcesPlugin;
 	unknown: LexiconGuess[];
 	inputs: Array<{ term: string; comp: TextComponent }> = [];
 	onSaved: (() => Promise<void> | void) | null;
 
 	constructor(
 		app: App,
-		plugin: ArabicSupportPlugin,
+		plugin: MidadArabicSourcesPlugin,
 		unknown: LexiconGuess[],
 		onSaved: (() => Promise<void> | void) | null = null
 	) {
@@ -3848,12 +3848,12 @@ class LexiconModal extends Modal {
 	}
 }
 
-class ArabicSupportSettingTab extends PluginSettingTab {
-	plugin: ArabicSupportPlugin;
+class MidadArabicSourcesSettingTab extends PluginSettingTab {
+	plugin: MidadArabicSourcesPlugin;
 	/** The one-shot local-Zotero probe has run (see probeZotero). */
 	private zoteroProbed = false;
 
-	constructor(app: App, plugin: ArabicSupportPlugin) {
+	constructor(app: App, plugin: MidadArabicSourcesPlugin) {
 		super(app, plugin);
 		this.plugin = plugin;
 	}
@@ -4416,9 +4416,9 @@ class LogModal extends Modal {
 }
 
 class ApiKeyModal extends Modal {
-	plugin: ArabicSupportPlugin;
+	plugin: MidadArabicSourcesPlugin;
 
-	constructor(app: App, plugin: ArabicSupportPlugin) {
+	constructor(app: App, plugin: MidadArabicSourcesPlugin) {
 		super(app);
 		this.plugin = plugin;
 	}
@@ -4448,10 +4448,10 @@ class ApiKeyModal extends Modal {
 }
 
 class ResumeModal extends Modal {
-	plugin: ArabicSupportPlugin;
+	plugin: MidadArabicSourcesPlugin;
 	state: PipelineState;
 
-	constructor(app: App, plugin: ArabicSupportPlugin, state: PipelineState) {
+	constructor(app: App, plugin: MidadArabicSourcesPlugin, state: PipelineState) {
 		super(app);
 		this.plugin = plugin;
 		this.state = state;
@@ -4507,7 +4507,7 @@ function uniquePromptName(base: string, entries: PromptEntry[]): string {
  * the dropdown sits to their left as one row.
  */
 class PromptPicker {
-	plugin: ArabicSupportPlugin;
+	plugin: MidadArabicSourcesPlugin;
 	kind: PromptKind;
 	containerEl: HTMLElement;
 	entries: PromptEntry[];
@@ -4517,7 +4517,7 @@ class PromptPicker {
 	deleteButton: ButtonComponent | null = null;
 
 	constructor(
-		plugin: ArabicSupportPlugin,
+		plugin: MidadArabicSourcesPlugin,
 		kind: PromptKind,
 		containerEl: HTMLElement,
 		entries: PromptEntry[],
@@ -4603,7 +4603,7 @@ class PromptPicker {
 
 /** The large editor for a prompt's name and system instruction. */
 class PromptEditorModal extends Modal {
-	plugin: ArabicSupportPlugin;
+	plugin: MidadArabicSourcesPlugin;
 	kind: PromptKind;
 	mode: "edit" | "new";
 	source: PromptEntry;
@@ -4613,7 +4613,7 @@ class PromptEditorModal extends Modal {
 	text: string;
 
 	constructor(
-		plugin: ArabicSupportPlugin,
+		plugin: MidadArabicSourcesPlugin,
 		kind: PromptKind,
 		mode: "edit" | "new",
 		source: PromptEntry,
@@ -4734,14 +4734,14 @@ class PromptEditorModal extends Modal {
 }
 
 class TranscribeModal extends Modal {
-	plugin: ArabicSupportPlugin;
+	plugin: MidadArabicSourcesPlugin;
 	citekey: string;
 	pdfs: PipelinePdf[];
 	prompts: PromptEntry[];
 	checks: Array<{ pdf: PipelinePdf; el: HTMLInputElement; vol: TextComponent }> = [];
 	picker!: PromptPicker;
 
-	constructor(app: App, plugin: ArabicSupportPlugin, citekey: string, pdfs: PipelinePdf[], prompts: PromptEntry[]) {
+	constructor(app: App, plugin: MidadArabicSourcesPlugin, citekey: string, pdfs: PipelinePdf[], prompts: PromptEntry[]) {
 		super(app);
 		this.plugin = plugin;
 		this.citekey = citekey;
@@ -4805,7 +4805,7 @@ class TranscribeModal extends Modal {
 }
 
 class TranslateModal extends Modal {
-	plugin: ArabicSupportPlugin;
+	plugin: MidadArabicSourcesPlugin;
 	citekey: string;
 	notes: PipelineNote[];
 	pdfs: PipelinePdf[];
@@ -4814,7 +4814,7 @@ class TranslateModal extends Modal {
 	volume = "";
 	picker!: PromptPicker;
 
-	constructor(app: App, plugin: ArabicSupportPlugin, citekey: string, notes: PipelineNote[], pdfs: PipelinePdf[], prompts: PromptEntry[]) {
+	constructor(app: App, plugin: MidadArabicSourcesPlugin, citekey: string, notes: PipelineNote[], pdfs: PipelinePdf[], prompts: PromptEntry[]) {
 		super(app);
 		this.plugin = plugin;
 		this.citekey = citekey;
@@ -4888,11 +4888,11 @@ class TranslateModal extends Modal {
 }
 
 class ReprocessModal extends Modal {
-	plugin: ArabicSupportPlugin;
+	plugin: MidadArabicSourcesPlugin;
 	zips: ArchiveZip[];
 	checks: Array<{ zip: ArchiveZip; el: HTMLInputElement }> = [];
 
-	constructor(app: App, plugin: ArabicSupportPlugin, zips: ArchiveZip[]) {
+	constructor(app: App, plugin: MidadArabicSourcesPlugin, zips: ArchiveZip[]) {
 		super(app);
 		this.plugin = plugin;
 		this.zips = zips;
@@ -4978,11 +4978,11 @@ class SourceTemplateUpdateConsentModal extends Modal {
 // ── Reconcile incomplete imports ─────────────────────────────────────────────
 
 class ReconcileSourcesModal extends Modal {
-	plugin: ArabicSupportPlugin;
+	plugin: MidadArabicSourcesPlugin;
 	items: Array<{ work: JsonObject; missing: number; total: number; reason: string }>;
 	checks: Array<{ work: JsonObject; el: HTMLInputElement }> = [];
 
-	constructor(app: App, plugin: ArabicSupportPlugin, items: Array<{ work: JsonObject; missing: number; total: number; reason: string }>) {
+	constructor(app: App, plugin: MidadArabicSourcesPlugin, items: Array<{ work: JsonObject; missing: number; total: number; reason: string }>) {
 		super(app);
 		this.plugin = plugin;
 		this.items = items;
@@ -5238,7 +5238,7 @@ function header(resp: { headers?: Record<string, string> }, name: string): strin
  * a corrupt item is just uncheck + Apply, then check + Apply.
  */
 /** The "add by URL" form and the user's list; shared by the tab and the command. */
-function buildUrlAdder(plugin: ArabicSupportPlugin, container: HTMLElement): void {
+function buildUrlAdder(plugin: MidadArabicSourcesPlugin, container: HTMLElement): void {
 	container.createEl("p", {
 		text: "Paste a Turath book URL (or its numeric ID). The plugin reads its metadata and offers a provisional romanization you can edit before adding.",
 	});
@@ -5305,9 +5305,9 @@ function buildUrlAdder(plugin: ArabicSupportPlugin, container: HTMLElement): voi
 
 /** Add Turath works by URL; the list lives in `turath-custom-works.json`. */
 class TurathUrlModal extends Modal {
-	plugin: ArabicSupportPlugin;
+	plugin: MidadArabicSourcesPlugin;
 
-	constructor(app: App, plugin: ArabicSupportPlugin) {
+	constructor(app: App, plugin: MidadArabicSourcesPlugin) {
 		super(app);
 		this.plugin = plugin;
 	}
@@ -5323,7 +5323,7 @@ class TurathUrlModal extends Modal {
 }
 
 class ManageSourcesModal extends Modal {
-	plugin: ArabicSupportPlugin;
+	plugin: MidadArabicSourcesPlugin;
 	works: SourceWork[];
 	installed: Set<string>;
 	deleting: Set<string>;
@@ -5343,7 +5343,7 @@ class ManageSourcesModal extends Modal {
 	refreshSelection: () => void = () => {};
 	updateFilter: () => void = () => {};
 
-	constructor(app: App, plugin: ArabicSupportPlugin, works: SourceWork[], installed: Set<string>, deleting: Set<string> = new Set(), sizes: Map<string, number> = new Map(), zoteroStatus: Map<string, string> = new Map(), onReload?: () => void) {
+	constructor(app: App, plugin: MidadArabicSourcesPlugin, works: SourceWork[], installed: Set<string>, deleting: Set<string> = new Set(), sizes: Map<string, number> = new Map(), zoteroStatus: Map<string, string> = new Map(), onReload?: () => void) {
 		super(app);
 		this.plugin = plugin;
 		this.works = works;
@@ -5674,11 +5674,11 @@ class ManageSourcesModal extends Modal {
  * sends to Zotero instead of installing/uninstalling.
  */
 class ZoteroSendModal extends Modal {
-	plugin: ArabicSupportPlugin;
+	plugin: MidadArabicSourcesPlugin;
 	entries: Array<{ work: JsonObject; item: JsonObject; hash: string; itemKey: string; status: "new" | "changed" | "current" }>;
 	checks: Array<{ key: string; el: HTMLInputElement }> = [];
 
-	constructor(app: App, plugin: ArabicSupportPlugin, entries: ZoteroSendModal["entries"]) {
+	constructor(app: App, plugin: MidadArabicSourcesPlugin, entries: ZoteroSendModal["entries"]) {
 		super(app);
 		this.plugin = plugin;
 		this.entries = entries;

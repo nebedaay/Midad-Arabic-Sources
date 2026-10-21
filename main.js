@@ -34,7 +34,7 @@ var __publicField = (obj, key, value) => {
 
 // src/main.ts
 __export(exports, {
-  default: () => ArabicSupportPlugin
+  default: () => MidadArabicSourcesPlugin
 });
 var import_child_process = __toModule(require("child_process"));
 var fs2 = __toModule(require("fs"));
@@ -11408,7 +11408,7 @@ var DEFAULT_SETTINGS = {
   zoteroAutoCreate: false,
   sourceUpdateCheckDays: 7
 };
-var ArabicSupportPlugin = class extends import_obsidian9.Plugin {
+var MidadArabicSourcesPlugin = class extends import_obsidian9.Plugin {
   constructor() {
     super(...arguments);
     this.lastUnknown = [];
@@ -11436,7 +11436,7 @@ var ArabicSupportPlugin = class extends import_obsidian9.Plugin {
   async onload() {
     await this.loadSettings();
     this.extractBundledAssets();
-    this.addSettingTab(new ArabicSupportSettingTab(this.app, this));
+    this.addSettingTab(new MidadArabicSourcesSettingTab(this.app, this));
     try {
       this.annotations = await registerAnnotations({
         app: this.app,
@@ -14381,7 +14381,7 @@ var LexiconModal = class extends import_obsidian9.Modal {
     this.contentEl.empty();
   }
 };
-var ArabicSupportSettingTab = class extends import_obsidian9.PluginSettingTab {
+var MidadArabicSourcesSettingTab = class extends import_obsidian9.PluginSettingTab {
   constructor(app, plugin) {
     super(app, plugin);
     this.zoteroProbed = false;
