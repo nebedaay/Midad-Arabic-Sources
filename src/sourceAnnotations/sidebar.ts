@@ -102,6 +102,10 @@ export class AnnotationSidebarView extends ItemView {
 			const note = actions.createEl("button", { text: "Annotation note" });
 			note.onclick = () => { void this.service.openAnnotationNoteForTarget(data.target); };
 		}
+		if (data) {
+			const copy = actions.createEl("button", { text: "Copy with annotations" });
+			copy.onclick = () => { void this.service.copySourceWithAnnotations(data.target); };
+		}
 		const moc = actions.createEl("button", { text: "Source annotations MOC" });
 		moc.onclick = () => { void this.service.openMoc(); };
 		const trash = actions.createEl("button", { text: "Annotation trash" });

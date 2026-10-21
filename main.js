@@ -11340,6 +11340,12 @@ var AnnotationSidebarView = class extends import_obsidian9.ItemView {
         void this.service.openAnnotationNoteForTarget(data.target);
       };
     }
+    if (data) {
+      const copy = actions.createEl("button", { text: "Copy with annotations" });
+      copy.onclick = () => {
+        void this.service.copySourceWithAnnotations(data.target);
+      };
+    }
     const moc = actions.createEl("button", { text: "Source annotations MOC" });
     moc.onclick = () => {
       void this.service.openMoc();
@@ -11877,6 +11883,13 @@ var AnnotationService = class {
       name: "Open annotation sidebar",
       callback: () => {
         void this.openSidebar();
+      }
+    });
+    this.plugin.addCommand({
+      id: "copy-source-with-annotations",
+      name: "Copy source with annotations",
+      callback: async () => {
+        await this.copySourceWithAnnotations();
       }
     });
     this.plugin.addCommand({
@@ -12722,6 +12735,66 @@ var AnnotationService = class {
         new import_obsidian12.Notice("Annotations moved to the annotation trash.");
       }
     }).open();
+  }
+  annotationClipboardBlock(annotation) {
+    var _a;
+    const label = annotationLabel(annotation.color);
+    const orphan = annotation.anchorStatus === "orphaned" ? " \xB7 unanchored" : "";
+    const lines = [`> [!mas-annotation-${annotation.color}] ${label}${orphan}`];
+    const quote = cleanQuoteMarkdown(annotation.quoteMarkdown || annotation.quote);
+    for (const line of quote.split("\n"))
+      lines.push(line ? `> > ${line}` : ">");
+    if ((_a = annotation.comment) == null ? void 0 : _a.trim()) {
+      lines.push(">");
+      for (const line of annotation.comment.trim().split("\n"))
+        lines.push(`> ${line}`);
+    }
+    return lines.join("\n");
+  }
+  async copySourceWithAnnotations(target) {
+    let resolved = target;
+    if (!resolved) {
+      const view = activeMarkdownView(this.app);
+      if (!(view == null ? void 0 : view.file)) {
+        new import_obsidian12.Notice("Open a source note first.");
+        return;
+      }
+      resolved = await this.targetForPath(view.file.path);
+    }
+    if (!resolved) {
+      new import_obsidian12.Notice("That note is not part of an imported source.");
+      return;
+    }
+    const file = this.app.vault.getAbstractFileByPath((0, import_obsidian12.normalizePath)(resolved.notePath));
+    if (!(file instanceof import_obsidian12.TFile)) {
+      new import_obsidian12.Notice("The source note is not available.");
+      return;
+    }
+    const text = await this.app.vault.adapter.read(file.path);
+    const bounds = managedBounds(text);
+    const source = (bounds ? text.slice(bounds.contentStart, bounds.contentEnd) : text).trim();
+    const annotations = await this.annotationsFor(resolved);
+    annotations.sort((a, b) => {
+      var _a, _b, _c, _d;
+      const orphan = (a.anchorStatus === "orphaned" ? 1 : 0) - (b.anchorStatus === "orphaned" ? 1 : 0);
+      if (orphan)
+        return orphan;
+      return ((_b = (_a = a.position) == null ? void 0 : _a.start) != null ? _b : Number.MAX_SAFE_INTEGER) - ((_d = (_c = b.position) == null ? void 0 : _c.start) != null ? _d : Number.MAX_SAFE_INTEGER);
+    });
+    const lines = [source, "", "---", "", "## Annotations", ""];
+    if (!annotations.length) {
+      lines.push("*No annotations on this source.*", "");
+    } else {
+      for (const annotation of annotations) {
+        lines.push(this.annotationClipboardBlock(annotation), "");
+      }
+    }
+    try {
+      await navigator.clipboard.writeText(lines.join("\n"));
+      new import_obsidian12.Notice(`Copied the source with ${annotations.length} annotation(s).`);
+    } catch (e) {
+      new import_obsidian12.Notice(`Could not copy: ${e instanceof Error ? e.message : e}`);
+    }
   }
   async sidebarData() {
     const view = activeMarkdownView(this.app);

@@ -26,7 +26,7 @@ import {
 } from "./note";
 import { refreshReadingViews, registerReadingAnnotations } from "./reading";
 import { reanchorAnnotation } from "./reanchor";
-import { resolveAnnotations, visibleSegments } from "./resolve";
+import { annotationLabel, resolveAnnotations, visibleSegments } from "./resolve";
 import { AnnotationSidebarView, ANNOTATION_SIDEBAR_VIEW, type AnnotationSidebarData } from "./sidebar";
 import { AnnotationStore, annotationNow, newAnnotationId, type AnnotationTrashBatch } from "./store";
 import { AnnotationTargetResolver } from "./target";
@@ -294,6 +294,12 @@ export class AnnotationService {
 			id: "open-annotation-sidebar",
 			name: "Open annotation sidebar",
 			callback: () => { void this.openSidebar(); },
+		});
+
+		this.plugin.addCommand({
+			id: "copy-source-with-annotations",
+			name: "Copy source with annotations",
+			callback: async () => { await this.copySourceWithAnnotations(); },
 		});
 
 		this.plugin.addCommand({
@@ -1174,6 +1180,63 @@ export class AnnotationService {
 				new Notice("Annotations moved to the annotation trash.");
 			},
 		}).open();
+	}
+
+	private annotationClipboardBlock(annotation: SourceAnnotation): string {
+		const label = annotationLabel(annotation.color);
+		const orphan = annotation.anchorStatus === "orphaned" ? " · unanchored" : "";
+		const lines = [`> [!mas-annotation-${annotation.color}] ${label}${orphan}`];
+		const quote = cleanQuoteMarkdown(annotation.quoteMarkdown || annotation.quote);
+		for (const line of quote.split("\n")) lines.push(line ? `> > ${line}` : ">");
+		if (annotation.comment?.trim()) {
+			lines.push(">");
+			for (const line of annotation.comment.trim().split("\n")) lines.push(`> ${line}`);
+		}
+		return lines.join("\n");
+	}
+
+	async copySourceWithAnnotations(target?: AnnotationTarget): Promise<void> {
+		let resolved = target;
+		if (!resolved) {
+			const view = activeMarkdownView(this.app);
+			if (!view?.file) {
+				new Notice("Open a source note first.");
+				return;
+			}
+			resolved = await this.targetForPath(view.file.path);
+		}
+		if (!resolved) {
+			new Notice("That note is not part of an imported source.");
+			return;
+		}
+		const file = this.app.vault.getAbstractFileByPath(normalizePath(resolved.notePath));
+		if (!(file instanceof TFile)) {
+			new Notice("The source note is not available.");
+			return;
+		}
+		const text = await this.app.vault.adapter.read(file.path);
+		const bounds = managedBounds(text);
+		const source = (bounds ? text.slice(bounds.contentStart, bounds.contentEnd) : text).trim();
+		const annotations = await this.annotationsFor(resolved);
+		annotations.sort((a, b) => {
+			const orphan = (a.anchorStatus === "orphaned" ? 1 : 0) - (b.anchorStatus === "orphaned" ? 1 : 0);
+			if (orphan) return orphan;
+			return (a.position?.start ?? Number.MAX_SAFE_INTEGER) - (b.position?.start ?? Number.MAX_SAFE_INTEGER);
+		});
+		const lines = [source, "", "---", "", "## Annotations", ""];
+		if (!annotations.length) {
+			lines.push("*No annotations on this source.*", "");
+		} else {
+			for (const annotation of annotations) {
+				lines.push(this.annotationClipboardBlock(annotation), "");
+			}
+		}
+		try {
+			await navigator.clipboard.writeText(lines.join("\n"));
+			new Notice(`Copied the source with ${annotations.length} annotation(s).`);
+		} catch (e) {
+			new Notice(`Could not copy: ${e instanceof Error ? e.message : e}`);
+		}
 	}
 
 	async sidebarData(): Promise<AnnotationSidebarData | null> {
