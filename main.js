@@ -9734,6 +9734,8 @@ function normalizeAnnotation(annotation) {
     quote,
     quoteText: String((_d = annotation.quoteText) != null ? _d : quote),
     quoteMarkdown: String((_e = annotation.quoteMarkdown) != null ? _e : quote),
+    prefix: typeof annotation.prefix === "string" ? annotation.prefix : "",
+    suffix: typeof annotation.suffix === "string" ? annotation.suffix : "",
     comment: annotation.comment,
     ordinal: Number((_f = annotation.ordinal) != null ? _f : 0),
     position: annotation.position,
@@ -10270,8 +10272,8 @@ var AnnotationStore = class {
     }
   }
   async ensureFolder(path2) {
-    const normalized = (0, import_obsidian5.normalizePath)(path2);
-    const parts = normalized.split("/");
+    const normalized2 = (0, import_obsidian5.normalizePath)(path2);
+    const parts = normalized2.split("/");
     let current = "";
     for (const part of parts) {
       current = current ? `${current}/${part}` : part;
@@ -10284,18 +10286,18 @@ var AnnotationStore = class {
     }
   }
   async writeAtomic(path2, content) {
-    const normalized = (0, import_obsidian5.normalizePath)(path2);
-    const parent = normalized.split("/").slice(0, -1).join("/");
+    const normalized2 = (0, import_obsidian5.normalizePath)(path2);
+    const parent = normalized2.split("/").slice(0, -1).join("/");
     if (parent)
       await this.ensureFolder(parent);
-    const temp = `${normalized}.tmp`;
+    const temp = `${normalized2}.tmp`;
     if (await this.app.vault.adapter.exists(temp)) {
       try {
         await this.app.vault.adapter.remove(temp);
       } catch (e) {
       }
     }
-    await this.app.vault.adapter.write(normalized, content);
+    await this.app.vault.adapter.write(normalized2, content);
   }
 };
 
@@ -10410,8 +10412,8 @@ function safeFileStem(value) {
   return value.replace(/[\\/:*?"<>|#^]/g, "-").trim() || "Annotations";
 }
 async function ensureFolder2(app, path2) {
-  const normalized = (0, import_obsidian6.normalizePath)(path2);
-  const parts = normalized.split("/");
+  const normalized2 = (0, import_obsidian6.normalizePath)(path2);
+  const parts = normalized2.split("/");
   let current = "";
   for (const part of parts) {
     current = current ? `${current}/${part}` : part;
@@ -10900,6 +10902,249 @@ function refreshReadingViews(app) {
   }
 }
 
+// src/sourceAnnotations/reanchor.ts
+var MAX_CANDIDATES = 40;
+var CONTEXT_CHARS = 120;
+var ANCHOR_CHARS = 80;
+var MIN_ANCHOR_CHARS = 8;
+function normalized(text) {
+  return normalizeWhitespaceWithMap(text).text;
+}
+function plain(text) {
+  return normalized(markdownToText(text));
+}
+function findAllIn(haystack, needle) {
+  const target = normalizeWhitespaceWithMap(needle.trim());
+  if (!target.text)
+    return [];
+  const out = [];
+  let at = 0;
+  while (out.length < MAX_CANDIDATES) {
+    const found = haystack.text.indexOf(target.text, at);
+    if (found < 0)
+      break;
+    const start = haystack.map[found];
+    const end = haystack.map[found + target.text.length - 1] + 1;
+    if (start !== void 0 && end !== void 0) {
+      out.push({ start, end, index: out.length });
+    }
+    at = found + target.text.length;
+  }
+  return out;
+}
+function commonPrefixLength(a, b) {
+  const max = Math.min(a.length, b.length);
+  let i = 0;
+  while (i < max && a.charAt(i) === b.charAt(i))
+    i++;
+  return i;
+}
+function commonSuffixLength(a, b) {
+  const max = Math.min(a.length, b.length);
+  let i = 0;
+  while (i < max && a.charAt(a.length - 1 - i) === b.charAt(b.length - 1 - i))
+    i++;
+  return i;
+}
+function contextScore(text, start, end, annotation) {
+  var _a, _b;
+  const before = normalized(text.slice(Math.max(0, start - CONTEXT_CHARS), start));
+  const after = normalized(text.slice(end, Math.min(text.length, end + CONTEXT_CHARS)));
+  const prefix = normalized((_a = annotation.prefix) != null ? _a : "").slice(-ANCHOR_CHARS);
+  const suffix = normalized((_b = annotation.suffix) != null ? _b : "").slice(0, ANCHOR_CHARS);
+  return {
+    before: prefix ? commonSuffixLength(before, prefix) / prefix.length : 0,
+    after: suffix ? commonPrefixLength(after, suffix) / suffix.length : 0
+  };
+}
+function positionScore(start, annotation, bodyStart) {
+  if (!annotation.position)
+    return 0;
+  const expected = bodyStart + annotation.position.start;
+  return Math.max(0, 1 - Math.abs(start - expected) / 2e3);
+}
+function scoreExact(text, candidate, annotation, bodyStart) {
+  const context = contextScore(text, candidate.start, candidate.end, annotation);
+  const rawEqual = text.slice(candidate.start, candidate.end) === annotation.quote ? 1 : 0;
+  const ordinal = candidate.index === annotation.ordinal ? 1 : 0;
+  return context.before * 3 + context.after * 3 + positionScore(candidate.start, annotation, bodyStart) * 1.5 + rawEqual * 0.2 + ordinal * 0.3;
+}
+function levenshtein(a, b) {
+  const width = b.length + 1;
+  let previous = new Array(width);
+  for (let j = 0; j < width; j++)
+    previous[j] = j;
+  for (let i = 1; i <= a.length; i++) {
+    const current = new Array(width);
+    current[0] = i;
+    for (let j = 1; j <= b.length; j++) {
+      const cost = a.charAt(i - 1) === b.charAt(j - 1) ? 0 : 1;
+      current[j] = Math.min(previous[j] + 1, current[j - 1] + 1, previous[j - 1] + cost);
+    }
+    previous = current;
+  }
+  return previous[b.length];
+}
+function similarity(a, b) {
+  if (!a || !b)
+    return 0;
+  if (a === b)
+    return 1;
+  if (Math.max(a.length, b.length) > 1200) {
+    const grams = (value) => {
+      const out = new Set();
+      for (let i = 0; i < value.length - 1; i++)
+        out.add(value.slice(i, i + 2));
+      return out;
+    };
+    const ga = grams(a);
+    const gb = grams(b);
+    let shared = 0;
+    for (const gram of ga)
+      if (gb.has(gram))
+        shared++;
+    return 2 * shared / Math.max(1, ga.size + gb.size);
+  }
+  return 1 - levenshtein(a, b) / Math.max(a.length, b.length);
+}
+function tailAnchor(value) {
+  const text = normalized(value);
+  if (!text)
+    return "";
+  const words = text.split(" ");
+  let anchor = words.slice(-8).join(" ");
+  if (anchor.length < MIN_ANCHOR_CHARS)
+    anchor = text;
+  return anchor.slice(-ANCHOR_CHARS);
+}
+function headAnchor(value) {
+  const text = normalized(value);
+  if (!text)
+    return "";
+  const words = text.split(" ");
+  let anchor = words.slice(0, 8).join(" ");
+  if (anchor.length < MIN_ANCHOR_CHARS)
+    anchor = text;
+  return anchor.slice(0, ANCHOR_CHARS);
+}
+function trimRange(text, start, end) {
+  while (start < end && /\s/.test(text.charAt(start)))
+    start++;
+  while (end > start && /\s/.test(text.charAt(end - 1)))
+    end--;
+  return { start, end };
+}
+function within(start, end, options) {
+  var _a, _b;
+  const contentStart = (_a = options.contentStart) != null ? _a : 0;
+  const contentEnd = (_b = options.contentEnd) != null ? _b : Number.MAX_SAFE_INTEGER;
+  return start >= contentStart && end <= contentEnd && end > start;
+}
+function reanchorAnnotation(text, annotation, options = {}) {
+  var _a, _b, _c;
+  const bodyStart = (_a = options.bodyStart) != null ? _a : 0;
+  const quote = annotation.quote || annotation.quoteText || "";
+  const oldPlain = plain(annotation.quoteText || quote);
+  if (!normalized(quote))
+    return null;
+  const haystack = normalizeWhitespaceWithMap(text);
+  const exact = [];
+  const seen = new Set();
+  for (const needle of [annotation.quote, annotation.quoteText]) {
+    if (!needle)
+      continue;
+    for (const found of findAllIn(haystack, needle)) {
+      const key = `${found.start}:${found.end}`;
+      if (seen.has(key) || !within(found.start, found.end, options))
+        continue;
+      seen.add(key);
+      exact.push({
+        ...found,
+        method: "exact",
+        score: scoreExact(text, found, annotation, bodyStart)
+      });
+    }
+  }
+  if (exact.length) {
+    exact.sort((a, b) => b.score - a.score);
+    return {
+      start: exact[0].start,
+      end: exact[0].end,
+      method: "exact",
+      score: exact[0].score
+    };
+  }
+  if (oldPlain.length < 12)
+    return null;
+  const candidates = [];
+  const seenCandidates = new Set();
+  const push = (start, end) => {
+    if (candidates.length >= MAX_CANDIDATES)
+      return;
+    const trimmed = trimRange(text, start, end);
+    if (!within(trimmed.start, trimmed.end, options))
+      return;
+    const key = `${trimmed.start}:${trimmed.end}`;
+    if (seenCandidates.has(key))
+      return;
+    seenCandidates.add(key);
+    if (trimmed.end - trimmed.start > Math.max(400, quote.length * 2 + 200))
+      return;
+    const candidatePlain = plain(text.slice(trimmed.start, trimmed.end));
+    const sim = similarity(candidatePlain, oldPlain);
+    if (!sim)
+      return;
+    const context = contextScore(text, trimmed.start, trimmed.end, annotation);
+    const bracketed = context.before >= 0.6 && context.after >= 0.6;
+    const required = bracketed ? oldPlain.length < 40 ? 0.6 : oldPlain.length < 120 ? 0.55 : 0.5 : oldPlain.length < 40 ? 0.82 : oldPlain.length < 120 ? 0.74 : 0.68;
+    if (sim < required)
+      return;
+    const length = Math.max(1, oldPlain.length, candidatePlain.length);
+    const lengthScore = Math.max(0, 1 - Math.abs(candidatePlain.length - oldPlain.length) / length);
+    candidates.push({
+      start: trimmed.start,
+      end: trimmed.end,
+      index: candidates.length,
+      method: "fuzzy",
+      score: sim * 10 + context.before * 2 + context.after * 2 + positionScore(trimmed.start, annotation, bodyStart) + lengthScore * 2
+    });
+  };
+  const prefix = tailAnchor((_b = annotation.prefix) != null ? _b : "");
+  const suffix = headAnchor((_c = annotation.suffix) != null ? _c : "");
+  if (prefix.length >= MIN_ANCHOR_CHARS && suffix.length >= MIN_ANCHOR_CHARS) {
+    const before = findAllIn(haystack, prefix).slice(0, 8);
+    const after = findAllIn(haystack, suffix).slice(0, 8);
+    for (const left of before) {
+      for (const right of after) {
+        if (right.start > left.end)
+          push(left.end, right.start);
+      }
+    }
+  }
+  const words = normalized(quote).split(" ");
+  if (words.length >= 6) {
+    const startAnchor = words.slice(0, 4).join(" ");
+    const endAnchor = words.slice(-4).join(" ");
+    if (startAnchor.length >= MIN_ANCHOR_CHARS && endAnchor.length >= MIN_ANCHOR_CHARS) {
+      const starts = findAllIn(haystack, startAnchor).slice(0, 8);
+      const ends = findAllIn(haystack, endAnchor).slice(0, 8);
+      for (const left of starts) {
+        for (const right of ends) {
+          if (right.end > left.start)
+            push(left.start, right.end);
+        }
+      }
+    }
+  }
+  if (!candidates.length)
+    return null;
+  candidates.sort((a, b) => b.score - a.score);
+  const best = candidates[0];
+  if (best.score < 6)
+    return null;
+  return { start: best.start, end: best.end, method: "fuzzy", score: best.score };
+}
+
 // src/sourceAnnotations/target.ts
 var import_obsidian8 = __toModule(require("obsidian"));
 function workKey(work) {
@@ -10978,21 +11223,21 @@ var AnnotationTargetResolver = class {
     const dir = String((_a = model.work.dir) != null ? _a : "");
     const isQuranText = model.work.collection === "quran-text";
     const canonical = isQuranText && this.isCanonicalQuran(model);
-    const normalized = (0, import_obsidian8.normalizePath)(path2);
+    const normalized2 = (0, import_obsidian8.normalizePath)(path2);
     for (const unit of model.units) {
       const dictRoot = model.work.collection === "dictionary" && unit.kind === "dict";
       const base = String((_b = unit.base) != null ? _b : "");
       const stem = canonical || dictRoot ? base : `${dir} - ${base}`;
       const folder = canonical ? this.canonicalRoot() : `${this.outRoot()}/${dir}`;
-      if ((0, import_obsidian8.normalizePath)(`${folder}/${stem}.md`) === normalized)
+      if ((0, import_obsidian8.normalizePath)(`${folder}/${stem}.md`) === normalized2)
         return unitKey(unit);
     }
     return null;
   }
   async resolve(path2) {
     var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m;
-    const normalized = (0, import_obsidian8.normalizePath)(path2);
-    const file = this.app.vault.getAbstractFileByPath(normalized);
+    const normalized2 = (0, import_obsidian8.normalizePath)(path2);
+    const file = this.app.vault.getAbstractFileByPath(normalized2);
     if (!(file instanceof import_obsidian8.TFile))
       return null;
     const frontmatter = (_a = this.app.metadataCache.getFileCache(file)) == null ? void 0 : _a.frontmatter;
@@ -11007,22 +11252,22 @@ var AnnotationTargetResolver = class {
         const dir2 = String((_a2 = candidate.dir) != null ? _a2 : "");
         if (!dir2)
           return false;
-        return normalized === (0, import_obsidian8.normalizePath)(`${outRoot}/${dir2}.md`) || normalized.startsWith((0, import_obsidian8.normalizePath)(`${outRoot}/${dir2}/`));
+        return normalized2 === (0, import_obsidian8.normalizePath)(`${outRoot}/${dir2}.md`) || normalized2.startsWith((0, import_obsidian8.normalizePath)(`${outRoot}/${dir2}/`));
       })) != null ? _c : null;
     }
     if (!work && masWork) {
-      work = { key: masWork, title: masWork, dir: (_d = normalized.split("/").slice(-2, -1)[0]) != null ? _d : masWork, status: "installed" };
+      work = { key: masWork, title: masWork, dir: (_d = normalized2.split("/").slice(-2, -1)[0]) != null ? _d : masWork, status: "installed" };
     }
     if (!work)
       return null;
     const dir = String((_e = work.dir) != null ? _e : "");
     const hubPath = (0, import_obsidian8.normalizePath)(`${outRoot}/${dir}.md`);
-    const isHub = normalized === hubPath;
+    const isHub = normalized2 === hubPath;
     if (masUnit) {
       return {
         workKey: workKey(work),
         unitKey: masUnit,
-        notePath: normalized,
+        notePath: normalized2,
         workTitle: String((_g = (_f = work.title) != null ? _f : dir) != null ? _g : workKey(work)),
         workDir: dir,
         sourceStatus: statusOf(work)
@@ -11035,18 +11280,18 @@ var AnnotationTargetResolver = class {
         return {
           workKey: workKey(work),
           unitKey: unit2,
-          notePath: normalized,
+          notePath: normalized2,
           workTitle: String((_i = (_h = work.title) != null ? _h : dir) != null ? _i : workKey(work)),
           workDir: dir,
           sourceStatus: statusOf(work)
         };
       }
-      const unit = this.findUnitByPath(model, normalized);
+      const unit = this.findUnitByPath(model, normalized2);
       if (unit) {
         return {
           workKey: workKey(work),
           unitKey: unit,
-          notePath: normalized,
+          notePath: normalized2,
           workTitle: String((_k = (_j = work.title) != null ? _j : dir) != null ? _k : workKey(work)),
           workDir: dir,
           sourceStatus: statusOf(work)
@@ -11057,7 +11302,7 @@ var AnnotationTargetResolver = class {
       return {
         workKey: workKey(work),
         unitKey: "hub",
-        notePath: normalized,
+        notePath: normalized2,
         workTitle: String((_m = (_l = work.title) != null ? _l : dir) != null ? _m : workKey(work)),
         workDir: dir,
         sourceStatus: statusOf(work)
@@ -11550,38 +11795,64 @@ var AnnotationService = class {
     if (!bounds)
       return;
     let changed = false;
-    let orphanChanged = false;
+    let artifactChanged = false;
     const annotations = unit.annotations.map((annotation) => {
       var _a, _b;
-      const found = findNormalized(text, annotation.quote || annotation.quoteText, annotation.ordinal);
-      if (!found) {
+      const match = reanchorAnnotation(text, annotation, {
+        bodyStart: bounds.bodyStart,
+        contentStart: bounds.contentStart,
+        contentEnd: bounds.contentEnd
+      });
+      if (!match) {
         if (annotation.anchorStatus !== "orphaned") {
           changed = true;
-          orphanChanged = true;
+          artifactChanged = true;
           return { ...annotation, anchorStatus: "orphaned", anchored: annotationNow() };
         }
         return annotation;
       }
-      const segments = visibleSegments(text, found.start, found.end).map((range) => [range.start - bounds.bodyStart, range.end - bounds.bodyStart]);
+      const quote = text.slice(match.start, match.end);
+      const quoteText = markdownToText(quote);
+      const quoteMarkdown = cleanQuoteMarkdown(quote);
+      const prefix = text.slice(Math.max(bounds.contentStart, match.start - 80), match.start);
+      const suffix = text.slice(match.end, Math.min(bounds.contentEnd, match.end + 80));
+      const section = sectionAt(text, match.start);
+      const ordinal = occurrencesBefore(text, match.start, quote);
+      const position = {
+        start: match.start - bounds.bodyStart,
+        end: match.end - bounds.bodyStart
+      };
+      const segments = visibleSegments(text, match.start, match.end).map((range) => [range.start - bounds.bodyStart, range.end - bounds.bodyStart]);
+      const quoteChanged = quote !== annotation.quote;
+      const previousQuotes = quoteChanged ? [...(_a = annotation.previousQuotes) != null ? _a : [], annotation.quote].filter(Boolean).slice(-5) : (_b = annotation.previousQuotes) != null ? _b : [];
       const next = {
         ...annotation,
-        position: { start: found.start - bounds.bodyStart, end: found.end - bounds.bodyStart },
+        quote,
+        quoteText,
+        quoteMarkdown,
+        prefix,
+        suffix,
+        section,
+        ordinal,
+        position,
         segments,
         anchored: annotationNow(),
         anchorStatus: "ok",
-        quoteChanged: text.slice(found.start, found.end) !== annotation.quote
+        quoteChanged,
+        previousQuotes
       };
-      if (!annotation.position || annotation.position.start !== ((_a = next.position) == null ? void 0 : _a.start) || annotation.position.end !== ((_b = next.position) == null ? void 0 : _b.end) || annotation.anchorStatus !== "ok" || annotation.quoteChanged !== next.quoteChanged) {
+      const artifactChangedNow = quoteChanged || section !== annotation.section || annotation.anchorStatus !== "ok" || quoteMarkdown !== annotation.quoteMarkdown;
+      if (artifactChangedNow)
+        artifactChanged = true;
+      if (artifactChangedNow || quote !== annotation.quote || quoteText !== annotation.quoteText || prefix !== annotation.prefix || suffix !== annotation.suffix || ordinal !== annotation.ordinal || !annotation.position || annotation.position.start !== position.start || annotation.position.end !== position.end || JSON.stringify(annotation.segments) !== JSON.stringify(segments) || annotation.quoteChanged !== quoteChanged) {
         changed = true;
-        if (annotation.anchorStatus !== "ok")
-          orphanChanged = true;
       }
       return next;
     });
     if (!changed)
       return;
     await this.store.saveUnit(target, annotations);
-    if (orphanChanged)
+    if (artifactChanged)
       await this.syncArtifacts(target.workKey);
     await this.refreshViews();
   }
@@ -11735,6 +12006,8 @@ var AnnotationService = class {
       quote: raw,
       quoteText,
       quoteMarkdown: cleanQuoteMarkdown(raw),
+      prefix: value.slice(Math.max(bounds.contentStart, from - 80), from),
+      suffix: value.slice(to, Math.min(bounds.contentEnd, to + 80)),
       section: sectionAt(value, from),
       ordinal: occurrencesBefore(value, from, raw),
       position: { start: from - bounds.bodyStart, end: to - bounds.bodyStart },
@@ -11820,6 +12093,8 @@ var AnnotationService = class {
       quote: draft.quote,
       quoteText: draft.quoteText,
       quoteMarkdown: draft.quoteMarkdown,
+      prefix: draft.prefix,
+      suffix: draft.suffix,
       comment: comment || void 0,
       ordinal: draft.ordinal,
       position: draft.position,
@@ -11863,7 +12138,7 @@ var AnnotationService = class {
     return found != null ? found : this.app.workspace.getActiveViewOfType(import_obsidian10.MarkdownView);
   }
   async openEditAnnotation(target, annotation, anchor) {
-    var _a, _b, _c;
+    var _a, _b, _c, _d, _e;
     const view = this.viewForTarget(target);
     if (!(view == null ? void 0 : view.file) || (0, import_obsidian10.normalizePath)(view.file.path) !== (0, import_obsidian10.normalizePath)(target.notePath)) {
       new import_obsidian10.Notice("Open the source note first.");
@@ -11877,10 +12152,12 @@ var AnnotationService = class {
       quote: current.quote,
       quoteText: current.quoteText,
       quoteMarkdown: current.quoteMarkdown,
+      prefix: (_b = current.prefix) != null ? _b : "",
+      suffix: (_c = current.suffix) != null ? _c : "",
       section: current.section,
       ordinal: current.ordinal,
-      position: (_b = current.position) != null ? _b : { start: 0, end: 0 },
-      segments: (_c = current.segments) != null ? _c : []
+      position: (_d = current.position) != null ? _d : { start: 0, end: 0 },
+      segments: (_e = current.segments) != null ? _e : []
     };
     const from = editor.getCursor("from");
     const to = editor.getCursor("to");
@@ -14223,8 +14500,8 @@ var MidadArabicSourcesPlugin = class extends import_obsidian11.Plugin {
         }
         lastSteps = p.steps;
         const files = filesDone + p.step;
-        const within = p.steps ? p.step / p.steps : 0;
-        const pct = p.total ? Math.floor((p.index + within) / p.total * 100) : 0;
+        const within2 = p.steps ? p.step / p.steps : 0;
+        const pct = p.total ? Math.floor((p.index + within2) / p.total * 100) : 0;
         const left = p.total - p.index - 1;
         const parts = [
           `${files} file${files === 1 ? "" : "s"} \u2014 ${p.index + 1}/${p.total} works (${pct}%)`,

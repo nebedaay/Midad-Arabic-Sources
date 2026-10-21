@@ -24,7 +24,8 @@ import {
 	renderAnnotationNote,
 } from "./note";
 import { refreshReadingViews, registerReadingAnnotations } from "./reading";
-import { findNormalized, resolveAnnotations, visibleSegments } from "./resolve";
+import { reanchorAnnotation } from "./reanchor";
+import { resolveAnnotations, visibleSegments } from "./resolve";
 import { AnnotationStore, annotationNow, newAnnotationId, type AnnotationTrashBatch } from "./store";
 import { AnnotationTargetResolver } from "./target";
 import { AnnotationTooltip } from "./tooltip";
@@ -375,44 +376,82 @@ export class AnnotationService {
 		const bounds = managedBounds(text);
 		if (!bounds) return;
 		let changed = false;
-		let orphanChanged = false;
+		let artifactChanged = false;
 		const annotations = unit.annotations.map((annotation) => {
 			// The source note on disk is raw markdown: use the raw quote first,
 			// then fall back to the rendered-text quote for older/migrated records.
-			const found = findNormalized(text, annotation.quote || annotation.quoteText, annotation.ordinal);
-			if (!found) {
+			const match = reanchorAnnotation(text, annotation, {
+				bodyStart: bounds.bodyStart,
+				contentStart: bounds.contentStart,
+				contentEnd: bounds.contentEnd,
+			});
+			if (!match) {
 				if (annotation.anchorStatus !== "orphaned") {
 					changed = true;
-					orphanChanged = true;
+					artifactChanged = true;
 					return { ...annotation, anchorStatus: "orphaned" as const, anchored: annotationNow() };
 				}
 				return annotation;
 			}
-			const segments = visibleSegments(text, found.start, found.end)
+			const quote = text.slice(match.start, match.end);
+			const quoteText = markdownToText(quote);
+			const quoteMarkdown = cleanQuoteMarkdown(quote);
+			const prefix = text.slice(Math.max(bounds.contentStart, match.start - 80), match.start);
+			const suffix = text.slice(match.end, Math.min(bounds.contentEnd, match.end + 80));
+			const section = sectionAt(text, match.start);
+			const ordinal = occurrencesBefore(text, match.start, quote);
+			const position = {
+				start: match.start - bounds.bodyStart,
+				end: match.end - bounds.bodyStart,
+			};
+			const segments = visibleSegments(text, match.start, match.end)
 				.map((range) => [range.start - bounds.bodyStart, range.end - bounds.bodyStart] as [number, number]);
+			const quoteChanged = quote !== annotation.quote;
+			const previousQuotes = quoteChanged
+				? [...(annotation.previousQuotes ?? []), annotation.quote].filter(Boolean).slice(-5)
+				: annotation.previousQuotes ?? [];
 			const next: SourceAnnotation = {
 				...annotation,
-				position: { start: found.start - bounds.bodyStart, end: found.end - bounds.bodyStart },
+				quote,
+				quoteText,
+				quoteMarkdown,
+				prefix,
+				suffix,
+				section,
+				ordinal,
+				position,
 				segments,
 				anchored: annotationNow(),
 				anchorStatus: "ok",
-				quoteChanged: text.slice(found.start, found.end) !== annotation.quote,
+				quoteChanged,
+				previousQuotes,
 			};
-			if (
-				!annotation.position ||
-				annotation.position.start !== next.position?.start ||
-				annotation.position.end !== next.position?.end ||
+			const artifactChangedNow =
+				quoteChanged ||
+				section !== annotation.section ||
 				annotation.anchorStatus !== "ok" ||
-				annotation.quoteChanged !== next.quoteChanged
+				quoteMarkdown !== annotation.quoteMarkdown;
+			if (artifactChangedNow) artifactChanged = true;
+			if (
+				artifactChangedNow ||
+				quote !== annotation.quote ||
+				quoteText !== annotation.quoteText ||
+				prefix !== annotation.prefix ||
+				suffix !== annotation.suffix ||
+				ordinal !== annotation.ordinal ||
+				!annotation.position ||
+				annotation.position.start !== position.start ||
+				annotation.position.end !== position.end ||
+				JSON.stringify(annotation.segments) !== JSON.stringify(segments) ||
+				annotation.quoteChanged !== quoteChanged
 			) {
 				changed = true;
-				if (annotation.anchorStatus !== "ok") orphanChanged = true;
 			}
 			return next;
 		});
 		if (!changed) return;
 		await this.store.saveUnit(target, annotations);
-		if (orphanChanged) await this.syncArtifacts(target.workKey);
+		if (artifactChanged) await this.syncArtifacts(target.workKey);
 		await this.refreshViews();
 	}
 
@@ -544,6 +583,8 @@ export class AnnotationService {
 			quote: raw,
 			quoteText,
 			quoteMarkdown: cleanQuoteMarkdown(raw),
+			prefix: value.slice(Math.max(bounds.contentStart, from - 80), from),
+			suffix: value.slice(to, Math.min(bounds.contentEnd, to + 80)),
 			section: sectionAt(value, from),
 			ordinal: occurrencesBefore(value, from, raw),
 			position: { start: from - bounds.bodyStart, end: to - bounds.bodyStart },
@@ -638,6 +679,8 @@ export class AnnotationService {
 			quote: draft.quote,
 			quoteText: draft.quoteText,
 			quoteMarkdown: draft.quoteMarkdown,
+			prefix: draft.prefix,
+			suffix: draft.suffix,
 			comment: comment || undefined,
 			ordinal: draft.ordinal,
 			position: draft.position,
@@ -708,6 +751,8 @@ export class AnnotationService {
 			quote: current.quote,
 			quoteText: current.quoteText,
 			quoteMarkdown: current.quoteMarkdown,
+			prefix: current.prefix ?? "",
+			suffix: current.suffix ?? "",
 			section: current.section,
 			ordinal: current.ordinal,
 			position: current.position ?? { start: 0, end: 0 },

@@ -23,6 +23,10 @@ export interface SourceAnnotation {
 	quoteText: string;
 	/** Sanitized markdown for the annotation note. */
 	quoteMarkdown: string;
+	/** Raw context immediately before the quote, used for fuzzy re-anchoring. */
+	prefix?: string;
+	/** Raw context immediately after the quote, used for fuzzy re-anchoring. */
+	suffix?: string;
 	comment?: string;
 	/** Occurrence index when the same quote appears more than once. */
 	ordinal: number;

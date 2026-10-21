@@ -80,6 +80,8 @@ function normalizeAnnotation(annotation: Partial<SourceAnnotation>): SourceAnnot
 		quote,
 		quoteText: String(annotation.quoteText ?? quote),
 		quoteMarkdown: String(annotation.quoteMarkdown ?? quote),
+		prefix: typeof annotation.prefix === "string" ? annotation.prefix : "",
+		suffix: typeof annotation.suffix === "string" ? annotation.suffix : "",
 		comment: annotation.comment,
 		ordinal: Number(annotation.ordinal ?? 0),
 		position: annotation.position,

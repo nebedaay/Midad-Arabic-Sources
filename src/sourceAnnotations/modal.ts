@@ -7,6 +7,8 @@ export interface AnnotationDraft {
 	quote: string;
 	quoteText: string;
 	quoteMarkdown: string;
+	prefix: string;
+	suffix: string;
 	section: string;
 	ordinal: number;
 	position: { start: number; end: number };
