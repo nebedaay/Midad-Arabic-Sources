@@ -176,11 +176,11 @@ function addMarginIcons(root: HTMLElement, dom: DomFactory, annotations: Resolve
 		}
 		if (!last) continue;
 		const rects = Array.from(last.getClientRects());
-		const endRect = rects[rects.length - 1] ?? last.getBoundingClientRect();
+		const markRect = rects[0] ?? last.getBoundingClientRect();
 		records.push({
 			annotation,
-			top: endRect.top - rootRect.top,
-			left: endRect.right - rootRect.left,
+			top: markRect.top - rootRect.top,
+			left: root.clientWidth - 26,
 		});
 	}
 	if (!records.length) return;

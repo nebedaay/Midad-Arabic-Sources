@@ -133,6 +133,7 @@ class AnnotationRail {
 		this.rail?.remove();
 		this.rail = null;
 		this.view.scrollDOM.classList.remove("mas-ann-scroller");
+		this.view.dom.classList.remove("mas-has-annotations");
 	}
 
 	/** coordsAtPos cannot run inside an update; measure on the next frame. */
@@ -154,9 +155,12 @@ class AnnotationRail {
 		const scroller = this.view.scrollDOM;
 		if (!annotations.length) {
 			scroller.classList.remove("mas-ann-scroller");
+			this.view.dom.classList.remove("mas-has-annotations");
 			return;
 		}
 		const scrollerRect = scroller.getBoundingClientRect();
+		const contentRect = this.view.contentDOM.getBoundingClientRect();
+		const contentRight = contentRect.right - scrollerRect.left + scroller.scrollLeft;
 		const records: Array<{ annotation: ResolvedAnnotation; top: number; left: number }> = [];
 		for (const annotation of annotations) {
 			const last = annotation.ranges[annotation.ranges.length - 1];
@@ -166,14 +170,16 @@ class AnnotationRail {
 			records.push({
 				annotation,
 				top: coords.top - scrollerRect.top + scroller.scrollTop,
-				left: coords.right - scrollerRect.left + scroller.scrollLeft,
+				left: contentRight - 26,
 			});
 		}
 		if (!records.length) {
 			scroller.classList.remove("mas-ann-scroller");
+			this.view.dom.classList.remove("mas-has-annotations");
 			return;
 		}
 		scroller.classList.add("mas-ann-scroller");
+		this.view.dom.classList.add("mas-has-annotations");
 		const rail = scroller.createDiv({ cls: "mas-ann-rail" });
 		this.rail = rail;
 
@@ -189,7 +195,7 @@ class AnnotationRail {
 				left += 6;
 				top = Math.max(0, top - 6);
 			}
-			left = Math.max(6, Math.min(left, scroller.scrollWidth - 26));
+			left = Math.max(6, Math.min(left, contentRight - 2));
 			placed.push({ left, top });
 			const icon = createEl("button", {
 				cls: "mas-ann-margin",
