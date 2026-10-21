@@ -1,4 +1,4 @@
-import { App, ButtonComponent, Modal } from "obsidian";
+import { App, ButtonComponent, Modal, Notice } from "obsidian";
 import type { AnnotationColor, SourceAnnotation } from "./types";
 
 export interface AnnotationDraft {
@@ -35,6 +35,22 @@ const COLOR_LABEL: Record<AnnotationColor, string> = {
 	gray: "Gray",
 };
 
+const COLOR_HUE: Record<AnnotationColor, number> = {
+	yellow: 55,
+	orange: 28,
+	red: 0,
+	purple: 265,
+	magenta: 300,
+	blue: 205,
+	green: 115,
+	gray: 100,
+};
+
+function tint(color: AnnotationColor, lightness: number, alpha: number): string {
+	const saturation = color === "gray" ? "0%" : "75%";
+	return `hsla(${COLOR_HUE[color]}, ${saturation}, ${lightness}%, ${alpha})`;
+}
+
 /**
  * The creation/edit dialog. The colour row is focused on open; Up/Down changes
  * colour, Right or Tab moves to the comment, Esc cancels, Cmd/Ctrl+Enter saves.
@@ -65,8 +81,13 @@ export class ConfirmModal extends Modal {
 			.setButtonText(this.options.confirmText ?? "Confirm")
 			.setDestructive()
 			.onClick(async () => {
-				await this.options.onConfirm();
-				this.close();
+				try {
+					await this.options.onConfirm();
+					this.close();
+				} catch (error) {
+					console.error("[midad-arabic-sources] confirm action", error);
+					new Notice(`Action failed: ${error instanceof Error ? error.message : String(error)}`);
+				}
 			});
 	}
 
@@ -93,13 +114,15 @@ export class AnnotationModal extends Modal {
 
 	onOpen(): void {
 		const { contentEl, titleEl } = this;
-		contentEl.addClass("mas-annotation-modal");
+		this.modalEl.addClass("mas-annotation-modal");
+		contentEl.addClass("mas-annotation-modal-content");
 		titleEl.setText(this.options.draft.annotation ? "Edit annotation" : "Annotate selection");
 
 		const preview = contentEl.createDiv({ cls: "mas-annotation-preview" });
 		preview.dataset.color = this.color;
 		preview.setText(this.options.draft.quoteText || this.options.draft.quote);
 		this.previewEl = preview;
+		this.updatePreviewColor();
 
 		const row = contentEl.createDiv({ cls: "mas-swatch-row" });
 		row.setAttribute("role", "radiogroup");
@@ -116,6 +139,7 @@ export class AnnotationModal extends Modal {
 					tabindex: color === this.color ? "0" : "-1",
 				},
 			});
+			button.setCssStyles({ background: tint(color, 62, 0.9) });
 			button.addEventListener("click", () => {
 				this.selectColor(color);
 				button.focus();
@@ -200,14 +224,25 @@ export class AnnotationModal extends Modal {
 			button.setAttribute("aria-checked", String(selected));
 			button.setAttribute("tabindex", selected ? "0" : "-1");
 		}
-		if (this.previewEl) this.previewEl.dataset.color = color;
+		this.updatePreviewColor();
+	}
+
+	private updatePreviewColor(): void {
+		if (!this.previewEl) return;
+		this.previewEl.dataset.color = this.color;
+		this.previewEl.setCssStyles({ background: tint(this.color, 82, 0.55) });
 	}
 
 	private async save(): Promise<void> {
 		const comment = this.textarea?.value.trim() ?? "";
-		this.submitted = true;
-		await this.options.onSubmit(this.color, comment);
-		this.close();
+		try {
+			await this.options.onSubmit(this.color, comment);
+			this.submitted = true;
+			this.close();
+		} catch (error) {
+			console.error("[midad-arabic-sources] save annotation", error);
+			new Notice(`Could not save annotation: ${error instanceof Error ? error.message : String(error)}`);
+		}
 	}
 
 	private async delete(): Promise<void> {
@@ -218,9 +253,14 @@ export class AnnotationModal extends Modal {
 			this.deleteButton?.setClass("mod-destructive");
 			return;
 		}
-		this.submitted = true;
-		await this.options.onDelete();
-		this.close();
+		try {
+			await this.options.onDelete();
+			this.submitted = true;
+			this.close();
+		} catch (error) {
+			console.error("[midad-arabic-sources] delete annotation", error);
+			new Notice(`Could not delete annotation: ${error instanceof Error ? error.message : String(error)}`);
+		}
 	}
 
 	onClose(): void {

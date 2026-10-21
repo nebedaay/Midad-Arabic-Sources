@@ -36,6 +36,7 @@ import type {
 	AnnotationColor,
 	AnnotationSettings,
 	AnnotationTarget,
+	ResolvedAnnotation,
 	SourceAnnotation,
 } from "./types";
 import { applyReadingAnnotations } from "./wrap";
@@ -248,11 +249,24 @@ export class AnnotationService {
 
 		this.plugin.registerEvent(this.app.workspace.on("editor-menu", (menu, editor, view) => {
 			const draft = this.draftFromEditor(editor, view.file);
-			if (!draft) return;
+			if (draft) {
+				menu.addItem((item) => item
+					.setTitle("Annotate selection")
+					.setIcon("highlighter")
+					.onClick(() => { void this.openAnnotate(editor, view.file); }));
+			}
+			const file = view.file;
+			if (!file || !this.store.findTarget(file.path)) return;
+			// Show the actions on every annotated source note; the click handler
+			// reports when the cursor is not actually inside a highlight.
 			menu.addItem((item) => item
-				.setTitle("Annotate selection")
-				.setIcon("highlighter")
-				.onClick(() => { void this.openAnnotate(editor, view.file); }));
+				.setTitle("Edit annotation")
+				.setIcon("pencil")
+				.onClick(() => { void this.openEditAtCursor(editor, file); }));
+			menu.addItem((item) => item
+				.setTitle("Delete annotation")
+				.setIcon("trash-2")
+				.onClick(() => { void this.confirmDeleteAtCursor(editor, file); }));
 		}));
 
 		this.plugin.registerEvent(this.app.vault.on("modify", (file) => {
@@ -430,16 +444,23 @@ export class AnnotationService {
 		new Notice("Annotation added.");
 	}
 
+	private annotationAtOffset(
+		text: string,
+		annotations: SourceAnnotation[],
+		offset: number
+	): ResolvedAnnotation | null {
+		return resolveAnnotations(text, annotations, false)
+			.filter((annotation) => annotation.ranges.some((range) => offset >= range.start && offset <= range.end))
+			.sort((a, b) => (a.end - a.start) - (b.end - b.start))[0] ?? null;
+	}
+
 	private async openEditAtCursor(editor: Editor, file: TFile): Promise<void> {
 		const target = await this.targetForPath(file.path);
 		if (!target) return;
 		const annotations = await this.annotationsFor(target);
 		const value = editor.getValue();
 		const offset = editor.posToOffset(editor.getCursor("from"));
-		const resolved = resolveAnnotations(value, annotations, false);
-		const hit = resolved
-			.filter((annotation) => annotation.ranges.some((range) => offset >= range.start && offset <= range.end))
-			.sort((a, b) => (a.end - a.start) - (b.end - b.start))[0];
+		const hit = this.annotationAtOffset(value, annotations, offset);
 		if (!hit) {
 			new Notice("No annotation here.");
 			return;
@@ -490,9 +511,7 @@ export class AnnotationService {
 		const annotations = await this.annotationsFor(target);
 		const value = editor.getValue();
 		const offset = editor.posToOffset(editor.getCursor("from"));
-		const hit = resolveAnnotations(value, annotations, false)
-			.filter((annotation) => annotation.ranges.some((range) => offset >= range.start && offset <= range.end))
-			.sort((a, b) => (a.end - a.start) - (b.end - b.start))[0];
+		const hit = this.annotationAtOffset(value, annotations, offset);
 		if (!hit) {
 			new Notice("No annotation here.");
 			return;

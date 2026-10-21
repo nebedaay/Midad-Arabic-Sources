@@ -9221,6 +9221,20 @@ var COLOR_LABEL = {
   green: "Green",
   gray: "Gray"
 };
+var COLOR_HUE = {
+  yellow: 55,
+  orange: 28,
+  red: 0,
+  purple: 265,
+  magenta: 300,
+  blue: 205,
+  green: 115,
+  gray: 100
+};
+function tint(color, lightness, alpha) {
+  const saturation = color === "gray" ? "0%" : "75%";
+  return `hsla(${COLOR_HUE[color]}, ${saturation}, ${lightness}%, ${alpha})`;
+}
 var ConfirmModal = class extends import_obsidian3.Modal {
   constructor(app, options) {
     super(app);
@@ -9233,8 +9247,13 @@ var ConfirmModal = class extends import_obsidian3.Modal {
     const buttons = this.contentEl.createDiv({ cls: "modal-button-container" });
     new import_obsidian3.ButtonComponent(buttons).setButtonText("Cancel").onClick(() => this.close());
     new import_obsidian3.ButtonComponent(buttons).setButtonText((_a = this.options.confirmText) != null ? _a : "Confirm").setDestructive().onClick(async () => {
-      await this.options.onConfirm();
-      this.close();
+      try {
+        await this.options.onConfirm();
+        this.close();
+      } catch (error) {
+        console.error("[midad-arabic-sources] confirm action", error);
+        new import_obsidian3.Notice(`Action failed: ${error instanceof Error ? error.message : String(error)}`);
+      }
     });
   }
   onClose() {
@@ -9257,12 +9276,14 @@ var AnnotationModal = class extends import_obsidian3.Modal {
   onOpen() {
     var _a, _b;
     const { contentEl, titleEl } = this;
-    contentEl.addClass("mas-annotation-modal");
+    this.modalEl.addClass("mas-annotation-modal");
+    contentEl.addClass("mas-annotation-modal-content");
     titleEl.setText(this.options.draft.annotation ? "Edit annotation" : "Annotate selection");
     const preview = contentEl.createDiv({ cls: "mas-annotation-preview" });
     preview.dataset.color = this.color;
     preview.setText(this.options.draft.quoteText || this.options.draft.quote);
     this.previewEl = preview;
+    this.updatePreviewColor();
     const row = contentEl.createDiv({ cls: "mas-swatch-row" });
     row.setAttribute("role", "radiogroup");
     row.setAttribute("aria-label", "Highlight colour");
@@ -9278,6 +9299,7 @@ var AnnotationModal = class extends import_obsidian3.Modal {
           tabindex: color === this.color ? "0" : "-1"
         }
       });
+      button.setCssStyles({ background: tint(color, 62, 0.9) });
       button.addEventListener("click", () => {
         this.selectColor(color);
         button.focus();
@@ -9354,15 +9376,25 @@ var AnnotationModal = class extends import_obsidian3.Modal {
       button.setAttribute("aria-checked", String(selected));
       button.setAttribute("tabindex", selected ? "0" : "-1");
     }
-    if (this.previewEl)
-      this.previewEl.dataset.color = color;
+    this.updatePreviewColor();
+  }
+  updatePreviewColor() {
+    if (!this.previewEl)
+      return;
+    this.previewEl.dataset.color = this.color;
+    this.previewEl.setCssStyles({ background: tint(this.color, 82, 0.55) });
   }
   async save() {
     var _a, _b;
     const comment = (_b = (_a = this.textarea) == null ? void 0 : _a.value.trim()) != null ? _b : "";
-    this.submitted = true;
-    await this.options.onSubmit(this.color, comment);
-    this.close();
+    try {
+      await this.options.onSubmit(this.color, comment);
+      this.submitted = true;
+      this.close();
+    } catch (error) {
+      console.error("[midad-arabic-sources] save annotation", error);
+      new import_obsidian3.Notice(`Could not save annotation: ${error instanceof Error ? error.message : String(error)}`);
+    }
   }
   async delete() {
     var _a, _b;
@@ -9374,9 +9406,14 @@ var AnnotationModal = class extends import_obsidian3.Modal {
       (_b = this.deleteButton) == null ? void 0 : _b.setClass("mod-destructive");
       return;
     }
-    this.submitted = true;
-    await this.options.onDelete();
-    this.close();
+    try {
+      await this.options.onDelete();
+      this.submitted = true;
+      this.close();
+    } catch (error) {
+      console.error("[midad-arabic-sources] delete annotation", error);
+      new import_obsidian3.Notice(`Could not delete annotation: ${error instanceof Error ? error.message : String(error)}`);
+    }
   }
   onClose() {
     var _a, _b;
@@ -10798,10 +10835,19 @@ var AnnotationService = class {
     }));
     this.plugin.registerEvent(this.app.workspace.on("editor-menu", (menu, editor, view) => {
       const draft = this.draftFromEditor(editor, view.file);
-      if (!draft)
+      if (draft) {
+        menu.addItem((item) => item.setTitle("Annotate selection").setIcon("highlighter").onClick(() => {
+          void this.openAnnotate(editor, view.file);
+        }));
+      }
+      const file = view.file;
+      if (!file || !this.store.findTarget(file.path))
         return;
-      menu.addItem((item) => item.setTitle("Annotate selection").setIcon("highlighter").onClick(() => {
-        void this.openAnnotate(editor, view.file);
+      menu.addItem((item) => item.setTitle("Edit annotation").setIcon("pencil").onClick(() => {
+        void this.openEditAtCursor(editor, file);
+      }));
+      menu.addItem((item) => item.setTitle("Delete annotation").setIcon("trash-2").onClick(() => {
+        void this.confirmDeleteAtCursor(editor, file);
       }));
     }));
     this.plugin.registerEvent(this.app.vault.on("modify", (file) => {
@@ -10981,6 +11027,10 @@ var AnnotationService = class {
     await this.refreshViews();
     new import_obsidian8.Notice("Annotation added.");
   }
+  annotationAtOffset(text, annotations, offset) {
+    var _a;
+    return (_a = resolveAnnotations(text, annotations, false).filter((annotation) => annotation.ranges.some((range) => offset >= range.start && offset <= range.end)).sort((a, b) => a.end - a.start - (b.end - b.start))[0]) != null ? _a : null;
+  }
   async openEditAtCursor(editor, file) {
     var _a, _b;
     const target = await this.targetForPath(file.path);
@@ -10989,8 +11039,7 @@ var AnnotationService = class {
     const annotations = await this.annotationsFor(target);
     const value = editor.getValue();
     const offset = editor.posToOffset(editor.getCursor("from"));
-    const resolved = resolveAnnotations(value, annotations, false);
-    const hit = resolved.filter((annotation) => annotation.ranges.some((range) => offset >= range.start && offset <= range.end)).sort((a, b) => a.end - a.start - (b.end - b.start))[0];
+    const hit = this.annotationAtOffset(value, annotations, offset);
     if (!hit) {
       new import_obsidian8.Notice("No annotation here.");
       return;
@@ -11039,7 +11088,7 @@ var AnnotationService = class {
     const annotations = await this.annotationsFor(target);
     const value = editor.getValue();
     const offset = editor.posToOffset(editor.getCursor("from"));
-    const hit = resolveAnnotations(value, annotations, false).filter((annotation) => annotation.ranges.some((range) => offset >= range.start && offset <= range.end)).sort((a, b) => a.end - a.start - (b.end - b.start))[0];
+    const hit = this.annotationAtOffset(value, annotations, offset);
     if (!hit) {
       new import_obsidian8.Notice("No annotation here.");
       return;

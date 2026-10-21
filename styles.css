@@ -848,8 +848,27 @@ body.theme-dark {
 
 /* ── Annotation dialog and notes ──────────────────────────────────────────── */
 
-.mas-annotation-modal {
-    min-width: min(560px, 90vw);
+.modal.mas-annotation-modal {
+    width: min(600px, 92vw);
+    max-width: 92vw;
+}
+
+.mas-annotation-modal-content {
+    min-width: 0;
+    max-height: 80vh;
+    overflow-y: auto;
+}
+
+.mas-annotation-modal-content .modal-button-container {
+    position: sticky;
+    bottom: 0;
+    z-index: 2;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 8px;
+    padding-top: 10px;
+    background: var(--background-primary);
 }
 
 .mas-annotation-preview {
@@ -903,6 +922,7 @@ body.theme-dark {
 .mas-annotation-comment {
     width: 100%;
     min-height: 90px;
+    box-sizing: border-box;
     resize: vertical;
     font-family: var(--font-text);
     font-size: var(--font-text-size);
