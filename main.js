@@ -9241,16 +9241,15 @@ var AnnotationRail = class {
     const contentRight = contentRect.right - scrollerRect.left + scroller.scrollLeft;
     const records = [];
     for (const annotation of annotations) {
-      const last = annotation.ranges[annotation.ranges.length - 1];
-      if (!last)
+      if (!annotation.ranges.length)
         continue;
-      const coords = this.view.coordsAtPos(last.end);
-      if (!coords)
+      const start = this.view.coordsAtPos(annotation.start);
+      if (!start)
         continue;
       records.push({
         annotation,
-        top: coords.top - scrollerRect.top + scroller.scrollTop,
-        left: contentRight - 26
+        top: start.top - scrollerRect.top + scroller.scrollTop,
+        left: contentRight - 40
       });
     }
     if (!records.length) {
@@ -10540,20 +10539,22 @@ function addMarginIcons(root, dom, annotations) {
   const rootRect = root.getBoundingClientRect();
   const records = [];
   for (const annotation of [...annotations].sort((a, b) => a.start - b.start)) {
-    let last = null;
+    let first = null;
     for (const mark of marks) {
       const ids = ((_a = mark.dataset.annIds) != null ? _a : "").split(" ");
-      if (ids.includes(annotation.id))
-        last = mark;
+      if (ids.includes(annotation.id)) {
+        first = mark;
+        break;
+      }
     }
-    if (!last)
+    if (!first)
       continue;
-    const rects = Array.from(last.getClientRects());
-    const markRect = (_b = rects[0]) != null ? _b : last.getBoundingClientRect();
+    const rects = Array.from(first.getClientRects());
+    const startRect = (_b = rects[0]) != null ? _b : first.getBoundingClientRect();
     records.push({
       annotation,
-      top: markRect.top - rootRect.top,
-      left: root.clientWidth - 26
+      top: startRect.top - rootRect.top,
+      left: root.clientWidth - 40
     });
   }
   if (!records.length)

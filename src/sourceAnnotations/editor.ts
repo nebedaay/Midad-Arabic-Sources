@@ -163,14 +163,13 @@ class AnnotationRail {
 		const contentRight = contentRect.right - scrollerRect.left + scroller.scrollLeft;
 		const records: Array<{ annotation: ResolvedAnnotation; top: number; left: number }> = [];
 		for (const annotation of annotations) {
-			const last = annotation.ranges[annotation.ranges.length - 1];
-			if (!last) continue;
-			const coords = this.view.coordsAtPos(last.end);
-			if (!coords) continue;
+			if (!annotation.ranges.length) continue;
+			const start = this.view.coordsAtPos(annotation.start);
+			if (!start) continue;
 			records.push({
 				annotation,
-				top: coords.top - scrollerRect.top + scroller.scrollTop,
-				left: contentRight - 26,
+				top: start.top - scrollerRect.top + scroller.scrollTop,
+				left: contentRight - 40,
 			});
 		}
 		if (!records.length) {

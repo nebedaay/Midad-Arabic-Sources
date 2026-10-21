@@ -169,18 +169,21 @@ function addMarginIcons(root: HTMLElement, dom: DomFactory, annotations: Resolve
 	const rootRect = root.getBoundingClientRect();
 	const records: Array<{ annotation: ResolvedAnnotation; top: number; left: number }> = [];
 	for (const annotation of [...annotations].sort((a, b) => a.start - b.start)) {
-		let last: HTMLElement | null = null;
+		let first: HTMLElement | null = null;
 		for (const mark of marks) {
 			const ids = (mark.dataset.annIds ?? "").split(" ");
-			if (ids.includes(annotation.id)) last = mark;
+			if (ids.includes(annotation.id)) {
+				first = mark;
+				break;
+			}
 		}
-		if (!last) continue;
-		const rects = Array.from(last.getClientRects());
-		const markRect = rects[0] ?? last.getBoundingClientRect();
+		if (!first) continue;
+		const rects = Array.from(first.getClientRects());
+		const startRect = rects[0] ?? first.getBoundingClientRect();
 		records.push({
 			annotation,
-			top: markRect.top - rootRect.top,
-			left: root.clientWidth - 26,
+			top: startRect.top - rootRect.top,
+			left: root.clientWidth - 40,
 		});
 	}
 	if (!records.length) return;
