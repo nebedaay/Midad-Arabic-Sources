@@ -52,7 +52,7 @@ import type {
 } from "./types";
 import { applyReadingAnnotations } from "./wrap";
 
-const MIDAD_ICON = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5.5 4h13A2.5 2.5 0 0 1 21 6.5v11a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 17.5v-11A2.5 2.5 0 0 1 5.5 4Z"/><path d="M8 14c0-2.2 1.5-4 3.5-4s3.5 1.8 3.5 4c0 1.9-1.4 3.2-3.2 3.2h-1.3v2.3"/></svg>`;
+const MIDAD_ICON = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path fill="currentColor" d="M17.5859375 7.598958333333334 16.921875 9.708333333333334Q16.088541666666664 9.630208333333334 15.111979166666664 9.591145833333334Q14.135416666666666 9.552083333333334 12.9375 9.552083333333334Q7.989583333333333 9.552083333333334 7.9765625 10.385416666666668L8.09375 10.8671875Q8.145833333333332 11.0234375 8.263020833333332 11.537760416666668Q8.380208333333332 12.052083333333334 8.588541666666666 12.9375Q8.9921875 14.760416666666668 9.220052083333332 16.21875Q9.447916666666666 17.677083333333336 9.421875 18.822916666666668Q9.421875 20.229166666666668 8.40625 22.0Q8.184895833333332 19.65625 7.846354166666666 17.598958333333336Q7.5078125 15.541666666666668 7.052083333333333 13.731770833333334Q6.739583333333333 12.494791666666668 6.576822916666666 11.635416666666668Q6.414062499999999 10.776041666666668 6.414062499999999 10.28125Q6.414062499999999 8.549479166666668 7.46875 7.950520833333334Q8.067708333333332 7.625 10.151041666666666 7.325520833333334Q11.986979166666666 7.052083333333334 12.78125 7.052083333333334Q13.067708333333332 7.052083333333334 13.2109375 7.104166666666667L11.0234375 4.643229166666667L8.171875 6.127604166666667L8.197916666666666 5.203125Q8.2109375 4.760416666666667 9.630208333333332 3.380208333333334Q11.036458333333332 2.0 11.505208333333332 2.0Q12.169270833333332 2.0 13.653645833333332 3.875Q15.502604166666666 6.244791666666667 15.736979166666666 6.427083333333334Q16.049479166666664 6.674479166666667 16.505208333333332 6.9609375Q16.9609375 7.247395833333334 17.5859375 7.598958333333334Z"/></svg>`;
 
 export interface AnnotationHost {
 	app: App;
@@ -154,6 +154,11 @@ export class AnnotationService {
 		} catch (error) {
 			console.error("[midad-arabic-sources] adoption scan", error);
 		}
+		try {
+			await this.repairUnitNotePaths();
+		} catch (error) {
+			console.error("[midad-arabic-sources] annotation path repair", error);
+		}
 		const migrated = await this.store.migrateSpike((workKey, notePath) => this.migrationMeta(workKey, notePath));
 		try {
 			await this.syncStartup(migrated);
@@ -171,6 +176,9 @@ export class AnnotationService {
 			(leaf) => new AnnotationSidebarView(leaf, this)
 		);
 		this.plugin.addRibbonIcon("midad", "Open Midad sidebar", () => { void this.openSidebar(); });
+		this.app.workspace.onLayoutReady(() => {
+			if (!this.disposed) void this.openSidebar();
+		});
 		this.registerCommands();
 		this.registerEvents();
 		window.setTimeout(() => {
@@ -283,6 +291,30 @@ export class AnnotationService {
 		const work = await this.store.getWork(stored.workKey);
 		if (work?.sourceStatus !== "adopted") return;
 		await this.setSourceStatus(stored.workKey, "removed");
+	}
+
+	/** Repair unit paths left stale by an earlier source-folder rename. */
+	private async repairUnitNotePaths(): Promise<void> {
+		for (const entry of Object.values(this.store.getIndex().works)) {
+			const work = await this.store.getWork(entry.key);
+			if (!work) continue;
+			const updates = new Map<string, string>();
+			for (const [unitKey, unit] of Object.entries(work.units)) {
+				try {
+					if (await this.app.vault.adapter.exists(normalizePath(unit.note))) continue;
+				} catch {
+					continue;
+				}
+				const actual = await this.resolver.notePathForUnit(entry.key, unitKey);
+				if (!actual) continue;
+				try {
+					if (await this.app.vault.adapter.exists(actual)) updates.set(unitKey, actual);
+				} catch { /* skip */ }
+			}
+			if (!updates.size) continue;
+			await this.store.updatePaths(entry.key, work.dir, work.note, updates);
+			await renderAnnotationNote(this.app, this.store, this.settings, entry.key);
+		}
 	}
 
 	private registerCommands(): void {

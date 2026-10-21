@@ -123,6 +123,27 @@ export class AnnotationTargetResolver {
 		return null;
 	}
 
+	/** The current note path for a unit, derived from the render model. */
+	async notePathForUnit(workKeyValue: string, unitKeyValue: string): Promise<string | null> {
+		const works = await this.manifest();
+		const work = works.find((candidate) => workKey(candidate) === workKeyValue);
+		if (!work) return null;
+		const model = await this.model(work);
+		if (!model) return null;
+		const dir = String(model.work.dir ?? "");
+		const isQuranText = model.work.collection === "quran-text";
+		const canonical = isQuranText && this.isCanonicalQuran(model);
+		for (const unit of model.units) {
+			if (unitKey(unit) !== unitKeyValue) continue;
+			const dictRoot = model.work.collection === "dictionary" && unit.kind === "dict";
+			const base = String(unit.base ?? "");
+			const stem = canonical || dictRoot ? base : `${dir} - ${base}`;
+			const folder = canonical ? this.canonicalRoot() : `${this.outRoot()}/${dir}`;
+			return normalizePath(`${folder}/${stem}.md`);
+		}
+		return null;
+	}
+
 	async resolve(path: string): Promise<AnnotationTarget | null> {
 		const normalized = normalizePath(path);
 		const file = this.app.vault.getAbstractFileByPath(normalized);

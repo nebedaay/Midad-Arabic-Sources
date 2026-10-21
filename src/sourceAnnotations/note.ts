@@ -81,7 +81,7 @@ function buildNoteBody(
 		if (!unit.annotations.length) continue;
 		count += unit.annotations.length;
 		const noteName = unit.entry.note.split("/").pop()?.replace(/\.md$/i, "") ?? unit.entry.unitKey;
-		lines.push(`### [[${noteName}]]`, "");
+		lines.push(`### ${noteHeadingLink(unit.entry.note, "", noteName)}`, "");
 		for (const annotation of unit.annotations) {
 			if (annotation.anchorStatus === "orphaned") continue;
 			lines.push(annotationBlock(annotation, unit.entry.note), "");
@@ -145,8 +145,10 @@ export async function renderAnnotationNote(
 	if (parent) await ensureFolder(app, parent);
 	await writeMerged(app, notePath, { content, specs }, false, false);
 	if (work.note !== notePath) {
-		work.note = notePath;
+		// Let setWorkNote see the old value; mutating the cached work first made it
+		// return without writing, leaving adopted works with an empty note path.
 		await store.setWorkNote(workKey, notePath);
+		work.note = notePath;
 	}
 	return notePath;
 }
@@ -156,14 +158,31 @@ export function annotationMocPath(settings: AnnotationSettings): string {
 	return normalizePath(`${outRoot}/source-annotation.md`);
 }
 
-function mocEntry(entry: AnnotationIndexEntry): string {
-	const noteName = entry.note.split("/").pop()?.replace(/\.md$/i, "") ?? entry.title;
+async function mocEntry(
+	entry: AnnotationIndexEntry,
+	store: AnnotationStore,
+	settings: AnnotationSettings
+): Promise<string[]> {
+	const work = await store.getWork(entry.key);
+	const notePath = entry.note || (work ? annotationNotePath(work, settings) : "");
+	if (!notePath) return [];
+	const annotationLink = noteHeadingLink(notePath, "", `${entry.title} Annotations`);
 	const orphan = entry.orphanCount > 0 ? ` · ${entry.orphanCount} unanchored` : "";
 	const plural = entry.count === 1 ? "annotation" : "annotations";
-	return `- [[${noteName}|${entry.title}]] — ${entry.count} ${plural}${orphan}`;
+	const units = (await store.allUnits(entry.key)).filter((unit) => unit.unit.annotations.length > 0);
+	if (units.length <= 1) {
+		const unit = units[0];
+		const sourceLink = unit
+			? ` · ${noteHeadingLink(unit.entry.note, "")}`
+			: "";
+		return [`- ${annotationLink} — ${entry.count} ${plural}${orphan}${sourceLink}`];
+	}
+	const lines = [`- ${annotationLink} — ${entry.count} ${plural}${orphan}`];
+	for (const unit of units) lines.push(`  - ${noteHeadingLink(unit.entry.note, "")}`);
+	return lines;
 }
 
-function mocBody(store: AnnotationStore): string {
+async function mocBody(store: AnnotationStore, settings: AnnotationSettings): Promise<string> {
 	const entries = Object.values(store.getIndex().works).filter((entry) => entry.count > 0);
 	const groups: Array<[string, AnnotationIndexEntry[]]> = [
 		["Installed", entries.filter((entry) => entry.sourceStatus === "installed")],
@@ -177,7 +196,9 @@ function mocBody(store: AnnotationStore): string {
 		if (!group.length) continue;
 		wrote = true;
 		lines.push(`### ${title}`, "");
-		for (const entry of group.sort((a, b) => a.title.localeCompare(b.title))) lines.push(mocEntry(entry));
+		for (const entry of group.sort((a, b) => a.title.localeCompare(b.title))) {
+			lines.push(...await mocEntry(entry, store, settings));
+		}
 		lines.push("");
 	}
 	if (!wrote) lines.push("*No annotated sources yet.*", "");
@@ -205,7 +226,7 @@ export async function renderAnnotationMoc(
 ): Promise<string> {
 	const path = annotationMocPath(settings);
 	const { frontmatter, specs } = mocFrontmatter(settings);
-	const content = `${frontmatter}${mocBody(store)}`;
+	const content = `${frontmatter}${await mocBody(store, settings)}`;
 	const parent = path.split("/").slice(0, -1).join("/");
 	if (parent) await ensureFolder(app, parent);
 	await writeMerged(app, path, { content, specs }, false, false);

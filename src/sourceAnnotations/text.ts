@@ -139,8 +139,9 @@ export function occurrencesBefore(text: string, offset: number, needle: string):
 
 /** Markdown link to a note and, when known, a heading inside it. */
 export function noteHeadingLink(notePath: string, heading: string, label?: string): string {
+	const target = notePath.replace(/\.md$/i, "");
 	const base = notePath.split("/").pop()?.replace(/\.md$/i, "") ?? notePath;
-	if (!heading) return `[[${base}]]`;
+	if (!heading) return `[[${target}|${label || base}]]`;
 	const display = label || heading;
-	return `[[${base}#${heading}|${display}]]`;
+	return `[[${target}#${heading}|${display}]]`;
 }
