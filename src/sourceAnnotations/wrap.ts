@@ -175,62 +175,62 @@ function addMarginIcons(root: HTMLElement, dom: DomFactory, annotations: Resolve
 			if (ids.includes(annotation.id)) last = mark;
 		}
 		if (!last) continue;
-		const block = last.closest<HTMLElement>(
-			"p, li, blockquote, h1, h2, h3, h4, h5, h6, td, th"
-		) ?? root;
-		const blockRect = block.getBoundingClientRect();
-		const markRect = last.getBoundingClientRect();
+		const rects = Array.from(last.getClientRects());
+		const endRect = rects[rects.length - 1] ?? last.getBoundingClientRect();
 		records.push({
 			annotation,
-			top: markRect.top - rootRect.top,
-			left: blockRect.right - rootRect.left,
+			top: endRect.top - rootRect.top,
+			left: endRect.right - rootRect.left,
 		});
 	}
 	if (!records.length) return;
 	root.classList.add("mas-has-annotations");
 	const rail = dom.el("div", { cls: "mas-ann-rail" });
-	const groups = new Map<number, typeof records>();
+	const placed: Array<{ left: number; top: number }> = [];
 	for (const record of records) {
-		const key = Math.round(record.top);
-		const group = groups.get(key) ?? [];
-		group.push(record);
-		groups.set(key, group);
-	}
-	for (const group of groups.values()) {
-		group.sort((a, b) => a.annotation.start - b.annotation.start);
-		group.forEach((record, index) => {
-			const icon = dom.el("button", {
-				cls: "mas-ann-margin",
-				attr: { type: "button", "aria-label": "Annotation" },
-			});
-			icon.dataset.annIds = record.annotation.id;
-			dom.style(icon, {
-				color: annotationTint(record.annotation.color, 65, 0.95),
-				top: `${Math.max(0, record.top - index * 6)}px`,
-				left: `${Math.max(6, Math.min(record.left + 6 + index * 6, root.clientWidth - 26))}px`,
-			});
-			const fire = (type: string): void => {
-				icon.dispatchEvent(new CustomEvent<AnnotationEventDetail>(type, {
-					bubbles: true,
-					detail: { ids: [record.annotation.id] },
-				}));
-			};
-			icon.addEventListener("mouseenter", () => fire(ANNOTATION_EVENTS.hover));
-			icon.addEventListener("mouseleave", () => fire(ANNOTATION_EVENTS.leave));
-			icon.addEventListener("click", (event) => {
+		let left = record.left + 6;
+		let top = Math.max(0, record.top);
+		let guard = 0;
+		while (
+			guard++ < 20 &&
+			placed.some((other) => Math.abs(other.left - left) < 20 && Math.abs(other.top - top) < 20)
+		) {
+			left += 6;
+			top = Math.max(0, top - 6);
+		}
+		left = Math.max(6, Math.min(left, root.clientWidth - 26));
+		placed.push({ left, top });
+		const icon = dom.el("button", {
+			cls: "mas-ann-margin",
+			attr: { type: "button", "aria-label": "Annotation" },
+		});
+		icon.dataset.annIds = record.annotation.id;
+		dom.style(icon, {
+			color: annotationTint(record.annotation.color, 65, 0.95),
+			top: `${top}px`,
+			left: `${left}px`,
+		});
+		const fire = (type: string): void => {
+			icon.dispatchEvent(new CustomEvent<AnnotationEventDetail>(type, {
+				bubbles: true,
+				detail: { ids: [record.annotation.id] },
+			}));
+		};
+		icon.addEventListener("mouseenter", () => fire(ANNOTATION_EVENTS.hover));
+		icon.addEventListener("mouseleave", () => fire(ANNOTATION_EVENTS.leave));
+		icon.addEventListener("click", (event) => {
+			event.preventDefault();
+			event.stopPropagation();
+			fire(ANNOTATION_EVENTS.open);
+		});
+		icon.addEventListener("keydown", (event) => {
+			if (event.key === "Enter" || event.key === " ") {
 				event.preventDefault();
 				event.stopPropagation();
 				fire(ANNOTATION_EVENTS.open);
-			});
-			icon.addEventListener("keydown", (event) => {
-				if (event.key === "Enter" || event.key === " ") {
-					event.preventDefault();
-					event.stopPropagation();
-					fire(ANNOTATION_EVENTS.open);
-				}
-			});
-			rail.appendChild(icon);
+			}
 		});
+		rail.appendChild(icon);
 	}
 	root.appendChild(rail);
 }
