@@ -816,25 +816,18 @@ body.theme-dark {
 
 .mas-ann-rail {
     position: absolute;
-    inset-block: 0;
-    inset-inline-end: 0;
-    width: 2.5rem;
+    top: 0;
+    left: 0;
+    width: 0;
+    height: 0;
     overflow: visible;
     pointer-events: none;
     z-index: 5;
 }
 
-.cm-editor.mas-has-annotations,
+.cm-scroller.mas-ann-scroller,
 .markdown-preview-sizer.mas-has-annotations {
     position: relative;
-}
-
-.cm-editor.mas-has-annotations .cm-content {
-    padding-right: 2.6rem;
-}
-
-.markdown-preview-sizer.mas-has-annotations {
-    padding-inline-end: 2.6rem;
 }
 
 .mas-ann-margin {
@@ -849,7 +842,8 @@ body.theme-dark {
     padding: 0;
     border: 0;
     border-radius: 4px;
-    background: transparent;
+    background: transparent !important;
+    box-shadow: none !important;
     cursor: pointer;
     pointer-events: auto;
     user-select: none;
@@ -871,9 +865,15 @@ body.theme-dark {
     -webkit-mask-position: center;
 }
 
+.mas-ann-rail .mas-ann-margin {
+    background: transparent !important;
+    border: 0 !important;
+    box-shadow: none !important;
+}
+
 .mas-ann-margin:hover,
 .mas-ann-margin:focus-visible {
-    background: var(--background-modifier-hover);
+    background: transparent !important;
     outline: none;
 }
 

@@ -167,7 +167,8 @@ function makeSegment(
 function addMarginIcons(root: HTMLElement, dom: DomFactory, annotations: ResolvedAnnotation[]): void {
 	const marks = Array.from(root.querySelectorAll<HTMLElement>(".mas-annotation"));
 	const rootRect = root.getBoundingClientRect();
-	const records: Array<{ annotation: ResolvedAnnotation; top: number }> = [];
+	const doc = root.ownerDocument;
+	const records: Array<{ annotation: ResolvedAnnotation; top: number; left: number }> = [];
 	for (const annotation of [...annotations].sort((a, b) => a.start - b.start)) {
 		let last: HTMLElement | null = null;
 		for (const mark of marks) {
@@ -175,8 +176,18 @@ function addMarginIcons(root: HTMLElement, dom: DomFactory, annotations: Resolve
 			if (ids.includes(annotation.id)) last = mark;
 		}
 		if (!last) continue;
-		const rect = last.getBoundingClientRect();
-		records.push({ annotation, top: rect.top - rootRect.top });
+		const block = last.closest<HTMLElement>(
+			"p, li, blockquote, h1, h2, h3, h4, h5, h6, td, th"
+		) ?? root;
+		const range = doc.createRange();
+		range.selectNodeContents(block);
+		const rects = Array.from(range.getClientRects());
+		const endRect = rects[rects.length - 1] ?? block.getBoundingClientRect();
+		records.push({
+			annotation,
+			top: endRect.top - rootRect.top,
+			left: endRect.right - rootRect.left,
+		});
 	}
 	if (!records.length) return;
 	root.classList.add("mas-has-annotations");
@@ -199,8 +210,7 @@ function addMarginIcons(root: HTMLElement, dom: DomFactory, annotations: Resolve
 			dom.style(icon, {
 				color: annotationTint(record.annotation.color, 65, 0.95),
 				top: `${Math.max(0, record.top - index * 18)}px`,
-				right: "0.35rem",
-				transform: `translateX(${index * 0.35}rem)`,
+				left: `${Math.max(6, Math.min(record.left + 6 + index * 5.6, root.clientWidth - 26))}px`,
 			});
 			const fire = (type: string): void => {
 				icon.dispatchEvent(new CustomEvent<AnnotationEventDetail>(type, {

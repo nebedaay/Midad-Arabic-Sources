@@ -81,6 +81,22 @@ export class AnnotationTooltip {
 		}
 
 		if (this.el !== el) return;
+		el.addEventListener("click", (event) => {
+			const node = event.target as HTMLElement | null;
+			const link = node?.closest("a");
+			if (!link) return;
+			const href = link.getAttribute("data-href") ?? link.getAttribute("href");
+			if (!href) return;
+			event.preventDefault();
+			event.stopPropagation();
+			this.hide();
+			if (link.hasAttribute("data-href") || link.classList.contains("internal-link")) {
+				const newLeaf = event.metaKey || event.ctrlKey;
+				void this.app.workspace.openLinkText(href, target.notePath, newLeaf);
+			} else {
+				window.open(href, "_blank");
+			}
+		});
 		this.position(anchor, el, win);
 		this.outside = (event: PointerEvent) => {
 			const targetNode = event.target as Node | null;

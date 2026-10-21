@@ -132,7 +132,7 @@ class AnnotationRail {
 		this.timer = 0;
 		this.rail?.remove();
 		this.rail = null;
-		this.view.dom.classList.remove("mas-has-annotations");
+		this.view.scrollDOM.classList.remove("mas-ann-scroller");
 	}
 
 	/** coordsAtPos cannot run inside an update; measure on the next frame. */
@@ -151,25 +151,31 @@ class AnnotationRail {
 		this.rail = null;
 		const annotations = [...this.view.state.field(editorAnnotationsField)]
 			.sort((a, b) => a.start - b.start);
+		const scroller = this.view.scrollDOM;
 		if (!annotations.length) {
-			this.view.dom.classList.remove("mas-has-annotations");
+			scroller.classList.remove("mas-ann-scroller");
 			return;
 		}
-		const editorRect = this.view.dom.getBoundingClientRect();
-		const records: Array<{ annotation: ResolvedAnnotation; top: number }> = [];
+		const scrollerRect = scroller.getBoundingClientRect();
+		const records: Array<{ annotation: ResolvedAnnotation; top: number; left: number }> = [];
 		for (const annotation of annotations) {
 			const last = annotation.ranges[annotation.ranges.length - 1];
 			if (!last) continue;
-			const coords = this.view.coordsAtPos(last.end);
+			const line = this.view.state.doc.lineAt(last.end);
+			const coords = this.view.coordsAtPos(line.to);
 			if (!coords) continue;
-			records.push({ annotation, top: coords.top - editorRect.top });
+			records.push({
+				annotation,
+				top: coords.top - scrollerRect.top + scroller.scrollTop,
+				left: coords.right - scrollerRect.left + scroller.scrollLeft,
+			});
 		}
 		if (!records.length) {
-			this.view.dom.classList.remove("mas-has-annotations");
+			scroller.classList.remove("mas-ann-scroller");
 			return;
 		}
-		this.view.dom.classList.add("mas-has-annotations");
-		const rail = this.view.dom.createDiv({ cls: "mas-ann-rail" });
+		scroller.classList.add("mas-ann-scroller");
+		const rail = scroller.createDiv({ cls: "mas-ann-rail" });
 		this.rail = rail;
 
 		const groups = new Map<number, typeof records>();
@@ -190,8 +196,7 @@ class AnnotationRail {
 				icon.setCssStyles({
 					color: annotationTint(record.annotation.color, 65, 0.95),
 					top: `${Math.max(0, record.top - index * 18)}px`,
-					right: "0.35rem",
-					transform: `translateX(${index * 0.35}rem)`,
+					left: `${Math.max(6, Math.min(record.left + 6 + index * 5.6, scroller.scrollWidth - 26))}px`,
 				});
 				icon.addEventListener("mouseenter", () => {
 					fire(icon, ANNOTATION_EVENTS.hover, [record.annotation.id]);

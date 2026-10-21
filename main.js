@@ -9211,7 +9211,7 @@ var AnnotationRail = class {
     this.timer = 0;
     (_a = this.rail) == null ? void 0 : _a.remove();
     this.rail = null;
-    this.view.dom.classList.remove("mas-has-annotations");
+    this.view.scrollDOM.classList.remove("mas-ann-scroller");
   }
   schedule() {
     if (this.destroyed || this.scheduled)
@@ -9229,27 +9229,33 @@ var AnnotationRail = class {
     (_a = this.rail) == null ? void 0 : _a.remove();
     this.rail = null;
     const annotations = [...this.view.state.field(editorAnnotationsField)].sort((a, b) => a.start - b.start);
+    const scroller = this.view.scrollDOM;
     if (!annotations.length) {
-      this.view.dom.classList.remove("mas-has-annotations");
+      scroller.classList.remove("mas-ann-scroller");
       return;
     }
-    const editorRect = this.view.dom.getBoundingClientRect();
+    const scrollerRect = scroller.getBoundingClientRect();
     const records = [];
     for (const annotation of annotations) {
       const last = annotation.ranges[annotation.ranges.length - 1];
       if (!last)
         continue;
-      const coords = this.view.coordsAtPos(last.end);
+      const line = this.view.state.doc.lineAt(last.end);
+      const coords = this.view.coordsAtPos(line.to);
       if (!coords)
         continue;
-      records.push({ annotation, top: coords.top - editorRect.top });
+      records.push({
+        annotation,
+        top: coords.top - scrollerRect.top + scroller.scrollTop,
+        left: coords.right - scrollerRect.left + scroller.scrollLeft
+      });
     }
     if (!records.length) {
-      this.view.dom.classList.remove("mas-has-annotations");
+      scroller.classList.remove("mas-ann-scroller");
       return;
     }
-    this.view.dom.classList.add("mas-has-annotations");
-    const rail = this.view.dom.createDiv({ cls: "mas-ann-rail" });
+    scroller.classList.add("mas-ann-scroller");
+    const rail = scroller.createDiv({ cls: "mas-ann-rail" });
     this.rail = rail;
     const groups = new Map();
     for (const record of records) {
@@ -9269,8 +9275,7 @@ var AnnotationRail = class {
         icon.setCssStyles({
           color: annotationTint(record.annotation.color, 65, 0.95),
           top: `${Math.max(0, record.top - index * 18)}px`,
-          right: "0.35rem",
-          transform: `translateX(${index * 0.35}rem)`
+          left: `${Math.max(6, Math.min(record.left + 6 + index * 5.6, scroller.scrollWidth - 26))}px`
         });
         icon.addEventListener("mouseenter", () => {
           fire(icon, ANNOTATION_EVENTS.hover, [record.annotation.id]);
@@ -10525,9 +10530,10 @@ function makeSegment(dom, segment, active, logicalStart, logicalEnd) {
   }
 }
 function addMarginIcons(root, dom, annotations) {
-  var _a, _b;
+  var _a, _b, _c, _d;
   const marks = Array.from(root.querySelectorAll(".mas-annotation"));
   const rootRect = root.getBoundingClientRect();
+  const doc = root.ownerDocument;
   const records = [];
   for (const annotation of [...annotations].sort((a, b) => a.start - b.start)) {
     let last = null;
@@ -10538,8 +10544,16 @@ function addMarginIcons(root, dom, annotations) {
     }
     if (!last)
       continue;
-    const rect = last.getBoundingClientRect();
-    records.push({ annotation, top: rect.top - rootRect.top });
+    const block = (_b = last.closest("p, li, blockquote, h1, h2, h3, h4, h5, h6, td, th")) != null ? _b : root;
+    const range = doc.createRange();
+    range.selectNodeContents(block);
+    const rects = Array.from(range.getClientRects());
+    const endRect = (_c = rects[rects.length - 1]) != null ? _c : block.getBoundingClientRect();
+    records.push({
+      annotation,
+      top: endRect.top - rootRect.top,
+      left: endRect.right - rootRect.left
+    });
   }
   if (!records.length)
     return;
@@ -10548,7 +10562,7 @@ function addMarginIcons(root, dom, annotations) {
   const groups = new Map();
   for (const record of records) {
     const key = Math.round(record.top);
-    const group = (_b = groups.get(key)) != null ? _b : [];
+    const group = (_d = groups.get(key)) != null ? _d : [];
     group.push(record);
     groups.set(key, group);
   }
@@ -10563,8 +10577,7 @@ function addMarginIcons(root, dom, annotations) {
       dom.style(icon, {
         color: annotationTint(record.annotation.color, 65, 0.95),
         top: `${Math.max(0, record.top - index * 18)}px`,
-        right: "0.35rem",
-        transform: `translateX(${index * 0.35}rem)`
+        left: `${Math.max(6, Math.min(record.left + 6 + index * 5.6, root.clientWidth - 26))}px`
       });
       const fire2 = (type) => {
         icon.dispatchEvent(new CustomEvent(type, {
@@ -10928,6 +10941,25 @@ var AnnotationTooltip = class {
     }
     if (this.el !== el)
       return;
+    el.addEventListener("click", (event) => {
+      var _a2;
+      const node = event.target;
+      const link = node == null ? void 0 : node.closest("a");
+      if (!link)
+        return;
+      const href = (_a2 = link.getAttribute("data-href")) != null ? _a2 : link.getAttribute("href");
+      if (!href)
+        return;
+      event.preventDefault();
+      event.stopPropagation();
+      this.hide();
+      if (link.hasAttribute("data-href") || link.classList.contains("internal-link")) {
+        const newLeaf = event.metaKey || event.ctrlKey;
+        void this.app.workspace.openLinkText(href, target.notePath, newLeaf);
+      } else {
+        window.open(href, "_blank");
+      }
+    });
     this.position(anchor, el, win);
     this.outside = (event) => {
       const targetNode = event.target;
