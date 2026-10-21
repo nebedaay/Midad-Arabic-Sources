@@ -2083,7 +2083,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		}
 	}
 
-	async openManageSources(force = false) {
+	async openManageSources(force = false, showFilter?: "all" | "installed" | "not-installed" | "archived" | "annotated") {
 		const loading = new Notice("Loading available sources…", 0);
 		try {
 			const works = await this.listSourcesCached(force);
@@ -2132,7 +2132,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			}
 			new ManageSourcesModal(
 				this.app, this, works, installedKeys, statusKeys("deleting"), archivedKeys, sizes, zoteroStatus,
-				() => { void this.openManageSources(true); }, new Set(this.archivingSources)
+				() => { void this.openManageSources(true); }, new Set(this.archivingSources), showFilter
 			).open();
 		} finally {
 			loading.hide();
@@ -5580,7 +5580,7 @@ class ManageSourcesModal extends Modal {
 	markArchiving: (work: SourceWork) => void = () => {};
 	finishArchiving: (work: SourceWork, ok: boolean) => void = () => {};
 
-	constructor(app: App, plugin: MidadArabicSourcesPlugin, works: SourceWork[], installed: Set<string>, deleting: Set<string> = new Set(), archived: Set<string> = new Set(), sizes: Map<string, number> = new Map(), zoteroStatus: Map<string, string> = new Map(), onReload?: () => void, archiving: Set<string> = new Set()) {
+	constructor(app: App, plugin: MidadArabicSourcesPlugin, works: SourceWork[], installed: Set<string>, deleting: Set<string> = new Set(), archived: Set<string> = new Set(), sizes: Map<string, number> = new Map(), zoteroStatus: Map<string, string> = new Map(), onReload?: () => void, archiving: Set<string> = new Set(), showFilter?: "all" | "installed" | "not-installed" | "archived" | "annotated") {
 		super(app);
 		this.plugin = plugin;
 		this.works = works;
@@ -5596,9 +5596,9 @@ class ManageSourcesModal extends Modal {
 		this.onReload = onReload;
 		this.initial = new Map(works.map((w) => [w.key, installed.has(w.key) && !archiving.has(w.key)]));
 		const saved = plugin.settings.manageShowFilter;
-		this.show = saved === "installed" || saved === "not-installed" || saved === "archived" || saved === "annotated"
+		this.show = showFilter ?? (saved === "installed" || saved === "not-installed" || saved === "archived" || saved === "annotated"
 			? saved
-			: "all";
+			: "all");
 		this.activeGenres = new Set(plugin.settings.manageGenreFilter || []);
 	}
 
@@ -6039,7 +6039,7 @@ class ManageSourcesModal extends Modal {
 		urlPane.classList.add("mas-manage__hidden");
 		buildUrlAdder(this.plugin, urlPane, () => {
 			this.close();
-			void this.plugin.openManageSources(true);
+			void this.plugin.openManageSources(true, "all");
 		});
 
 		const setMode = (m: "manage" | "zotero" | "url") => {

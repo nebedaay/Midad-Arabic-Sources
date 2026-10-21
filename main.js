@@ -14605,7 +14605,7 @@ var MidadArabicSourcesPlugin = class extends import_obsidian13.Plugin {
       return false;
     }
   }
-  async openManageSources(force = false) {
+  async openManageSources(force = false, showFilter) {
     var _a;
     const loading = new import_obsidian13.Notice("Loading available sources\u2026", 0);
     try {
@@ -14649,7 +14649,7 @@ var MidadArabicSourcesPlugin = class extends import_obsidian13.Plugin {
       }
       new ManageSourcesModal(this.app, this, works, installedKeys, statusKeys("deleting"), archivedKeys, sizes, zoteroStatus, () => {
         void this.openManageSources(true);
-      }, new Set(this.archivingSources)).open();
+      }, new Set(this.archivingSources), showFilter).open();
     } finally {
       loading.hide();
     }
@@ -17674,7 +17674,7 @@ var TurathUrlModal = class extends import_obsidian13.Modal {
   }
 };
 var ManageSourcesModal = class extends import_obsidian13.Modal {
-  constructor(app, plugin, works, installed, deleting = new Set(), archived = new Set(), sizes = new Map(), zoteroStatus = new Map(), onReload, archiving = new Set()) {
+  constructor(app, plugin, works, installed, deleting = new Set(), archived = new Set(), sizes = new Map(), zoteroStatus = new Map(), onReload, archiving = new Set(), showFilter) {
     super(app);
     this.rows = [];
     this.headings = new Map();
@@ -17704,7 +17704,7 @@ var ManageSourcesModal = class extends import_obsidian13.Modal {
     this.onReload = onReload;
     this.initial = new Map(works.map((w) => [w.key, installed.has(w.key) && !archiving.has(w.key)]));
     const saved = plugin.settings.manageShowFilter;
-    this.show = saved === "installed" || saved === "not-installed" || saved === "archived" || saved === "annotated" ? saved : "all";
+    this.show = showFilter != null ? showFilter : saved === "installed" || saved === "not-installed" || saved === "archived" || saved === "annotated" ? saved : "all";
     this.activeGenres = new Set(plugin.settings.manageGenreFilter || []);
   }
   onOpen() {
@@ -18134,7 +18134,7 @@ var ManageSourcesModal = class extends import_obsidian13.Modal {
     urlPane.classList.add("mas-manage__hidden");
     buildUrlAdder(this.plugin, urlPane, () => {
       this.close();
-      void this.plugin.openManageSources(true);
+      void this.plugin.openManageSources(true, "all");
     });
     const setMode = (m) => {
       const prev = this.mode;
