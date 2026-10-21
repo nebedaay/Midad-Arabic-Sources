@@ -51,6 +51,7 @@ See [Document import](./document-import.md#annotations).
 - **Delete annotations for this source…** — move a work's annotation store and note to the plugin trash.
 - **Open annotation sidebar** — reveal the active source's annotation cards.
 - **Copy source with annotations** — copy the managed source text plus a colour-callout annotation section.
+- **Adopt note for annotations** — make an arbitrary Markdown note annotatable by adding a stable work/unit identity and a managed body region. Known Midad transcriptions/translations are adopted automatically.
 - **Open source annotations** — open the generated per-work annotation note.
 - **Open annotation trash** — restore or permanently delete annotation batches.
 - **Reload annotations** — reload the store and repaint open source notes.

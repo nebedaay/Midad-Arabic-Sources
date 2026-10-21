@@ -10,7 +10,7 @@ export type AnnotationColor =
 	| "green"
 	| "gray";
 
-export type SourceStatus = "installed" | "archived" | "removed";
+export type SourceStatus = "installed" | "adopted" | "archived" | "removed";
 export type AnchorStatus = "ok" | "orphaned";
 
 /** One annotation as stored on disk. */

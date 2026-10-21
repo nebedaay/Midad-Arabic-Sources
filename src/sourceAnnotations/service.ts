@@ -16,6 +16,7 @@ import {
 	resolveForEditor,
 	selectionWatcher,
 } from "./editor";
+import { AdoptedNotesRegistry, newAdoptedNoteKey } from "./adopted";
 import { AnnotationPopup, ConfirmModal, type AnnotationDraft, type PopupAnchor } from "./modal";
 import { AnnotationTrashModal } from "./trashModal";
 import { ANNOTATION_EVENTS, type AnnotationEventDetail } from "./events";
@@ -32,6 +33,7 @@ import { AnnotationStore, annotationNow, newAnnotationId, type AnnotationTrashBa
 import { AnnotationTargetResolver } from "./target";
 import { AnnotationTooltip } from "./tooltip";
 import {
+	bodyBounds,
 	cleanQuoteMarkdown,
 	crossesHeading,
 	managedBounds,
@@ -39,6 +41,7 @@ import {
 	occurrencesBefore,
 	sectionAt,
 } from "./text";
+import { MANAGED_CLOSE, MANAGED_OPEN, joinNote, splitNote } from "../sourceImport/merge";
 import type {
 	AnnotationColor,
 	AnnotationSettings,
@@ -82,7 +85,7 @@ function isSourceFrontmatter(frontmatter: Record<string, unknown> | undefined): 
 	const type = typeof rawType === "string" ? rawType : "";
 	// Annotation notes and MOCs also carry mas-up; only text-source notes are
 	// annotatable. `mas-key` covers older hubs that predate document-type.
-	return type.includes("text-source") || !!frontmatter["mas-key"];
+	return type.includes("text-source") || !!frontmatter["mas-key"] || !!frontmatter["mas-work"];
 }
 
 /**
@@ -95,6 +98,7 @@ export class AnnotationService {
 	private readonly settings: AnnotationSettings;
 	private readonly host: AnnotationHost;
 	private readonly store: AnnotationStore;
+	private readonly adoption: AdoptedNotesRegistry;
 	private readonly resolver: AnnotationTargetResolver;
 	private readonly tooltip: AnnotationTooltip;
 	private readonly pathAnnotations = new Map<string, SourceAnnotation[]>();
@@ -114,7 +118,8 @@ export class AnnotationService {
 		this.plugin = host.plugin;
 		this.settings = host.settings;
 		this.store = new AnnotationStore(host.app);
-		this.resolver = new AnnotationTargetResolver(host.app, host.settings);
+		this.adoption = new AdoptedNotesRegistry(host.app);
+		this.resolver = new AnnotationTargetResolver(host.app, host.settings, this.adoption);
 		this.tooltip = new AnnotationTooltip(this.app, {
 			onEdit: (annotation, target, anchor) => {
 				this.tooltip.hide();
@@ -140,6 +145,12 @@ export class AnnotationService {
 
 	async start(): Promise<void> {
 		await this.store.load();
+		await this.adoption.load();
+		try {
+			await this.adoption.scanKnownNotes();
+		} catch (error) {
+			console.error("[midad-arabic-sources] adoption scan", error);
+		}
 		const migrated = await this.store.migrateSpike((workKey, notePath) => this.migrationMeta(workKey, notePath));
 		try {
 			await this.syncStartup(migrated);
@@ -199,6 +210,75 @@ export class AnnotationService {
 		}
 		await renderAnnotationMoc(this.app, this.store, this.settings);
 		await this.refreshParent();
+	}
+
+	private async adoptNote(file: TFile): Promise<void> {
+		if (file.extension !== "md") return;
+		if (this.adoption.has(file.path)) {
+			new Notice("This note is already in the annotation system.");
+			return;
+		}
+		const frontmatter = this.app.metadataCache.getFileCache(file)?.frontmatter as Record<string, unknown> | undefined;
+		const rawType = frontmatter?.["document-type"];
+		const type = typeof rawType === "string" ? rawType : "";
+		if (type.includes("source-annotation") || isSourceFrontmatter(frontmatter)) {
+			new Notice("This note is already managed by Midad.");
+			return;
+		}
+		const key = newAdoptedNoteKey();
+		await this.app.fileManager.processFrontMatter(file, (fm: Record<string, unknown>) => {
+			fm["mas-work"] = key;
+			if (!fm["mas-unit"]) fm["mas-unit"] = "note";
+			if (!fm["title"]) fm["title"] = file.basename;
+		});
+		const text = await this.app.vault.adapter.read(normalizePath(file.path));
+		if (!managedBounds(text)) {
+			const prior = splitNote(text);
+			const body = prior.body.replace(/^\n+|\n+$/g, "");
+			if (!body.trim()) {
+				new Notice("This note has no body to adopt.");
+				return;
+			}
+			const wrapped = `${MANAGED_OPEN}\n${body}\n${MANAGED_CLOSE}\n`;
+			await this.app.vault.adapter.write(
+				normalizePath(file.path),
+				joinNote(prior.frontmatter ?? "", wrapped)
+			);
+		}
+		this.resolver.invalidate();
+		new Notice("Note adopted. Select text to annotate it.");
+		window.setTimeout(() => {
+			void this.refreshViews();
+			refreshReadingViews(this.app);
+		}, 150);
+	}
+
+	private async onAdoptedNoteRenamed(file: TFile, oldPath: string): Promise<void> {
+		const changed = await this.adoption.rename(oldPath, file.path);
+		const stored = this.store.findTarget(oldPath);
+		if (stored) {
+			const work = await this.store.getWork(stored.workKey);
+			if (work?.sourceStatus === "adopted") {
+				const oldBase = oldPath.split("/").pop()?.replace(/\.md$/i, "") ?? work.dir;
+				const nextDir = work.dir === oldBase ? file.basename : work.dir;
+				await this.store.updatePaths(
+					stored.workKey,
+					nextDir,
+					work.note,
+					new Map([[stored.unitKey, normalizePath(file.path)]])
+				);
+				await this.syncArtifacts(stored.workKey);
+			}
+		}
+		if (changed || stored) await this.refreshViews();
+	}
+
+	private async onAdoptedNoteDeleted(path: string): Promise<void> {
+		const stored = this.store.findTarget(path);
+		if (!stored) return;
+		const work = await this.store.getWork(stored.workKey);
+		if (work?.sourceStatus !== "adopted") return;
+		await this.setSourceStatus(stored.workKey, "removed");
 	}
 
 	private registerCommands(): void {
@@ -304,6 +384,16 @@ export class AnnotationService {
 		});
 
 		this.plugin.addCommand({
+			id: "adopt-note-for-annotations",
+			name: "Adopt note for annotations",
+			callback: async () => {
+				const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+				if (view?.file) await this.adoptNote(view.file);
+				else new Notice("Open a Markdown note first.");
+			},
+		});
+
+		this.plugin.addCommand({
 			id: "reload-annotations",
 			name: "Reload annotations",
 			callback: async () => {
@@ -327,6 +417,31 @@ export class AnnotationService {
 	}
 
 	private registerEvents(): void {
+		this.plugin.registerEvent(this.app.workspace.on("file-menu", (menu, file) => {
+			if (!(file instanceof TFile) || file.extension !== "md") return;
+			if (this.adoption.has(file.path)) return;
+			const frontmatter = this.app.metadataCache.getFileCache(file)?.frontmatter as Record<string, unknown> | undefined;
+			const rawType = frontmatter?.["document-type"];
+			const type = typeof rawType === "string" ? rawType : "";
+			if (type.includes("source-annotation") || isSourceFrontmatter(frontmatter)) return;
+			menu.addItem((item) => item
+				.setTitle("Adopt note for annotations")
+				.setIcon("highlighter")
+				.onClick(() => { void this.adoptNote(file); }));
+		}));
+		this.plugin.registerEvent(this.app.vault.on("create", (file) => {
+			if (!(file instanceof TFile)) return;
+			void this.adoption.registerNewFile(file).then((changed) => {
+				if (changed) void this.refreshViews();
+			});
+		}));
+		this.plugin.registerEvent(this.app.vault.on("rename", (file, oldPath) => {
+			if (!(file instanceof TFile)) return;
+			void this.onAdoptedNoteRenamed(file, oldPath);
+		}));
+		this.plugin.registerEvent(this.app.vault.on("delete", (file) => {
+			if (file instanceof TFile) void this.onAdoptedNoteDeleted(file.path);
+		}));
 		this.plugin.registerDomEvent(document, "keydown", (event) => {
 			if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "c") {
 				this.suppressAutoUntil = Date.now() + 1500;
@@ -414,7 +529,7 @@ export class AnnotationService {
 		} catch {
 			return;
 		}
-		const bounds = managedBounds(text);
+		const bounds = managedBounds(text) ?? (work.sourceStatus === "adopted" ? bodyBounds(text) : null);
 		if (!bounds) return;
 		let changed = false;
 		let artifactChanged = false;
@@ -603,9 +718,11 @@ export class AnnotationService {
 	private draftFromEditor(editor: Editor, file: TFile | null): AnnotationDraft | null {
 		if (!file) return null;
 		const cache = this.app.metadataCache.getFileCache(file);
-		if (!isSourceFrontmatter(cache?.frontmatter)) return null;
+		const frontmatter = cache?.frontmatter as Record<string, unknown> | undefined;
+		const adopted = !!frontmatter?.["mas-work"] || this.adoption.has(file.path);
+		if (!adopted && !isSourceFrontmatter(frontmatter)) return null;
 		const value = editor.getValue();
-		const bounds = managedBounds(value);
+		const bounds = managedBounds(value) ?? (adopted ? bodyBounds(value) : null);
 		if (!bounds) return null;
 		let from = editor.posToOffset(editor.getCursor("from"));
 		let to = editor.posToOffset(editor.getCursor("to"));
@@ -994,9 +1111,12 @@ export class AnnotationService {
 		if (stored) {
 			const work = await this.store.getWork(stored.workKey);
 			if (work) {
-				if (work.sourceStatus !== "installed" && this.app.vault.getAbstractFileByPath(normalizePath(path))) {
-					await this.store.setSourceStatus(stored.workKey, "installed");
-					work.sourceStatus = "installed";
+				if (work.sourceStatus !== "installed" && work.sourceStatus !== "adopted" && this.app.vault.getAbstractFileByPath(normalizePath(path))) {
+					const restoredStatus = work.key.startsWith("adopted:") || work.key.startsWith("note:")
+						? "adopted"
+						: "installed";
+					await this.store.setSourceStatus(stored.workKey, restoredStatus);
+					work.sourceStatus = restoredStatus;
 					await renderAnnotationNote(this.app, this.store, this.settings, stored.workKey);
 					await renderAnnotationMoc(this.app, this.store, this.settings);
 					await this.refreshParent();
@@ -1345,7 +1465,7 @@ export class AnnotationService {
 			new Notice("This annotation is unanchored. Open the annotation note to see the preserved quote.");
 			return;
 		}
-		const bounds = managedBounds(text);
+		const bounds = managedBounds(text) ?? (target.sourceStatus === "adopted" ? bodyBounds(text) : null);
 		const fallback = annotation.position && bounds
 			? bounds.bodyStart + annotation.position.start
 			: undefined;

@@ -4,7 +4,7 @@
 
 Run it from a `@citekey` note. A dialog lists that item’s transcriptions (all checked by default) plus any PDFs it found; deselect the ones you do not want, optionally set a **Volume** number, and click **Translate**.
 
-- The translation is submitted as a Gemini batch job and written to `_2 Bibliographic notes/Arabic translations/` as `@<citekey> - translation.md` (or `… - translation vol. N.md`).
+- The translation is submitted as a Gemini batch job and written to `_2 Bibliographic notes/Arabic translations/` as `@<citekey> - translation.md` (or `… - translation vol. N.md`). Translations are automatically made annotatable, with all volumes of a series sharing one annotation note.
 - A translation mirrors its transcription note’s aliases and is linked from it, so the two sit side by side.
 - The batch is archived under `.midad-arabic-sources/archive/`, so it can be reprocessed later.
 - The same progress panel and log apply as for [transcription](./transcription.md).

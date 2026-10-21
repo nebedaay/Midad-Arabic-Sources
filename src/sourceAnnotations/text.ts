@@ -43,6 +43,14 @@ export function managedBounds(content: string): ManagedBounds | null {
 	};
 }
 
+/** The whole body after frontmatter, for adopted notes without managed spans. */
+export function bodyBounds(content: string): ManagedBounds | null {
+	const prior = splitNote(content);
+	const bodyStart = content.length - prior.body.length;
+	if (!prior.body.trim()) return null;
+	return { bodyStart, contentStart: bodyStart, contentEnd: bodyStart + prior.body.length };
+}
+
 /** Remove callout/blockquote markers and trailing spaces. */
 export function cleanQuoteMarkdown(markdown: string): string {
 	return markdown

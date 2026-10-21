@@ -74,6 +74,7 @@ The plugin keeps its cache and bookkeeping in `.midad-arabic-sources/` at the va
 | `source-models/<collection>/<id>.json` | The language-neutral **render model** each work is rendered from. |
 | `source-archives/<collection>/<id>.json.gz` | The compressed model of an archived work. |
 | `annotations/<collection>/<id>/` | The sharded annotation store and its derived indexes. |
+| `annotations/adopted.json` | The registry of automatically adopted transcriptions, translations, and known notes. |
 | `source-imports.json` | The manifest: every work and its status (`installed`, `deleting`, `archived`). |
 | `source-catalog.json` | The cached catalogue of available works (7-day TTL). |
 | `source-stats.json` | Measured sizes and the per-template render watermarks. |

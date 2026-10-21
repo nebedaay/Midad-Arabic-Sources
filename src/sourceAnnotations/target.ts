@@ -1,5 +1,6 @@
 import { App, TFile, normalizePath } from "obsidian";
 import type { SourceModel } from "../sourceImport/render";
+import type { AdoptedNotesRegistry } from "./adopted";
 import type { AnnotationTarget, AnnotationSettings, SourceStatus } from "./types";
 
 interface ManifestWork {
@@ -27,6 +28,7 @@ function unitKey(unit: Record<string, unknown>): string {
 
 function statusOf(work: ManifestWork): SourceStatus {
 	if (work.status === "archived") return "archived";
+	if (work.status === "adopted") return "adopted";
 	if (work.status === "deleting") return "removed";
 	return "installed";
 }
@@ -39,12 +41,14 @@ function statusOf(work: ManifestWork): SourceStatus {
 export class AnnotationTargetResolver {
 	private readonly app: App;
 	private readonly settings: AnnotationSettings;
+	private readonly adoption: AdoptedNotesRegistry | null;
 	private readonly models = new Map<string, SourceModel>();
 	private manifestCache: ManifestWork[] | null = null;
 
-	constructor(app: App, settings: AnnotationSettings) {
+	constructor(app: App, settings: AnnotationSettings, adoption: AdoptedNotesRegistry | null = null) {
 		this.app = app;
 		this.settings = settings;
+		this.adoption = adoption;
 	}
 
 	private outRoot(): string {
@@ -127,6 +131,20 @@ export class AnnotationTargetResolver {
 		const masWork = typeof frontmatter?.["mas-work"] === "string" ? String(frontmatter["mas-work"]) : "";
 		const masUnit = typeof frontmatter?.["mas-unit"] === "string" ? String(frontmatter["mas-unit"]) : "";
 
+		// Known transcriptions/translations are registered without touching their
+		// YAML or filenames.
+		const adopted = this.adoption?.get(normalized);
+		if (adopted) {
+			return {
+				workKey: adopted.workKey,
+				unitKey: adopted.unitKey,
+				notePath: normalized,
+				workTitle: adopted.workTitle,
+				workDir: adopted.workDir,
+				sourceStatus: "adopted",
+			};
+		}
+
 		const works = await this.manifest();
 		const outRoot = this.outRoot();
 		let work = works.find((candidate) => workKey(candidate) === masWork) ?? null;
@@ -140,7 +158,9 @@ export class AnnotationTargetResolver {
 		}
 
 		if (!work && masWork) {
-			work = { key: masWork, title: masWork, dir: normalized.split("/").slice(-2, -1)[0] ?? masWork, status: "installed" };
+			const base = normalized.split("/").pop()?.replace(/\.md$/i, "") ?? masWork;
+			const title = typeof frontmatter?.title === "string" ? frontmatter.title : base;
+			work = { key: masWork, title, dir: base, status: "adopted" };
 		}
 		if (!work) return null;
 
@@ -148,10 +168,11 @@ export class AnnotationTargetResolver {
 		const hubPath = normalizePath(`${outRoot}/${dir}.md`);
 		const isHub = normalized === hubPath;
 
-		if (masUnit) {
+		const resolvedUnit = masUnit || (masWork ? "note" : "");
+		if (resolvedUnit) {
 			return {
 				workKey: workKey(work),
-				unitKey: masUnit,
+				unitKey: resolvedUnit,
 				notePath: normalized,
 				workTitle: String(work.title ?? dir ?? workKey(work)),
 				workDir: dir,

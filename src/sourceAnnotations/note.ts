@@ -42,7 +42,9 @@ async function ensureFolder(app: App, path: string): Promise<void> {
 
 export function annotationNotePath(work: AnnotationWorkFile, settings: AnnotationSettings): string {
 	const folder = settings.annotationNoteFolder.trim() || `${settings.sourceImportRoot.trim() || "_7 Sources"}/Notes`;
-	return normalizePath(`${folder}/${safeFileStem(work.dir)} - Annotations.md`);
+	const adopted = work.key.startsWith("adopted:") || work.key.startsWith("note:");
+	const stem = adopted ? `Adopted - ${work.title}` : work.dir;
+	return normalizePath(`${folder}/${safeFileStem(stem)} - Annotations.md`);
 }
 
 function calloutLines(markdown: string, prefix: string): string[] {
@@ -165,6 +167,7 @@ function mocBody(store: AnnotationStore): string {
 	const entries = Object.values(store.getIndex().works).filter((entry) => entry.count > 0);
 	const groups: Array<[string, AnnotationIndexEntry[]]> = [
 		["Installed", entries.filter((entry) => entry.sourceStatus === "installed")],
+		["Adopted notes", entries.filter((entry) => entry.sourceStatus === "adopted")],
 		["Archived", entries.filter((entry) => entry.sourceStatus === "archived")],
 		["Source removed", entries.filter((entry) => entry.sourceStatus === "removed")],
 	];
