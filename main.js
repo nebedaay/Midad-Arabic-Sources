@@ -11695,6 +11695,7 @@ var AnnotationService = class {
     this.suppressAutoSignature = "";
     this.dialogOpen = false;
     this.disposed = false;
+    this.lastSidebarPath = "";
     this.host = host;
     this.app = host.app;
     this.plugin = host.plugin;
@@ -12797,28 +12798,46 @@ var AnnotationService = class {
     }
   }
   async sidebarData() {
-    const view = activeMarkdownView(this.app);
-    if (!(view == null ? void 0 : view.file))
-      return null;
-    const target = await this.targetForPath(view.file.path);
-    if (!target)
-      return null;
-    const annotations = await this.annotationsFor(target);
-    annotations.sort((a, b) => {
-      var _a, _b, _c, _d;
-      const orphan = (a.anchorStatus === "orphaned" ? 1 : 0) - (b.anchorStatus === "orphaned" ? 1 : 0);
-      if (orphan)
-        return orphan;
-      return ((_b = (_a = a.position) == null ? void 0 : _a.start) != null ? _b : Number.MAX_SAFE_INTEGER) - ((_d = (_c = b.position) == null ? void 0 : _c.start) != null ? _d : Number.MAX_SAFE_INTEGER);
-    });
-    const work = await this.store.getWork(target.workKey);
-    return {
-      notePath: target.notePath,
-      noteName: view.file.basename,
-      workTitle: (work == null ? void 0 : work.title) || target.workTitle,
-      target,
-      annotations
-    };
+    const candidates = [];
+    const active = this.app.workspace.getActiveViewOfType(import_obsidian12.MarkdownView);
+    if (active)
+      candidates.push(active);
+    const last = this.lastSidebarPath ? markdownViews(this.app).find((view) => view.file && (0, import_obsidian12.normalizePath)(view.file.path) === (0, import_obsidian12.normalizePath)(this.lastSidebarPath)) : null;
+    if (last)
+      candidates.push(last);
+    const fallback = activeMarkdownView(this.app);
+    if (fallback)
+      candidates.push(fallback);
+    const seen = new Set();
+    for (const view of candidates) {
+      if (!view.file)
+        continue;
+      const path2 = (0, import_obsidian12.normalizePath)(view.file.path);
+      if (seen.has(path2))
+        continue;
+      seen.add(path2);
+      const target = await this.targetForPath(path2);
+      if (!target)
+        continue;
+      this.lastSidebarPath = path2;
+      const annotations = await this.annotationsFor(target);
+      annotations.sort((a, b) => {
+        var _a, _b, _c, _d;
+        const orphan = (a.anchorStatus === "orphaned" ? 1 : 0) - (b.anchorStatus === "orphaned" ? 1 : 0);
+        if (orphan)
+          return orphan;
+        return ((_b = (_a = a.position) == null ? void 0 : _a.start) != null ? _b : Number.MAX_SAFE_INTEGER) - ((_d = (_c = b.position) == null ? void 0 : _c.start) != null ? _d : Number.MAX_SAFE_INTEGER);
+      });
+      const work = await this.store.getWork(target.workKey);
+      return {
+        notePath: target.notePath,
+        noteName: view.file.basename,
+        workTitle: (work == null ? void 0 : work.title) || target.workTitle,
+        target,
+        annotations
+      };
+    }
+    return null;
   }
   async openSidebar() {
     const existing = this.app.workspace.getLeavesOfType(ANNOTATION_SIDEBAR_VIEW)[0];

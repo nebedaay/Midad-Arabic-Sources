@@ -106,6 +106,7 @@ export class AnnotationService {
 	private suppressAutoSignature = "";
 	private dialogOpen = false;
 	private disposed = false;
+	private lastSidebarPath = "";
 
 	constructor(host: AnnotationHost) {
 		this.host = host;
@@ -1240,24 +1241,43 @@ export class AnnotationService {
 	}
 
 	async sidebarData(): Promise<AnnotationSidebarData | null> {
-		const view = activeMarkdownView(this.app);
-		if (!view?.file) return null;
-		const target = await this.targetForPath(view.file.path);
-		if (!target) return null;
-		const annotations = await this.annotationsFor(target);
-		annotations.sort((a, b) => {
-			const orphan = (a.anchorStatus === "orphaned" ? 1 : 0) - (b.anchorStatus === "orphaned" ? 1 : 0);
-			if (orphan) return orphan;
-			return (a.position?.start ?? Number.MAX_SAFE_INTEGER) - (b.position?.start ?? Number.MAX_SAFE_INTEGER);
-		});
-		const work = await this.store.getWork(target.workKey);
-		return {
-			notePath: target.notePath,
-			noteName: view.file.basename,
-			workTitle: work?.title || target.workTitle,
-			target,
-			annotations,
-		};
+		const candidates: MarkdownView[] = [];
+		const active = this.app.workspace.getActiveViewOfType(MarkdownView);
+		if (active) candidates.push(active);
+		const last = this.lastSidebarPath
+			? markdownViews(this.app).find((view) =>
+				view.file && normalizePath(view.file.path) === normalizePath(this.lastSidebarPath)
+			)
+			: null;
+		if (last) candidates.push(last);
+		const fallback = activeMarkdownView(this.app);
+		if (fallback) candidates.push(fallback);
+
+		const seen = new Set<string>();
+		for (const view of candidates) {
+			if (!view.file) continue;
+			const path = normalizePath(view.file.path);
+			if (seen.has(path)) continue;
+			seen.add(path);
+			const target = await this.targetForPath(path);
+			if (!target) continue;
+			this.lastSidebarPath = path;
+			const annotations = await this.annotationsFor(target);
+			annotations.sort((a, b) => {
+				const orphan = (a.anchorStatus === "orphaned" ? 1 : 0) - (b.anchorStatus === "orphaned" ? 1 : 0);
+				if (orphan) return orphan;
+				return (a.position?.start ?? Number.MAX_SAFE_INTEGER) - (b.position?.start ?? Number.MAX_SAFE_INTEGER);
+			});
+			const work = await this.store.getWork(target.workKey);
+			return {
+				notePath: target.notePath,
+				noteName: view.file.basename,
+				workTitle: work?.title || target.workTitle,
+				target,
+				annotations,
+			};
+		}
+		return null;
 	}
 
 	async openSidebar(): Promise<void> {
