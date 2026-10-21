@@ -9925,8 +9925,13 @@ var AnnotationStore = class {
     if (parent)
       await this.ensureFolder(parent);
     const temp = `${normalized}.tmp`;
-    await this.app.vault.adapter.write(temp, content);
-    await this.app.vault.adapter.rename(temp, normalized);
+    if (await this.app.vault.adapter.exists(temp)) {
+      try {
+        await this.app.vault.adapter.remove(temp);
+      } catch (e) {
+      }
+    }
+    await this.app.vault.adapter.write(normalized, content);
   }
 };
 
@@ -12548,7 +12553,7 @@ var ArabicSupportPlugin = class extends import_obsidian9.Plugin {
     } catch (e) {
       json = null;
     }
-    console.debug("[arabic-support] zotero", method, url, "\u2192", status);
+    console.debug("[midad-arabic-sources] zotero", method, url, "\u2192", status);
     return { status, text, json, headers: hdrs };
   }
   zoteroHeaders(method) {

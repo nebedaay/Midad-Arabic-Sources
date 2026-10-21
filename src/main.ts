@@ -1694,7 +1694,7 @@ export default class ArabicSupportPlugin extends Plugin {
 		} catch {
 			json = null;
 		}
-		console.debug("[arabic-support] zotero", method, url, "→", status);
+		console.debug("[midad-arabic-sources] zotero", method, url, "→", status);
 		return { status, text, json, headers: hdrs };
 	}
 

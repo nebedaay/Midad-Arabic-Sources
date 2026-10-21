@@ -546,8 +546,18 @@ export class AnnotationStore {
 		const normalized = normalizePath(path);
 		const parent = normalized.split("/").slice(0, -1).join("/");
 		if (parent) await this.ensureFolder(parent);
+		// Obsidian's adapter.rename refuses to overwrite an existing destination
+		// ("Destination file already exists!"), so a temp+rename is not a safe
+		// replace here. Write directly, and clear a temp left by an interrupted
+		// earlier attempt.
 		const temp = `${normalized}.tmp`;
-		await this.app.vault.adapter.write(temp, content);
-		await this.app.vault.adapter.rename(temp, normalized);
+		if (await this.app.vault.adapter.exists(temp)) {
+			try {
+				await this.app.vault.adapter.remove(temp);
+			} catch {
+				/* ignore */
+			}
+		}
+		await this.app.vault.adapter.write(normalized, content);
 	}
 }
