@@ -5412,8 +5412,8 @@ class ManageSourcesModal extends Modal {
 		const langSel = topbar.createEl("select");
 		const langLabels = new Map<string, string>();
 		for (const w of this.works) langLabels.set(w.language, w.language_label || w.language);
-		for (const lg of Array.from(langLabels.keys()).sort()) {
-			langSel.createEl("option", { text: langLabels.get(lg) || lg }).value = lg;
+		for (const [lg, label] of Array.from(langLabels.entries()).sort((a, b) => a[1].localeCompare(b[1]))) {
+			langSel.createEl("option", { text: label }).value = lg;
 		}
 		langSel.createEl("option", { text: "All languages" }).value = "";
 		langSel.value = "";
@@ -5482,7 +5482,7 @@ class ManageSourcesModal extends Modal {
 		// ── The list: one clickable row per work (highlight = selected) ───────
 		const pane = body.createDiv({ cls: "mas-manage__pane" });
 		const list = pane.createDiv({ cls: "mas-manage__list" });
-		const COLS = "7ch minmax(90px,0.8fr) minmax(190px,1.8fr) minmax(100px,0.9fr) minmax(100px,0.8fr) 70px 90px";
+		const COLS = "6ch minmax(80px,0.8fr) minmax(160px,1.8fr) minmax(90px,0.9fr) minmax(90px,0.8fr) 68px 80px";
 		const head = list.createDiv({ cls: "mas-manage__head" });
 		head.style.gridTemplateColumns = COLS;
 		for (const label of ["Lang", "Author", "Title", "Kind", "Repository", "Size", "State"]) head.createSpan({ text: label });

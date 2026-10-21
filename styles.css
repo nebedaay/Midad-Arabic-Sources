@@ -412,13 +412,17 @@ Displaying Qur'an sūras in the Qur'an vault
    literature notes" modal: a filter sidebar on the left, a selectable list on
    the right. Rows are highlighted when selected (no checkboxes). */
 .mas-manage-modal {
-    width: min(1240px, 96vw);
+    width: min(1240px, calc(100vw - 32px));
+    max-width: calc(100vw - 32px);
     height: min(85vh, 820px);
+    max-height: calc(100vh - 32px);
+    box-sizing: border-box;
     display: flex;
     flex-direction: column;
 }
 .mas-manage-modal .modal-content {
     flex: 1 1 auto;
+    min-width: 0;
     min-height: 0;
     overflow: hidden;
 }
@@ -426,6 +430,7 @@ Displaying Qur'an sūras in the Qur'an vault
     display: flex;
     flex-direction: column;
     height: 100%;
+    min-width: 0;
     min-height: 0;
 }
 .mas-manage__tabs {
@@ -476,6 +481,7 @@ Displaying Qur'an sūras in the Qur'an vault
     display: flex;
     gap: var(--size-4-3);
     flex: 1 1 auto;
+    min-width: 0;
     min-height: 0;
 }
 .mas-manage__side {
@@ -484,6 +490,7 @@ Displaying Qur'an sūras in the Qur'an vault
     flex-direction: column;
     gap: var(--size-4-2);
     overflow-y: auto;
+    min-width: 0;
     min-height: 0;
 }
 .mas-manage__group {
@@ -545,12 +552,14 @@ Displaying Qur'an sūras in the Qur'an vault
 }
 .mas-manage__pane {
     flex: 1 1 auto;
+    min-width: 0;
     min-height: 0;
     display: flex;
     flex-direction: column;
 }
 .mas-manage__list {
     flex: 1 1 auto;
+    min-width: 0;
     min-height: 0;
     overflow: auto;
     border: 1px solid var(--background-modifier-border);
@@ -559,7 +568,7 @@ Displaying Qur'an sūras in the Qur'an vault
 }
 .mas-manage__head,
 .mas-manage__row {
-    min-width: 900px;
+    min-width: 660px;
 }
 .mas-manage__urlpane {
     flex: 1 1 auto;
@@ -627,10 +636,12 @@ Displaying Qur'an sūras in the Qur'an vault
 }
 .mas-manage__foot {
     display: flex;
+    flex: 0 0 auto;
     flex-wrap: wrap;
     align-items: center;
     justify-content: space-between;
     gap: var(--size-4-2);
+    min-width: 0;
     padding-top: var(--size-4-2);
 }
 .mas-manage__status {
@@ -639,7 +650,10 @@ Displaying Qur'an sūras in the Qur'an vault
 }
 .mas-manage__actions {
     display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
     gap: var(--size-4-2);
+    min-width: 0;
 }
 .mas-manage__actions .mas-manage__toggle.is-hidden {
     display: none;
