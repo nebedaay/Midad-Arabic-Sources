@@ -1294,3 +1294,8 @@ body.theme-dark {
     gap: 6px;
     flex: 0 0 auto;
 }
+
+.mas-orphan-picker-comment {
+    color: var(--text-muted);
+    font-size: var(--font-ui-smaller);
+}

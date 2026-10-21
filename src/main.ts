@@ -3,6 +3,7 @@ import * as fs from "fs";
 import * as http from "http";
 import * as os from "os";
 import { promisify } from "util";
+import * as zlib from "zlib";
 import {
 	App,
 	ButtonComponent,
@@ -46,6 +47,7 @@ import {
 import { BUNDLED_ASSETS } from "./assets.generated";
 import { openDocs, getDocs } from "./docs";
 import { registerAnnotations, AnnotationService } from "./sourceAnnotations/service";
+import { ConfirmModal } from "./sourceAnnotations/modal";
 import { AnnotationTrashModal } from "./sourceAnnotations/trashModal";
 import type { AnnotationColor } from "./sourceAnnotations/types";
 
@@ -606,6 +608,33 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			id: "manage-text-sources",
 			name: "Manage text sources…",
 			callback: async () => { await this.openManageSources(); },
+		});
+
+		this.addCommand({
+			id: "archive-this-source",
+			name: "Archive this source…",
+			callback: async () => {
+				const file = this.app.workspace.getActiveFile();
+				if (!file) {
+					new Notice("Open a source note first.");
+					return;
+				}
+				const work = await this.workForPath(file.path);
+				if (!work) {
+					new Notice("That note is not part of an imported source.");
+					return;
+				}
+				if (this.workStatus(work) === "archived") {
+					new Notice("That source is already archived.");
+					return;
+				}
+				new ConfirmModal(this.app, {
+					title: "Archive source",
+					message: `Archive “${work.title || work.dir}”? Its notes will be removed, but its annotations and a compressed model are kept.`,
+					confirmText: "Archive",
+					onConfirm: async () => { await this.archiveSource(work); },
+				}).open();
+			},
 		});
 
 		this.addCommand({
@@ -2150,6 +2179,10 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 				await this.saveSourceManifest(
 					manifest.filter((w) => !(w.collection === work.collection && w.id === work.id) && w.dir !== dir)
 				);
+				try {
+					const archive = this.sourceArchivePath(work);
+					if (fs.existsSync(archive)) fs.unlinkSync(archive);
+				} catch { /* leave a stale archive rather than failing the removal */ }
 			}
 
 			// Refresh only the MOCs and parent note; never re-render the removed
@@ -2172,6 +2205,128 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			console.error("[midad-arabic-sources] removeSource", key, problems);
 			new Notice(`Removed “${work.title || dir}” with problems: ${problems.join("; ")}`);
 		}
+	}
+
+	/** The gzipped model that backs an archived work. */
+	sourceArchivePath(work: JsonObject): string {
+		const collection = String(work.collection ?? "work").replace(/[^\w.-]+/g, "_");
+		const id = String(work.id ?? "work").replace(/[^\w.-]+/g, "_");
+		return `${this.vaultPath()}/.midad-arabic-sources/source-archives/${collection}/${id}.json.gz`;
+	}
+
+	/** Remove a work's rendered hub and folder, returning any per-file errors. */
+	async deleteRenderedNotes(work: JsonObject): Promise<string[]> {
+		const outRoot = this.settings.sourceImportRoot.trim() || "_7 Sources";
+		const dir = String(work.dir ?? "");
+		const adapter = this.app.vault.adapter;
+		const problems: string[] = [];
+		const hub = normalizePath(`${outRoot}/${dir}.md`);
+		const folder = normalizePath(`${outRoot}/${dir}`);
+		try {
+			if (await adapter.exists(hub)) await adapter.remove(hub);
+		} catch (e) {
+			problems.push(`hub: ${e instanceof Error ? e.message : e}`);
+		}
+		try {
+			if (await adapter.exists(folder)) {
+				for (const file of await this.listFilesUnder(folder)) {
+					try {
+						await adapter.remove(file);
+					} catch (e) {
+						problems.push(`${file}: ${e instanceof Error ? e.message : e}`);
+					}
+				}
+				await adapter.rmdir(folder, true);
+			}
+		} catch (e) {
+			problems.push(`folder: ${e instanceof Error ? e.message : e}`);
+		}
+		return problems;
+	}
+
+	/**
+	 * Compress a work's model and remove its rendered notes. The manifest keeps
+	 * the work as `archived`, so maintenance leaves it alone and the Manage filter
+	 * can offer it for restore. Annotations are deliberately untouched.
+	 */
+	async archiveSource(work: JsonObject): Promise<boolean> {
+		const key = this.workKey(work);
+		if (this.workStatus(work) === "archived") {
+			new Notice("That source is already archived.");
+			return false;
+		}
+		const modelAbs = `${this.vaultPath()}/.midad-arabic-sources/source-models/${work.collection}/${work.id}.json`;
+		if (!fs.existsSync(modelAbs)) {
+			new Notice("That source has no cached model to archive.");
+			return false;
+		}
+		const archive = this.sourceArchivePath(work);
+		try {
+			const text = fs.readFileSync(modelAbs, "utf8");
+			JSON.parse(text);
+			fs.mkdirSync(archive.slice(0, archive.lastIndexOf("/")), { recursive: true });
+			fs.writeFileSync(archive, zlib.gzipSync(Buffer.from(text, "utf8")));
+		} catch (e) {
+			new Notice(`Could not archive the source: ${e instanceof Error ? e.message : e}`);
+			return false;
+		}
+		await this.setWorkStatus(key, "archived");
+		const problems = await this.deleteRenderedNotes(work);
+		try {
+			fs.unlinkSync(modelAbs);
+		} catch (e) {
+			problems.push(`model: ${e instanceof Error ? e.message : e}`);
+		}
+		await this.refreshSourcesIndex();
+		try {
+			await this.annotations?.onSourceArchived(key);
+		} catch (e) {
+			console.error("[midad-arabic-sources] annotation status after archive", e);
+		}
+		new Notice(
+			problems.length
+				? `Archived “${work.title || work.dir}” with problems: ${problems.join("; ")}`
+				: `Archived “${work.title || work.dir}”.`
+		);
+		return true;
+	}
+
+	/** Expand an archived model, render its notes, and mark it installed again. */
+	async restoreArchivedSource(work: JsonObject): Promise<boolean> {
+		const key = this.workKey(work);
+		const archive = this.sourceArchivePath(work);
+		if (!fs.existsSync(archive)) {
+			new Notice("No archive was found for that source.");
+			return false;
+		}
+		const modelRel = normalizePath(`.midad-arabic-sources/source-models/${work.collection}/${work.id}.json`);
+		const modelAbs = `${this.vaultPath()}/${modelRel}`;
+		try {
+			const text = zlib.gunzipSync(fs.readFileSync(archive)).toString("utf8");
+			JSON.parse(text);
+			fs.mkdirSync(modelAbs.slice(0, modelAbs.lastIndexOf("/")), { recursive: true });
+			fs.writeFileSync(modelAbs, text);
+		} catch (e) {
+			new Notice(`Could not restore the archive: ${e instanceof Error ? e.message : e}`);
+			return false;
+		}
+		await this.renderWithProgress([modelAbs], true, `Restoring ${work.title || work.dir}`);
+		const outRoot = this.settings.sourceImportRoot.trim() || "_7 Sources";
+		const hub = normalizePath(`${outRoot}/${work.dir}.md`);
+		if (!this.app.vault.getAbstractFileByPath(hub)) {
+			new Notice("The archive was extracted, but its notes could not be rendered. It remains archived.");
+			return false;
+		}
+		await this.setWorkStatus(key, "installed");
+		await this.refreshSourcesIndex();
+		try {
+			await this.annotations?.onSourceRestored(key);
+		} catch (e) {
+			console.error("[midad-arabic-sources] annotation status after restore", e);
+		}
+		try { fs.unlinkSync(archive); } catch { /* keep the backup if it cannot be removed */ }
+		new Notice(`Restored “${work.title || work.dir}”.`);
+		return true;
 	}
 
 	/** Every file under `path` (vault-relative), following subfolders. */
@@ -2305,6 +2460,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		const canonicalRoot = this.settings.canonicalQuranFolder.trim() || `${outRoot}/Quran`;
 		const out: Array<{ work: JsonObject; missing: number; total: number; reason: string }> = [];
 		for (const work of manifest) {
+			if (this.workStatus(work) !== "installed") continue;
 			if (pending.has(this.workKey(work))) continue; // being removed
 			if (!modelKeys.has(`${work.collection}:${work.id}`)) {
 				// The cached model is gone, so the work can no longer be re-rendered.
@@ -2376,7 +2532,9 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		const manifest = await this.loadSourceManifest();
 		const pending = await this.loadPendingDeletions();
 		const keys = new Set<string>();
-		for (const w of manifest) keys.add(`${w.collection}:${w.id}`);
+		for (const w of manifest) {
+			if (this.workStatus(w) === "installed") keys.add(`${w.collection}:${w.id}`);
+		}
 		for (const k of await this.listModelKeys()) keys.add(k);
 		for (const k of pending) keys.delete(k); // being removed: leave them alone
 		if (!keys.size) {
@@ -2768,7 +2926,8 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 	// leaves a half-deleted one; the removal resumes on the next run instead.
 
 	/** A work's status, defaulting to installed for older manifest entries. */
-	workStatus(work: JsonObject): "installed" | "deleting" {
+	workStatus(work: JsonObject): "installed" | "deleting" | "archived" {
+		if (work.status === "archived") return "archived";
 		return work.status === "deleting" ? "deleting" : "installed";
 	}
 
@@ -2777,7 +2936,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		return String(work.key ?? `${work.collection}:${work.id}`);
 	}
 
-	async setWorkStatus(keys: string | string[], status: "installed" | "deleting" | null): Promise<void> {
+	async setWorkStatus(keys: string | string[], status: "installed" | "deleting" | "archived" | null): Promise<void> {
 		const list = Array.isArray(keys) ? keys : [keys];
 		const manifest = await this.loadSourceManifest();
 		let changed = false;
@@ -5521,17 +5680,47 @@ class ManageSourcesModal extends Modal {
 				cls: "mas-manage__mut",
 				text: this.deleting.has(w.key) ? "being removed" : isArchived ? "archived" : isInstalled ? "installed" : "",
 			});
-			if (annotationCount) {
-				row.oncontextmenu = (event) => {
-					event.preventDefault();
-					const menu = new Menu();
+			row.oncontextmenu = (event) => {
+				if (!annotationCount && !isInstalled && !isArchived) return;
+				event.preventDefault();
+				const menu = new Menu();
+				if (annotationCount) {
 					menu.addItem((item) => item
 						.setTitle("Delete annotations for this item…")
 						.setIcon("trash-2")
 						.onClick(() => { void this.plugin.annotations?.confirmDeleteAnnotations(w.key); }));
-					menu.showAtMouseEvent(event);
-				};
-			}
+				}
+				if (isInstalled && !isArchived) {
+					menu.addItem((item) => item
+						.setTitle("Archive source…")
+						.setIcon("archive")
+						.onClick(() => {
+							new ConfirmModal(this.app, {
+								title: "Archive source",
+								message: `Archive “${w.title || w.dir}”? Its notes will be removed, but its annotations and a compressed model are kept.`,
+								confirmText: "Archive",
+								onConfirm: async () => {
+									if (await this.plugin.archiveSource(w)) {
+										this.close();
+										void this.plugin.openManageSources(true);
+									}
+								},
+							}).open();
+						}));
+				}
+				if (isArchived) {
+					menu.addItem((item) => item
+						.setTitle("Restore from archive")
+						.setIcon("archive-restore")
+						.onClick(async () => {
+							if (await this.plugin.restoreArchivedSource(w)) {
+								this.close();
+								void this.plugin.openManageSources(true);
+							}
+						}));
+				}
+				menu.showAtMouseEvent(event);
+			};
 			row.onclick = () => {
 				if (this.selected.has(w.key)) this.selected.delete(w.key);
 				else this.selected.add(w.key);
@@ -5626,20 +5815,25 @@ class ManageSourcesModal extends Modal {
 				return;
 			}
 			const toInstall: SourceWork[] = [];
+			const toRestore: SourceWork[] = [];
 			const toRemove: SourceWork[] = [];
 			for (const w of this.works) {
 				const was = this.initial.get(w.key) === true;
 				const now = this.selected.has(w.key);
-				if (now && !was) toInstall.push(w);
-				else if (!now && was) toRemove.push(w);
+				if (now && !was) {
+					if (this.archived.has(w.key)) toRestore.push(w);
+					else toInstall.push(w);
+				} else if (!now && was) {
+					toRemove.push(w);
+				}
 			}
-			if (!toInstall.length && !toRemove.length) {
+			if (!toInstall.length && !toRestore.length && !toRemove.length) {
 				new Notice("Nothing to change.");
 				return;
 			}
 			this.close();
 			const progress = new Notice(
-				`Applying… (${toInstall.length} to install, ${toRemove.length} to remove)`,
+				`Applying… (${toInstall.length} to install, ${toRestore.length} to restore, ${toRemove.length} to remove)`,
 				0
 			);
 			const failed: string[] = [];
@@ -5660,6 +5854,16 @@ class ManageSourcesModal extends Modal {
 						failed.push(`${name}: ${e instanceof Error ? e.message : e}`);
 					}
 				}
+				if (toRestore.length) {
+					for (const w of toRestore) {
+						progress.setMessage(`Restoring ${w.title || w.dir}…`);
+						try {
+							if (!(await this.plugin.restoreArchivedSource(w))) failed.push(`restore: ${w.title || w.dir}`);
+						} catch (e) {
+							failed.push(`restore ${w.title || w.dir}: ${e instanceof Error ? e.message : e}`);
+						}
+					}
+				}
 				if (toInstall.length) {
 					progress.setMessage(`Installing ${toInstall.length} source(s)…`);
 					try {
@@ -5672,7 +5876,7 @@ class ManageSourcesModal extends Modal {
 				progress.hide();
 			}
 			new Notice(
-				`Applied: ${toInstall.length} installed, ${toRemove.length} removed.` +
+				`Applied: ${toInstall.length} installed, ${toRestore.length} restored, ${toRemove.length} removed.` +
 					(failed.length ? ` ${failed.length} failed — see the console.` : "")
 			);
 			if (failed.length) console.error("[midad-arabic-sources] apply failures", failed);

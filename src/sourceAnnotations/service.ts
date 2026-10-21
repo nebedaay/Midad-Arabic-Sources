@@ -4,6 +4,7 @@ import {
 	MarkdownView,
 	Notice,
 	Plugin,
+	SuggestModal,
 	TFile,
 	normalizePath,
 } from "obsidian";
@@ -227,6 +228,18 @@ export class AnnotationService {
 			editorCheckCallback: (checking, editor, view) => {
 				if (!view.file || !this.store.findTarget(view.file.path)) return false;
 				if (!checking) void this.confirmDeleteAtCursor(editor, view.file);
+				return true;
+			},
+		});
+
+		this.plugin.addCommand({
+			id: "reanchor-orphaned-annotation",
+			name: "Re-anchor orphaned annotation…",
+			editorCheckCallback: (checking, editor, view) => {
+				if (!view.file || !this.store.findTarget(view.file.path)) return false;
+				const draft = this.draftFromEditor(editor, view.file);
+				if (!draft) return false;
+				if (!checking) void this.reanchorOrphaned(view.file, draft);
 				return true;
 			},
 		});
@@ -722,6 +735,55 @@ export class AnnotationService {
 		new Notice("Annotation added.");
 	}
 
+	private async reanchorOrphaned(file: TFile, draft: AnnotationDraft): Promise<void> {
+		const target = await this.targetForPath(file.path);
+		if (!target) {
+			new Notice("Could not identify the source work.");
+			return;
+		}
+		const annotations = await this.annotationsFor(target);
+		const orphans = annotations.filter((annotation) => annotation.anchorStatus === "orphaned");
+		if (!orphans.length) {
+			new Notice("There are no unanchored annotations for this source.");
+			return;
+		}
+		const apply = async (orphan: SourceAnnotation): Promise<void> => {
+			const now = annotationNow();
+			const quoteChanged = draft.quote !== orphan.quote;
+			const current = await this.annotationsFor(target);
+			const updated = current.map((annotation) => annotation.id === orphan.id
+				? {
+					...annotation,
+					quote: draft.quote,
+					quoteText: draft.quoteText,
+					quoteMarkdown: draft.quoteMarkdown,
+					prefix: draft.prefix,
+					suffix: draft.suffix,
+					section: draft.section,
+					ordinal: draft.ordinal,
+					position: draft.position,
+					segments: draft.segments,
+					anchored: now,
+					anchorStatus: "ok" as const,
+					quoteChanged,
+					previousQuotes: quoteChanged
+						? [...(annotation.previousQuotes ?? []), annotation.quote].filter(Boolean).slice(-5)
+						: annotation.previousQuotes ?? [],
+				}
+				: annotation);
+			await this.store.saveUnit(target, updated);
+			this.pathAnnotations.set(normalizePath(target.notePath), updated);
+			await this.syncArtifacts(target.workKey);
+			await this.refreshViews();
+			new Notice("Annotation re-anchored.");
+		};
+		if (orphans.length === 1) {
+			await apply(orphans[0]);
+			return;
+		}
+		new OrphanPicker(this.app, orphans, (orphan) => { void apply(orphan); }).open();
+	}
+
 	private annotationAtOffset(
 		text: string,
 		annotations: SourceAnnotation[],
@@ -990,14 +1052,26 @@ export class AnnotationService {
 		this.refreshSidebar();
 	}
 
-	async onSourceRemoved(workKey: string): Promise<void> {
+	private async setSourceStatus(workKey: string, status: "installed" | "archived" | "removed"): Promise<void> {
 		const work = await this.store.getWork(workKey);
 		if (!work) return;
-		await this.store.setSourceStatus(workKey, "removed");
+		await this.store.setSourceStatus(workKey, status);
 		await renderAnnotationNote(this.app, this.store, this.settings, workKey);
 		await renderAnnotationMoc(this.app, this.store, this.settings);
 		await this.refreshParent();
 		await this.refreshViews();
+	}
+
+	async onSourceRemoved(workKey: string): Promise<void> {
+		await this.setSourceStatus(workKey, "removed");
+	}
+
+	async onSourceArchived(workKey: string): Promise<void> {
+		await this.setSourceStatus(workKey, "archived");
+	}
+
+	async onSourceRestored(workKey: string): Promise<void> {
+		await this.setSourceStatus(workKey, "installed");
 	}
 
 	async onSourceRenamed(workKey: string, oldDir: string, newDir: string): Promise<void> {
@@ -1244,6 +1318,38 @@ export class AnnotationService {
 
 	mocExists(): boolean {
 		return !!this.app.vault.getAbstractFileByPath(this.mocPath());
+	}
+}
+
+class OrphanPicker extends SuggestModal<SourceAnnotation> {
+	private readonly orphans: SourceAnnotation[];
+	private readonly choose: (annotation: SourceAnnotation) => void;
+
+	constructor(app: App, orphans: SourceAnnotation[], choose: (annotation: SourceAnnotation) => void) {
+		super(app);
+		this.orphans = orphans;
+		this.choose = choose;
+		this.setPlaceholder("Choose an unanchored annotation…");
+	}
+
+	getSuggestions(query: string): SourceAnnotation[] {
+		const needle = query.trim().toLowerCase();
+		if (!needle) return this.orphans;
+		return this.orphans.filter((annotation) =>
+			`${annotation.quoteText} ${annotation.quote} ${annotation.comment ?? ""}`.toLowerCase().includes(needle)
+		);
+	}
+
+	renderSuggestion(annotation: SourceAnnotation, el: HTMLElement): void {
+		const quote = (annotation.quoteText || annotation.quote || "").replace(/\s+/g, " ").trim();
+		el.createDiv({ text: quote.length > 160 ? `${quote.slice(0, 157)}…` : quote });
+		if (annotation.comment?.trim()) {
+			el.createDiv({ cls: "mas-orphan-picker-comment", text: annotation.comment.trim() });
+		}
+	}
+
+	onChooseSuggestion(annotation: SourceAnnotation): void {
+		this.choose(annotation);
 	}
 }
 

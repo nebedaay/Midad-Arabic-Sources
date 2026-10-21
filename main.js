@@ -41,6 +41,7 @@ var fs2 = __toModule(require("fs"));
 var http = __toModule(require("http"));
 var os = __toModule(require("os"));
 var import_util = __toModule(require("util"));
+var zlib = __toModule(require("zlib"));
 var import_obsidian13 = __toModule(require("obsidian"));
 
 // src/sourceImport/render.ts
@@ -11814,6 +11815,20 @@ var AnnotationService = class {
       }
     });
     this.plugin.addCommand({
+      id: "reanchor-orphaned-annotation",
+      name: "Re-anchor orphaned annotation\u2026",
+      editorCheckCallback: (checking, editor, view) => {
+        if (!view.file || !this.store.findTarget(view.file.path))
+          return false;
+        const draft = this.draftFromEditor(editor, view.file);
+        if (!draft)
+          return false;
+        if (!checking)
+          void this.reanchorOrphaned(view.file, draft);
+        return true;
+      }
+    });
+    this.plugin.addCommand({
       id: "delete-source-annotations",
       name: "Delete annotations for this source\u2026",
       callback: async () => {
@@ -12294,6 +12309,55 @@ var AnnotationService = class {
     await this.refreshViews();
     new import_obsidian12.Notice("Annotation added.");
   }
+  async reanchorOrphaned(file, draft) {
+    const target = await this.targetForPath(file.path);
+    if (!target) {
+      new import_obsidian12.Notice("Could not identify the source work.");
+      return;
+    }
+    const annotations = await this.annotationsFor(target);
+    const orphans = annotations.filter((annotation) => annotation.anchorStatus === "orphaned");
+    if (!orphans.length) {
+      new import_obsidian12.Notice("There are no unanchored annotations for this source.");
+      return;
+    }
+    const apply = async (orphan) => {
+      const now = annotationNow();
+      const quoteChanged = draft.quote !== orphan.quote;
+      const current = await this.annotationsFor(target);
+      const updated = current.map((annotation) => {
+        var _a, _b;
+        return annotation.id === orphan.id ? {
+          ...annotation,
+          quote: draft.quote,
+          quoteText: draft.quoteText,
+          quoteMarkdown: draft.quoteMarkdown,
+          prefix: draft.prefix,
+          suffix: draft.suffix,
+          section: draft.section,
+          ordinal: draft.ordinal,
+          position: draft.position,
+          segments: draft.segments,
+          anchored: now,
+          anchorStatus: "ok",
+          quoteChanged,
+          previousQuotes: quoteChanged ? [...(_a = annotation.previousQuotes) != null ? _a : [], annotation.quote].filter(Boolean).slice(-5) : (_b = annotation.previousQuotes) != null ? _b : []
+        } : annotation;
+      });
+      await this.store.saveUnit(target, updated);
+      this.pathAnnotations.set((0, import_obsidian12.normalizePath)(target.notePath), updated);
+      await this.syncArtifacts(target.workKey);
+      await this.refreshViews();
+      new import_obsidian12.Notice("Annotation re-anchored.");
+    };
+    if (orphans.length === 1) {
+      await apply(orphans[0]);
+      return;
+    }
+    new OrphanPicker(this.app, orphans, (orphan) => {
+      void apply(orphan);
+    }).open();
+  }
   annotationAtOffset(text, annotations, offset) {
     var _a;
     return (_a = resolveAnnotations(text, annotations, false).filter((annotation) => annotation.ranges.some((range) => offset >= range.start && offset <= range.end)).sort((a, b) => a.end - a.start - (b.end - b.start))[0]) != null ? _a : null;
@@ -12550,15 +12614,24 @@ var AnnotationService = class {
     }
     this.refreshSidebar();
   }
-  async onSourceRemoved(workKey2) {
+  async setSourceStatus(workKey2, status) {
     const work = await this.store.getWork(workKey2);
     if (!work)
       return;
-    await this.store.setSourceStatus(workKey2, "removed");
+    await this.store.setSourceStatus(workKey2, status);
     await renderAnnotationNote(this.app, this.store, this.settings, workKey2);
     await renderAnnotationMoc(this.app, this.store, this.settings);
     await this.refreshParent();
     await this.refreshViews();
+  }
+  async onSourceRemoved(workKey2) {
+    await this.setSourceStatus(workKey2, "removed");
+  }
+  async onSourceArchived(workKey2) {
+    await this.setSourceStatus(workKey2, "archived");
+  }
+  async onSourceRestored(workKey2) {
+    await this.setSourceStatus(workKey2, "installed");
   }
   async onSourceRenamed(workKey2, oldDir, newDir) {
     const work = await this.store.getWork(workKey2);
@@ -12782,6 +12855,34 @@ var AnnotationService = class {
   }
   mocExists() {
     return !!this.app.vault.getAbstractFileByPath(this.mocPath());
+  }
+};
+var OrphanPicker = class extends import_obsidian12.SuggestModal {
+  constructor(app, orphans, choose) {
+    super(app);
+    this.orphans = orphans;
+    this.choose = choose;
+    this.setPlaceholder("Choose an unanchored annotation\u2026");
+  }
+  getSuggestions(query) {
+    const needle = query.trim().toLowerCase();
+    if (!needle)
+      return this.orphans;
+    return this.orphans.filter((annotation) => {
+      var _a;
+      return `${annotation.quoteText} ${annotation.quote} ${(_a = annotation.comment) != null ? _a : ""}`.toLowerCase().includes(needle);
+    });
+  }
+  renderSuggestion(annotation, el) {
+    var _a;
+    const quote = (annotation.quoteText || annotation.quote || "").replace(/\s+/g, " ").trim();
+    el.createDiv({ text: quote.length > 160 ? `${quote.slice(0, 157)}\u2026` : quote });
+    if ((_a = annotation.comment) == null ? void 0 : _a.trim()) {
+      el.createDiv({ cls: "mas-orphan-picker-comment", text: annotation.comment.trim() });
+    }
+  }
+  onChooseSuggestion(annotation) {
+    this.choose(annotation);
   }
 };
 async function registerAnnotations(host) {
@@ -13072,6 +13173,34 @@ var MidadArabicSourcesPlugin = class extends import_obsidian13.Plugin {
       name: "Manage text sources\u2026",
       callback: async () => {
         await this.openManageSources();
+      }
+    });
+    this.addCommand({
+      id: "archive-this-source",
+      name: "Archive this source\u2026",
+      callback: async () => {
+        const file = this.app.workspace.getActiveFile();
+        if (!file) {
+          new import_obsidian13.Notice("Open a source note first.");
+          return;
+        }
+        const work = await this.workForPath(file.path);
+        if (!work) {
+          new import_obsidian13.Notice("That note is not part of an imported source.");
+          return;
+        }
+        if (this.workStatus(work) === "archived") {
+          new import_obsidian13.Notice("That source is already archived.");
+          return;
+        }
+        new ConfirmModal(this.app, {
+          title: "Archive source",
+          message: `Archive \u201C${work.title || work.dir}\u201D? Its notes will be removed, but its annotations and a compressed model are kept.`,
+          confirmText: "Archive",
+          onConfirm: async () => {
+            await this.archiveSource(work);
+          }
+        }).open();
       }
     });
     this.addCommand({
@@ -14456,6 +14585,12 @@ var MidadArabicSourcesPlugin = class extends import_obsidian13.Plugin {
       if (!problems.length) {
         const manifest = await this.loadSourceManifest();
         await this.saveSourceManifest(manifest.filter((w) => !(w.collection === work.collection && w.id === work.id) && w.dir !== dir));
+        try {
+          const archive = this.sourceArchivePath(work);
+          if (fs2.existsSync(archive))
+            fs2.unlinkSync(archive);
+        } catch (e) {
+        }
       }
       await this.refreshSourcesIndex();
       try {
@@ -14471,6 +14606,120 @@ var MidadArabicSourcesPlugin = class extends import_obsidian13.Plugin {
       console.error("[midad-arabic-sources] removeSource", key, problems);
       new import_obsidian13.Notice(`Removed \u201C${work.title || dir}\u201D with problems: ${problems.join("; ")}`);
     }
+  }
+  sourceArchivePath(work) {
+    var _a, _b;
+    const collection = String((_a = work.collection) != null ? _a : "work").replace(/[^\w.-]+/g, "_");
+    const id = String((_b = work.id) != null ? _b : "work").replace(/[^\w.-]+/g, "_");
+    return `${this.vaultPath()}/.midad-arabic-sources/source-archives/${collection}/${id}.json.gz`;
+  }
+  async deleteRenderedNotes(work) {
+    var _a;
+    const outRoot = this.settings.sourceImportRoot.trim() || "_7 Sources";
+    const dir = String((_a = work.dir) != null ? _a : "");
+    const adapter = this.app.vault.adapter;
+    const problems = [];
+    const hub = (0, import_obsidian13.normalizePath)(`${outRoot}/${dir}.md`);
+    const folder = (0, import_obsidian13.normalizePath)(`${outRoot}/${dir}`);
+    try {
+      if (await adapter.exists(hub))
+        await adapter.remove(hub);
+    } catch (e) {
+      problems.push(`hub: ${e instanceof Error ? e.message : e}`);
+    }
+    try {
+      if (await adapter.exists(folder)) {
+        for (const file of await this.listFilesUnder(folder)) {
+          try {
+            await adapter.remove(file);
+          } catch (e) {
+            problems.push(`${file}: ${e instanceof Error ? e.message : e}`);
+          }
+        }
+        await adapter.rmdir(folder, true);
+      }
+    } catch (e) {
+      problems.push(`folder: ${e instanceof Error ? e.message : e}`);
+    }
+    return problems;
+  }
+  async archiveSource(work) {
+    var _a;
+    const key = this.workKey(work);
+    if (this.workStatus(work) === "archived") {
+      new import_obsidian13.Notice("That source is already archived.");
+      return false;
+    }
+    const modelAbs = `${this.vaultPath()}/.midad-arabic-sources/source-models/${work.collection}/${work.id}.json`;
+    if (!fs2.existsSync(modelAbs)) {
+      new import_obsidian13.Notice("That source has no cached model to archive.");
+      return false;
+    }
+    const archive = this.sourceArchivePath(work);
+    try {
+      const text = fs2.readFileSync(modelAbs, "utf8");
+      JSON.parse(text);
+      fs2.mkdirSync(archive.slice(0, archive.lastIndexOf("/")), { recursive: true });
+      fs2.writeFileSync(archive, zlib.gzipSync(Buffer.from(text, "utf8")));
+    } catch (e) {
+      new import_obsidian13.Notice(`Could not archive the source: ${e instanceof Error ? e.message : e}`);
+      return false;
+    }
+    await this.setWorkStatus(key, "archived");
+    const problems = await this.deleteRenderedNotes(work);
+    try {
+      fs2.unlinkSync(modelAbs);
+    } catch (e) {
+      problems.push(`model: ${e instanceof Error ? e.message : e}`);
+    }
+    await this.refreshSourcesIndex();
+    try {
+      await ((_a = this.annotations) == null ? void 0 : _a.onSourceArchived(key));
+    } catch (e) {
+      console.error("[midad-arabic-sources] annotation status after archive", e);
+    }
+    new import_obsidian13.Notice(problems.length ? `Archived \u201C${work.title || work.dir}\u201D with problems: ${problems.join("; ")}` : `Archived \u201C${work.title || work.dir}\u201D.`);
+    return true;
+  }
+  async restoreArchivedSource(work) {
+    var _a;
+    const key = this.workKey(work);
+    const archive = this.sourceArchivePath(work);
+    if (!fs2.existsSync(archive)) {
+      new import_obsidian13.Notice("No archive was found for that source.");
+      return false;
+    }
+    const modelRel = (0, import_obsidian13.normalizePath)(`.midad-arabic-sources/source-models/${work.collection}/${work.id}.json`);
+    const modelAbs = `${this.vaultPath()}/${modelRel}`;
+    try {
+      const text = zlib.gunzipSync(fs2.readFileSync(archive)).toString("utf8");
+      JSON.parse(text);
+      fs2.mkdirSync(modelAbs.slice(0, modelAbs.lastIndexOf("/")), { recursive: true });
+      fs2.writeFileSync(modelAbs, text);
+    } catch (e) {
+      new import_obsidian13.Notice(`Could not restore the archive: ${e instanceof Error ? e.message : e}`);
+      return false;
+    }
+    await this.renderWithProgress([modelAbs], true, `Restoring ${work.title || work.dir}`);
+    const outRoot = this.settings.sourceImportRoot.trim() || "_7 Sources";
+    const hub = (0, import_obsidian13.normalizePath)(`${outRoot}/${work.dir}.md`);
+    if (!this.app.vault.getAbstractFileByPath(hub)) {
+      new import_obsidian13.Notice("The archive was extracted, but its notes could not be rendered. It remains archived.");
+      return false;
+    }
+    await this.setWorkStatus(key, "installed");
+    await this.refreshSourcesIndex();
+    try {
+      await ((_a = this.annotations) == null ? void 0 : _a.onSourceRestored(key));
+    } catch (e) {
+      console.error("[midad-arabic-sources] annotation status after restore", e);
+    }
+    try {
+      fs2.unlinkSync(archive);
+    } catch (e) {
+    }
+    new import_obsidian13.Notice(`Restored \u201C${work.title || work.dir}\u201D.`);
+    return true;
   }
   async listFilesUnder(path2) {
     const adapter = this.app.vault.adapter;
@@ -14584,6 +14833,8 @@ var MidadArabicSourcesPlugin = class extends import_obsidian13.Plugin {
     const canonicalRoot = this.settings.canonicalQuranFolder.trim() || `${outRoot}/Quran`;
     const out = [];
     for (const work of manifest) {
+      if (this.workStatus(work) !== "installed")
+        continue;
       if (pending2.has(this.workKey(work)))
         continue;
       if (!modelKeys.has(`${work.collection}:${work.id}`)) {
@@ -14645,8 +14896,10 @@ var MidadArabicSourcesPlugin = class extends import_obsidian13.Plugin {
       const manifest = await this.loadSourceManifest();
       const pending2 = await this.loadPendingDeletions();
       const keys = new Set();
-      for (const w of manifest)
-        keys.add(`${w.collection}:${w.id}`);
+      for (const w of manifest) {
+        if (this.workStatus(w) === "installed")
+          keys.add(`${w.collection}:${w.id}`);
+      }
       for (const k of await this.listModelKeys())
         keys.add(k);
       for (const k of pending2)
@@ -14987,6 +15240,8 @@ var MidadArabicSourcesPlugin = class extends import_obsidian13.Plugin {
     }
   }
   workStatus(work) {
+    if (work.status === "archived")
+      return "archived";
     return work.status === "deleting" ? "deleting" : "installed";
   }
   workKey(work) {
@@ -17448,17 +17703,42 @@ var ManageSourcesModal = class extends import_obsidian13.Modal {
         cls: "mas-manage__mut",
         text: this.deleting.has(w.key) ? "being removed" : isArchived ? "archived" : isInstalled ? "installed" : ""
       });
-      if (annotationCount) {
-        row.oncontextmenu = (event) => {
-          event.preventDefault();
-          const menu = new import_obsidian13.Menu();
+      row.oncontextmenu = (event) => {
+        if (!annotationCount && !isInstalled && !isArchived)
+          return;
+        event.preventDefault();
+        const menu = new import_obsidian13.Menu();
+        if (annotationCount) {
           menu.addItem((item) => item.setTitle("Delete annotations for this item\u2026").setIcon("trash-2").onClick(() => {
             var _a2;
             void ((_a2 = this.plugin.annotations) == null ? void 0 : _a2.confirmDeleteAnnotations(w.key));
           }));
-          menu.showAtMouseEvent(event);
-        };
-      }
+        }
+        if (isInstalled && !isArchived) {
+          menu.addItem((item) => item.setTitle("Archive source\u2026").setIcon("archive").onClick(() => {
+            new ConfirmModal(this.app, {
+              title: "Archive source",
+              message: `Archive \u201C${w.title || w.dir}\u201D? Its notes will be removed, but its annotations and a compressed model are kept.`,
+              confirmText: "Archive",
+              onConfirm: async () => {
+                if (await this.plugin.archiveSource(w)) {
+                  this.close();
+                  void this.plugin.openManageSources(true);
+                }
+              }
+            }).open();
+          }));
+        }
+        if (isArchived) {
+          menu.addItem((item) => item.setTitle("Restore from archive").setIcon("archive-restore").onClick(async () => {
+            if (await this.plugin.restoreArchivedSource(w)) {
+              this.close();
+              void this.plugin.openManageSources(true);
+            }
+          }));
+        }
+        menu.showAtMouseEvent(event);
+      };
       row.onclick = () => {
         if (this.selected.has(w.key))
           this.selected.delete(w.key);
@@ -17552,21 +17832,26 @@ var ManageSourcesModal = class extends import_obsidian13.Modal {
         return;
       }
       const toInstall = [];
+      const toRestore = [];
       const toRemove = [];
       for (const w of this.works) {
         const was = this.initial.get(w.key) === true;
         const now = this.selected.has(w.key);
-        if (now && !was)
-          toInstall.push(w);
-        else if (!now && was)
+        if (now && !was) {
+          if (this.archived.has(w.key))
+            toRestore.push(w);
+          else
+            toInstall.push(w);
+        } else if (!now && was) {
           toRemove.push(w);
+        }
       }
-      if (!toInstall.length && !toRemove.length) {
+      if (!toInstall.length && !toRestore.length && !toRemove.length) {
         new import_obsidian13.Notice("Nothing to change.");
         return;
       }
       this.close();
-      const progress = new import_obsidian13.Notice(`Applying\u2026 (${toInstall.length} to install, ${toRemove.length} to remove)`, 0);
+      const progress = new import_obsidian13.Notice(`Applying\u2026 (${toInstall.length} to install, ${toRestore.length} to restore, ${toRemove.length} to remove)`, 0);
       const failed = [];
       try {
         let n = 0;
@@ -17583,6 +17868,17 @@ var ManageSourcesModal = class extends import_obsidian13.Modal {
             failed.push(`${name}: ${e instanceof Error ? e.message : e}`);
           }
         }
+        if (toRestore.length) {
+          for (const w of toRestore) {
+            progress.setMessage(`Restoring ${w.title || w.dir}\u2026`);
+            try {
+              if (!await this.plugin.restoreArchivedSource(w))
+                failed.push(`restore: ${w.title || w.dir}`);
+            } catch (e) {
+              failed.push(`restore ${w.title || w.dir}: ${e instanceof Error ? e.message : e}`);
+            }
+          }
+        }
         if (toInstall.length) {
           progress.setMessage(`Installing ${toInstall.length} source(s)\u2026`);
           try {
@@ -17594,7 +17890,7 @@ var ManageSourcesModal = class extends import_obsidian13.Modal {
       } finally {
         progress.hide();
       }
-      new import_obsidian13.Notice(`Applied: ${toInstall.length} installed, ${toRemove.length} removed.` + (failed.length ? ` ${failed.length} failed \u2014 see the console.` : ""));
+      new import_obsidian13.Notice(`Applied: ${toInstall.length} installed, ${toRestore.length} restored, ${toRemove.length} removed.` + (failed.length ? ` ${failed.length} failed \u2014 see the console.` : ""));
       if (failed.length)
         console.error("[midad-arabic-sources] apply failures", failed);
     };
