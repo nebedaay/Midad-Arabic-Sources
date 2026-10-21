@@ -1,4 +1,5 @@
 import { App, ButtonComponent, Modal, Notice, Scope } from "obsidian";
+import { ANNOTATION_COLORS, annotationTint } from "./colors";
 import type { AnnotationColor, SourceAnnotation } from "./types";
 
 export interface AnnotationDraft {
@@ -27,10 +28,6 @@ export interface AnnotationPopupOptions {
 	onClosed?: () => void;
 }
 
-const COLORS: AnnotationColor[] = [
-	"yellow", "orange", "red", "purple", "magenta", "blue", "green", "gray",
-];
-
 const COLOR_LABEL: Record<AnnotationColor, string> = {
 	yellow: "Yellow",
 	orange: "Orange",
@@ -41,22 +38,6 @@ const COLOR_LABEL: Record<AnnotationColor, string> = {
 	green: "Green",
 	gray: "Gray",
 };
-
-const COLOR_HUE: Record<AnnotationColor, number> = {
-	yellow: 55,
-	orange: 28,
-	red: 0,
-	purple: 265,
-	magenta: 300,
-	blue: 205,
-	green: 115,
-	gray: 100,
-};
-
-function tint(color: AnnotationColor, lightness: number, alpha: number): string {
-	const saturation = color === "gray" ? "0%" : "75%";
-	return `hsla(${COLOR_HUE[color]}, ${saturation}, ${lightness}%, ${alpha})`;
-}
 
 export interface ConfirmOptions {
 	title: string;
@@ -144,7 +125,7 @@ export class AnnotationPopup {
 		const swatchRow = row.createDiv({ cls: "mas-annotation-popup-swatches" });
 		swatchRow.setAttribute("role", "radiogroup");
 		swatchRow.setAttribute("aria-label", "Highlight colour");
-		for (const color of COLORS) {
+		for (const color of ANNOTATION_COLORS) {
 			const button = swatchRow.createEl("button", {
 				cls: `mas-swatch ${color === this.color ? "is-selected" : ""}`,
 				attr: {
@@ -156,7 +137,7 @@ export class AnnotationPopup {
 					tabindex: color === this.color ? "0" : "-1",
 				},
 			});
-			button.setCssStyles({ background: tint(color, 62, 0.9) });
+			button.setCssStyles({ background: annotationTint(color, 62, 0.9) });
 			button.addEventListener("click", () => {
 				this.selectColor(color);
 				button.focus();
@@ -259,12 +240,12 @@ export class AnnotationPopup {
 	}
 
 	private onSwatchKey(event: KeyboardEvent): void {
-		const index = COLORS.indexOf(this.color);
+		const index = ANNOTATION_COLORS.indexOf(this.color);
 		if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
 			event.preventDefault();
 			const delta = event.key === "ArrowRight" ? 1 : -1;
-			const next = (index + delta + COLORS.length) % COLORS.length;
-			this.selectColor(COLORS[next]);
+			const next = (index + delta + ANNOTATION_COLORS.length) % ANNOTATION_COLORS.length;
+			this.selectColor(ANNOTATION_COLORS[next]);
 			this.swatches[next]?.focus();
 			return;
 		}
@@ -278,7 +259,7 @@ export class AnnotationPopup {
 		this.color = color;
 		for (let i = 0; i < this.swatches.length; i++) {
 			const button = this.swatches[i];
-			const selected = COLORS[i] === color;
+			const selected = ANNOTATION_COLORS[i] === color;
 			button.classList.toggle("is-selected", selected);
 			button.setAttribute("aria-checked", String(selected));
 			button.setAttribute("tabindex", selected ? "0" : "-1");

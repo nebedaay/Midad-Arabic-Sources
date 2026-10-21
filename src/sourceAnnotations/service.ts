@@ -16,6 +16,7 @@ import {
 	selectionWatcher,
 } from "./editor";
 import { AnnotationPopup, ConfirmModal, type AnnotationDraft, type PopupAnchor } from "./modal";
+import { ANNOTATION_EVENTS, type AnnotationEventDetail } from "./events";
 import {
 	annotationMocPath,
 	renderAnnotationMoc,
@@ -25,6 +26,7 @@ import { refreshReadingViews, registerReadingAnnotations } from "./reading";
 import { findNormalized, resolveAnnotations, visibleSegments } from "./resolve";
 import { AnnotationStore, annotationNow, newAnnotationId } from "./store";
 import { AnnotationTargetResolver } from "./target";
+import { AnnotationTooltip } from "./tooltip";
 import {
 	cleanQuoteMarkdown,
 	crossesHeading,
@@ -81,9 +83,12 @@ export class AnnotationService {
 	private readonly host: AnnotationHost;
 	private readonly store: AnnotationStore;
 	private readonly resolver: AnnotationTargetResolver;
+	private readonly tooltip: AnnotationTooltip;
 	private readonly pathAnnotations = new Map<string, SourceAnnotation[]>();
 	private readonly verifyTimers = new Map<string, number>();
 	private readonly autoTimers = new WeakMap<EditorView, number>();
+	private tooltipHoverTimer = 0;
+	private tooltipHideTimer = 0;
 	private suppressAutoUntil = 0;
 	private suppressAutoSignature = "";
 	private dialogOpen = false;
@@ -96,6 +101,23 @@ export class AnnotationService {
 		this.settings = host.settings;
 		this.store = new AnnotationStore(host.app);
 		this.resolver = new AnnotationTargetResolver(host.app, host.settings);
+		this.tooltip = new AnnotationTooltip(this.app, {
+			onEdit: (annotation, target, anchor) => {
+				this.tooltip.hide();
+				const rect = anchor.getBoundingClientRect();
+				void this.openEditAnnotation(target, annotation, {
+					left: rect.left,
+					top: rect.top,
+					bottom: rect.bottom,
+				});
+			},
+			onDelete: (annotation, target) => {
+				this.tooltip.hide();
+				this.confirmDeleteAnnotation(target, annotation);
+			},
+			onEnter: () => this.cancelTooltipHide(),
+			onLeave: () => this.scheduleTooltipHide(),
+		});
 	}
 
 	async start(): Promise<void> {
@@ -121,6 +143,8 @@ export class AnnotationService {
 
 	dispose(): void {
 		this.disposed = true;
+		this.cancelTooltipTimers();
+		this.tooltip.hide();
 		for (const timer of this.verifyTimers.values()) window.clearTimeout(timer);
 		this.verifyTimers.clear();
 	}
@@ -258,6 +282,16 @@ export class AnnotationService {
 			this.suppressAutoUntil = Date.now() + 1500;
 		});
 
+		this.plugin.registerDomEvent(document, ANNOTATION_EVENTS.hover, (event) => {
+			this.onAnnotationHover(event);
+		});
+		this.plugin.registerDomEvent(document, ANNOTATION_EVENTS.leave, () => {
+			this.scheduleTooltipHide();
+		});
+		this.plugin.registerDomEvent(document, ANNOTATION_EVENTS.open, (event) => {
+			this.onAnnotationOpen(event);
+		});
+
 		this.plugin.registerEvent(this.app.workspace.on("active-leaf-change", () => {
 			window.setTimeout(() => {
 				if (!this.disposed) void this.refreshViews();
@@ -373,6 +407,65 @@ export class AnnotationService {
 	private anyModalOpen(): boolean {
 		const container = document.querySelector(".modal-container");
 		return !!container && !!container.querySelector(".modal");
+	}
+
+	private cancelTooltipHide(): void {
+		if (this.tooltipHideTimer) {
+			window.clearTimeout(this.tooltipHideTimer);
+			this.tooltipHideTimer = 0;
+		}
+	}
+
+	private cancelTooltipTimers(): void {
+		if (this.tooltipHoverTimer) {
+			window.clearTimeout(this.tooltipHoverTimer);
+			this.tooltipHoverTimer = 0;
+		}
+		this.cancelTooltipHide();
+	}
+
+	private scheduleTooltipShow(anchor: HTMLElement, ids: string[]): void {
+		this.cancelTooltipTimers();
+		this.tooltipHoverTimer = window.setTimeout(() => {
+			this.tooltipHoverTimer = 0;
+			void this.showTooltip(anchor, ids);
+		}, 220);
+	}
+
+	private scheduleTooltipHide(): void {
+		this.cancelTooltipTimers();
+		this.tooltipHideTimer = window.setTimeout(() => {
+			this.tooltipHideTimer = 0;
+			this.tooltip.hide();
+		}, 260);
+	}
+
+	private onAnnotationHover(event: CustomEvent<AnnotationEventDetail>): void {
+		if (this.dialogOpen || this.anyModalOpen()) return;
+		const anchor = event.target as HTMLElement | null;
+		const ids = event.detail?.ids ?? [];
+		if (!anchor || !ids.length) return;
+		this.scheduleTooltipShow(anchor, ids);
+	}
+
+	private onAnnotationOpen(event: CustomEvent<AnnotationEventDetail>): void {
+		if (this.dialogOpen || this.anyModalOpen()) return;
+		const anchor = event.target as HTMLElement | null;
+		const ids = event.detail?.ids ?? [];
+		if (!anchor || !ids.length) return;
+		this.cancelTooltipTimers();
+		void this.showTooltip(anchor, ids);
+	}
+
+	private async showTooltip(anchor: HTMLElement, ids: string[]): Promise<void> {
+		if (this.dialogOpen || this.anyModalOpen()) return;
+		const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+		if (!view?.file) return;
+		const target = await this.targetForPath(view.file.path);
+		if (!target) return;
+		const annotations = (await this.annotationsFor(target)).filter((annotation) => ids.includes(annotation.id));
+		if (!annotations.length) return;
+		await this.tooltip.show(anchor, annotations, target);
 	}
 
 	private onEditorSelection(view: EditorView): void {
@@ -494,6 +587,8 @@ export class AnnotationService {
 		const from = editor.getCursor("from");
 		const to = editor.getCursor("to");
 		const anchor = this.anchorForEditor(editor);
+		this.cancelTooltipTimers();
+		this.tooltip.hide();
 		this.dialogOpen = true;
 		new AnnotationPopup(this.app, {
 			draft,
@@ -572,59 +667,88 @@ export class AnnotationService {
 			new Notice("No annotation here.");
 			return;
 		}
+		await this.openEditAnnotation(target, hit, this.anchorForEditor(editor));
+	}
+
+	private viewForTarget(target: AnnotationTarget): MarkdownView | null {
+		const targetPath = normalizePath(target.notePath);
+		const found = markdownViews(this.app).find((view) =>
+			view.file && normalizePath(view.file.path) === targetPath
+		);
+		return found ?? this.app.workspace.getActiveViewOfType(MarkdownView);
+	}
+
+	private async openEditAnnotation(
+		target: AnnotationTarget,
+		annotation: SourceAnnotation,
+		anchor?: PopupAnchor
+	): Promise<void> {
+		const view = this.viewForTarget(target);
+		if (!view?.file || normalizePath(view.file.path) !== normalizePath(target.notePath)) {
+			new Notice("Open the source note first.");
+			return;
+		}
+		const editor = view.editor;
+		const annotations = await this.annotationsFor(target);
+		const current = annotations.find((item) => item.id === annotation.id) ?? annotation;
 		const draft: AnnotationDraft = {
-			annotation: hit,
-			quote: hit.quote,
-			quoteText: hit.quoteText,
-			quoteMarkdown: hit.quoteMarkdown,
-			section: hit.section,
-			ordinal: hit.ordinal,
-			position: hit.position ?? { start: 0, end: 0 },
-			segments: hit.segments ?? [],
+			annotation: current,
+			quote: current.quote,
+			quoteText: current.quoteText,
+			quoteMarkdown: current.quoteMarkdown,
+			section: current.section,
+			ordinal: current.ordinal,
+			position: current.position ?? { start: 0, end: 0 },
+			segments: current.segments ?? [],
 		};
 		const from = editor.getCursor("from");
 		const to = editor.getCursor("to");
 		const signature = this.selectionSignatureForEditor(editor);
-		const anchor = this.anchorForEditor(editor);
+		const popupAnchor = anchor ?? this.anchorForEditor(editor);
+		const restore = (): void => {
+			if (view.getMode() !== "preview") {
+				editor.focus();
+				editor.setSelection(from, to);
+			}
+		};
+		this.cancelTooltipTimers();
+		this.tooltip.hide();
 		this.dialogOpen = true;
 		new AnnotationPopup(this.app, {
 			draft,
-			defaultColor: hit.color,
+			defaultColor: current.color,
 			onSubmit: async (color, comment) => {
-				const updated = annotations.map((annotation) => annotation.id === hit.id
-					? { ...annotation, color, comment: comment || undefined, modified: annotationNow() }
-					: annotation);
+				const list = await this.annotationsFor(target);
+				const updated = list.map((item) => item.id === current.id
+					? { ...item, color, comment: comment || undefined, modified: annotationNow() }
+					: item);
 				await this.store.saveUnit(target, updated);
 				this.pathAnnotations.set(normalizePath(target.notePath), updated);
 				await this.syncArtifacts(target.workKey);
 				await this.refreshViews();
 				this.suppressAutoSignature = signature;
-				editor.focus();
-				editor.setSelection(from, to);
+				restore();
 				new Notice("Annotation updated.");
 			},
 			onDelete: async () => {
-				const kept = annotations.filter((annotation) => annotation.id !== hit.id);
+				const list = await this.annotationsFor(target);
+				const kept = list.filter((item) => item.id !== current.id);
 				await this.store.saveUnit(target, kept);
 				this.pathAnnotations.set(normalizePath(target.notePath), kept);
 				await this.syncArtifacts(target.workKey);
 				await this.refreshViews();
 				this.suppressAutoSignature = signature;
-				editor.focus();
-				editor.setSelection(from, to);
+				restore();
 				new Notice("Annotation deleted.");
 			},
 			onCancel: (reason) => {
 				this.suppressAutoSignature = signature;
-				if (reason !== "outside") {
-					editor.focus();
-					editor.setSelection(from, to);
-				}
+				if (reason !== "outside") restore();
 			},
 			onClosed: () => {
 				this.dialogOpen = false;
 			},
-		}).open(anchor);
+		}).open(popupAnchor);
 	}
 
 	private async confirmDeleteAtCursor(editor: Editor, file: TFile): Promise<void> {
@@ -638,12 +762,18 @@ export class AnnotationService {
 			new Notice("No annotation here.");
 			return;
 		}
+		this.confirmDeleteAnnotation(target, hit);
+	}
+
+	private confirmDeleteAnnotation(target: AnnotationTarget, annotation: SourceAnnotation): void {
+		this.tooltip.hide();
 		new ConfirmModal(this.app, {
 			title: "Delete annotation",
 			message: "Delete this annotation? The quote and comment will be removed from this source’s annotation note.",
 			confirmText: "Delete",
 			onConfirm: async () => {
-				const kept = annotations.filter((annotation) => annotation.id !== hit.id);
+				const list = await this.annotationsFor(target);
+				const kept = list.filter((item) => item.id !== annotation.id);
 				await this.store.saveUnit(target, kept);
 				this.pathAnnotations.set(normalizePath(target.notePath), kept);
 				await this.syncArtifacts(target.workKey);
@@ -740,6 +870,8 @@ export class AnnotationService {
 
 	async refreshViews(): Promise<void> {
 		if (this.disposed) return;
+		this.cancelTooltipTimers();
+		this.tooltip.hide();
 		for (const view of markdownViews(this.app)) {
 			if (!view.file) continue;
 			const path = view.file.path;
