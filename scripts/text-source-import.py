@@ -658,10 +658,33 @@ def arabic_numeral(n: int) -> str:
     return str(n).translate(ARABIC_DIGITS)
 
 
+def _limit_name_bytes(value: str, limit: int = 110) -> str:
+    """Keep a folder/file stem inside a safe byte budget.
+
+    macOS/Linux allow 255 bytes per path component; a long author plus a long
+    title plus a unit base can exceed that, especially for Arabic (2 bytes per
+    character). Truncate at a character boundary and append a stable hash so the
+    shortened name cannot collide with another work.
+    """
+    if len(value.encode("utf-8")) <= limit:
+        return value
+    suffix = f" ~{hashlib.sha1(value.encode('utf-8')).hexdigest()[:6]}"
+    budget = max(1, limit - len(suffix.encode("utf-8")))
+    cut = value
+    while cut and len(cut.encode("utf-8")) > budget:
+        cut = cut[:-1]
+    cut = cut.rstrip(" ._-")
+    if " " in cut:
+        cut = cut.rsplit(" ", 1)[0].rstrip(" ._-")
+    cut = cut or "work"
+    return f"{cut}{suffix}"
+
+
 def slug_to_dir(value: str) -> str:
     """Sanitize a value for use as a folder/file name."""
     value = re.sub(r'[<>:"/\\|?*]', "", value)
-    return re.sub(r"\s+", " ", value).strip()
+    value = re.sub(r"\s+", " ", value).strip()
+    return _limit_name_bytes(value)
 
 
 # A stable, short label per collection. The repository URL is still recorded in
@@ -1599,13 +1622,19 @@ def with_unique_dirs(works: list[dict], *, preserve_installed: bool = True) -> N
     seen: set[str] = set(installed.values())
 
     def qualified(base: str, repo: str, label: str = "") -> str:
-        """`Title (edition) (repo)` — the edition label, when needed, comes first."""
-        parts = [base]
+        """`Title (edition) (repo)` — the edition label, when needed, comes first.
+
+        The byte budget applies to the whole component, but the repository
+        qualifier is reserved first, so truncation never eats it.
+        """
+        stem = base
         if label:
-            parts.append(f"({label})")
-        if repo:
-            parts.append(f"({repo})")
-        return slug_to_dir(" ".join(parts))
+            stem += f" ({label})"
+        if not repo:
+            return slug_to_dir(stem)
+        suffix = f" ({repo})"
+        budget = max(20, 110 - len(suffix.encode("utf-8")))
+        return slug_to_dir(f"{_limit_name_bytes(stem, budget)}{suffix}")
 
     for w in works:
         key = str(w.get("key"))

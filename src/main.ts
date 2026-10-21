@@ -1264,6 +1264,16 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		return normalizePath(".midad-arabic-sources/turath-custom-works.json");
 	}
 
+	/** A cheap stamp for the custom-work list, used to invalidate the catalogue. */
+	async customWorksStamp(): Promise<number> {
+		try {
+			if (await this.app.vault.adapter.exists(this.customWorksPath())) {
+				return (await this.app.vault.adapter.stat(this.customWorksPath()))?.mtime ?? 0;
+			}
+		} catch { /* no custom list yet */ }
+		return 0;
+	}
+
 	async loadCustomWorks(): Promise<TurathCustomWork[]> {
 		try {
 			const text = await this.app.vault.adapter.read(this.customWorksPath());
@@ -1378,12 +1388,14 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 	async listSourcesCached(force = false): Promise<SourceWork[]> {
 		if (!force && this.sourceCatalog) return this.sourceCatalog;
 		const path = normalizePath(".midad-arabic-sources/source-catalog.json");
-		let cached: { at?: number; schema?: number; works?: SourceWork[] } | null = null;
+		let cached: { at?: number; schema?: number; customAt?: number; works?: SourceWork[] } | null = null;
 		try {
 			cached = JSON.parse(await this.app.vault.adapter.read(path)) as { at?: number; schema?: number; works?: SourceWork[] };
 		} catch { /* no usable cache */ }
 		const works0 = cached?.works;
-		const usable = Array.isArray(works0) && works0.length > 0 && cached?.schema === SOURCE_CATALOG_SCHEMA;
+		const customAt = await this.customWorksStamp();
+		const usable = Array.isArray(works0) && works0.length > 0 && cached?.schema === SOURCE_CATALOG_SCHEMA &&
+			(cached?.customAt ?? 0) === customAt;
 		if (!force && usable && works0) {
 			this.sourceCatalog = works0;
 			// Serve the cache immediately; refresh in the background when it is old,
@@ -1395,7 +1407,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		if (works.length) {
 			this.sourceCatalog = works;
 			try {
-				await this.app.vault.adapter.write(path, JSON.stringify({ at: Date.now(), schema: SOURCE_CATALOG_SCHEMA, works }));
+				await this.app.vault.adapter.write(path, JSON.stringify({ at: Date.now(), schema: SOURCE_CATALOG_SCHEMA, customAt, works }));
 			} catch { /* ignore */ }
 		}
 		return works;
@@ -1413,7 +1425,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 				this.sourceCatalog = works;
 				await this.app.vault.adapter.write(
 					normalizePath(".midad-arabic-sources/source-catalog.json"),
-					JSON.stringify({ at: Date.now(), schema: SOURCE_CATALOG_SCHEMA, works })
+					JSON.stringify({ at: Date.now(), schema: SOURCE_CATALOG_SCHEMA, customAt: await this.customWorksStamp(), works })
 				);
 			}
 		} catch (e) {
