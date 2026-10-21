@@ -363,7 +363,7 @@ function frontmatterTimeMs(value: unknown): number | null {
 const SOURCE_CATALOG_TTL = 7 * 86_400_000;
 
 /** Bump when the catalogue's shape changes, to invalidate stale caches. */
-const SOURCE_CATALOG_SCHEMA = 2;
+const SOURCE_CATALOG_SCHEMA = 3;
 
 /**
  * The cached-model schema at which each collection's *acquisition* last changed.
@@ -2083,15 +2083,28 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		}
 	}
 
-	async openManageSources(force = false, showFilter?: "all" | "installed" | "not-installed" | "archived" | "annotated") {
+	async openManageSources(
+		force = false,
+		showFilter?: "all" | "installed" | "not-installed" | "archived" | "annotated",
+		initialMode: "manage" | "zotero" | "url" = "manage"
+	) {
 		const loading = new Notice("Loading available sources…", 0);
 		try {
-			const works = await this.listSourcesCached(force);
+			const works = [...await this.listSourcesCached(force)];
 			if (!works.length) {
 				new Notice("No sources found. Is Python configured and the importer script present?");
 				return;
 			}
 			const manifest = await this.loadSourceManifest();
+			// Never hide an installed work just because its catalogue entry vanished
+			// (for example a custom-only Turath work whose list entry was removed).
+			// Showing it lets the user remove the source from the main list.
+			const catalogueKeys = new Set(works.map((w) => this.workKey(w)));
+			for (const w of manifest) {
+				if (this.workStatus(w) === "deleting") continue;
+				if (catalogueKeys.has(this.workKey(w))) continue;
+				works.push(w as unknown as SourceWork);
+			}
 			const statusKeys = (status: "installed" | "deleting") =>
 				new Set(manifest.filter((w) => this.workStatus(w) === status).map((w) => this.workKey(w)));
 			const archivedKeys = new Set(manifest.filter((w) => w.status === "archived").map((w) => this.workKey(w)));
@@ -2132,7 +2145,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			}
 			new ManageSourcesModal(
 				this.app, this, works, installedKeys, statusKeys("deleting"), archivedKeys, sizes, zoteroStatus,
-				() => { void this.openManageSources(true); }, new Set(this.archivingSources), showFilter
+				() => { void this.openManageSources(true); }, new Set(this.archivingSources), showFilter, initialMode
 			).open();
 		} finally {
 			loading.hide();
@@ -2144,7 +2157,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 	 * `onProgress(done, total)` reports per-file progress so a slow removal is
 	 * not silent.
 	 */
-	async removeSource(work: JsonObject, onProgress?: (done: number, total: number) => void): Promise<void> {
+	async removeSource(work: JsonObject, onProgress?: (done: number, total: number) => void): Promise<boolean> {
 		const outRoot = this.settings.sourceImportRoot.trim() || "_7 Sources";
 		const dir = work.dir as string;
 		const adapter = this.app.vault.adapter;
@@ -2225,7 +2238,9 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		if (problems.length) {
 			console.error("[midad-arabic-sources] removeSource", key, problems);
 			new Notice(`Removed “${work.title || dir}” with problems: ${problems.join("; ")}`);
+			return false;
 		}
+		return true;
 	}
 
 	/** The gzipped model that backs an archived work. */
@@ -2671,7 +2686,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 	}
 
 	/** A work is "installed" when its hub/work note exists in the vault. */
-	async isSourceInstalled(dir: string): Promise<boolean> {
+	async isSourceDirInstalled(dir: string): Promise<boolean> {
 		const outRoot = this.settings.sourceImportRoot.trim() || "_7 Sources";
 		try {
 			return await this.app.vault.adapter.exists(normalizePath(`${outRoot}/${dir}.md`));
@@ -3005,6 +3020,19 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			if (status !== null) next.push({ ...w, status });
 		}
 		if (changed) await this.saveSourceManifest(next);
+	}
+
+	/** Whether a work key is currently installed (not archived, not being removed). */
+	async isSourceInstalled(key: string): Promise<boolean> {
+		const manifest = await this.loadSourceManifest();
+		return manifest.some((w) => this.workKey(w) === key &&
+			(w.status === "archived" ? false : this.workStatus(w) === "installed"));
+	}
+
+	/** Whether a Turath work is in the built-in catalogue (custom entries may override it). */
+	async isBuiltinTurathWork(id: string): Promise<boolean> {
+		const works = await this.listSourcesCached();
+		return works.some((w) => w.collection === "turath" && String(w.id) === String(id) && w.builtin === true);
 	}
 
 	/** Keys of every work currently being removed. */
@@ -5319,6 +5347,8 @@ interface SourceWork {
 	repository?: string;
 	/** True when some entries are named by transliterating their Arabic. */
 	needs_transliteration?: boolean;
+	/** True when the work exists in the built-in catalogue, not only a custom entry. */
+	builtin?: boolean;
 	id: string;
 	name: string;
 	title: string;
@@ -5473,6 +5503,9 @@ function buildUrlAdder(plugin: MidadArabicSourcesPlugin, container: HTMLElement,
 	container.createEl("p", {
 		text: "Paste a Turath book URL (or its numeric ID). The plugin reads its metadata and offers a provisional romanization you can edit before adding.",
 	});
+	container.createEl("p", {
+		text: "After adding a work to the list of available sources, you still need to install it, either here or through the main “Install/uninstall sources” tab.",
+	});
 	let inputEl!: HTMLInputElement;
 	let titleEl!: HTMLInputElement;
 	let authorEl!: HTMLInputElement;
@@ -5490,13 +5523,60 @@ function buildUrlAdder(plugin: MidadArabicSourcesPlugin, container: HTMLElement,
 			return;
 		}
 		for (const w of works) {
+			const key = `turath:${w.id}`;
+			const installed = await plugin.isSourceInstalled(key);
 			new Setting(listEl)
 				.setName(w.title || w.arabic || w.id)
 				.setDesc(w.author ? `${w.author} — ${w.url}` : w.url)
-				.addButton((b) => b.setButtonText("Remove").setDestructive().onClick(async () => {
-					await plugin.removeTurathWork(w.id);
-					await renderList();
-				}));
+				.addButton((b) => b
+					.setButtonText(installed ? "Installed" : "Install")
+					.setDisabled(installed)
+					.onClick(async () => {
+						b.setDisabled(true);
+						b.setButtonText("Installing…");
+						try {
+							await plugin.importSources([key]);
+							onAdded?.();
+						} finally {
+							await renderList();
+						}
+					}))
+				.addButton((b) => b
+					.setButtonText("Remove from list")
+					.setDestructive()
+					.onClick(async () => {
+						const builtin = await plugin.isBuiltinTurathWork(w.id);
+						const manifest = builtin ? [] : await plugin.loadSourceManifest();
+						const source = manifest.find((entry) => plugin.workKey(entry) === key);
+						if (source) {
+							new ConfirmModal(plugin.app, {
+								title: "Remove from list and uninstall",
+								message: "This work is not in the built-in catalogue. Removing it from the list will also uninstall it and delete its generated notes; annotations are kept. Continue?",
+								confirmText: "Remove",
+								onConfirm: async () => {
+									const progress = new Notice(`Uninstalling “${w.title || w.id}”…`, 0);
+									try {
+										const ok = await plugin.removeSource(source, (done, total) =>
+											progress.setMessage(`Uninstalling “${w.title || w.id}” — ${done}/${total} files…`)
+										);
+										if (!ok) {
+											new Notice("The source could not be fully uninstalled; its custom entry was kept.");
+											return;
+										}
+										await plugin.removeTurathWork(w.id);
+										onAdded?.();
+										await renderList();
+									} finally {
+										progress.hide();
+									}
+								},
+							}).open();
+							return;
+						}
+						await plugin.removeTurathWork(w.id);
+						onAdded?.();
+						await renderList();
+					}));
 		}
 	};
 
@@ -5523,14 +5603,34 @@ function buildUrlAdder(plugin: MidadArabicSourcesPlugin, container: HTMLElement,
 	new Setting(preview).setName("Author (romanized)").addText((text) => { authorEl = text.inputEl; });
 	new Setting(preview).addButton((b) => b.setButtonText("Add to list").onClick(async () => {
 		if (!pending) return;
-		pending.title = titleEl.value.trim() || pending.title;
-		pending.author = authorEl.value.trim() || pending.author;
-		await plugin.saveTurathWork(pending);
-		pending = null;
-		inputEl.value = "";
-		preview.classList.add("mas-manage__hidden");
-		await renderList();
-		onAdded?.();
+		const work = pending;
+		work.title = titleEl.value.trim() || work.title;
+		work.author = authorEl.value.trim() || work.author;
+		const save = async (): Promise<void> => {
+			await plugin.saveTurathWork(work);
+			pending = null;
+			inputEl.value = "";
+			preview.classList.add("mas-manage__hidden");
+			await renderList();
+			onAdded?.();
+		};
+		const custom = (await plugin.loadCustomWorks()).some((item) => String(item.id) === String(work.id));
+		const available = (await plugin.listSourcesCached()).some((item) =>
+			item.collection === "turath" && String(item.id) === String(work.id)
+		);
+		const installed = (await plugin.loadSourceManifest()).some((item) =>
+			plugin.workKey(item) === `turath:${work.id}` && item.status !== "deleting"
+		);
+		if (custom || available || installed) {
+			new ConfirmModal(plugin.app, {
+				title: "Work already exists",
+				message: "This work already exists in the list of available sources. Override the entry in the list with this custom entry?",
+				confirmText: "Yes",
+				onConfirm: save,
+			}).open();
+			return;
+		}
+		await save();
 	}));
 	void renderList();
 }
@@ -5575,12 +5675,13 @@ class ManageSourcesModal extends Modal {
 	activeGenres = new Set<string>();
 	offRepos = new Set<string>();
 	allSelected = false;
+	catalogDirty = false;
 	refreshSelection: () => void = () => {};
 	updateFilter: () => void = () => {};
 	markArchiving: (work: SourceWork) => void = () => {};
 	finishArchiving: (work: SourceWork, ok: boolean) => void = () => {};
 
-	constructor(app: App, plugin: MidadArabicSourcesPlugin, works: SourceWork[], installed: Set<string>, deleting: Set<string> = new Set(), archived: Set<string> = new Set(), sizes: Map<string, number> = new Map(), zoteroStatus: Map<string, string> = new Map(), onReload?: () => void, archiving: Set<string> = new Set(), showFilter?: "all" | "installed" | "not-installed" | "archived" | "annotated") {
+	constructor(app: App, plugin: MidadArabicSourcesPlugin, works: SourceWork[], installed: Set<string>, deleting: Set<string> = new Set(), archived: Set<string> = new Set(), sizes: Map<string, number> = new Map(), zoteroStatus: Map<string, string> = new Map(), onReload?: () => void, archiving: Set<string> = new Set(), showFilter?: "all" | "installed" | "not-installed" | "archived" | "annotated", initialMode: "manage" | "zotero" | "url" = "manage") {
 		super(app);
 		this.plugin = plugin;
 		this.works = works;
@@ -5599,6 +5700,7 @@ class ManageSourcesModal extends Modal {
 		this.show = showFilter ?? (saved === "installed" || saved === "not-installed" || saved === "archived" || saved === "annotated"
 			? saved
 			: "all");
+		this.mode = initialMode;
 		this.activeGenres = new Set(plugin.settings.manageGenreFilter || []);
 	}
 
@@ -6038,11 +6140,16 @@ class ManageSourcesModal extends Modal {
 		const urlPane = contentEl.createDiv({ cls: "mas-manage__urlpane" });
 		urlPane.classList.add("mas-manage__hidden");
 		buildUrlAdder(this.plugin, urlPane, () => {
-			this.close();
-			void this.plugin.openManageSources(true, "all");
+			this.catalogDirty = true;
 		});
 
 		const setMode = (m: "manage" | "zotero" | "url") => {
+			if (m === "manage" && this.catalogDirty) {
+				this.catalogDirty = false;
+				this.close();
+				window.setTimeout(() => { void this.plugin.openManageSources(true, "all", "manage"); }, 0);
+				return;
+			}
 			const prev = this.mode;
 			this.mode = m;
 			const isUrl = m === "url";

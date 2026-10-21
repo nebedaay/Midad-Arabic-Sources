@@ -1291,6 +1291,10 @@ def load_catalog(collection: str, *, use_cache: bool = True) -> list[dict]:
             works.append({
                 "collection": collection,
                 "id": str(b["id"]),
+                # A custom-only work disappears from the catalogue when its
+                # custom entry is removed; a built-in work remains (possibly with
+                # its default metadata).
+                "builtin": str(b["id"]) in builtin_ids,
                 "name": _sentence_case_title(b.get("title") or b.get("arabic") or str(b["id"])),
                 "arabic": b.get("arabic", ""),
                 "author": b.get("author", ""),
