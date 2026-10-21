@@ -2267,6 +2267,10 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		const progress = new Notice(`Archiving “${work.title || work.dir}”…`, 0);
 		try {
 			return await this.archiveSource(work);
+		} catch (e) {
+			console.error("[midad-arabic-sources] archive", key, e);
+			new Notice(`Could not archive the source: ${e instanceof Error ? e.message : e}`);
+			return false;
 		} finally {
 			this.archivingSources.delete(key);
 			progress.hide();

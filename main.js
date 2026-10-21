@@ -14750,6 +14750,10 @@ var MidadArabicSourcesPlugin = class extends import_obsidian13.Plugin {
     const progress = new import_obsidian13.Notice(`Archiving \u201C${work.title || work.dir}\u201D\u2026`, 0);
     try {
       return await this.archiveSource(work);
+    } catch (e) {
+      console.error("[midad-arabic-sources] archive", key, e);
+      new import_obsidian13.Notice(`Could not archive the source: ${e instanceof Error ? e.message : e}`);
+      return false;
     } finally {
       this.archivingSources.delete(key);
       progress.hide();
