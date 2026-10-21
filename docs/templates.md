@@ -248,9 +248,9 @@ When you edit a template, the plugin offers to re-render the affected notes (the
 
 Each work records the repository’s own `repository-updated` date. **“Check for source updates”** runs a two-stage check: it first asks the repository for that date, and only if it moved does it fetch the item’s **content hash** (a git blob SHA returned by the server — no download). If the hash changed the text changed and it re-downloads and re-renders; if only the date moved (schema/metadata churn) it just records the new date. The check runs at most every **“Check repositories every … days”** (default 7; 0 = command only).
 
-## Annotations (planned)
+## Annotations
 
-A future version may scrape your highlights (Obsidian’s colored `==highlight==`) and markdown footnotes from an imported note and reapply them after a re-render, giving a Zotero-annotation-like workflow. For now, put your own commentary below the managed region and it will survive.
+Annotations are an overlay, not native `==` marks: select text inside the managed region and the plugin stores the quote, colour, and comment in `.midad-arabic-sources/annotations/`, then paints it in Live Preview and Reading view. The generated source note is never modified. The margin icon opens a comment tooltip, the annotation sidebar lists the active note with click-to-scroll, and each work gets a generated annotation note and a shared Source Annotations MOC. Re-renders re-anchor quotes by exact text first and then by surrounding context; unmatched annotations remain in the note's **Unanchored** section and can be re-anchored from a new selection. **Copy source with annotations** copies the source plus an Annotations section for use outside the vault. Source archive keeps the annotations when the notes are removed.
 
 ## Layouts
 

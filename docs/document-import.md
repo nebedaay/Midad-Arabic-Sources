@@ -6,9 +6,9 @@ The importer pulls born-digital Arabic texts from public repositories into your 
 
 **Manage text sources…** opens a two-pane dialogue with two tabs.
 
-Under the tabs sit the collection description and a top bar: a **Show** filter (All / Installed / Not installed), a **filter box**, a **language** select, a ↻ reload button, and **Add by URL…**. On the left are **Kinds of sources** (toggle buttons, one per genre — Tafsīr, Ḥadīth, Fiqh, Uṣūl al-Fiqh, Doctrine (ʿaqīda), Tārīkh, Biography (rijāl), Language (lugha), Lexicography, Grammar (naḥw and ṣarf), Rhetoric, Adab, Dictionaries, and more; none selected means all) and **Repositories** (a selectable list). A work can sit in more than one kind (e.g. a ḥadīth commentary is both Ḥadīth and Ḥadīth commentary). The right pane lists one clickable row per work — Language, Author, Title (with its subtitle beneath), Kind, Repository, Size, State — and the row is highlighted when selected, with no checkboxes.
+Under the tabs sit the collection description and a top bar: a **Show** filter (All / Installed / Not installed / Archived / Annotated), a **filter box**, a **language** select sorted by language name, a ↻ reload button, and **Add by URL…**. On the left are **Kinds of sources** (toggle buttons, one per genre — Tafsīr, Ḥadīth, Fiqh, Uṣūl al-Fiqh, Doctrine (ʿaqīda), Tārīkh, Biography (rijāl), Language (lugha), Lexicography, Grammar (naḥw and ṣarf), Rhetoric, Adab, Dictionaries, and more; none selected means all) and **Repositories** (a selectable list). A work can sit in more than one kind (e.g. a ḥadīth commentary is both Ḥadīth and Ḥadīth commentary). The right pane lists one clickable row per work — Language, Author, Title (with its subtitle beneath), Kind, Repository, Size, State — and the row is highlighted when selected, with no checkboxes. A row with annotations carries a highlighter icon and count. Right-clicking offers annotation deletion and, for installed works, **Archive source…**; archived rows offer **Restore from archive**. The language filter is sorted by display name, so English appears before German. The modal is capped to the window and the footer stays reachable; the table scrolls inside its pane when the window is narrow.
 
-- In the **install/uninstall** tab, installed works start selected; deselecting one marks it for removal. There is no Select All, because there are far too many works to act on at once.
+- In the **install/uninstall** tab, installed works start selected; deselecting one marks it for removal. Archived works start unselected; selecting one and applying restores it from its compressed model. There is no Select All, because there are far too many works to act on at once.
 - In the **Send references to Zotero** tab, a single **Select All/None** toggle selects, then clears, the visible installed works. See [Zotero export](./zotero.md).
 
 The catalogue of available works is cached: per session and on disk (`.midad-arabic-sources/source-catalog.json`, 7 days). Opening the dialogue serves the cache immediately and refreshes it in the background when it is stale; the ↻ button forces a fresh listing.
@@ -38,10 +38,16 @@ Turath has far more books than any catalogue can list. **Add by URL** (a tab in 
 - **Migrate imported sources to the current naming scheme** — one-off; moves works that predate the repository-qualifier convention to the current folder and file names.
 - **Check imported sources** — find works whose notes or cached model are missing and offer to restore them.
 - **Check for source updates** — ask each repository whether a text changed upstream (also on the **Check repositories every … days** cadence, default 7).
+- **Archive this source…** — compress the work's model to `.midad-arabic-sources/source-archives/<collection>/<id>.json.gz`, remove its notes, and keep its annotations and a restorable manifest entry.
+- **Annotate the selected text**, **Edit annotation**, **Delete annotation**, **Re-anchor orphaned annotation…**, **Open annotation sidebar**, and **Copy source with annotations** — the annotation commands. See [Annotations](#annotations).
 
 ## Re-rendering and your edits
 
 Regenerating a note never overwrites your work. Generated content lives inside a managed region (`<span class="mas-managed">…</span>`), and only template-declared frontmatter properties are reconciled. Everything else — including a `related:` property you edited — is preserved. See [Templates](./templates.md) for how the merge strategies work.
+
+## Annotations
+
+Annotations are painted over the generated text, never written into it. Select text inside a work's managed region to open the colour/comment popup; the **Annotate the selected text** command and editor menu are fallbacks. An animated margin icon opens a compact comment tooltip, and the **Open annotation sidebar** command or ribbon icon lists the active note's annotations with quote excerpts, click-to-scroll, editing, deletion, and links to the annotation note, MOC, and trash. Each work gets one generated annotation note and the shared `source-annotation` MOC. Re-rendering or updating a source re-anchors quotes by exact text and then by surrounding context; unmatched annotations stay in the note's **Unanchored** section. The **Re-anchor orphaned annotation…** command uses the current selection to recover one. **Copy source with annotations** copies the source plus a callout section for use elsewhere, and **Archive source…** preserves the annotation store while its notes are removed.
 
 ## Naming and provenance
 
@@ -54,6 +60,8 @@ Every generated page carries `repository`, `license-attribution`, and `repositor
 - **Notes**: under the **Import destination** (`_7 Sources` by default), one folder per work.
 - **Cached source JSON**: `.midad-arabic-sources/cache/text-sources/`.
 - **Render models**: `.midad-arabic-sources/source-models/<collection>/<id>.json`.
-- **Manifest**: `.midad-arabic-sources/source-imports.json` — the authoritative list of works and their status.
+- **Archived models**: `.midad-arabic-sources/source-archives/<collection>/<id>.json.gz`.
+- **Annotations**: `.midad-arabic-sources/annotations/<collection>/<id>/`, with the generated note under the configured annotation-note folder.
+- **Manifest**: `.midad-arabic-sources/source-imports.json` — the authoritative list of works and their status (`installed`, `deleting`, `archived`).
 
-Removing a work is a **hard delete** of its cached model and notes (not a trash move); the source JSON stays cached, so re-installing is quick.
+Removing a work is a **hard delete** of its cached model and notes (not a trash move); the source JSON stays cached, so re-installing is quick. Archiving is different: it keeps a compressed model and the annotations, and can be restored without downloading again.

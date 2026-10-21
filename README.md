@@ -56,8 +56,13 @@ A catalog-driven importer pulls classical texts from public repositories into yo
 - **Re-render imported sources** — regenerate every note from its cached model.
 - **Check imported sources** — find works whose notes or cached model are missing.
 - **Check for source updates** — ask the repositories whether a text changed upstream.
+- **Archive this source…** — compress a work's model, remove its notes, and preserve its annotations; restore it from Manage text sources.
 
 Collections currently wired in: Qurʾān commentaries (tafsīr) from `spa5k/tafsir_api` and the Qurʾānic Universal Library; Qurʾān translations from `fawazahmed0/quran-api`; ḥadīth collections from `AhmedBaset/hadith-json`; the Qurʾān in its riwāyāt from `risan/quran-json`; two dictionaries, Hans Wehr’s *Dictionary of Modern Written Arabic* and Lane’s *An Arabic-English Lexicon* (both read from their SQLite editions, one note per root); and classical books from [Turath.io](https://app.turath.io) (one note per TOC chapter, a volume index per volume, two category MOCs — `Turath` and the work type). Imports are cached, and re-rendering never overwrites your edits: generated content sits in a managed region and only template-declared frontmatter properties are reconciled. See [Document import](./docs/document-import.md) and [Templates](./docs/templates.md).
+
+### Annotations
+
+Select text inside an imported source to annotate it without changing the generated note. Annotations are stored separately, painted in Live Preview and Reading view, shown through margin icons and a comment tooltip, and listed in the annotation sidebar with click-to-scroll. Each work gets a generated annotation note and the shared **Source Annotations** MOC. Re-renders relocate quotes by exact text and context; unresolved quotes stay in the note's **Unanchored** section and can be recovered from a new selection. **Copy source with annotations** copies the source plus a colour-callout annotation section. Archiving a source keeps its annotations.
 
 ### Zotero export
 

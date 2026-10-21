@@ -39,6 +39,21 @@ See [Document import](./document-import.md) and [Templates](./templates.md).
 - **Migrate imported sources to the current naming scheme** — one-off rename to the repository-qualifier convention.
 - **Check imported sources** — find works whose notes or cached model are missing.
 - **Check for source updates** — ask each repository whether a text changed upstream.
+- **Archive this source…** — compress a work's model, remove its notes, and keep its annotations.
+
+## Annotations
+
+See [Document import](./document-import.md#annotations).
+
+- **Annotate the selected text** — open the colour/comment popup for a managed-region selection.
+- **Edit annotation** / **Delete annotation** — act on the annotation under the cursor.
+- **Re-anchor orphaned annotation…** — use the current selection as the new anchor for an unanchored annotation.
+- **Delete annotations for this source…** — move a work's annotation store and note to the plugin trash.
+- **Open annotation sidebar** — reveal the active source's annotation cards.
+- **Copy source with annotations** — copy the managed source text plus a colour-callout annotation section.
+- **Open source annotations** — open the generated per-work annotation note.
+- **Open annotation trash** — restore or permanently delete annotation batches.
+- **Reload annotations** — reload the store and repaint open source notes.
 
 ## Zotero
 
