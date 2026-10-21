@@ -55,6 +55,17 @@ Every classical work’s folder and hub use `Author - Title (repository)` — fo
 
 Every generated page carries `repository`, `license-attribution`, and `repository-updated` properties, and `[[Midad Arabic Sources]]` in its `up`, so the whole corpus is traceable to its source and to the plugin that imported it.
 
+## Model JSON namespace
+
+The hidden source models are deliberately named by identity rather than by title: `source-models/<collection>/<id>.json`. A collection is normally **repository-scoped** (the dictionary collection is the exception, with distinct ids for Wehr and Lane), and `(collection, id)` is the work's stable key. That makes the simple leaf names safe:
+
+- A Muwaṭṭaʾ from the ḥadīth-json repository is `hadith/malik.json`; the Turath Muwaṭṭaʾ is a different collection and a numeric id under `turath/`.
+- A second repository for the same genre gets its own collection (as `tafsir` and `tafsir-qul` already do), so its `malik` cannot collide with `hadith/malik`.
+- Two versions in one repository must have distinct catalogue ids; they then become `hadith/malik.json` and `hadith/malik-v2.json`.
+- Two grammar works by one author have different repository ids, e.g. `turath/123.json` and `turath/456.json`; the author and title distinguish their visible notes, not their internal models.
+
+The importer rejects duplicate `(collection, id)` keys and any two ids that sanitize to the same model path, rather than overwriting one model with another. The embedded `work.key` is authoritative, and `fetch` also refuses to replace a model that declares a different key. All 834 catalogue works currently map to 834 distinct model paths.
+
 ## Where things go
 
 - **Notes**: under the **Import destination** (`_7 Sources` by default), one folder per work.

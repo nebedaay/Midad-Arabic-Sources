@@ -1643,13 +1643,38 @@ def with_unique_dirs(works: list[dict], *, preserve_installed: bool = True) -> N
 
 
 def all_works(overrides: dict[str, dict], *, preserve_installed: bool = True) -> dict[str, dict]:
-    """Every catalogue work, merged and given a stable unique folder, by key."""
+    """Every catalogue work, merged and given a stable unique folder, by key.
+
+    The model JSON namespace is also checked here: a collection is
+    repository-scoped, and `(collection, id)` must be unique. A sanitised id
+    that would land on another work's filename is rejected rather than silently
+    overwriting that model.
+    """
     works: list[dict] = []
     for coll in COLLECTIONS:
         for w in load_catalog(coll, use_cache=True):
             works.append(apply_overrides(w, overrides))
     with_unique_dirs(works, preserve_installed=preserve_installed)
-    return {w["key"]: w for w in works}
+    out: dict[str, dict] = {}
+    model_paths: dict[str, str] = {}
+    for w in works:
+        key = str(w["key"])
+        if key in out:
+            raise ValueError(
+                f"Duplicate source key {key!r}: {out[key].get('title')!r} and "
+                f"{w.get('title')!r}. Give one a distinct catalogue id, or put "
+                "a different repository in its own collection."
+            )
+        model_path = f"{w['collection']}/{slug_to_dir(str(w['id']))}.json"
+        previous = model_paths.get(model_path)
+        if previous and previous != key:
+            raise ValueError(
+                f"Model path collision {model_path!r}: {previous!r} and {key!r}. "
+                "Give one a distinct catalogue id."
+            )
+        model_paths[model_path] = key
+        out[key] = w
+    return out
 
 
 # ── Sūrah table ──────────────────────────────────────────────────────────────
