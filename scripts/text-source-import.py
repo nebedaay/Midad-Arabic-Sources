@@ -1251,12 +1251,16 @@ def load_catalog(collection: str, *, use_cache: bool = True) -> list[dict]:
                 "language_name": "arabic",
             })
     elif spec["kind"] == "book":
-        # Built-in catalogue plus works the user added by URL (their entries win
-        # only where they are not already built in).
+        # Built-in catalogue plus works the user added by URL. A custom entry for
+        # an id that is already built in overrides its title, author, genres, and
+        # other editable fields; custom-only ids are appended.
+        custom = {str(w.get("id", "")): w for w in _custom_turath_works()}
+        entries = []
+        for b in TURATH_BOOKS:
+            cid = str(b["id"])
+            entries.append({**b, **custom.get(cid, {})})
         builtin_ids = {str(b["id"]) for b in TURATH_BOOKS}
-        entries = list(TURATH_BOOKS) + [
-            w for w in _custom_turath_works() if str(w.get("id", "")) not in builtin_ids
-        ]
+        entries.extend(w for wid, w in custom.items() if wid not in builtin_ids)
         for b in entries:
             detail = TURATH_DETAILS.get(str(b["id"]), {})
             type_key = str(b.get("type") or detail.get("type") or "other")

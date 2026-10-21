@@ -1278,6 +1278,12 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 	async saveCustomWorks(works: TurathCustomWork[]): Promise<void> {
 		await this.app.vault.adapter.write(this.customWorksPath(), JSON.stringify({ works }, null, 2));
 		this.sourceCatalog = null; // the catalogue now differs
+		// Remove the on-disk catalogue too; otherwise a reopened Manage modal serves
+		// the old titles/author until its TTL expires.
+		try {
+			const catalogPath = normalizePath(".midad-arabic-sources/source-catalog.json");
+			if (await this.app.vault.adapter.exists(catalogPath)) await this.app.vault.adapter.remove(catalogPath);
+		} catch { /* next list will rebuild it */ }
 	}
 
 	/** The numeric id from a Turath URL, or from a bare id; '' if neither. */
@@ -1349,7 +1355,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		if (i >= 0) list[i] = work;
 		else list.push(work);
 		await this.saveCustomWorks(list);
-		new Notice(`Added “${work.title}”. Open Manage text sources to install it.`);
+		new Notice(`Added “${work.title}”. Select it under Install/uninstall sources, then Apply.`);
 	}
 
 	async removeTurathWork(id: string): Promise<void> {
@@ -5304,6 +5310,10 @@ interface SourceWork {
 	id: string;
 	name: string;
 	title: string;
+	/** Arabic title, used by search even when it is not displayed in the row. */
+	title_ar?: string;
+	short_ar?: string;
+	aliases?: string[];
 	dir: string;
 	author: string;
 	language: string;
@@ -5447,7 +5457,7 @@ function header(resp: { headers?: Record<string, string> }, name: string): strin
  * a corrupt item is just uncheck + Apply, then check + Apply.
  */
 /** The "add by URL" form and the user's list; shared by the tab and the command. */
-function buildUrlAdder(plugin: MidadArabicSourcesPlugin, container: HTMLElement): void {
+function buildUrlAdder(plugin: MidadArabicSourcesPlugin, container: HTMLElement, onAdded?: () => void): void {
 	container.createEl("p", {
 		text: "Paste a Turath book URL (or its numeric ID). The plugin reads its metadata and offers a provisional romanization you can edit before adding.",
 	});
@@ -5508,6 +5518,7 @@ function buildUrlAdder(plugin: MidadArabicSourcesPlugin, container: HTMLElement)
 		inputEl.value = "";
 		preview.classList.add("mas-manage__hidden");
 		await renderList();
+		onAdded?.();
 	}));
 	void renderList();
 }
@@ -5888,7 +5899,7 @@ class ManageSourcesModal extends Modal {
 			const lg = langSel.value;
 			for (const r of this.rows) {
 				const w = r.work;
-				const hay = `${w.title} ${w.name} ${w.author} ${w.id} ${w.repository || ""}`.toLowerCase();
+				const hay = `${w.title} ${w.name} ${w.title_ar ?? ""} ${w.short_ar ?? ""} ${(w.aliases ?? []).join(" ")} ${w.author} ${w.subtitle ?? ""} ${w.id} ${w.repository || ""}`.toLowerCase();
 				const showOk = this.show === "all"
 					? true
 					: this.show === "installed"
@@ -6014,7 +6025,10 @@ class ManageSourcesModal extends Modal {
 
 		const urlPane = contentEl.createDiv({ cls: "mas-manage__urlpane" });
 		urlPane.classList.add("mas-manage__hidden");
-		buildUrlAdder(this.plugin, urlPane);
+		buildUrlAdder(this.plugin, urlPane, () => {
+			this.close();
+			void this.plugin.openManageSources(true);
+		});
 
 		const setMode = (m: "manage" | "zotero" | "url") => {
 			const prev = this.mode;
