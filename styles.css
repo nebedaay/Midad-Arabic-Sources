@@ -814,60 +814,67 @@ body.theme-dark {
 .mas-annotation.mas-band-5-3 { background-image: linear-gradient(180deg, transparent 0 60%, var(--mas-band-color) 60% 80%, transparent 80% 100%); }
 .mas-annotation.mas-band-5-4 { background-image: linear-gradient(180deg, transparent 0 80%, var(--mas-band-color) 80% 100%); }
 
-.mas-ann-gutter {
-    width: 0;
+.mas-ann-rail {
+    position: absolute;
+    inset-block: 0;
+    inset-inline-end: 0;
+    width: 2.5rem;
+    overflow: visible;
+    pointer-events: none;
+    z-index: 5;
 }
 
-.mas-ann-gutter:has(.mas-ann-margin) {
-    width: 1.9em;
+.cm-editor.mas-has-annotations,
+.markdown-preview-sizer.mas-has-annotations {
+    position: relative;
+}
+
+.cm-editor.mas-has-annotations .cm-content {
+    padding-right: 2.6rem;
+}
+
+.markdown-preview-sizer.mas-has-annotations {
+    padding-inline-end: 2.6rem;
 }
 
 .mas-ann-margin {
+    --mas-ann-icon-size: 1.15rem;
+    --mas-comment-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M22 17a2 2 0 0 1-2 2H6.828a2 2 0 0 0-1.414.586l-2.202 2.202A.71.71 0 0 1 2 21.286V5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2z'/%3E%3Cpath d='M7 11h10'/%3E%3Cpath d='M7 15h6'/%3E%3Cpath d='M7 7h8'/%3E%3C/svg%3E");
+    position: absolute;
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    gap: 1px;
-    min-width: 1.35em;
-    height: 1.35em;
+    width: 1.5rem;
+    height: 1.5rem;
     padding: 0;
     border: 0;
     border-radius: 4px;
     background: transparent;
-    color: var(--text-muted);
-    font-size: var(--font-ui-smaller);
-    line-height: 1;
     cursor: pointer;
+    pointer-events: auto;
     user-select: none;
+}
+
+.mas-ann-margin::before {
+    content: '';
+    display: inline-block;
+    width: var(--mas-ann-icon-size);
+    height: var(--mas-ann-icon-size);
+    background-color: currentColor;
+    mask-image: var(--mas-comment-icon);
+    -webkit-mask-image: var(--mas-comment-icon);
+    mask-size: contain;
+    -webkit-mask-size: contain;
+    mask-repeat: no-repeat;
+    -webkit-mask-repeat: no-repeat;
+    mask-position: center;
+    -webkit-mask-position: center;
 }
 
 .mas-ann-margin:hover,
 .mas-ann-margin:focus-visible {
     background: var(--background-modifier-hover);
-    color: var(--text-normal);
     outline: none;
-}
-
-.mas-ann-margin-glyph {
-    font-size: 0.95em;
-}
-
-.mas-ann-margin-count {
-    font-size: 0.7em;
-    opacity: 0.85;
-}
-
-.mas-ann-margin-host {
-    position: relative;
-}
-
-.mas-ann-margin-host > .mas-ann-margin {
-    position: absolute;
-    inset-inline-end: -2em;
-    top: 0.1em;
-}
-
-.markdown-preview-sizer.mas-has-annotations {
-    padding-inline-end: 2.4em;
 }
 
 .mas-ann-tooltip {

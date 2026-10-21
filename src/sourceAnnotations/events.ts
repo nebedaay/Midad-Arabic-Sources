@@ -1,4 +1,4 @@
-/** DOM events used by the CM6 gutter and Reading-view margin icons. */
+/** DOM events used by the Live Preview and Reading-view margin icons. */
 export const ANNOTATION_EVENTS = {
 	open: "mas-annotation-open",
 	hover: "mas-annotation-hover",

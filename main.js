@@ -8963,6 +8963,32 @@ var import_obsidian9 = __toModule(require("obsidian"));
 var import_view = __toModule(require("@codemirror/view"));
 var import_state = __toModule(require("@codemirror/state"));
 
+// src/sourceAnnotations/colors.ts
+var ANNOTATION_COLORS = [
+  "yellow",
+  "orange",
+  "red",
+  "purple",
+  "magenta",
+  "blue",
+  "green",
+  "gray"
+];
+var HUES = {
+  yellow: 55,
+  orange: 28,
+  red: 0,
+  purple: 265,
+  magenta: 300,
+  blue: 205,
+  green: 115,
+  gray: 100
+};
+function annotationTint(color, lightness, alpha) {
+  const saturation = color === "gray" ? "0%" : "75%";
+  return `hsla(${HUES[color]}, ${saturation}, ${lightness}%, ${alpha})`;
+}
+
 // src/sourceAnnotations/resolve.ts
 function normalizeWhitespaceWithMap(text) {
   const out = [];
@@ -9147,90 +9173,133 @@ var annotationField = import_state.StateField.define({
   },
   provide: (field) => import_view.EditorView.decorations.from(field)
 });
-function buildMarkerRows(annotations, doc) {
-  var _a;
-  const rows = new Map();
-  for (const annotation of annotations) {
-    const last = annotation.ranges[annotation.ranges.length - 1];
-    if (!last)
-      continue;
-    const line = doc.lineAt(last.end).number;
-    const ids = (_a = rows.get(line)) != null ? _a : [];
-    if (!ids.includes(annotation.id))
-      ids.push(annotation.id);
-    rows.set(line, ids);
-  }
-  return [...rows.entries()].map(([line, ids]) => ({ line, ids })).sort((a, b) => a.line - b.line);
-}
-var annotationMarkerField = import_state.StateField.define({
+var editorAnnotationsField = import_state.StateField.define({
   create: () => [],
-  update(rows, transaction) {
+  update(value, transaction) {
     for (const effect of transaction.effects) {
-      if (effect.is(setEditorAnnotations)) {
-        return buildMarkerRows(effect.value, transaction.state.doc);
-      }
+      if (effect.is(setEditorAnnotations))
+        return effect.value;
     }
-    return rows;
+    return value;
   }
 });
-function dispatchMarker(el, type, ids) {
+function fire(el, type, ids) {
   el.dispatchEvent(new CustomEvent(type, {
     bubbles: true,
     detail: { ids }
   }));
 }
-var AnnotationGutterMarker = class extends import_view.GutterMarker {
-  constructor(ids) {
-    super();
-    this.ids = ids;
+var AnnotationRail = class {
+  constructor(view) {
+    this.rail = null;
+    this.destroyed = false;
+    this.scheduled = false;
+    this.timer = 0;
+    this.view = view;
+    this.schedule();
   }
-  eq(other) {
-    return other instanceof AnnotationGutterMarker && other.ids.join("|") === this.ids.join("|");
-  }
-  toDOM() {
-    const label = this.ids.length === 1 ? "1 annotation" : `${this.ids.length} annotations`;
-    const el = createSpan({
-      cls: "mas-ann-margin",
-      attr: { role: "button", tabindex: "0", "aria-label": label }
-    });
-    el.createSpan({ cls: "mas-ann-margin-glyph", text: "\u{1F4AC}" });
-    if (this.ids.length > 1) {
-      el.createSpan({ cls: "mas-ann-margin-count", text: String(this.ids.length) });
+  update(update) {
+    if (update.docChanged || update.viewportChanged || update.geometryChanged || update.transactions.some((tr) => tr.effects.some((effect) => effect.is(setEditorAnnotations)))) {
+      this.schedule();
     }
-    el.addEventListener("mouseenter", () => dispatchMarker(el, ANNOTATION_EVENTS.hover, this.ids));
-    el.addEventListener("mouseleave", () => dispatchMarker(el, ANNOTATION_EVENTS.leave, this.ids));
-    el.addEventListener("click", (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      dispatchMarker(el, ANNOTATION_EVENTS.open, this.ids);
-    });
-    el.addEventListener("keydown", (event) => {
-      if (event.key === "Enter" || event.key === " ") {
-        event.preventDefault();
-        event.stopPropagation();
-        dispatchMarker(el, ANNOTATION_EVENTS.open, this.ids);
-      }
-    });
-    return el;
+  }
+  destroy() {
+    var _a;
+    this.destroyed = true;
+    if (this.timer)
+      window.clearTimeout(this.timer);
+    this.timer = 0;
+    (_a = this.rail) == null ? void 0 : _a.remove();
+    this.rail = null;
+    this.view.dom.classList.remove("mas-has-annotations");
+  }
+  schedule() {
+    if (this.destroyed || this.scheduled)
+      return;
+    this.scheduled = true;
+    this.timer = window.setTimeout(() => {
+      this.scheduled = false;
+      this.timer = 0;
+      if (!this.destroyed)
+        this.rebuild();
+    }, 0);
+  }
+  rebuild() {
+    var _a, _b;
+    (_a = this.rail) == null ? void 0 : _a.remove();
+    this.rail = null;
+    const annotations = [...this.view.state.field(editorAnnotationsField)].sort((a, b) => a.start - b.start);
+    if (!annotations.length) {
+      this.view.dom.classList.remove("mas-has-annotations");
+      return;
+    }
+    const editorRect = this.view.dom.getBoundingClientRect();
+    const records = [];
+    for (const annotation of annotations) {
+      const last = annotation.ranges[annotation.ranges.length - 1];
+      if (!last)
+        continue;
+      const coords = this.view.coordsAtPos(last.end);
+      if (!coords)
+        continue;
+      records.push({ annotation, top: coords.top - editorRect.top });
+    }
+    if (!records.length) {
+      this.view.dom.classList.remove("mas-has-annotations");
+      return;
+    }
+    this.view.dom.classList.add("mas-has-annotations");
+    const rail = this.view.dom.createDiv({ cls: "mas-ann-rail" });
+    this.rail = rail;
+    const groups = new Map();
+    for (const record of records) {
+      const key = Math.round(record.top);
+      const group = (_b = groups.get(key)) != null ? _b : [];
+      group.push(record);
+      groups.set(key, group);
+    }
+    for (const group of groups.values()) {
+      group.sort((a, b) => a.annotation.start - b.annotation.start);
+      group.forEach((record, index) => {
+        const icon = createEl("button", {
+          cls: "mas-ann-margin",
+          attr: { type: "button", "aria-label": "Annotation" }
+        });
+        icon.dataset.annIds = record.annotation.id;
+        icon.setCssStyles({
+          color: annotationTint(record.annotation.color, 65, 0.95),
+          top: `${Math.max(0, record.top - index * 18)}px`,
+          right: "0.35rem",
+          transform: `translateX(${index * 0.35}rem)`
+        });
+        icon.addEventListener("mouseenter", () => {
+          fire(icon, ANNOTATION_EVENTS.hover, [record.annotation.id]);
+        });
+        icon.addEventListener("mouseleave", () => {
+          fire(icon, ANNOTATION_EVENTS.leave, [record.annotation.id]);
+        });
+        icon.addEventListener("click", (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          fire(icon, ANNOTATION_EVENTS.open, [record.annotation.id]);
+        });
+        icon.addEventListener("keydown", (event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            event.stopPropagation();
+            fire(icon, ANNOTATION_EVENTS.open, [record.annotation.id]);
+          }
+        });
+        rail.appendChild(icon);
+      });
+    }
   }
 };
-var annotationGutter = (0, import_view.gutter)({
-  class: "mas-ann-gutter",
-  markers: (view) => {
-    const rows = view.state.field(annotationMarkerField);
-    const builder = new import_state.RangeSetBuilder();
-    for (const row of rows) {
-      const line = view.state.doc.line(row.line);
-      builder.add(line.from, line.from, new AnnotationGutterMarker(row.ids));
-    }
-    return builder.finish();
-  },
-  lineMarkerChange: (update) => update.state.field(annotationMarkerField) !== update.startState.field(annotationMarkerField)
-});
+var annotationRailPlugin = import_view.ViewPlugin.fromClass(AnnotationRail);
 var annotationEditorExtension = [
   annotationField,
-  annotationMarkerField,
-  annotationGutter
+  editorAnnotationsField,
+  annotationRailPlugin
 ];
 function selectionWatcher(onSelection) {
   return import_view.EditorView.updateListener.of((update) => {
@@ -9250,34 +9319,6 @@ function clearEditorAnnotations(view) {
 
 // src/sourceAnnotations/modal.ts
 var import_obsidian3 = __toModule(require("obsidian"));
-
-// src/sourceAnnotations/colors.ts
-var ANNOTATION_COLORS = [
-  "yellow",
-  "orange",
-  "red",
-  "purple",
-  "magenta",
-  "blue",
-  "green",
-  "gray"
-];
-var HUES = {
-  yellow: 55,
-  orange: 28,
-  red: 0,
-  purple: 265,
-  magenta: 300,
-  blue: 205,
-  green: 115,
-  gray: 100
-};
-function annotationTint(color, lightness, alpha) {
-  const saturation = color === "gray" ? "0%" : "75%";
-  return `hsla(${HUES[color]}, ${saturation}, ${lightness}%, ${alpha})`;
-}
-
-// src/sourceAnnotations/modal.ts
 var COLOR_LABEL = {
   yellow: "Yellow",
   orange: "Orange",
@@ -10338,6 +10379,9 @@ var obsidianDom = {
   },
   span(opts) {
     return createSpan(opts);
+  },
+  style(el, styles) {
+    el.setCssStyles(styles);
   }
 };
 var SKIP_SELECTOR = [
@@ -10399,6 +10443,7 @@ var BLOCK_TAGS = new Set([
 ]);
 function unwrapAnnotations(root) {
   root.querySelectorAll(".mas-ann-icon").forEach((el) => el.remove());
+  root.querySelectorAll(".mas-ann-rail").forEach((el) => el.remove());
   root.querySelectorAll(".mas-ann-margin").forEach((el) => el.remove());
   root.querySelectorAll(".mas-ann-margin-host").forEach((el) => el.classList.remove("mas-ann-margin-host"));
   root.classList.remove("mas-has-annotations");
@@ -10480,60 +10525,71 @@ function makeSegment(dom, segment, active, logicalStart, logicalEnd) {
   }
 }
 function addMarginIcons(root, dom, annotations) {
-  var _a, _b, _c;
+  var _a, _b;
   const marks = Array.from(root.querySelectorAll(".mas-annotation"));
-  const groups = new Map();
-  for (const annotation of annotations) {
+  const rootRect = root.getBoundingClientRect();
+  const records = [];
+  for (const annotation of [...annotations].sort((a, b) => a.start - b.start)) {
     let last = null;
     for (const mark of marks) {
-      const ids2 = ((_a = mark.dataset.annIds) != null ? _a : "").split(" ");
-      if (ids2.includes(annotation.id))
+      const ids = ((_a = mark.dataset.annIds) != null ? _a : "").split(" ");
+      if (ids.includes(annotation.id))
         last = mark;
     }
     if (!last)
       continue;
-    const block = (_b = last.closest(".callout, p, li, blockquote, h1, h2, h3, h4, h5, h6, td, th")) != null ? _b : root;
-    const ids = (_c = groups.get(block)) != null ? _c : [];
-    if (!ids.includes(annotation.id))
-      ids.push(annotation.id);
-    groups.set(block, ids);
+    const rect = last.getBoundingClientRect();
+    records.push({ annotation, top: rect.top - rootRect.top });
   }
-  if (!groups.size)
+  if (!records.length)
     return;
-  for (const [block, ids] of groups) {
-    block.classList.add("mas-ann-margin-host");
-    const label = ids.length === 1 ? "1 annotation" : `${ids.length} annotations`;
-    const icon = dom.el("button", {
-      cls: "mas-ann-margin",
-      attr: { type: "button", "aria-label": label, "data-ann-ids": ids.join(" ") }
-    });
-    icon.appendChild(dom.span({ cls: "mas-ann-margin-glyph", text: "\u{1F4AC}" }));
-    if (ids.length > 1) {
-      icon.appendChild(dom.span({ cls: "mas-ann-margin-count", text: String(ids.length) }));
-    }
-    const fire = (type) => {
-      icon.dispatchEvent(new CustomEvent(type, {
-        bubbles: true,
-        detail: { ids }
-      }));
-    };
-    icon.addEventListener("mouseenter", () => fire(ANNOTATION_EVENTS.hover));
-    icon.addEventListener("mouseleave", () => fire(ANNOTATION_EVENTS.leave));
-    icon.addEventListener("click", (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      fire(ANNOTATION_EVENTS.open);
-    });
-    icon.addEventListener("keydown", (event) => {
-      if (event.key === "Enter" || event.key === " ") {
+  root.classList.add("mas-has-annotations");
+  const rail = dom.el("div", { cls: "mas-ann-rail" });
+  const groups = new Map();
+  for (const record of records) {
+    const key = Math.round(record.top);
+    const group = (_b = groups.get(key)) != null ? _b : [];
+    group.push(record);
+    groups.set(key, group);
+  }
+  for (const group of groups.values()) {
+    group.sort((a, b) => a.annotation.start - b.annotation.start);
+    group.forEach((record, index) => {
+      const icon = dom.el("button", {
+        cls: "mas-ann-margin",
+        attr: { type: "button", "aria-label": "Annotation" }
+      });
+      icon.dataset.annIds = record.annotation.id;
+      dom.style(icon, {
+        color: annotationTint(record.annotation.color, 65, 0.95),
+        top: `${Math.max(0, record.top - index * 18)}px`,
+        right: "0.35rem",
+        transform: `translateX(${index * 0.35}rem)`
+      });
+      const fire2 = (type) => {
+        icon.dispatchEvent(new CustomEvent(type, {
+          bubbles: true,
+          detail: { ids: [record.annotation.id] }
+        }));
+      };
+      icon.addEventListener("mouseenter", () => fire2(ANNOTATION_EVENTS.hover));
+      icon.addEventListener("mouseleave", () => fire2(ANNOTATION_EVENTS.leave));
+      icon.addEventListener("click", (event) => {
         event.preventDefault();
         event.stopPropagation();
-        fire(ANNOTATION_EVENTS.open);
-      }
+        fire2(ANNOTATION_EVENTS.open);
+      });
+      icon.addEventListener("keydown", (event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          event.stopPropagation();
+          fire2(ANNOTATION_EVENTS.open);
+        }
+      });
+      rail.appendChild(icon);
     });
-    block.appendChild(icon);
   }
-  root.classList.add("mas-has-annotations");
+  root.appendChild(rail);
 }
 function applyReadingAnnotations(root, annotations, dom = obsidianDom) {
   var _a;

@@ -1,3 +1,4 @@
+import { annotationTint } from "./colors";
 import { annotationClass, bandClass, resolveAnnotations } from "./resolve";
 import { ANNOTATION_EVENTS, type AnnotationEventDetail } from "./events";
 import type { ResolvedAnnotation, SourceAnnotation } from "./types";
@@ -32,6 +33,7 @@ export interface DomOptions {
 export interface DomFactory {
 	el<K extends keyof HTMLElementTagNameMap>(tag: K, opts?: DomOptions): HTMLElementTagNameMap[K];
 	span(opts?: DomOptions): HTMLSpanElement;
+	style(el: HTMLElement, styles: Record<string, string>): void;
 }
 
 const obsidianDom: DomFactory = {
@@ -40,6 +42,9 @@ const obsidianDom: DomFactory = {
 	},
 	span(opts) {
 		return createSpan(opts);
+	},
+	style(el, styles) {
+		el.setCssStyles(styles);
 	},
 };
 
@@ -74,6 +79,7 @@ const BLOCK_TAGS = new Set([
 /** Remove any previous annotation markup so a re-run is idempotent. */
 export function unwrapAnnotations(root: HTMLElement): void {
 	root.querySelectorAll(".mas-ann-icon").forEach((el) => el.remove());
+	root.querySelectorAll(".mas-ann-rail").forEach((el) => el.remove());
 	root.querySelectorAll(".mas-ann-margin").forEach((el) => el.remove());
 	root.querySelectorAll(".mas-ann-margin-host").forEach((el) => el.classList.remove("mas-ann-margin-host"));
 	root.classList.remove("mas-has-annotations");
@@ -160,56 +166,66 @@ function makeSegment(
 
 function addMarginIcons(root: HTMLElement, dom: DomFactory, annotations: ResolvedAnnotation[]): void {
 	const marks = Array.from(root.querySelectorAll<HTMLElement>(".mas-annotation"));
-	const groups = new Map<HTMLElement, string[]>();
-	for (const annotation of annotations) {
+	const rootRect = root.getBoundingClientRect();
+	const records: Array<{ annotation: ResolvedAnnotation; top: number }> = [];
+	for (const annotation of [...annotations].sort((a, b) => a.start - b.start)) {
 		let last: HTMLElement | null = null;
 		for (const mark of marks) {
 			const ids = (mark.dataset.annIds ?? "").split(" ");
 			if (ids.includes(annotation.id)) last = mark;
 		}
 		if (!last) continue;
-		const block = last.closest<HTMLElement>(
-			".callout, p, li, blockquote, h1, h2, h3, h4, h5, h6, td, th"
-		) ?? root;
-		const ids = groups.get(block) ?? [];
-		if (!ids.includes(annotation.id)) ids.push(annotation.id);
-		groups.set(block, ids);
+		const rect = last.getBoundingClientRect();
+		records.push({ annotation, top: rect.top - rootRect.top });
 	}
-	if (!groups.size) return;
-	for (const [block, ids] of groups) {
-		block.classList.add("mas-ann-margin-host");
-		const label = ids.length === 1 ? "1 annotation" : `${ids.length} annotations`;
-		const icon = dom.el("button", {
-			cls: "mas-ann-margin",
-			attr: { type: "button", "aria-label": label, "data-ann-ids": ids.join(" ") },
-		});
-		icon.appendChild(dom.span({ cls: "mas-ann-margin-glyph", text: "💬" }));
-		if (ids.length > 1) {
-			icon.appendChild(dom.span({ cls: "mas-ann-margin-count", text: String(ids.length) }));
-		}
-		const fire = (type: string): void => {
-			icon.dispatchEvent(new CustomEvent<AnnotationEventDetail>(type, {
-				bubbles: true,
-				detail: { ids },
-			}));
-		};
-		icon.addEventListener("mouseenter", () => fire(ANNOTATION_EVENTS.hover));
-		icon.addEventListener("mouseleave", () => fire(ANNOTATION_EVENTS.leave));
-		icon.addEventListener("click", (event) => {
-			event.preventDefault();
-			event.stopPropagation();
-			fire(ANNOTATION_EVENTS.open);
-		});
-		icon.addEventListener("keydown", (event) => {
-			if (event.key === "Enter" || event.key === " ") {
+	if (!records.length) return;
+	root.classList.add("mas-has-annotations");
+	const rail = dom.el("div", { cls: "mas-ann-rail" });
+	const groups = new Map<number, typeof records>();
+	for (const record of records) {
+		const key = Math.round(record.top);
+		const group = groups.get(key) ?? [];
+		group.push(record);
+		groups.set(key, group);
+	}
+	for (const group of groups.values()) {
+		group.sort((a, b) => a.annotation.start - b.annotation.start);
+		group.forEach((record, index) => {
+			const icon = dom.el("button", {
+				cls: "mas-ann-margin",
+				attr: { type: "button", "aria-label": "Annotation" },
+			});
+			icon.dataset.annIds = record.annotation.id;
+			dom.style(icon, {
+				color: annotationTint(record.annotation.color, 65, 0.95),
+				top: `${Math.max(0, record.top - index * 18)}px`,
+				right: "0.35rem",
+				transform: `translateX(${index * 0.35}rem)`,
+			});
+			const fire = (type: string): void => {
+				icon.dispatchEvent(new CustomEvent<AnnotationEventDetail>(type, {
+					bubbles: true,
+					detail: { ids: [record.annotation.id] },
+				}));
+			};
+			icon.addEventListener("mouseenter", () => fire(ANNOTATION_EVENTS.hover));
+			icon.addEventListener("mouseleave", () => fire(ANNOTATION_EVENTS.leave));
+			icon.addEventListener("click", (event) => {
 				event.preventDefault();
 				event.stopPropagation();
 				fire(ANNOTATION_EVENTS.open);
-			}
+			});
+			icon.addEventListener("keydown", (event) => {
+				if (event.key === "Enter" || event.key === " ") {
+					event.preventDefault();
+					event.stopPropagation();
+					fire(ANNOTATION_EVENTS.open);
+				}
+			});
+			rail.appendChild(icon);
 		});
-		block.appendChild(icon);
 	}
-	root.classList.add("mas-has-annotations");
+	root.appendChild(rail);
 }
 
 /** Paint annotations into a rendered Reading-view container. */
