@@ -1578,7 +1578,7 @@ def with_unique_dirs(works: list[dict], *, preserve_installed: bool = True) -> N
     nickname dictionaries keep their established titles. Two editions can still
     share a name — one translator into several languages, or the romanised
     `-la`/`-lad` variants of one edition. Qualify the later ones with their
-    language, then their id.
+    language or edition, then a number.
 
     The result depends only on the catalogue order, never on which works are
     being fetched, so `list`, `fetch` and `check-updates` always agree on a
@@ -1618,7 +1618,6 @@ def with_unique_dirs(works: list[dict], *, preserve_installed: bool = True) -> N
         qualifiers = [
             w.get("language_label") or w.get("language"),
             edition_variant(w["id"]),
-            w["id"],
         ]
         unique = ""
         for label in qualifiers:
@@ -1628,6 +1627,10 @@ def with_unique_dirs(works: list[dict], *, preserve_installed: bool = True) -> N
             if attempt not in seen:
                 unique = attempt
                 break
+        # Same author, title, repository, language, and edition: a readable
+        # number is better than exposing the repository's opaque id in a note
+        # path. Existing installed names stay reserved, so a newcomer takes the
+        # next free number.
         if not unique:
             n = 2
             while not unique:
