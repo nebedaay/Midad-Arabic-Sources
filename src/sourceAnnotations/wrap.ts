@@ -167,7 +167,6 @@ function makeSegment(
 function addMarginIcons(root: HTMLElement, dom: DomFactory, annotations: ResolvedAnnotation[]): void {
 	const marks = Array.from(root.querySelectorAll<HTMLElement>(".mas-annotation"));
 	const rootRect = root.getBoundingClientRect();
-	const doc = root.ownerDocument;
 	const records: Array<{ annotation: ResolvedAnnotation; top: number; left: number }> = [];
 	for (const annotation of [...annotations].sort((a, b) => a.start - b.start)) {
 		let last: HTMLElement | null = null;
@@ -179,14 +178,12 @@ function addMarginIcons(root: HTMLElement, dom: DomFactory, annotations: Resolve
 		const block = last.closest<HTMLElement>(
 			"p, li, blockquote, h1, h2, h3, h4, h5, h6, td, th"
 		) ?? root;
-		const range = doc.createRange();
-		range.selectNodeContents(block);
-		const rects = Array.from(range.getClientRects());
-		const endRect = rects[rects.length - 1] ?? block.getBoundingClientRect();
+		const blockRect = block.getBoundingClientRect();
+		const markRect = last.getBoundingClientRect();
 		records.push({
 			annotation,
-			top: endRect.top - rootRect.top,
-			left: endRect.right - rootRect.left,
+			top: markRect.top - rootRect.top,
+			left: blockRect.right - rootRect.left,
 		});
 	}
 	if (!records.length) return;

@@ -157,6 +157,7 @@ class AnnotationRail {
 			return;
 		}
 		const scrollerRect = scroller.getBoundingClientRect();
+		const contentRect = this.view.contentDOM.getBoundingClientRect();
 		const records: Array<{ annotation: ResolvedAnnotation; top: number; left: number }> = [];
 		for (const annotation of annotations) {
 			const last = annotation.ranges[annotation.ranges.length - 1];
@@ -167,7 +168,7 @@ class AnnotationRail {
 			records.push({
 				annotation,
 				top: coords.top - scrollerRect.top + scroller.scrollTop,
-				left: coords.right - scrollerRect.left + scroller.scrollLeft,
+				left: contentRect.right - scrollerRect.left + scroller.scrollLeft,
 			});
 		}
 		if (!records.length) {

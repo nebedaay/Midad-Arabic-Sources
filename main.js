@@ -9235,6 +9235,7 @@ var AnnotationRail = class {
       return;
     }
     const scrollerRect = scroller.getBoundingClientRect();
+    const contentRect = this.view.contentDOM.getBoundingClientRect();
     const records = [];
     for (const annotation of annotations) {
       const last = annotation.ranges[annotation.ranges.length - 1];
@@ -9247,7 +9248,7 @@ var AnnotationRail = class {
       records.push({
         annotation,
         top: coords.top - scrollerRect.top + scroller.scrollTop,
-        left: coords.right - scrollerRect.left + scroller.scrollLeft
+        left: contentRect.right - scrollerRect.left + scroller.scrollLeft
       });
     }
     if (!records.length) {
@@ -10530,10 +10531,9 @@ function makeSegment(dom, segment, active, logicalStart, logicalEnd) {
   }
 }
 function addMarginIcons(root, dom, annotations) {
-  var _a, _b, _c, _d;
+  var _a, _b, _c;
   const marks = Array.from(root.querySelectorAll(".mas-annotation"));
   const rootRect = root.getBoundingClientRect();
-  const doc = root.ownerDocument;
   const records = [];
   for (const annotation of [...annotations].sort((a, b) => a.start - b.start)) {
     let last = null;
@@ -10545,14 +10545,12 @@ function addMarginIcons(root, dom, annotations) {
     if (!last)
       continue;
     const block = (_b = last.closest("p, li, blockquote, h1, h2, h3, h4, h5, h6, td, th")) != null ? _b : root;
-    const range = doc.createRange();
-    range.selectNodeContents(block);
-    const rects = Array.from(range.getClientRects());
-    const endRect = (_c = rects[rects.length - 1]) != null ? _c : block.getBoundingClientRect();
+    const blockRect = block.getBoundingClientRect();
+    const markRect = last.getBoundingClientRect();
     records.push({
       annotation,
-      top: endRect.top - rootRect.top,
-      left: endRect.right - rootRect.left
+      top: markRect.top - rootRect.top,
+      left: blockRect.right - rootRect.left
     });
   }
   if (!records.length)
@@ -10562,7 +10560,7 @@ function addMarginIcons(root, dom, annotations) {
   const groups = new Map();
   for (const record of records) {
     const key = Math.round(record.top);
-    const group = (_d = groups.get(key)) != null ? _d : [];
+    const group = (_c = groups.get(key)) != null ? _c : [];
     group.push(record);
     groups.set(key, group);
   }
@@ -10927,6 +10925,17 @@ var AnnotationTooltip = class {
         this.hide();
         this.options.onEdit(annotation, target, anchor);
       });
+      const openNote = actions.createEl("button", {
+        cls: "clickable-icon mas-ann-card-action",
+        attr: { type: "button", "aria-label": "Open annotation note" }
+      });
+      (0, import_obsidian8.setIcon)(openNote, "notebook-pen");
+      openNote.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        this.hide();
+        this.options.onOpenNote(target);
+      });
       const remove = actions.createEl("button", {
         cls: "clickable-icon mas-ann-card-action",
         attr: { type: "button", "aria-label": "Delete annotation" }
@@ -11083,6 +11092,10 @@ var AnnotationService = class {
         this.tooltip.hide();
         this.confirmDeleteAnnotation(target, annotation);
       },
+      onOpenNote: (target) => {
+        this.tooltip.hide();
+        void this.openAnnotationNoteForTarget(target);
+      },
       onEnter: () => this.cancelTooltipHide(),
       onLeave: () => this.scheduleTooltipHide()
     });
@@ -11198,12 +11211,7 @@ var AnnotationService = class {
           new import_obsidian9.Notice("This note is not part of an imported source.");
           return;
         }
-        const path2 = await renderAnnotationNote(this.app, this.store, this.settings, target.workKey);
-        if (!path2)
-          return;
-        const file = this.app.vault.getAbstractFileByPath(path2);
-        if (file instanceof import_obsidian9.TFile)
-          await this.app.workspace.getLeaf().openFile(file);
+        await this.openAnnotationNoteForTarget(target);
       }
     });
     this.plugin.addCommand({
@@ -11772,6 +11780,14 @@ var AnnotationService = class {
   async annotationsFor(target) {
     const unit = await this.store.getUnit(target.workKey, target.unitKey);
     return unit ? [...unit.annotations] : [];
+  }
+  async openAnnotationNoteForTarget(target) {
+    const path2 = await renderAnnotationNote(this.app, this.store, this.settings, target.workKey);
+    if (!path2)
+      return;
+    const file = this.app.vault.getAbstractFileByPath(path2);
+    if (file instanceof import_obsidian9.TFile)
+      await this.app.workspace.getLeaf().openFile(file);
   }
   async targetForPath(path2) {
     const stored = this.store.findTarget(path2);

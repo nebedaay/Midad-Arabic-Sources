@@ -115,6 +115,10 @@ export class AnnotationService {
 				this.tooltip.hide();
 				this.confirmDeleteAnnotation(target, annotation);
 			},
+			onOpenNote: (target) => {
+				this.tooltip.hide();
+				void this.openAnnotationNoteForTarget(target);
+			},
 			onEnter: () => this.cancelTooltipHide(),
 			onLeave: () => this.scheduleTooltipHide(),
 		});
@@ -232,10 +236,7 @@ export class AnnotationService {
 					new Notice("This note is not part of an imported source.");
 					return;
 				}
-				const path = await renderAnnotationNote(this.app, this.store, this.settings, target.workKey);
-				if (!path) return;
-				const file = this.app.vault.getAbstractFileByPath(path);
-				if (file instanceof TFile) await this.app.workspace.getLeaf().openFile(file);
+				await this.openAnnotationNoteForTarget(target);
 			},
 		});
 
@@ -818,6 +819,13 @@ export class AnnotationService {
 	private async annotationsFor(target: AnnotationTarget): Promise<SourceAnnotation[]> {
 		const unit = await this.store.getUnit(target.workKey, target.unitKey);
 		return unit ? [...unit.annotations] : [];
+	}
+
+	private async openAnnotationNoteForTarget(target: AnnotationTarget): Promise<void> {
+		const path = await renderAnnotationNote(this.app, this.store, this.settings, target.workKey);
+		if (!path) return;
+		const file = this.app.vault.getAbstractFileByPath(path);
+		if (file instanceof TFile) await this.app.workspace.getLeaf().openFile(file);
 	}
 
 	private async targetForPath(path: string): Promise<AnnotationTarget | null> {

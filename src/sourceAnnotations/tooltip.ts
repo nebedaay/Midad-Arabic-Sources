@@ -5,6 +5,7 @@ import type { AnnotationTarget, SourceAnnotation } from "./types";
 export interface AnnotationTooltipOptions {
 	onEdit: (annotation: SourceAnnotation, target: AnnotationTarget, anchor: HTMLElement) => void;
 	onDelete: (annotation: SourceAnnotation, target: AnnotationTarget) => void;
+	onOpenNote: (target: AnnotationTarget) => void;
 	onEnter?: () => void;
 	onLeave?: () => void;
 }
@@ -66,6 +67,17 @@ export class AnnotationTooltip {
 				event.stopPropagation();
 				this.hide();
 				this.options.onEdit(annotation, target, anchor);
+			});
+			const openNote = actions.createEl("button", {
+				cls: "clickable-icon mas-ann-card-action",
+				attr: { type: "button", "aria-label": "Open annotation note" },
+			});
+			setIcon(openNote, "notebook-pen");
+			openNote.addEventListener("click", (event) => {
+				event.preventDefault();
+				event.stopPropagation();
+				this.hide();
+				this.options.onOpenNote(target);
 			});
 			const remove = actions.createEl("button", {
 				cls: "clickable-icon mas-ann-card-action",
