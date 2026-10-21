@@ -424,7 +424,8 @@ Displaying Qur'an sūras in the Qur'an vault
     flex: 1 1 auto;
     min-width: 0;
     min-height: 0;
-    overflow: hidden;
+    overflow: auto;
+    overscroll-behavior: contain;
 }
 .mas-manage {
     display: flex;
@@ -560,7 +561,7 @@ Displaying Qur'an sūras in the Qur'an vault
 .mas-manage__list {
     flex: 1 1 auto;
     min-width: 0;
-    min-height: 0;
+    min-height: 160px;
     overflow: auto;
     border: 1px solid var(--background-modifier-border);
     border-radius: var(--radius-s);
