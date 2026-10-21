@@ -9266,35 +9266,39 @@ var ConfirmModal = class extends import_obsidian3.Modal {
     this.contentEl.empty();
   }
 };
-var AnnotationModal = class extends import_obsidian3.Modal {
+var AnnotationPopup = class {
   constructor(app, options) {
-    super(app);
+    this.popup = null;
     this.submitted = false;
+    this.closed = false;
     this.deleteArmed = false;
     this.swatches = [];
     this.textarea = null;
-    this.previewEl = null;
     this.deleteButton = null;
-    var _a, _b;
+    this.outsideHandler = null;
+    this.scrollHandler = null;
+    this.resizeHandler = null;
+    var _a, _b, _c, _d;
+    this.app = app;
     this.options = options;
     this.color = (_b = (_a = options.draft.annotation) == null ? void 0 : _a.color) != null ? _b : options.defaultColor;
+    this.doc = (_c = app.workspace.containerEl.ownerDocument) != null ? _c : document;
+    this.win = (_d = this.doc.defaultView) != null ? _d : window;
   }
-  onOpen() {
+  open(anchor) {
     var _a, _b;
-    const { contentEl, titleEl } = this;
-    this.modalEl.addClass("mas-annotation-modal");
-    contentEl.addClass("mas-annotation-modal-content");
-    titleEl.setText(this.options.draft.annotation ? "Edit annotation" : "Annotate selection");
-    const preview = contentEl.createDiv({ cls: "mas-annotation-preview" });
-    preview.dataset.color = this.color;
-    preview.setText(this.options.draft.quoteText || this.options.draft.quote);
-    this.previewEl = preview;
-    this.updatePreviewColor();
-    const row = contentEl.createDiv({ cls: "mas-swatch-row" });
-    row.setAttribute("role", "radiogroup");
-    row.setAttribute("aria-label", "Highlight colour");
+    const popup = this.doc.body.createDiv({ cls: "mas-annotation-popup" });
+    popup.setAttribute("role", "dialog");
+    popup.setAttribute("aria-label", this.options.draft.annotation ? "Edit annotation" : "Annotate selection");
+    this.popup = popup;
+    const row = popup.createDiv({ cls: "mas-annotation-popup-row" });
+    const label = row.createEl("label", { cls: "mas-annotation-label", text: "Comment" });
+    label.setAttribute("for", "mas-annotation-comment");
+    const swatchRow = row.createDiv({ cls: "mas-annotation-popup-swatches" });
+    swatchRow.setAttribute("role", "radiogroup");
+    swatchRow.setAttribute("aria-label", "Highlight colour");
     for (const color of COLORS) {
-      const button = row.createEl("button", {
+      const button = swatchRow.createEl("button", {
         cls: `mas-swatch ${color === this.color ? "is-selected" : ""}`,
         attr: {
           type: "button",
@@ -9312,15 +9316,13 @@ var AnnotationModal = class extends import_obsidian3.Modal {
       });
       this.swatches.push(button);
     }
-    row.addEventListener("keydown", (event) => this.onSwatchKey(event));
-    const label = contentEl.createEl("label", { cls: "mas-annotation-label", text: "Comment" });
-    label.setAttribute("for", "mas-annotation-comment");
-    const textarea = contentEl.createEl("textarea", {
+    swatchRow.addEventListener("keydown", (event) => this.onSwatchKey(event));
+    const textarea = popup.createEl("textarea", {
       cls: "mas-annotation-comment",
       attr: {
         id: "mas-annotation-comment",
         placeholder: "Comment (Markdown; wikilinks welcome)",
-        rows: "4"
+        rows: "3"
       }
     });
     textarea.value = (_b = (_a = this.options.draft.annotation) == null ? void 0 : _a.comment) != null ? _b : "";
@@ -9331,46 +9333,83 @@ var AnnotationModal = class extends import_obsidian3.Modal {
       }
     });
     this.textarea = textarea;
-    const hint = contentEl.createDiv({ cls: "mas-annotation-hint" });
-    hint.setText("Esc cancels \xB7 Cmd/Ctrl+Enter saves");
-    const buttons = contentEl.createDiv({ cls: "modal-button-container" });
+    const footer = popup.createDiv({ cls: "mas-annotation-popup-footer" });
+    const hint = footer.createDiv({ cls: "mas-annotation-hint" });
+    hint.setText("Esc \xB7 Cmd/Ctrl+Enter");
+    const buttons = footer.createDiv({ cls: "mas-annotation-popup-buttons" });
     if (this.options.onDelete) {
       this.deleteButton = new import_obsidian3.ButtonComponent(buttons).setButtonText("Delete").setClass("mod-warning").onClick(() => {
         void this.delete();
       });
     }
-    new import_obsidian3.ButtonComponent(buttons).setButtonText("Cancel").onClick(() => this.close());
+    new import_obsidian3.ButtonComponent(buttons).setButtonText("Cancel").onClick(() => this.close("button"));
     new import_obsidian3.ButtonComponent(buttons).setButtonText("Save").setCta().onClick(() => {
       void this.save();
     });
-    this.scope.register([], "Escape", () => {
-      this.close();
-      return false;
+    popup.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        this.close("escape");
+      }
     });
-    window.setTimeout(() => {
-      var _a2, _b2;
-      (_b2 = (_a2 = this.swatches.find((button) => button.classList.contains("is-selected"))) != null ? _a2 : this.swatches[0]) == null ? void 0 : _b2.focus();
+    this.outsideHandler = (event) => {
+      var _a2;
+      if (!((_a2 = this.popup) == null ? void 0 : _a2.contains(event.target)))
+        this.close("outside");
+    };
+    this.doc.addEventListener("pointerdown", this.outsideHandler, true);
+    this.scrollHandler = (event) => {
+      var _a2;
+      if (!((_a2 = this.popup) == null ? void 0 : _a2.contains(event.target)))
+        this.close("outside");
+    };
+    this.win.addEventListener("scroll", this.scrollHandler, true);
+    this.resizeHandler = () => this.close("outside");
+    this.win.addEventListener("resize", this.resizeHandler);
+    this.win.setTimeout(() => {
+      var _a2;
+      if (!this.popup)
+        return;
+      this.position(anchor);
+      (_a2 = this.selectedSwatch()) == null ? void 0 : _a2.focus();
     }, 0);
   }
+  selectedSwatch() {
+    var _a;
+    return (_a = this.swatches.find((button) => button.classList.contains("is-selected"))) != null ? _a : this.swatches[0];
+  }
+  position(anchor) {
+    var _a;
+    if (!this.popup)
+      return;
+    const margin = 8;
+    const rect = this.popup.getBoundingClientRect();
+    let left = anchor ? anchor.left : this.win.innerWidth / 2 - rect.width / 2;
+    let top = anchor ? anchor.bottom + 6 : this.win.innerHeight / 2;
+    if (left + rect.width + margin > this.win.innerWidth)
+      left = this.win.innerWidth - rect.width - margin;
+    if (top + rect.height + margin > this.win.innerHeight) {
+      top = ((_a = anchor == null ? void 0 : anchor.top) != null ? _a : this.win.innerHeight / 2) - rect.height - 6;
+    }
+    left = Math.max(margin, left);
+    top = Math.max(margin, top);
+    this.popup.setCssStyles({ left: `${left}px`, top: `${top}px` });
+  }
   onSwatchKey(event) {
-    var _a, _b, _c;
+    var _a, _b;
     const index = COLORS.indexOf(this.color);
-    if (event.key === "ArrowUp" || event.key === "ArrowDown") {
+    if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
       event.preventDefault();
-      const delta = event.key === "ArrowDown" ? 1 : -1;
+      const delta = event.key === "ArrowRight" ? 1 : -1;
       const next = (index + delta + COLORS.length) % COLORS.length;
       this.selectColor(COLORS[next]);
       (_a = this.swatches[next]) == null ? void 0 : _a.focus();
       return;
     }
-    if (event.key === "ArrowRight" || event.key === "Tab") {
-      event.preventDefault();
-      (_b = this.textarea) == null ? void 0 : _b.focus();
-      return;
-    }
     if (event.key === "Enter") {
       event.preventDefault();
-      (_c = this.textarea) == null ? void 0 : _c.focus();
+      (_b = this.textarea) == null ? void 0 : _b.focus();
     }
   }
   selectColor(color) {
@@ -9382,13 +9421,6 @@ var AnnotationModal = class extends import_obsidian3.Modal {
       button.setAttribute("aria-checked", String(selected));
       button.setAttribute("tabindex", selected ? "0" : "-1");
     }
-    this.updatePreviewColor();
-  }
-  updatePreviewColor() {
-    if (!this.previewEl)
-      return;
-    this.previewEl.dataset.color = this.color;
-    this.previewEl.setCssStyles({ background: tint(this.color, 82, 0.55) });
   }
   async save() {
     var _a, _b;
@@ -9396,7 +9428,7 @@ var AnnotationModal = class extends import_obsidian3.Modal {
     try {
       await this.options.onSubmit(this.color, comment);
       this.submitted = true;
-      this.close();
+      this.close("button");
     } catch (error) {
       console.error("[midad-arabic-sources] save annotation", error);
       new import_obsidian3.Notice(`Could not save annotation: ${error instanceof Error ? error.message : String(error)}`);
@@ -9415,18 +9447,31 @@ var AnnotationModal = class extends import_obsidian3.Modal {
     try {
       await this.options.onDelete();
       this.submitted = true;
-      this.close();
+      this.close("button");
     } catch (error) {
       console.error("[midad-arabic-sources] delete annotation", error);
       new import_obsidian3.Notice(`Could not delete annotation: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
-  onClose() {
-    var _a, _b, _c, _d;
-    this.contentEl.empty();
+  close(reason) {
+    var _a, _b, _c, _d, _e;
+    if (this.closed)
+      return;
+    this.closed = true;
+    if (this.outsideHandler)
+      this.doc.removeEventListener("pointerdown", this.outsideHandler, true);
+    if (this.scrollHandler)
+      this.win.removeEventListener("scroll", this.scrollHandler, true);
+    if (this.resizeHandler)
+      this.win.removeEventListener("resize", this.resizeHandler);
+    this.outsideHandler = null;
+    this.scrollHandler = null;
+    this.resizeHandler = null;
+    (_a = this.popup) == null ? void 0 : _a.remove();
+    this.popup = null;
     if (!this.submitted)
-      (_b = (_a = this.options).onCancel) == null ? void 0 : _b.call(_a);
-    (_d = (_c = this.options).onClosed) == null ? void 0 : _d.call(_c);
+      (_c = (_b = this.options).onCancel) == null ? void 0 : _c.call(_b, reason);
+    (_e = (_d = this.options).onClosed) == null ? void 0 : _e.call(_d);
   }
 };
 
@@ -10688,7 +10733,7 @@ var AnnotationService = class {
     this.autoTimers = new WeakMap();
     this.suppressAutoUntil = 0;
     this.suppressAutoSignature = "";
-    this.modalOpen = false;
+    this.dialogOpen = false;
     this.disposed = false;
     this.host = host;
     this.app = host.app;
@@ -10983,7 +11028,7 @@ var AnnotationService = class {
     }
     if (!this.settings.annotateOnSelection)
       return;
-    if (this.modalOpen || this.anyModalOpen())
+    if (this.dialogOpen || this.anyModalOpen())
       return;
     if (Date.now() < this.suppressAutoUntil)
       return;
@@ -10999,7 +11044,7 @@ var AnnotationService = class {
       this.autoTimers.delete(view);
       if (this.disposed || !this.settings.annotateOnSelection)
         return;
-      if (this.modalOpen || this.anyModalOpen())
+      if (this.dialogOpen || this.anyModalOpen())
         return;
       if (Date.now() < this.suppressAutoUntil)
         return;
@@ -11065,6 +11110,17 @@ var AnnotationService = class {
     const to = editor.posToOffset(editor.getCursor("to"));
     return `${from}:${to}`;
   }
+  anchorForEditor(editor) {
+    const cm = editor.cm;
+    if (!cm)
+      return void 0;
+    const to = editor.posToOffset(editor.getCursor("to"));
+    const coords = cm.coordsAtPos(to);
+    if (coords)
+      return { left: coords.left, top: coords.top, bottom: coords.bottom };
+    const rect = cm.dom.getBoundingClientRect();
+    return { left: rect.left + 20, top: rect.top + 20, bottom: rect.top + 40 };
+  }
   async openAnnotate(editor, file, autoSignature) {
     if (!file)
       return;
@@ -11089,23 +11145,28 @@ var AnnotationService = class {
     }
     const from = editor.getCursor("from");
     const to = editor.getCursor("to");
-    this.modalOpen = true;
-    new AnnotationModal(this.app, {
+    const anchor = this.anchorForEditor(editor);
+    this.dialogOpen = true;
+    new AnnotationPopup(this.app, {
       draft,
       defaultColor: this.settings.annotationDefaultColor,
       onSubmit: async (color, comment) => {
         await this.createAnnotation(target, draft, color, comment);
         this.suppressAutoSignature = signature;
-      },
-      onCancel: () => {
-        this.suppressAutoSignature = signature;
         editor.focus();
         editor.setSelection(from, to);
       },
+      onCancel: (reason) => {
+        this.suppressAutoSignature = signature;
+        if (reason !== "outside") {
+          editor.focus();
+          editor.setSelection(from, to);
+        }
+      },
       onClosed: () => {
-        this.modalOpen = false;
+        this.dialogOpen = false;
       }
-    }).open();
+    }).open(anchor);
   }
   async createAnnotation(target, draft, color, comment) {
     const annotations = await this.annotationsFor(target);
@@ -11165,8 +11226,9 @@ var AnnotationService = class {
     const from = editor.getCursor("from");
     const to = editor.getCursor("to");
     const signature = this.selectionSignatureForEditor(editor);
-    this.modalOpen = true;
-    new AnnotationModal(this.app, {
+    const anchor = this.anchorForEditor(editor);
+    this.dialogOpen = true;
+    new AnnotationPopup(this.app, {
       draft,
       defaultColor: hit.color,
       onSubmit: async (color, comment) => {
@@ -11176,6 +11238,8 @@ var AnnotationService = class {
         await this.syncArtifacts(target.workKey);
         await this.refreshViews();
         this.suppressAutoSignature = signature;
+        editor.focus();
+        editor.setSelection(from, to);
         new import_obsidian8.Notice("Annotation updated.");
       },
       onDelete: async () => {
@@ -11185,17 +11249,21 @@ var AnnotationService = class {
         await this.syncArtifacts(target.workKey);
         await this.refreshViews();
         this.suppressAutoSignature = signature;
-        new import_obsidian8.Notice("Annotation deleted.");
-      },
-      onCancel: () => {
-        this.suppressAutoSignature = signature;
         editor.focus();
         editor.setSelection(from, to);
+        new import_obsidian8.Notice("Annotation deleted.");
+      },
+      onCancel: (reason) => {
+        this.suppressAutoSignature = signature;
+        if (reason !== "outside") {
+          editor.focus();
+          editor.setSelection(from, to);
+        }
       },
       onClosed: () => {
-        this.modalOpen = false;
+        this.dialogOpen = false;
       }
-    }).open();
+    }).open(anchor);
   }
   async confirmDeleteAtCursor(editor, file) {
     const target = await this.targetForPath(file.path);

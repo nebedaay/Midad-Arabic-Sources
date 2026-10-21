@@ -848,55 +848,61 @@ body.theme-dark {
 
 /* ── Annotation dialog and notes ──────────────────────────────────────────── */
 
-.modal.mas-annotation-modal {
-    width: min(600px, 92vw);
+.mas-annotation-popup {
+    position: fixed;
+    z-index: var(--layer-popover);
+    width: min(360px, 92vw);
     max-width: 92vw;
-}
-
-.mas-annotation-modal-content {
-    min-width: 0;
-    max-height: 80vh;
-    overflow-y: auto;
-}
-
-.mas-annotation-modal-content .modal-button-container {
-    position: sticky;
-    bottom: 0;
-    z-index: 2;
-    display: flex;
-    flex-wrap: wrap;
-    justify-content: flex-end;
-    gap: 8px;
-    padding-top: 10px;
+    padding: 9px 10px 8px;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 8px;
     background: var(--background-primary);
+    box-shadow: 0 3px 14px rgba(0, 0, 0, 0.18);
+    font-family: var(--font-interface);
+    font-size: var(--font-ui-small);
+    line-height: 1.35;
 }
 
-.mas-annotation-preview {
-    margin: 0 0 14px;
-    padding: 10px 12px;
-    border-radius: 6px;
-    background: hsla(var(--mas-hue, var(--mas-gray)), 70%, 82%, 0.55);
-    color: var(--text-normal);
-    white-space: pre-wrap;
-    max-height: 9em;
-    overflow-y: auto;
-    unicode-bidi: plaintext;
-}
-
-.mas-swatch-row {
+.mas-annotation-popup-row {
     display: flex;
-    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 6px;
+}
+
+.mas-annotation-popup-swatches {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.mas-annotation-popup-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
     gap: 8px;
-    margin: 4px 0 16px;
+    margin-top: 6px;
+}
+
+.mas-annotation-popup-buttons {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.mas-annotation-popup-buttons button {
+    font-size: var(--font-ui-smaller);
+    height: auto;
+    padding: 3px 8px;
 }
 
 .mas-swatch {
-    width: 28px;
-    height: 28px;
+    width: 16px;
+    height: 16px;
     padding: 0;
     border-radius: 999px;
     border: 2px solid transparent;
-    background: hsla(var(--mas-hue, var(--mas-gray)), 75%, 62%, 0.9);
     box-shadow: inset 0 0 0 1px var(--background-modifier-border);
     cursor: pointer;
 }
@@ -909,47 +915,32 @@ body.theme-dark {
 
 .mas-swatch.is-selected {
     border-color: var(--text-accent);
-    box-shadow: 0 0 0 2px var(--background-primary), 0 0 0 3px var(--text-accent);
+    box-shadow: 0 0 0 1px var(--background-primary), 0 0 0 2px var(--text-accent);
 }
 
 .mas-annotation-label {
     display: block;
-    margin-bottom: 5px;
-    color: var(--text-muted);
-    font-size: var(--font-ui-small);
-}
-
-.mas-annotation-comment {
-    width: 100%;
-    min-height: 90px;
-    box-sizing: border-box;
-    resize: vertical;
-    font-family: var(--font-text);
-    font-size: var(--font-text-size);
-}
-
-.mas-annotation-hint {
-    margin-top: 6px;
+    margin: 0;
     color: var(--text-muted);
     font-size: var(--font-ui-smaller);
 }
 
-.mas-annotation-preview[data-color="yellow"],
-.mas-swatch[data-color="yellow"] { --mas-hue: var(--mas-yellow); }
-.mas-annotation-preview[data-color="orange"],
-.mas-swatch[data-color="orange"] { --mas-hue: var(--mas-orange); }
-.mas-annotation-preview[data-color="red"],
-.mas-swatch[data-color="red"] { --mas-hue: var(--mas-red); }
-.mas-annotation-preview[data-color="purple"],
-.mas-swatch[data-color="purple"] { --mas-hue: var(--mas-purple); }
-.mas-annotation-preview[data-color="magenta"],
-.mas-swatch[data-color="magenta"] { --mas-hue: var(--mas-magenta); }
-.mas-annotation-preview[data-color="blue"],
-.mas-swatch[data-color="blue"] { --mas-hue: var(--mas-blue); }
-.mas-annotation-preview[data-color="green"],
-.mas-swatch[data-color="green"] { --mas-hue: var(--mas-green); }
-.mas-annotation-preview[data-color="gray"],
-.mas-swatch[data-color="gray"] { --mas-hue: var(--mas-gray); --mas-annot-sat: 0%; }
+.mas-annotation-comment {
+    width: 100%;
+    min-height: 64px;
+    box-sizing: border-box;
+    resize: vertical;
+    font-family: var(--font-text);
+    font-size: var(--font-text-size);
+    line-height: 1.4;
+}
+
+.mas-annotation-hint {
+    margin: 0;
+    color: var(--text-muted);
+    font-size: var(--font-ui-smaller);
+    white-space: nowrap;
+}
 
 .callout[data-callout^="mas-annotation"] {
     --callout-blend-mode: normal;

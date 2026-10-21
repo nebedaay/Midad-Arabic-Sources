@@ -12,11 +12,17 @@ export interface AnnotationDraft {
 	segments: Array<[number, number]>;
 }
 
-export interface AnnotationModalOptions {
+export interface PopupAnchor {
+	left: number;
+	top: number;
+	bottom: number;
+}
+
+export interface AnnotationPopupOptions {
 	draft: AnnotationDraft;
 	defaultColor: AnnotationColor;
 	onSubmit: (color: AnnotationColor, comment: string) => Promise<void> | void;
-	onCancel?: () => void;
+	onCancel?: (reason: "escape" | "button" | "outside") => void;
 	onDelete?: () => Promise<void> | void;
 	onClosed?: () => void;
 }
@@ -52,10 +58,6 @@ function tint(color: AnnotationColor, lightness: number, alpha: number): string 
 	return `hsla(${COLOR_HUE[color]}, ${saturation}, ${lightness}%, ${alpha})`;
 }
 
-/**
- * The creation/edit dialog. The colour row is focused on open; Up/Down changes
- * colour, Right or Tab moves to the comment, Esc cancels, Cmd/Ctrl+Enter saves.
- */
 export interface ConfirmOptions {
 	title: string;
 	message: string;
@@ -97,39 +99,51 @@ export class ConfirmModal extends Modal {
 	}
 }
 
-export class AnnotationModal extends Modal {
-	private readonly options: AnnotationModalOptions;
+/**
+ * The compact annotation popup: a fixed-position panel next to the selection,
+ * not a centered modal. The swatch row is horizontal, so Left/Right moves
+ * between colours and Tab moves to the comment box.
+ */
+export class AnnotationPopup {
+	private readonly app: App;
+	private readonly options: AnnotationPopupOptions;
 	private color: AnnotationColor;
+	private popup: HTMLElement | null = null;
 	private submitted = false;
+	private closed = false;
 	private deleteArmed = false;
 	private swatches: HTMLButtonElement[] = [];
 	private textarea: HTMLTextAreaElement | null = null;
-	private previewEl: HTMLElement | null = null;
 	private deleteButton: ButtonComponent | null = null;
+	private readonly doc: Document;
+	private readonly win: Window;
+	private outsideHandler: ((event: PointerEvent) => void) | null = null;
+	private scrollHandler: ((event: Event) => void) | null = null;
+	private resizeHandler: (() => void) | null = null;
 
-	constructor(app: App, options: AnnotationModalOptions) {
-		super(app);
+	constructor(app: App, options: AnnotationPopupOptions) {
+		this.app = app;
 		this.options = options;
 		this.color = options.draft.annotation?.color ?? options.defaultColor;
+		this.doc = app.workspace.containerEl.ownerDocument ?? document;
+		this.win = this.doc.defaultView ?? window;
 	}
 
-	onOpen(): void {
-		const { contentEl, titleEl } = this;
-		this.modalEl.addClass("mas-annotation-modal");
-		contentEl.addClass("mas-annotation-modal-content");
-		titleEl.setText(this.options.draft.annotation ? "Edit annotation" : "Annotate selection");
+	open(anchor?: PopupAnchor): void {
+		const popup = this.doc.body.createDiv({ cls: "mas-annotation-popup" });
+		popup.setAttribute("role", "dialog");
+		popup.setAttribute("aria-label", this.options.draft.annotation ? "Edit annotation" : "Annotate selection");
+		this.popup = popup;
 
-		const preview = contentEl.createDiv({ cls: "mas-annotation-preview" });
-		preview.dataset.color = this.color;
-		preview.setText(this.options.draft.quoteText || this.options.draft.quote);
-		this.previewEl = preview;
-		this.updatePreviewColor();
+		const row = popup.createDiv({ cls: "mas-annotation-popup-row" });
+		const label = row.createEl("label", { cls: "mas-annotation-label", text: "Comment" });
+		label.setAttribute("for", "mas-annotation-comment");
 
-		const row = contentEl.createDiv({ cls: "mas-swatch-row" });
-		row.setAttribute("role", "radiogroup");
-		row.setAttribute("aria-label", "Highlight colour");
+		const swatchRow = row.createDiv({ cls: "mas-annotation-popup-swatches" });
+		swatchRow.setAttribute("role", "radiogroup");
+		swatchRow.setAttribute("aria-label", "Highlight colour");
 		for (const color of COLORS) {
-			const button = row.createEl("button", {
+			const button = swatchRow.createEl("button", {
 				cls: `mas-swatch ${color === this.color ? "is-selected" : ""}`,
 				attr: {
 					type: "button",
@@ -147,16 +161,14 @@ export class AnnotationModal extends Modal {
 			});
 			this.swatches.push(button);
 		}
-		row.addEventListener("keydown", (event) => this.onSwatchKey(event));
+		swatchRow.addEventListener("keydown", (event) => this.onSwatchKey(event));
 
-		const label = contentEl.createEl("label", { cls: "mas-annotation-label", text: "Comment" });
-		label.setAttribute("for", "mas-annotation-comment");
-		const textarea = contentEl.createEl("textarea", {
+		const textarea = popup.createEl("textarea", {
 			cls: "mas-annotation-comment",
 			attr: {
 				id: "mas-annotation-comment",
 				placeholder: "Comment (Markdown; wikilinks welcome)",
-				rows: "4",
+				rows: "3",
 			},
 		});
 		textarea.value = this.options.draft.annotation?.comment ?? "";
@@ -168,10 +180,10 @@ export class AnnotationModal extends Modal {
 		});
 		this.textarea = textarea;
 
-		const hint = contentEl.createDiv({ cls: "mas-annotation-hint" });
-		hint.setText("Esc cancels · Cmd/Ctrl+Enter saves");
-
-		const buttons = contentEl.createDiv({ cls: "modal-button-container" });
+		const footer = popup.createDiv({ cls: "mas-annotation-popup-footer" });
+		const hint = footer.createDiv({ cls: "mas-annotation-hint" });
+		hint.setText("Esc · Cmd/Ctrl+Enter");
+		const buttons = footer.createDiv({ cls: "mas-annotation-popup-buttons" });
 		if (this.options.onDelete) {
 			this.deleteButton = new ButtonComponent(buttons)
 				.setButtonText("Delete")
@@ -180,34 +192,65 @@ export class AnnotationModal extends Modal {
 		}
 		new ButtonComponent(buttons)
 			.setButtonText("Cancel")
-			.onClick(() => this.close());
+			.onClick(() => this.close("button"));
 		new ButtonComponent(buttons)
 			.setButtonText("Save")
 			.setCta()
 			.onClick(() => { void this.save(); });
 
-		this.scope.register([], "Escape", () => {
-			this.close();
-			return false;
+		popup.addEventListener("keydown", (event) => {
+			if (event.key === "Escape") {
+				event.preventDefault();
+				event.stopPropagation();
+				this.close("escape");
+			}
 		});
-		window.setTimeout(() => {
-			(this.swatches.find((button) => button.classList.contains("is-selected")) ?? this.swatches[0])?.focus();
+
+		this.outsideHandler = (event: PointerEvent) => {
+			if (!this.popup?.contains(event.target as Node)) this.close("outside");
+		};
+		this.doc.addEventListener("pointerdown", this.outsideHandler, true);
+		this.scrollHandler = (event: Event) => {
+			if (!this.popup?.contains(event.target as Node)) this.close("outside");
+		};
+		this.win.addEventListener("scroll", this.scrollHandler, true);
+		this.resizeHandler = () => this.close("outside");
+		this.win.addEventListener("resize", this.resizeHandler);
+
+		this.win.setTimeout(() => {
+			if (!this.popup) return;
+			this.position(anchor);
+			this.selectedSwatch()?.focus();
 		}, 0);
+	}
+
+	private selectedSwatch(): HTMLButtonElement | undefined {
+		return this.swatches.find((button) => button.classList.contains("is-selected")) ?? this.swatches[0];
+	}
+
+	private position(anchor?: PopupAnchor): void {
+		if (!this.popup) return;
+		const margin = 8;
+		const rect = this.popup.getBoundingClientRect();
+		let left = anchor ? anchor.left : this.win.innerWidth / 2 - rect.width / 2;
+		let top = anchor ? anchor.bottom + 6 : this.win.innerHeight / 2;
+		if (left + rect.width + margin > this.win.innerWidth) left = this.win.innerWidth - rect.width - margin;
+		if (top + rect.height + margin > this.win.innerHeight) {
+			top = (anchor?.top ?? this.win.innerHeight / 2) - rect.height - 6;
+		}
+		left = Math.max(margin, left);
+		top = Math.max(margin, top);
+		this.popup.setCssStyles({ left: `${left}px`, top: `${top}px` });
 	}
 
 	private onSwatchKey(event: KeyboardEvent): void {
 		const index = COLORS.indexOf(this.color);
-		if (event.key === "ArrowUp" || event.key === "ArrowDown") {
+		if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
 			event.preventDefault();
-			const delta = event.key === "ArrowDown" ? 1 : -1;
+			const delta = event.key === "ArrowRight" ? 1 : -1;
 			const next = (index + delta + COLORS.length) % COLORS.length;
 			this.selectColor(COLORS[next]);
 			this.swatches[next]?.focus();
-			return;
-		}
-		if (event.key === "ArrowRight" || event.key === "Tab") {
-			event.preventDefault();
-			this.textarea?.focus();
 			return;
 		}
 		if (event.key === "Enter") {
@@ -225,13 +268,6 @@ export class AnnotationModal extends Modal {
 			button.setAttribute("aria-checked", String(selected));
 			button.setAttribute("tabindex", selected ? "0" : "-1");
 		}
-		this.updatePreviewColor();
-	}
-
-	private updatePreviewColor(): void {
-		if (!this.previewEl) return;
-		this.previewEl.dataset.color = this.color;
-		this.previewEl.setCssStyles({ background: tint(this.color, 82, 0.55) });
 	}
 
 	private async save(): Promise<void> {
@@ -239,7 +275,7 @@ export class AnnotationModal extends Modal {
 		try {
 			await this.options.onSubmit(this.color, comment);
 			this.submitted = true;
-			this.close();
+			this.close("button");
 		} catch (error) {
 			console.error("[midad-arabic-sources] save annotation", error);
 			new Notice(`Could not save annotation: ${error instanceof Error ? error.message : String(error)}`);
@@ -257,16 +293,25 @@ export class AnnotationModal extends Modal {
 		try {
 			await this.options.onDelete();
 			this.submitted = true;
-			this.close();
+			this.close("button");
 		} catch (error) {
 			console.error("[midad-arabic-sources] delete annotation", error);
 			new Notice(`Could not delete annotation: ${error instanceof Error ? error.message : String(error)}`);
 		}
 	}
 
-	onClose(): void {
-		this.contentEl.empty();
-		if (!this.submitted) this.options.onCancel?.();
+	private close(reason: "escape" | "button" | "outside"): void {
+		if (this.closed) return;
+		this.closed = true;
+		if (this.outsideHandler) this.doc.removeEventListener("pointerdown", this.outsideHandler, true);
+		if (this.scrollHandler) this.win.removeEventListener("scroll", this.scrollHandler, true);
+		if (this.resizeHandler) this.win.removeEventListener("resize", this.resizeHandler);
+		this.outsideHandler = null;
+		this.scrollHandler = null;
+		this.resizeHandler = null;
+		this.popup?.remove();
+		this.popup = null;
+		if (!this.submitted) this.options.onCancel?.(reason);
 		this.options.onClosed?.();
 	}
 }

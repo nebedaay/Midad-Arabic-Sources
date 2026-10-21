@@ -15,7 +15,7 @@ import {
 	resolveForEditor,
 	selectionWatcher,
 } from "./editor";
-import { AnnotationModal, ConfirmModal, type AnnotationDraft } from "./modal";
+import { AnnotationPopup, ConfirmModal, type AnnotationDraft, type PopupAnchor } from "./modal";
 import {
 	annotationMocPath,
 	renderAnnotationMoc,
@@ -86,7 +86,7 @@ export class AnnotationService {
 	private readonly autoTimers = new WeakMap<EditorView, number>();
 	private suppressAutoUntil = 0;
 	private suppressAutoSignature = "";
-	private modalOpen = false;
+	private dialogOpen = false;
 	private disposed = false;
 
 	constructor(host: AnnotationHost) {
@@ -390,7 +390,7 @@ export class AnnotationService {
 			return;
 		}
 		if (!this.settings.annotateOnSelection) return;
-		if (this.modalOpen || this.anyModalOpen()) return;
+		if (this.dialogOpen || this.anyModalOpen()) return;
 		if (Date.now() < this.suppressAutoUntil) return;
 		const signature = `${selection.from}:${selection.to}`;
 		if (this.suppressAutoSignature && this.suppressAutoSignature !== signature) {
@@ -402,7 +402,7 @@ export class AnnotationService {
 		const timer = window.setTimeout(() => {
 			this.autoTimers.delete(view);
 			if (this.disposed || !this.settings.annotateOnSelection) return;
-			if (this.modalOpen || this.anyModalOpen()) return;
+			if (this.dialogOpen || this.anyModalOpen()) return;
 			if (Date.now() < this.suppressAutoUntil) return;
 			const current = view.state.selection.main;
 			if (current.from !== from || current.to !== to) return;
@@ -457,6 +457,16 @@ export class AnnotationService {
 		return `${from}:${to}`;
 	}
 
+	private anchorForEditor(editor: Editor): PopupAnchor | undefined {
+		const cm = (editor as unknown as { cm?: EditorView }).cm;
+		if (!cm) return undefined;
+		const to = editor.posToOffset(editor.getCursor("to"));
+		const coords = cm.coordsAtPos(to);
+		if (coords) return { left: coords.left, top: coords.top, bottom: coords.bottom };
+		const rect = cm.dom.getBoundingClientRect();
+		return { left: rect.left + 20, top: rect.top + 20, bottom: rect.top + 40 };
+	}
+
 	private async openAnnotate(editor: Editor, file: TFile | null, autoSignature?: string): Promise<void> {
 		if (!file) return;
 		const draft = this.draftFromEditor(editor, file);
@@ -483,23 +493,28 @@ export class AnnotationService {
 		}
 		const from = editor.getCursor("from");
 		const to = editor.getCursor("to");
-		this.modalOpen = true;
-		new AnnotationModal(this.app, {
+		const anchor = this.anchorForEditor(editor);
+		this.dialogOpen = true;
+		new AnnotationPopup(this.app, {
 			draft,
 			defaultColor: this.settings.annotationDefaultColor,
 			onSubmit: async (color, comment) => {
 				await this.createAnnotation(target, draft, color, comment);
 				this.suppressAutoSignature = signature;
-			},
-			onCancel: () => {
-				this.suppressAutoSignature = signature;
 				editor.focus();
 				editor.setSelection(from, to);
 			},
-			onClosed: () => {
-				this.modalOpen = false;
+			onCancel: (reason) => {
+				this.suppressAutoSignature = signature;
+				if (reason !== "outside") {
+					editor.focus();
+					editor.setSelection(from, to);
+				}
 			},
-		}).open();
+			onClosed: () => {
+				this.dialogOpen = false;
+			},
+		}).open(anchor);
 	}
 
 	private async createAnnotation(
@@ -570,8 +585,9 @@ export class AnnotationService {
 		const from = editor.getCursor("from");
 		const to = editor.getCursor("to");
 		const signature = this.selectionSignatureForEditor(editor);
-		this.modalOpen = true;
-		new AnnotationModal(this.app, {
+		const anchor = this.anchorForEditor(editor);
+		this.dialogOpen = true;
+		new AnnotationPopup(this.app, {
 			draft,
 			defaultColor: hit.color,
 			onSubmit: async (color, comment) => {
@@ -583,6 +599,8 @@ export class AnnotationService {
 				await this.syncArtifacts(target.workKey);
 				await this.refreshViews();
 				this.suppressAutoSignature = signature;
+				editor.focus();
+				editor.setSelection(from, to);
 				new Notice("Annotation updated.");
 			},
 			onDelete: async () => {
@@ -592,17 +610,21 @@ export class AnnotationService {
 				await this.syncArtifacts(target.workKey);
 				await this.refreshViews();
 				this.suppressAutoSignature = signature;
-				new Notice("Annotation deleted.");
-			},
-			onCancel: () => {
-				this.suppressAutoSignature = signature;
 				editor.focus();
 				editor.setSelection(from, to);
+				new Notice("Annotation deleted.");
+			},
+			onCancel: (reason) => {
+				this.suppressAutoSignature = signature;
+				if (reason !== "outside") {
+					editor.focus();
+					editor.setSelection(from, to);
+				}
 			},
 			onClosed: () => {
-				this.modalOpen = false;
+				this.dialogOpen = false;
 			},
-		}).open();
+		}).open(anchor);
 	}
 
 	private async confirmDeleteAtCursor(editor: Editor, file: TFile): Promise<void> {
