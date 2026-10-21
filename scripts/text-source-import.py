@@ -4192,6 +4192,21 @@ def cmd_fetch(args: argparse.Namespace) -> int:
         work["license_attribution"] = repo_license_attribution(work)
         model = work_model(work, units, created, layout)
         model_path = MODEL_DIR / work["collection"] / f"{slug_to_dir(work['id'])}.json"
+        # The path is `<collection>/<repository id>.json`; the collection is the
+        # namespace. Refuse to let a sanitised id overwrite a model that says it
+        # belongs to a different work.
+        if model_path.exists():
+            try:
+                existing = json.loads(model_path.read_text(encoding="utf-8"))
+                existing_key = str((existing.get("work") or {}).get("key") or "")
+                if existing_key and existing_key != str(work["key"]):
+                    emit("error", message=(
+                        f"Model name collision: {model_path} belongs to {existing_key}, "
+                        f"not {work['key']}."
+                    ))
+                    return 1
+            except Exception:  # noqa: BLE001 - a corrupt model is simply replaced
+                pass
         model_path.parent.mkdir(parents=True, exist_ok=True)
         model_path.write_text(json.dumps(model, ensure_ascii=False, indent=1), encoding="utf-8")
         models.append(str(model_path))
