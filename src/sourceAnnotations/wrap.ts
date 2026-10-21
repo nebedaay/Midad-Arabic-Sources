@@ -206,8 +206,8 @@ function addMarginIcons(root: HTMLElement, dom: DomFactory, annotations: Resolve
 			icon.dataset.annIds = record.annotation.id;
 			dom.style(icon, {
 				color: annotationTint(record.annotation.color, 65, 0.95),
-				top: `${Math.max(0, record.top - index * 18)}px`,
-				left: `${Math.max(6, Math.min(record.left + 6 + index * 5.6, root.clientWidth - 26))}px`,
+				top: `${Math.max(0, record.top - index * 6)}px`,
+				left: `${Math.max(6, Math.min(record.left + 6 + index * 6, root.clientWidth - 26))}px`,
 			});
 			const fire = (type: string): void => {
 				icon.dispatchEvent(new CustomEvent<AnnotationEventDetail>(type, {
