@@ -76,7 +76,7 @@ const reviewWarnings = {
         // Midad Arabic Sources
         "ETA", "MOC", "OCR", "CSL", "SQLite", "BERT", "MLE", "CAMeL", "PDFS",
       ],
-      ignoreWords: ["Use", "Copy", "Manage", "Settings", "Community"],
+      ignoreWords: ["Use", "Copy", "Manage", "Settings", "Community", "Cursor", "cursor"],
       ignoreRegex: ["mas-", "@[a-z]", "midad-arabic-sources", "app\\.turath\\.io"],
     },
   ],

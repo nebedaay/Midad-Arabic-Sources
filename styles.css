@@ -845,3 +845,114 @@ body.theme-dark {
     margin-inline-start: 0.08em;
     opacity: 0.8;
 }
+
+/* ── Annotation dialog and notes ──────────────────────────────────────────── */
+
+.mas-annotation-modal {
+    min-width: min(560px, 90vw);
+}
+
+.mas-annotation-preview {
+    margin: 0 0 14px;
+    padding: 10px 12px;
+    border-radius: 6px;
+    background: hsla(var(--mas-hue, var(--mas-gray)), 70%, 82%, 0.55);
+    color: var(--text-normal);
+    white-space: pre-wrap;
+    max-height: 9em;
+    overflow-y: auto;
+    unicode-bidi: plaintext;
+}
+
+.mas-swatch-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 4px 0 16px;
+}
+
+.mas-swatch {
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    border-radius: 999px;
+    border: 2px solid transparent;
+    background: hsla(var(--mas-hue, var(--mas-gray)), 75%, 62%, 0.9);
+    box-shadow: inset 0 0 0 1px var(--background-modifier-border);
+    cursor: pointer;
+}
+
+.mas-swatch:hover,
+.mas-swatch:focus-visible {
+    border-color: var(--text-normal);
+    outline: none;
+}
+
+.mas-swatch.is-selected {
+    border-color: var(--text-accent);
+    box-shadow: 0 0 0 2px var(--background-primary), 0 0 0 3px var(--text-accent);
+}
+
+.mas-annotation-label {
+    display: block;
+    margin-bottom: 5px;
+    color: var(--text-muted);
+    font-size: var(--font-ui-small);
+}
+
+.mas-annotation-comment {
+    width: 100%;
+    min-height: 90px;
+    resize: vertical;
+    font-family: var(--font-text);
+    font-size: var(--font-text-size);
+}
+
+.mas-annotation-hint {
+    margin-top: 6px;
+    color: var(--text-muted);
+    font-size: var(--font-ui-smaller);
+}
+
+.mas-annotation-preview[data-color="yellow"],
+.mas-swatch[data-color="yellow"] { --mas-hue: var(--mas-yellow); }
+.mas-annotation-preview[data-color="orange"],
+.mas-swatch[data-color="orange"] { --mas-hue: var(--mas-orange); }
+.mas-annotation-preview[data-color="red"],
+.mas-swatch[data-color="red"] { --mas-hue: var(--mas-red); }
+.mas-annotation-preview[data-color="purple"],
+.mas-swatch[data-color="purple"] { --mas-hue: var(--mas-purple); }
+.mas-annotation-preview[data-color="magenta"],
+.mas-swatch[data-color="magenta"] { --mas-hue: var(--mas-magenta); }
+.mas-annotation-preview[data-color="blue"],
+.mas-swatch[data-color="blue"] { --mas-hue: var(--mas-blue); }
+.mas-annotation-preview[data-color="green"],
+.mas-swatch[data-color="green"] { --mas-hue: var(--mas-green); }
+.mas-annotation-preview[data-color="gray"],
+.mas-swatch[data-color="gray"] { --mas-hue: var(--mas-gray); --mas-annot-sat: 0%; }
+
+.callout[data-callout^="mas-annotation"] {
+    --callout-blend-mode: normal;
+    --mas-hue: var(--mas-gray);
+    border-left: 3px solid hsla(var(--mas-hue), 75%, 55%, 0.8);
+    background-color: hsla(var(--mas-hue), 75%, 90%, 0.45);
+}
+
+.callout[data-callout^="mas-annotation"] .callout-title {
+    color: var(--text-normal);
+}
+
+.callout[data-callout="mas-annotation-yellow"] { --mas-hue: var(--mas-yellow); }
+.callout[data-callout="mas-annotation-orange"] { --mas-hue: var(--mas-orange); }
+.callout[data-callout="mas-annotation-red"] { --mas-hue: var(--mas-red); }
+.callout[data-callout="mas-annotation-purple"] { --mas-hue: var(--mas-purple); }
+.callout[data-callout="mas-annotation-magenta"] { --mas-hue: var(--mas-magenta); }
+.callout[data-callout="mas-annotation-blue"] { --mas-hue: var(--mas-blue); }
+.callout[data-callout="mas-annotation-green"] { --mas-hue: var(--mas-green); }
+.callout[data-callout="mas-annotation-gray"] { --mas-hue: var(--mas-gray); --mas-annot-sat: 0%; }
+
+.callout[data-callout^="mas-annotation"] blockquote {
+    border-left-color: hsla(var(--mas-hue), 60%, 55%, 0.5);
+    color: var(--text-normal);
+    unicode-bidi: plaintext;
+}

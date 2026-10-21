@@ -4,7 +4,7 @@ import { annotationClass, annotationLabel, bandClass, resolveAnnotations } from 
 import type { ResolvedAnnotation, SourceAnnotation } from "./types";
 
 /** Annotations resolved against the current editor document. */
-export const setSpikeAnnotations = StateEffect.define<ResolvedAnnotation[]>();
+export const setEditorAnnotations = StateEffect.define<ResolvedAnnotation[]>();
 
 class CommentWidget extends WidgetType {
 	private readonly ids: string;
@@ -124,7 +124,7 @@ export const annotationField = StateField.define<DecorationSet>({
 	create: () => Decoration.none,
 	update(decorations, transaction) {
 		for (const effect of transaction.effects) {
-			if (effect.is(setSpikeAnnotations)) {
+			if (effect.is(setEditorAnnotations)) {
 				return buildDecorations(effect.value, transaction.state.doc.length);
 			}
 		}
@@ -139,10 +139,10 @@ export function resolveForEditor(doc: string, annotations: SourceAnnotation[]): 
 	return resolveAnnotations(doc, annotations, false);
 }
 
-export function applySpikeAnnotations(view: EditorView, annotations: ResolvedAnnotation[]): void {
-	view.dispatch({ effects: setSpikeAnnotations.of(annotations) });
+export function applyEditorAnnotations(view: EditorView, annotations: ResolvedAnnotation[]): void {
+	view.dispatch({ effects: setEditorAnnotations.of(annotations) });
 }
 
-export function clearSpikeAnnotations(view: EditorView): void {
-	view.dispatch({ effects: setSpikeAnnotations.of([]) });
+export function clearEditorAnnotations(view: EditorView): void {
+	view.dispatch({ effects: setEditorAnnotations.of([]) });
 }

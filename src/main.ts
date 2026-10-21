@@ -43,7 +43,8 @@ import {
 } from "./sourceImport/history";
 import { BUNDLED_ASSETS } from "./assets.generated";
 import { openDocs, getDocs } from "./docs";
-import { registerAnnotationSpike } from "./sourceAnnotations/spike";
+import { registerAnnotations, AnnotationService } from "./sourceAnnotations/service";
+import type { AnnotationColor } from "./sourceAnnotations/types";
 
 // ── External tool resolution (mirrors ScholarWeft's tools.ts) ────────────────
 // Electron's renderer does not inherit the shell PATH, so we probe candidates
@@ -140,6 +141,10 @@ interface ArabicSupportSettings {
 	canonicalQuranRiwāya: string;
 	canonicalQuranFolder: string;
 	sourceMocParent: string;
+	// Annotations
+	annotationNoteFolder: string;
+	annotationDefaultColor: AnnotationColor;
+	annotationTrashDays: number;
 	manageShowFilter?: string;
 	manageGenreFilter?: string[];
 	sourceUpdateCheckDays?: number;
@@ -447,6 +452,9 @@ const DEFAULT_SETTINGS: ArabicSupportSettings = {
 	canonicalQuranRiwāya: "",
 	canonicalQuranFolder: "_7 Sources/Quran",
 	sourceMocParent: "Sources",
+	annotationNoteFolder: "_7 Sources/Notes",
+	annotationDefaultColor: "yellow",
+	annotationTrashDays: 30,
 	manageShowFilter: "all",
 	manageGenreFilter: [],
 	zoteroExport: false,
@@ -476,6 +484,8 @@ export default class ArabicSupportPlugin extends Plugin {
 	sourceOperationKind: "explicit" | "auto" | null = null;
 	/** The Python process currently acquiring sources, if any. */
 	activeSourceProc: ReturnType<typeof spawn> | null = null;
+	/** Phase 1 annotation layer; null until startup succeeds. */
+	annotations: AnnotationService | null = null;
 
 	async onload() {
 		await this.loadSettings();
@@ -483,8 +493,18 @@ export default class ArabicSupportPlugin extends Plugin {
 		// (they ship inside main.js; see gen-assets.mjs).
 		this.extractBundledAssets();
 		this.addSettingTab(new ArabicSupportSettingTab(this.app, this));
-		// Phase 0 annotation spike: read the sharded store and paint annotations.
-		registerAnnotationSpike(this);
+		try {
+			this.annotations = await registerAnnotations({
+				app: this.app,
+				plugin: this,
+				settings: this.settings,
+				refreshParent: () => this.refreshAnnotationParent(),
+			});
+			await this.refreshAnnotationParent();
+		} catch (error) {
+			console.error("[midad-arabic-sources] annotations failed to start", error);
+			new Notice("The annotation layer could not start. See the developer console for details.");
+		}
 
 		this.addCommand({
 			id: "transliterate-selection-to-clipboard",
@@ -714,6 +734,7 @@ export default class ArabicSupportPlugin extends Plugin {
 	}
 
 	onunload(): void {
+		this.annotations?.dispose();
 		// Invalidate this instance's source operation before a re-enable creates a
 		// new one: the old render loop checks the generation per note, and the
 		// importer subprocess is killed, so two instances cannot write together.
@@ -2126,6 +2147,13 @@ export default class ArabicSupportPlugin extends Plugin {
 			// Refresh only the MOCs and parent note; never re-render the removed
 			// work. It is still flagged, so it drops out of the sources list now.
 			await this.refreshSourcesIndex();
+			// Annotations outlive the source text: keep the store and annotation
+			// note, and mark the note's source-status as removed.
+			try {
+				await this.annotations?.onSourceRemoved(key);
+			} catch (e) {
+				console.error("[midad-arabic-sources] annotation status after removal", e);
+			}
 		} catch (e) {
 			// Leave the entry flagged "deleting": the next maintenance run retries.
 			problems.push(e instanceof Error ? e.message : String(e));
@@ -2249,6 +2277,9 @@ export default class ArabicSupportPlugin extends Plugin {
 		const mocNames = [...new Set(installed.flatMap((w) => (
 			Array.isArray(w.mocs) ? (w.mocs as string[]) : (typeof w.moc === "string" ? [w.moc] : [])
 		)))].filter(Boolean).sort();
+		if (this.annotations?.hasAnnotatedWorks() || this.annotations?.mocExists()) {
+			if (!mocNames.includes("source-annotation")) mocNames.push("source-annotation");
+		}
 		const parentPath = await this.updateSourceParent(templates, mocNames, today);
 		if (parentPath) written.push(parentPath);
 		return written;
@@ -2648,6 +2679,35 @@ export default class ArabicSupportPlugin extends Plugin {
 	 * creates one; only its managed region and merge-keep properties are written,
 	 * so hand-written content is never lost.
 	 */
+	/**
+	 * Refresh only the top-level parent note after an annotation change, so the
+	 * Source Annotations MOC appears there without re-rendering every category MOC.
+	 */
+	async refreshAnnotationParent(): Promise<void> {
+		const userFolder = this.settings.sourceTemplateFolder.trim() || null;
+		let templates: TemplateSet;
+		try {
+			templates = await loadTemplates(this.app, this.bundledTemplateDir(), userFolder);
+		} catch {
+			return;
+		}
+		try {
+			const manifest = await this.loadSourceManifest();
+			const installed = manifest.filter((w) => this.workStatus(w) === "installed");
+			const mocNames = [...new Set(installed.flatMap((w) => (
+				Array.isArray(w.mocs) ? (w.mocs as string[]) : (typeof w.moc === "string" ? [w.moc] : [])
+			)))].filter(Boolean).sort();
+			if (this.annotations?.hasAnnotatedWorks() || this.annotations?.mocExists()) {
+				if (!mocNames.includes("source-annotation")) mocNames.push("source-annotation");
+			}
+			if (!mocNames.length) return;
+			const today = new Date().toISOString().slice(0, 10);
+			await this.updateSourceParent(templates, mocNames, today);
+		} catch (error) {
+			console.error("[midad-arabic-sources] annotation parent", error);
+		}
+	}
+
 	async updateSourceParent(templates: TemplateSet, mocs: string[], generated: string): Promise<string | null> {
 		const name = (this.settings.sourceMocParent || "").trim() || "Sources";
 		if (!mocs.length) return null;
@@ -2899,6 +2959,11 @@ export default class ArabicSupportPlugin extends Plugin {
 				model.work.dir = newDir;
 				await adapter.write(modelRel, JSON.stringify(model));
 				work.dir = newDir;
+				try {
+					await this.annotations?.onSourceRenamed(key, oldDir, newDir);
+				} catch (e) {
+					console.error("[midad-arabic-sources] annotation paths after rename", e);
+				}
 				migrated.push(key);
 				models.push(`${this.vaultPath()}/${modelRel}`);
 				notice.setMessage(`Renaming sources: ${migrated.length} moved — ${newDir}`);
@@ -4062,6 +4127,41 @@ class ArabicSupportSettingTab extends PluginSettingTab {
 					},
 					doc("Document import guide", "document-import.md", "Collections, the Manage text sources dialogue, naming, and updates."),
 					doc("Templates guide", "templates.md", "The ETA templates and the render-model reference."),
+				],
+			},
+			{
+				type: "page",
+				name: "Annotations",
+				desc: "Highlights, comments, the annotation note, and the Source Annotations MOC.",
+				items: [
+					{
+						name: "Annotation note folder",
+						desc: "Folder for the generated per-work annotation notes. They are ordinary notes; the plugin only owns their annotations region.",
+						control: { type: "text", key: "annotationNoteFolder", placeholder: "_7 Sources/Notes" },
+					},
+					{
+						name: "Default annotation colour",
+						desc: "Colour selected when the annotation dialog opens.",
+						control: {
+							type: "dropdown",
+							key: "annotationDefaultColor",
+							options: {
+								yellow: "Yellow",
+								orange: "Orange",
+								red: "Red",
+								purple: "Purple",
+								magenta: "Magenta",
+								blue: "Blue",
+								green: "Green",
+								gray: "Gray",
+							},
+						},
+					},
+					{
+						name: "Annotation trash retention (days)",
+						desc: "How long deleted annotations and their notes stay in the plugin trash before permanent removal.",
+						control: { type: "number", key: "annotationTrashDays", defaultValue: 30, placeholder: "30", min: 1 },
+					},
 				],
 			},
 			{

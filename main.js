@@ -41,7 +41,7 @@ var fs2 = __toModule(require("fs"));
 var http = __toModule(require("http"));
 var os = __toModule(require("os"));
 var import_util = __toModule(require("util"));
-var import_obsidian6 = __toModule(require("obsidian"));
+var import_obsidian9 = __toModule(require("obsidian"));
 
 // src/sourceImport/render.ts
 var import_obsidian = __toModule(require("obsidian"));
@@ -8956,8 +8956,8 @@ function openDocs(app, name = "README.md") {
   new DocsModal(app, name).open();
 }
 
-// src/sourceAnnotations/spike.ts
-var import_obsidian5 = __toModule(require("obsidian"));
+// src/sourceAnnotations/service.ts
+var import_obsidian8 = __toModule(require("obsidian"));
 
 // src/sourceAnnotations/editor.ts
 var import_view = __toModule(require("@codemirror/view"));
@@ -9077,7 +9077,7 @@ function annotationLabel(color) {
 }
 
 // src/sourceAnnotations/editor.ts
-var setSpikeAnnotations = import_state.StateEffect.define();
+var setEditorAnnotations = import_state.StateEffect.define();
 var CommentWidget = class extends import_view.WidgetType {
   constructor(annotations) {
     super();
@@ -9180,7 +9180,7 @@ var annotationField = import_state.StateField.define({
   create: () => import_view.Decoration.none,
   update(decorations, transaction) {
     for (const effect of transaction.effects) {
-      if (effect.is(setSpikeAnnotations)) {
+      if (effect.is(setEditorAnnotations)) {
         return buildDecorations(effect.value, transaction.state.doc.length);
       }
     }
@@ -9192,15 +9192,977 @@ var annotationEditorExtension = [annotationField];
 function resolveForEditor(doc, annotations) {
   return resolveAnnotations(doc, annotations, false);
 }
-function applySpikeAnnotations(view, annotations) {
-  view.dispatch({ effects: setSpikeAnnotations.of(annotations) });
+function applyEditorAnnotations(view, annotations) {
+  view.dispatch({ effects: setEditorAnnotations.of(annotations) });
 }
-function clearSpikeAnnotations(view) {
-  view.dispatch({ effects: setSpikeAnnotations.of([]) });
+function clearEditorAnnotations(view) {
+  view.dispatch({ effects: setEditorAnnotations.of([]) });
+}
+
+// src/sourceAnnotations/modal.ts
+var import_obsidian3 = __toModule(require("obsidian"));
+var COLORS = [
+  "yellow",
+  "orange",
+  "red",
+  "purple",
+  "magenta",
+  "blue",
+  "green",
+  "gray"
+];
+var COLOR_LABEL = {
+  yellow: "Yellow",
+  orange: "Orange",
+  red: "Red",
+  purple: "Purple",
+  magenta: "Magenta",
+  blue: "Blue",
+  green: "Green",
+  gray: "Gray"
+};
+var ConfirmModal = class extends import_obsidian3.Modal {
+  constructor(app, options) {
+    super(app);
+    this.options = options;
+  }
+  onOpen() {
+    var _a;
+    this.titleEl.setText(this.options.title);
+    this.contentEl.createEl("p", { text: this.options.message });
+    const buttons = this.contentEl.createDiv({ cls: "modal-button-container" });
+    new import_obsidian3.ButtonComponent(buttons).setButtonText("Cancel").onClick(() => this.close());
+    new import_obsidian3.ButtonComponent(buttons).setButtonText((_a = this.options.confirmText) != null ? _a : "Confirm").setDestructive().onClick(async () => {
+      await this.options.onConfirm();
+      this.close();
+    });
+  }
+  onClose() {
+    this.contentEl.empty();
+  }
+};
+var AnnotationModal = class extends import_obsidian3.Modal {
+  constructor(app, options) {
+    super(app);
+    this.submitted = false;
+    this.deleteArmed = false;
+    this.swatches = [];
+    this.textarea = null;
+    this.previewEl = null;
+    this.deleteButton = null;
+    var _a, _b;
+    this.options = options;
+    this.color = (_b = (_a = options.draft.annotation) == null ? void 0 : _a.color) != null ? _b : options.defaultColor;
+  }
+  onOpen() {
+    var _a, _b;
+    const { contentEl, titleEl } = this;
+    contentEl.addClass("mas-annotation-modal");
+    titleEl.setText(this.options.draft.annotation ? "Edit annotation" : "Annotate selection");
+    const preview = contentEl.createDiv({ cls: "mas-annotation-preview" });
+    preview.dataset.color = this.color;
+    preview.setText(this.options.draft.quoteText || this.options.draft.quote);
+    this.previewEl = preview;
+    const row = contentEl.createDiv({ cls: "mas-swatch-row" });
+    row.setAttribute("role", "radiogroup");
+    row.setAttribute("aria-label", "Highlight colour");
+    for (const color of COLORS) {
+      const button = row.createEl("button", {
+        cls: `mas-swatch ${color === this.color ? "is-selected" : ""}`,
+        attr: {
+          type: "button",
+          role: "radio",
+          "aria-label": COLOR_LABEL[color],
+          "aria-checked": String(color === this.color),
+          "data-color": color,
+          tabindex: color === this.color ? "0" : "-1"
+        }
+      });
+      button.addEventListener("click", () => {
+        this.selectColor(color);
+        button.focus();
+      });
+      this.swatches.push(button);
+    }
+    row.addEventListener("keydown", (event) => this.onSwatchKey(event));
+    const label = contentEl.createEl("label", { cls: "mas-annotation-label", text: "Comment" });
+    label.setAttribute("for", "mas-annotation-comment");
+    const textarea = contentEl.createEl("textarea", {
+      cls: "mas-annotation-comment",
+      attr: {
+        id: "mas-annotation-comment",
+        placeholder: "Comment (Markdown; wikilinks welcome)",
+        rows: "4"
+      }
+    });
+    textarea.value = (_b = (_a = this.options.draft.annotation) == null ? void 0 : _a.comment) != null ? _b : "";
+    textarea.addEventListener("keydown", (event) => {
+      if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+        event.preventDefault();
+        void this.save();
+      }
+    });
+    this.textarea = textarea;
+    const hint = contentEl.createDiv({ cls: "mas-annotation-hint" });
+    hint.setText("Esc cancels \xB7 Cmd/Ctrl+Enter saves");
+    const buttons = contentEl.createDiv({ cls: "modal-button-container" });
+    if (this.options.onDelete) {
+      this.deleteButton = new import_obsidian3.ButtonComponent(buttons).setButtonText("Delete").setClass("mod-warning").onClick(() => {
+        void this.delete();
+      });
+    }
+    new import_obsidian3.ButtonComponent(buttons).setButtonText("Cancel").onClick(() => this.close());
+    new import_obsidian3.ButtonComponent(buttons).setButtonText("Save").setCta().onClick(() => {
+      void this.save();
+    });
+    this.scope.register([], "Escape", () => {
+      this.close();
+      return false;
+    });
+    window.setTimeout(() => {
+      var _a2, _b2;
+      (_b2 = (_a2 = this.swatches.find((button) => button.classList.contains("is-selected"))) != null ? _a2 : this.swatches[0]) == null ? void 0 : _b2.focus();
+    }, 0);
+  }
+  onSwatchKey(event) {
+    var _a, _b, _c;
+    const index = COLORS.indexOf(this.color);
+    if (event.key === "ArrowUp" || event.key === "ArrowDown") {
+      event.preventDefault();
+      const delta = event.key === "ArrowDown" ? 1 : -1;
+      const next = (index + delta + COLORS.length) % COLORS.length;
+      this.selectColor(COLORS[next]);
+      (_a = this.swatches[next]) == null ? void 0 : _a.focus();
+      return;
+    }
+    if (event.key === "ArrowRight" || event.key === "Tab") {
+      event.preventDefault();
+      (_b = this.textarea) == null ? void 0 : _b.focus();
+      return;
+    }
+    if (event.key === "Enter") {
+      event.preventDefault();
+      (_c = this.textarea) == null ? void 0 : _c.focus();
+    }
+  }
+  selectColor(color) {
+    this.color = color;
+    for (let i = 0; i < this.swatches.length; i++) {
+      const button = this.swatches[i];
+      const selected = COLORS[i] === color;
+      button.classList.toggle("is-selected", selected);
+      button.setAttribute("aria-checked", String(selected));
+      button.setAttribute("tabindex", selected ? "0" : "-1");
+    }
+    if (this.previewEl)
+      this.previewEl.dataset.color = color;
+  }
+  async save() {
+    var _a, _b;
+    const comment = (_b = (_a = this.textarea) == null ? void 0 : _a.value.trim()) != null ? _b : "";
+    this.submitted = true;
+    await this.options.onSubmit(this.color, comment);
+    this.close();
+  }
+  async delete() {
+    var _a, _b;
+    if (!this.options.onDelete)
+      return;
+    if (!this.deleteArmed) {
+      this.deleteArmed = true;
+      (_a = this.deleteButton) == null ? void 0 : _a.setButtonText("Click again to delete");
+      (_b = this.deleteButton) == null ? void 0 : _b.setClass("mod-destructive");
+      return;
+    }
+    this.submitted = true;
+    await this.options.onDelete();
+    this.close();
+  }
+  onClose() {
+    var _a, _b;
+    this.contentEl.empty();
+    if (!this.submitted)
+      (_b = (_a = this.options).onCancel) == null ? void 0 : _b.call(_a);
+  }
+};
+
+// src/sourceAnnotations/note.ts
+var import_obsidian5 = __toModule(require("obsidian"));
+
+// src/sourceAnnotations/store.ts
+var import_obsidian4 = __toModule(require("obsidian"));
+var ANNOTATION_ROOT = ".midad-arabic-sources/annotations";
+var ANNOTATION_INDEX = `${ANNOTATION_ROOT}/index.json`;
+var ANNOTATION_TRASH = ".midad-arabic-sources/trash/annotations";
+function safeSegment(value) {
+  return String(value).replace(/[\\/:*?"<>|#^]/g, "-").replace(/\s+/g, " ").trim().slice(0, 100) || "work";
+}
+function workFolder(key) {
+  const parts = key.split(":");
+  const collection = safeSegment(parts[0] || "work");
+  const id = safeSegment(parts.slice(1).join(":") || parts[0] || "work");
+  return (0, import_obsidian4.normalizePath)(`${ANNOTATION_ROOT}/${collection}/${id}`);
+}
+function unitFileName(unitKey2) {
+  return `${safeSegment(unitKey2.replace(":", "-"))}.json`;
+}
+function annotationNow() {
+  const d = new Date();
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+function annotationToday() {
+  const d = new Date();
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+function newAnnotationId() {
+  const uuid = typeof crypto !== "undefined" && typeof crypto.randomUUID === "function" ? crypto.randomUUID().replace(/-/g, "") : `${Date.now().toString(36)}${Math.random().toString(36).slice(2)}`;
+  return `ann_${uuid.slice(0, 12)}`;
+}
+function parseJson(raw) {
+  try {
+    return JSON.parse(raw);
+  } catch (e) {
+    return null;
+  }
+}
+function normalizeAnnotation(annotation) {
+  var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j;
+  const now = annotationNow();
+  const quote = String((_b = (_a = annotation.quote) != null ? _a : annotation.quoteText) != null ? _b : "");
+  return {
+    id: annotation.id || newAnnotationId(),
+    color: (_c = annotation.color) != null ? _c : "yellow",
+    quote,
+    quoteText: String((_d = annotation.quoteText) != null ? _d : quote),
+    quoteMarkdown: String((_e = annotation.quoteMarkdown) != null ? _e : quote),
+    comment: annotation.comment,
+    ordinal: Number((_f = annotation.ordinal) != null ? _f : 0),
+    position: annotation.position,
+    segments: annotation.segments,
+    section: String((_g = annotation.section) != null ? _g : ""),
+    created: String((_h = annotation.created) != null ? _h : now),
+    modified: String((_i = annotation.modified) != null ? _i : now),
+    anchored: String((_j = annotation.anchored) != null ? _j : now),
+    anchorStatus: annotation.anchorStatus === "orphaned" ? "orphaned" : "ok",
+    quoteChanged: annotation.quoteChanged === true,
+    previousQuotes: Array.isArray(annotation.previousQuotes) ? annotation.previousQuotes : [],
+    tags: Array.isArray(annotation.tags) ? annotation.tags : []
+  };
+}
+function countAnnotations(units) {
+  let count = 0;
+  let orphanCount = 0;
+  for (const unit of Object.values(units)) {
+    count += unit.count;
+    orphanCount += unit.orphanCount;
+  }
+  return { count, orphanCount };
+}
+var AnnotationStore = class {
+  constructor(app) {
+    this.index = null;
+    this.works = new Map();
+    this.units = new Map();
+    this.paths = new Map();
+    this.locks = new Map();
+    this.app = app;
+  }
+  async load() {
+    this.index = null;
+    this.works.clear();
+    this.units.clear();
+    this.paths.clear();
+    try {
+      const path2 = (0, import_obsidian4.normalizePath)(ANNOTATION_INDEX);
+      if (await this.app.vault.adapter.exists(path2)) {
+        const parsed = parseJson(await this.app.vault.adapter.read(path2));
+        if (parsed && parsed.works && typeof parsed.works === "object")
+          this.index = parsed;
+      }
+    } catch (e) {
+      this.index = null;
+    }
+    if (!this.index || !Object.keys(this.index.works).length) {
+      await this.rebuild();
+      return;
+    }
+    await this.loadWorkFiles();
+  }
+  async loadWorkFiles() {
+    var _a, _b;
+    for (const key of Object.keys((_b = (_a = this.index) == null ? void 0 : _a.works) != null ? _b : {})) {
+      const work = await this.readWork(key);
+      if (work) {
+        this.works.set(key, work);
+        this.indexUnitPaths(work);
+      }
+    }
+  }
+  indexUnitPaths(work) {
+    for (const [unitKey2, entry] of Object.entries(work.units)) {
+      if (entry.note)
+        this.paths.set((0, import_obsidian4.normalizePath)(entry.note), { workKey: work.key, unitKey: unitKey2 });
+    }
+  }
+  async readWork(key) {
+    try {
+      const path2 = (0, import_obsidian4.normalizePath)(`${workFolder(key)}/work.json`);
+      if (!await this.app.vault.adapter.exists(path2))
+        return null;
+      const work = parseJson(await this.app.vault.adapter.read(path2));
+      if (!work || !work.units || typeof work.units !== "object")
+        return null;
+      work.key = key;
+      return work;
+    } catch (e) {
+      return null;
+    }
+  }
+  async rebuild() {
+    const works = {};
+    this.works.clear();
+    this.paths.clear();
+    try {
+      const roots = await this.app.vault.adapter.list((0, import_obsidian4.normalizePath)(ANNOTATION_ROOT));
+      for (const collectionFolder of roots.folders) {
+        const collection = await this.app.vault.adapter.list(collectionFolder);
+        for (const folder of collection.folders) {
+          const workPath = (0, import_obsidian4.normalizePath)(`${folder}/work.json`);
+          if (!await this.app.vault.adapter.exists(workPath))
+            continue;
+          const work = parseJson(await this.app.vault.adapter.read(workPath));
+          if (!work || !work.key || !work.units)
+            continue;
+          this.works.set(work.key, work);
+          this.indexUnitPaths(work);
+          const counts = countAnnotations(work.units);
+          works[work.key] = {
+            key: work.key,
+            title: work.title,
+            dir: work.dir,
+            note: work.note,
+            count: counts.count,
+            orphanCount: counts.orphanCount,
+            sourceStatus: work.sourceStatus,
+            updated: work.updated
+          };
+        }
+      }
+    } catch (e) {
+    }
+    this.index = { schema: 1, works };
+    await this.writeIndex();
+  }
+  async writeIndex() {
+    if (!this.index)
+      return;
+    await this.writeAtomic((0, import_obsidian4.normalizePath)(ANNOTATION_INDEX), JSON.stringify(this.index, null, 2) + "\n");
+  }
+  async getWork(key) {
+    const cached = this.works.get(key);
+    if (cached)
+      return cached;
+    const work = await this.readWork(key);
+    if (work) {
+      this.works.set(key, work);
+      this.indexUnitPaths(work);
+    }
+    return work;
+  }
+  async ensureWork(target, notePath) {
+    const existing = await this.getWork(target.workKey);
+    const now = annotationNow();
+    const work = existing != null ? existing : {
+      schema: 1,
+      key: target.workKey,
+      title: target.workTitle,
+      dir: target.workDir,
+      note: notePath,
+      sourceStatus: target.sourceStatus,
+      created: now,
+      updated: now,
+      units: {}
+    };
+    work.title = target.workTitle || work.title;
+    work.dir = target.workDir || work.dir;
+    work.sourceStatus = target.sourceStatus;
+    if (notePath)
+      work.note = notePath;
+    this.works.set(work.key, work);
+    return work;
+  }
+  async saveUnit(target, annotations) {
+    var _a;
+    const key = `${target.workKey}::${target.unitKey}`;
+    const previous = (_a = this.locks.get(target.workKey)) != null ? _a : Promise.resolve();
+    const next = previous.then(async () => {
+      var _a2, _b, _c;
+      const work = await this.ensureWork(target, (_b = (_a2 = this.works.get(target.workKey)) == null ? void 0 : _a2.note) != null ? _b : "");
+      const existing = work.units[target.unitKey];
+      const file = (existing == null ? void 0 : existing.file) || unitFileName(target.unitKey);
+      const folder = workFolder(target.workKey);
+      await this.ensureFolder(folder);
+      const unitPath = (0, import_obsidian4.normalizePath)(`${folder}/${file}`);
+      const clean = annotations.map((annotation) => normalizeAnnotation(annotation));
+      if ((existing == null ? void 0 : existing.note) && existing.note !== target.notePath) {
+        this.paths.delete((0, import_obsidian4.normalizePath)(existing.note));
+      }
+      if (!clean.length) {
+        if (await this.app.vault.adapter.exists(unitPath))
+          await this.app.vault.adapter.remove(unitPath);
+        delete work.units[target.unitKey];
+        this.units.delete(key);
+        this.paths.delete((0, import_obsidian4.normalizePath)(target.notePath));
+      } else {
+        const unit = {
+          schema: 1,
+          unitKey: target.unitKey,
+          note: target.notePath,
+          annotations: clean
+        };
+        await this.writeAtomic(unitPath, JSON.stringify(unit, null, 2) + "\n");
+        this.units.set(key, unit);
+        work.units[target.unitKey] = {
+          unitKey: target.unitKey,
+          note: target.notePath,
+          file,
+          count: clean.length,
+          orphanCount: clean.filter((annotation) => annotation.anchorStatus !== "ok").length,
+          ord: (_c = existing == null ? void 0 : existing.ord) != null ? _c : Object.keys(work.units).length
+        };
+        this.paths.set((0, import_obsidian4.normalizePath)(target.notePath), {
+          workKey: target.workKey,
+          unitKey: target.unitKey
+        });
+      }
+      work.updated = annotationNow();
+      await this.writeAtomic((0, import_obsidian4.normalizePath)(`${folder}/work.json`), JSON.stringify(work, null, 2) + "\n");
+      const counts = countAnnotations(work.units);
+      if (!this.index)
+        this.index = { schema: 1, works: {} };
+      this.index.works[work.key] = {
+        key: work.key,
+        title: work.title,
+        dir: work.dir,
+        note: work.note,
+        count: counts.count,
+        orphanCount: counts.orphanCount,
+        sourceStatus: work.sourceStatus,
+        updated: work.updated
+      };
+      await this.writeIndex();
+    });
+    this.locks.set(target.workKey, next.catch(() => {
+    }));
+    await next;
+  }
+  async getUnit(workKey2, unitKey2) {
+    const key = `${workKey2}::${unitKey2}`;
+    const cached = this.units.get(key);
+    if (cached)
+      return cached;
+    const work = await this.getWork(workKey2);
+    const entry = work == null ? void 0 : work.units[unitKey2];
+    if (!work || !entry)
+      return null;
+    try {
+      const path2 = (0, import_obsidian4.normalizePath)(`${workFolder(workKey2)}/${entry.file}`);
+      if (!await this.app.vault.adapter.exists(path2))
+        return null;
+      const unit = parseJson(await this.app.vault.adapter.read(path2));
+      if (!unit)
+        return null;
+      this.units.set(key, unit);
+      return unit;
+    } catch (e) {
+      return null;
+    }
+  }
+  async allUnits(workKey2) {
+    const work = await this.getWork(workKey2);
+    if (!work)
+      return [];
+    const entries = Object.values(work.units).sort((a, b) => a.ord - b.ord);
+    const out = [];
+    for (const entry of entries) {
+      const unit = await this.getUnit(workKey2, entry.unitKey);
+      if (unit)
+        out.push({ entry, unit });
+    }
+    return out;
+  }
+  async setWorkNote(workKey2, notePath) {
+    var _a;
+    const work = await this.getWork(workKey2);
+    if (!work || work.note === notePath)
+      return;
+    work.note = notePath;
+    work.updated = annotationNow();
+    await this.ensureFolder(workFolder(workKey2));
+    await this.writeAtomic((0, import_obsidian4.normalizePath)(`${workFolder(workKey2)}/work.json`), JSON.stringify(work, null, 2) + "\n");
+    if ((_a = this.index) == null ? void 0 : _a.works[workKey2]) {
+      this.index.works[workKey2].note = notePath;
+      this.index.works[workKey2].updated = work.updated;
+      await this.writeIndex();
+    }
+  }
+  async setSourceStatus(workKey2, status) {
+    var _a;
+    const work = await this.getWork(workKey2);
+    if (!work)
+      return;
+    if (work.sourceStatus === status)
+      return;
+    work.sourceStatus = status;
+    work.updated = annotationNow();
+    await this.writeAtomic((0, import_obsidian4.normalizePath)(`${workFolder(workKey2)}/work.json`), JSON.stringify(work, null, 2) + "\n");
+    if ((_a = this.index) == null ? void 0 : _a.works[workKey2]) {
+      this.index.works[workKey2].sourceStatus = status;
+      this.index.works[workKey2].updated = work.updated;
+      await this.writeIndex();
+    }
+  }
+  async updatePaths(workKey2, workDir, workNote, unitNotes) {
+    var _a;
+    const work = await this.getWork(workKey2);
+    if (!work)
+      return;
+    work.dir = workDir || work.dir;
+    if (workNote)
+      work.note = workNote;
+    for (const [unitKey2, note] of unitNotes) {
+      if (work.units[unitKey2]) {
+        this.paths.delete((0, import_obsidian4.normalizePath)(work.units[unitKey2].note));
+        work.units[unitKey2].note = note;
+        this.paths.set((0, import_obsidian4.normalizePath)(note), { workKey: workKey2, unitKey: unitKey2 });
+      }
+    }
+    work.updated = annotationNow();
+    await this.writeAtomic((0, import_obsidian4.normalizePath)(`${workFolder(workKey2)}/work.json`), JSON.stringify(work, null, 2) + "\n");
+    if ((_a = this.index) == null ? void 0 : _a.works[workKey2]) {
+      this.index.works[workKey2].dir = work.dir;
+      this.index.works[workKey2].note = work.note;
+      this.index.works[workKey2].updated = work.updated;
+      await this.writeIndex();
+    }
+  }
+  findTarget(path2) {
+    var _a;
+    return (_a = this.paths.get((0, import_obsidian4.normalizePath)(path2))) != null ? _a : null;
+  }
+  getIndex() {
+    var _a;
+    return (_a = this.index) != null ? _a : { schema: 1, works: {} };
+  }
+  hasWorks() {
+    return Object.keys(this.getIndex().works).length > 0;
+  }
+  async trashWork(workKey2) {
+    var _a;
+    const work = await this.getWork(workKey2);
+    if (!work)
+      return null;
+    const stamp = annotationNow().replace(/[:]/g, "-").replace(" ", "T");
+    const batch = (0, import_obsidian4.normalizePath)(`${ANNOTATION_TRASH}/${stamp}`);
+    await this.ensureFolder(batch);
+    const folder = workFolder(workKey2);
+    const trashedData = (0, import_obsidian4.normalizePath)(`${batch}/data`);
+    try {
+      if (await this.app.vault.adapter.exists(folder)) {
+        await this.app.vault.adapter.rename(folder, trashedData);
+      }
+    } catch (e) {
+    }
+    let trashedNote = "";
+    if (work.note) {
+      const notePath = (0, import_obsidian4.normalizePath)(work.note);
+      if (await this.app.vault.adapter.exists(notePath)) {
+        const notesFolder = (0, import_obsidian4.normalizePath)(`${batch}/notes`);
+        await this.ensureFolder(notesFolder);
+        const name = (_a = notePath.split("/").pop()) != null ? _a : "Annotations.md";
+        trashedNote = (0, import_obsidian4.normalizePath)(`${notesFolder}/${name}`);
+        try {
+          await this.app.vault.adapter.rename(notePath, trashedNote);
+        } catch (e) {
+          trashedNote = "";
+        }
+      }
+    }
+    const manifest = {
+      schema: 1,
+      deletedAt: annotationNow(),
+      reason: "manual",
+      workKey: workKey2,
+      workTitle: work.title,
+      sourceStatus: work.sourceStatus,
+      originalNote: work.note,
+      trashedNote,
+      count: countAnnotations(work.units).count
+    };
+    await this.writeAtomic((0, import_obsidian4.normalizePath)(`${batch}/manifest.json`), JSON.stringify(manifest, null, 2) + "\n");
+    if (this.index) {
+      delete this.index.works[workKey2];
+      await this.writeIndex();
+    }
+    this.works.delete(workKey2);
+    for (const [key] of this.units) {
+      if (key.startsWith(`${workKey2}::`))
+        this.units.delete(key);
+    }
+    for (const [path2, target] of this.paths) {
+      if (target.workKey === workKey2)
+        this.paths.delete(path2);
+    }
+    return batch;
+  }
+  async migrateSpike(resolveMeta) {
+    var _a, _b;
+    const spikePath = (0, import_obsidian4.normalizePath)(`${ANNOTATION_ROOT}/spike-index.json`);
+    if (!await this.app.vault.adapter.exists(spikePath))
+      return false;
+    try {
+      const parsed = parseJson(await this.app.vault.adapter.read(spikePath));
+      for (const [notePath, entry] of Object.entries((_a = parsed == null ? void 0 : parsed.notes) != null ? _a : {})) {
+        if (!entry.work || !entry.unit || !entry.file)
+          continue;
+        const meta = await resolveMeta(entry.work, notePath);
+        if (!meta)
+          continue;
+        const oldPath = (0, import_obsidian4.normalizePath)(`${ANNOTATION_ROOT}/${entry.file}`);
+        const old = parseJson(await this.app.vault.adapter.read(oldPath));
+        const annotations = Array.isArray(old == null ? void 0 : old.annotations) ? old.annotations.map((annotation) => normalizeAnnotation(annotation)) : [];
+        if (!annotations.length)
+          continue;
+        const target = {
+          workKey: entry.work,
+          unitKey: entry.unit,
+          notePath,
+          workTitle: meta.title,
+          workDir: meta.dir,
+          sourceStatus: "installed"
+        };
+        const work = await this.ensureWork(target, meta.note);
+        const file = (_b = oldPath.split("/").pop()) != null ? _b : unitFileName(entry.unit);
+        work.units[entry.unit] = {
+          unitKey: entry.unit,
+          note: notePath,
+          file,
+          count: annotations.length,
+          orphanCount: annotations.filter((annotation) => annotation.anchorStatus !== "ok").length,
+          ord: Object.keys(work.units).length
+        };
+        await this.writeAtomic(oldPath, JSON.stringify({ schema: 1, unitKey: entry.unit, note: notePath, annotations }, null, 2) + "\n");
+        await this.writeAtomic((0, import_obsidian4.normalizePath)(`${workFolder(entry.work)}/work.json`), JSON.stringify(work, null, 2) + "\n");
+        this.works.set(entry.work, work);
+        this.indexUnitPaths(work);
+      }
+      const migrated = (0, import_obsidian4.normalizePath)(`${ANNOTATION_ROOT}/spike-index.migrated.json`);
+      if (await this.app.vault.adapter.exists(migrated))
+        await this.app.vault.adapter.remove(migrated);
+      await this.app.vault.adapter.rename(spikePath, migrated);
+      await this.rebuild();
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+  async ensureFolder(path2) {
+    const normalized = (0, import_obsidian4.normalizePath)(path2);
+    const parts = normalized.split("/");
+    let current = "";
+    for (const part of parts) {
+      current = current ? `${current}/${part}` : part;
+      if (!await this.app.vault.adapter.exists(current)) {
+        try {
+          await this.app.vault.adapter.mkdir(current);
+        } catch (e) {
+        }
+      }
+    }
+  }
+  async writeAtomic(path2, content) {
+    const normalized = (0, import_obsidian4.normalizePath)(path2);
+    const parent = normalized.split("/").slice(0, -1).join("/");
+    if (parent)
+      await this.ensureFolder(parent);
+    const temp = `${normalized}.tmp`;
+    await this.app.vault.adapter.write(temp, content);
+    await this.app.vault.adapter.rename(temp, normalized);
+  }
+};
+
+// src/sourceAnnotations/text.ts
+function managedBounds(content) {
+  const prior = splitNote(content);
+  const bodyStart = content.length - prior.body.length;
+  const region = findManagedRegion(prior.body);
+  if (!region)
+    return null;
+  let open = 0;
+  let close = 0;
+  for (const [o, c] of [
+    [MANAGED_OPEN, MANAGED_CLOSE],
+    [LEGACY_MANAGED_OPEN, LEGACY_MANAGED_CLOSE]
+  ]) {
+    if (prior.body.startsWith(o, region.start)) {
+      open = o.length;
+      close = c.length;
+      break;
+    }
+  }
+  if (!open)
+    return null;
+  return {
+    bodyStart,
+    contentStart: bodyStart + region.start + open,
+    contentEnd: bodyStart + region.end - close
+  };
+}
+function cleanQuoteMarkdown(markdown) {
+  return markdown.replace(/\r\n?/g, "\n").split("\n").map((line) => line.replace(/^(?:>\s?)+/, "").replace(/\s+$/, "")).join("\n").replace(/^\n+|\n+$/g, "");
+}
+function markdownToText(markdown) {
+  let text = cleanQuoteMarkdown(markdown);
+  text = text.replace(/\[\[([^\]|]+)\|([^\]]+)\]\]/g, "$2").replace(/\[\[([^\]]+)\]\]/g, "$1").replace(/\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/<[^>]+>/g, "").replace(/^\s*(?:[-*+]|\d+\.)\s+/gm, "").replace(/^\s*\[[ xX]\]\s*/gm, "").replace(/^\s*#{1,6}\s+/gm, "").replace(/(\*\*|__|\*|_|`|~~)/g, "").replace(/[ \t]+$/gm, "").replace(/^\n+|\n+$/g, "");
+  return text;
+}
+function lineStarts(text) {
+  const starts = [0];
+  for (let i = 0; i < text.length; i++) {
+    if (text.charAt(i) === "\n")
+      starts.push(i + 1);
+  }
+  return starts;
+}
+var HEADING_RE = /^(#{1,6})\s+(.*)$/;
+function sectionAt(text, offset) {
+  let section = "";
+  for (const start of lineStarts(text)) {
+    if (start >= offset)
+      break;
+    const end = text.indexOf("\n", start);
+    const line = text.slice(start, end === -1 ? text.length : end);
+    const match = HEADING_RE.exec(line);
+    if (match)
+      section = match[2].trim();
+  }
+  return section;
+}
+function crossesHeading(text, start, end) {
+  for (const lineStart of lineStarts(text)) {
+    if (lineStart < start)
+      continue;
+    if (lineStart >= end)
+      break;
+    const lineEnd = text.indexOf("\n", lineStart);
+    const line = text.slice(lineStart, lineEnd === -1 ? text.length : lineEnd);
+    if (HEADING_RE.test(line))
+      return true;
+  }
+  const startLine = text.lastIndexOf("\n", Math.max(0, start - 1)) + 1;
+  const startEnd = text.indexOf("\n", startLine);
+  if (HEADING_RE.test(text.slice(startLine, startEnd === -1 ? text.length : startEnd)))
+    return true;
+  return false;
+}
+function occurrencesBefore(text, offset, needle) {
+  const trimmed = needle.trim();
+  if (!trimmed)
+    return 0;
+  const haystack = normalizeWhitespaceWithMap(text.slice(0, offset));
+  const target = normalizeWhitespaceWithMap(trimmed);
+  if (!target.text)
+    return 0;
+  let count = 0;
+  let at = 0;
+  while (true) {
+    const found = haystack.text.indexOf(target.text, at);
+    if (found < 0)
+      return count;
+    count += 1;
+    at = found + target.text.length;
+  }
+}
+function noteHeadingLink(notePath, heading, label) {
+  var _a, _b;
+  const base = (_b = (_a = notePath.split("/").pop()) == null ? void 0 : _a.replace(/\.md$/i, "")) != null ? _b : notePath;
+  if (!heading)
+    return `[[${base}]]`;
+  const display = label || heading;
+  return `[[${base}#${heading}|${display}]]`;
+}
+
+// src/sourceAnnotations/note.ts
+function nowStamp() {
+  const d = new Date();
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+function safeFileStem(value) {
+  return value.replace(/[\\/:*?"<>|#^]/g, "-").trim() || "Annotations";
+}
+async function ensureFolder2(app, path2) {
+  const normalized = (0, import_obsidian5.normalizePath)(path2);
+  const parts = normalized.split("/");
+  let current = "";
+  for (const part of parts) {
+    current = current ? `${current}/${part}` : part;
+    if (!await app.vault.adapter.exists(current)) {
+      try {
+        await app.vault.adapter.mkdir(current);
+      } catch (e) {
+      }
+    }
+  }
+}
+function annotationNotePath(work, settings) {
+  const folder = settings.annotationNoteFolder.trim() || `${settings.sourceImportRoot.trim() || "_7 Sources"}/Notes`;
+  return (0, import_obsidian5.normalizePath)(`${folder}/${safeFileStem(work.dir)} - Annotations.md`);
+}
+function calloutLines(markdown, prefix) {
+  return markdown.replace(/\r\n?/g, "\n").split("\n").map((line) => line.trim() ? `${prefix} ${line}` : prefix.replace(/\s+$/, ""));
+}
+function annotationBlock(annotation, unitNote) {
+  var _a;
+  const lines = [];
+  const link = noteHeadingLink(unitNote, annotation.section);
+  lines.push(`> [!mas-annotation-${annotation.color}] ${annotationLabel(annotation.color)} \xB7 ${link}`);
+  const quote = calloutLines(annotation.quoteMarkdown || annotation.quote, "> >");
+  lines.push(...quote);
+  if ((_a = annotation.comment) == null ? void 0 : _a.trim()) {
+    lines.push(">");
+    lines.push(...calloutLines(annotation.comment.trim(), ">"));
+  }
+  lines.push(">");
+  const modified = annotation.modified && annotation.modified !== annotation.created ? ` \xB7 updated ${annotation.modified.slice(0, 10)}` : "";
+  lines.push(`> <sub>added ${annotation.created.slice(0, 10)}${modified} \xB7 ^${annotation.id}</sub>`);
+  return lines.join("\n");
+}
+function buildNoteBody(units) {
+  var _a, _b;
+  const lines = [MANAGED_OPEN, "## Annotations", ""];
+  let count = 0;
+  for (const unit of units) {
+    if (!unit.annotations.length)
+      continue;
+    count += unit.annotations.length;
+    const noteName = (_b = (_a = unit.entry.note.split("/").pop()) == null ? void 0 : _a.replace(/\.md$/i, "")) != null ? _b : unit.entry.unitKey;
+    lines.push(`### [[${noteName}]]`, "");
+    for (const annotation of unit.annotations) {
+      if (annotation.anchorStatus === "orphaned")
+        continue;
+      lines.push(annotationBlock(annotation, unit.entry.note), "");
+    }
+  }
+  const orphans = units.flatMap((unit) => unit.annotations.filter((annotation) => annotation.anchorStatus === "orphaned").map((annotation) => ({ annotation, note: unit.entry.note })));
+  if (orphans.length) {
+    lines.push("## Unanchored", "", "*The source text changed; these quotes are preserved until they can be re-anchored.*", "");
+    for (const orphan of orphans)
+      lines.push(annotationBlock(orphan.annotation, orphan.note), "");
+  }
+  if (!count && !orphans.length) {
+    lines.push("*No annotations yet.*", "");
+  }
+  lines.push(MANAGED_CLOSE, "", "## Notes", "");
+  return lines.join("\n");
+}
+function buildNoteFrontmatter(work) {
+  const yaml = new YamlBuilder();
+  yaml.start();
+  yaml.add("document-type", "[[source-annotation]]");
+  yaml.add("created", annotationToday(), { merge: "keep" });
+  yaml.add("updated", nowStamp());
+  yaml.add("mas-up", [`[[${work.dir}]]`, "[[Midad Arabic Sources]]"]);
+  yaml.add("related", [], { force: true, merge: "keep" });
+  yaml.add("title", `${work.title} \u2014 Annotations`);
+  yaml.add("aliases", [`${work.title} Annotations`, `${work.dir} - Annotations`]);
+  yaml.add("source-work", work.key);
+  yaml.add("source-status", work.sourceStatus);
+  const counts = Object.values(work.units).reduce((acc, unit) => ({ count: acc.count + unit.count, orphan: acc.orphan + unit.orphanCount }), { count: 0, orphan: 0 });
+  yaml.add("annotation-count", counts.count);
+  yaml.add("orphan-count", counts.orphan);
+  yaml.add("cssclasses", ["mas-annotations"], { quote: "never" });
+  const frontmatter = yaml.end();
+  return { frontmatter, specs: yaml.fieldSpecs() };
+}
+async function renderAnnotationNote(app, store, settings, workKey2) {
+  const work = await store.getWork(workKey2);
+  if (!work)
+    return null;
+  const notePath = work.note || annotationNotePath(work, settings);
+  const units = await store.allUnits(workKey2);
+  const { frontmatter, specs } = buildNoteFrontmatter(work);
+  const content = `${frontmatter}${buildNoteBody(units.map((unit) => ({ entry: unit.entry, annotations: unit.unit.annotations })))}`;
+  const parent = notePath.split("/").slice(0, -1).join("/");
+  if (parent)
+    await ensureFolder2(app, parent);
+  await writeMerged(app, notePath, { content, specs }, false, false);
+  if (work.note !== notePath) {
+    work.note = notePath;
+    await store.setWorkNote(workKey2, notePath);
+  }
+  return notePath;
+}
+function annotationMocPath(settings) {
+  const outRoot = settings.sourceImportRoot.trim() || "_7 Sources";
+  return (0, import_obsidian5.normalizePath)(`${outRoot}/source-annotation.md`);
+}
+function mocEntry(entry) {
+  var _a, _b;
+  const noteName = (_b = (_a = entry.note.split("/").pop()) == null ? void 0 : _a.replace(/\.md$/i, "")) != null ? _b : entry.title;
+  const orphan = entry.orphanCount > 0 ? ` \xB7 ${entry.orphanCount} unanchored` : "";
+  const plural = entry.count === 1 ? "annotation" : "annotations";
+  return `- [[${noteName}|${entry.title}]] \u2014 ${entry.count} ${plural}${orphan}`;
+}
+function mocBody(store) {
+  const entries = Object.values(store.getIndex().works).filter((entry) => entry.count > 0);
+  const groups = [
+    ["Installed", entries.filter((entry) => entry.sourceStatus === "installed")],
+    ["Archived", entries.filter((entry) => entry.sourceStatus === "archived")],
+    ["Source removed", entries.filter((entry) => entry.sourceStatus === "removed")]
+  ];
+  const lines = [MANAGED_OPEN, "## Annotated sources", ""];
+  let wrote = false;
+  for (const [title, group] of groups) {
+    if (!group.length)
+      continue;
+    wrote = true;
+    lines.push(`### ${title}`, "");
+    for (const entry of group.sort((a, b) => a.title.localeCompare(b.title)))
+      lines.push(mocEntry(entry));
+    lines.push("");
+  }
+  if (!wrote)
+    lines.push("*No annotated sources yet.*", "");
+  lines.push(MANAGED_CLOSE, "", "## Notes", "");
+  return lines.join("\n");
+}
+function mocFrontmatter(settings) {
+  const yaml = new YamlBuilder();
+  yaml.start();
+  yaml.add("created", annotationToday(), { merge: "keep" });
+  yaml.add("updated", nowStamp());
+  yaml.add("title", "Source Annotations");
+  yaml.add("aliases", ["Source Annotations"]);
+  yaml.add("mas-up", [`[[${settings.sourceMocParent.trim() || "Sources"}]]`, "[[Midad Arabic Sources]]"]);
+  const frontmatter = yaml.end();
+  return { frontmatter, specs: yaml.fieldSpecs() };
+}
+async function renderAnnotationMoc(app, store, settings) {
+  const path2 = annotationMocPath(settings);
+  const { frontmatter, specs } = mocFrontmatter(settings);
+  const content = `${frontmatter}${mocBody(store)}`;
+  const parent = path2.split("/").slice(0, -1).join("/");
+  if (parent)
+    await ensureFolder2(app, parent);
+  await writeMerged(app, path2, { content, specs }, false, false);
+  return path2;
 }
 
 // src/sourceAnnotations/reading.ts
-var import_obsidian3 = __toModule(require("obsidian"));
+var import_obsidian6 = __toModule(require("obsidian"));
 
 // src/sourceAnnotations/wrap.ts
 var obsidianDom = {
@@ -9473,199 +10435,789 @@ function refreshReadingViews(app) {
   var _a;
   for (const leaf of app.workspace.getLeavesOfType("markdown")) {
     const view = leaf.view;
-    if (!(view instanceof import_obsidian3.MarkdownView))
+    if (!(view instanceof import_obsidian6.MarkdownView))
       continue;
     const preview = view.previewMode;
     (_a = preview == null ? void 0 : preview.rerender) == null ? void 0 : _a.call(preview, true);
   }
 }
 
-// src/sourceAnnotations/store.ts
-var import_obsidian4 = __toModule(require("obsidian"));
-var INDEX_PATH = ".midad-arabic-sources/annotations/spike-index.json";
-var ROOT = ".midad-arabic-sources/annotations";
-function parseIndex(raw) {
-  try {
-    const parsed = JSON.parse(raw);
-    if (parsed && typeof parsed === "object" && "notes" in parsed) {
-      const notes = parsed.notes;
-      if (notes && typeof notes === "object") {
-        return { notes };
-      }
-    }
-  } catch (e) {
-  }
-  return { notes: {} };
+// src/sourceAnnotations/target.ts
+var import_obsidian7 = __toModule(require("obsidian"));
+function workKey(work) {
+  var _a, _b;
+  if (work.key)
+    return work.key;
+  return `${(_a = work.collection) != null ? _a : "work"}:${(_b = work.id) != null ? _b : ""}`;
 }
-function parseUnit(raw) {
-  try {
-    const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== "object")
-      return null;
-    const unit = parsed;
-    if (!Array.isArray(unit.annotations))
-      return null;
-    return {
-      schema: typeof unit.schema === "number" ? unit.schema : 1,
-      unitKey: typeof unit.unitKey === "string" ? unit.unitKey : "",
-      note: typeof unit.note === "string" ? unit.note : "",
-      annotations: unit.annotations
-    };
-  } catch (e) {
-    return null;
-  }
+function unitKey(unit) {
+  const kind = typeof unit.kind === "string" ? unit.kind : "unit";
+  const id = typeof unit.id === "string" || typeof unit.id === "number" ? String(unit.id) : typeof unit.base === "string" ? unit.base : "";
+  return `${kind}:${id}`;
 }
-var AnnotationSpikeStore = class {
-  constructor(app) {
-    this.index = null;
-    this.cache = new Map();
+function statusOf(work) {
+  if (work.status === "archived")
+    return "archived";
+  if (work.status === "deleting")
+    return "removed";
+  return "installed";
+}
+var AnnotationTargetResolver = class {
+  constructor(app, settings) {
+    this.models = new Map();
+    this.manifestCache = null;
     this.app = app;
+    this.settings = settings;
   }
-  async load() {
-    this.index = null;
-    this.cache.clear();
+  outRoot() {
+    return this.settings.sourceImportRoot.trim() || "_7 Sources";
+  }
+  canonicalRoot() {
+    return this.settings.canonicalQuranFolder.trim() || `${this.outRoot()}/Quran`;
+  }
+  canonicalId() {
+    return this.settings.canonicalQuranRiw\u0101ya.trim() || "hafs";
+  }
+  invalidate() {
+    this.models.clear();
+    this.manifestCache = null;
+  }
+  async manifest() {
     try {
-      const path2 = (0, import_obsidian4.normalizePath)(INDEX_PATH);
-      if (!await this.app.vault.adapter.exists(path2)) {
-        this.index = { notes: {} };
-        return;
-      }
-      this.index = parseIndex(await this.app.vault.adapter.read(path2));
+      const raw = await this.app.vault.adapter.read((0, import_obsidian7.normalizePath)(".midad-arabic-sources/source-imports.json"));
+      const parsed = JSON.parse(raw);
+      const works = Array.isArray(parsed) ? parsed : parsed && typeof parsed === "object" && Array.isArray(parsed.works) ? parsed.works : [];
+      this.manifestCache = works.filter((work) => !!work && typeof work === "object");
     } catch (e) {
-      this.index = { notes: {} };
+      this.manifestCache = [];
     }
+    return this.manifestCache;
   }
-  async ensure(path2) {
-    var _a;
-    if (!this.index)
-      await this.load();
-    const entry = (_a = this.index) == null ? void 0 : _a.notes[path2];
-    if (!entry)
-      return null;
-    const cached = this.cache.get(path2);
+  async model(work) {
+    const key = workKey(work);
+    const cached = this.models.get(key);
     if (cached)
       return cached;
     try {
-      const unitPath = (0, import_obsidian4.normalizePath)(`${ROOT}/${entry.file}`);
-      if (!await this.app.vault.adapter.exists(unitPath))
+      const path2 = (0, import_obsidian7.normalizePath)(`.midad-arabic-sources/source-models/${work.collection}/${work.id}.json`);
+      const parsed = JSON.parse(await this.app.vault.adapter.read(path2));
+      if (!parsed || typeof parsed !== "object")
         return null;
-      const unit = parseUnit(await this.app.vault.adapter.read(unitPath));
-      if (!unit)
+      const model = parsed;
+      if (!model.work || !Array.isArray(model.units))
         return null;
-      this.cache.set(path2, unit.annotations);
-      return unit.annotations;
+      this.models.set(key, model);
+      return model;
     } catch (e) {
       return null;
     }
   }
-  async loadAll() {
+  isCanonicalQuran(model) {
+    return model.work.collection === "quran-text" && String(model.work.id) === this.canonicalId();
+  }
+  findUnitByPath(model, path2) {
     var _a, _b;
-    if (!this.index)
-      await this.load();
-    for (const path2 of Object.keys((_b = (_a = this.index) == null ? void 0 : _a.notes) != null ? _b : {})) {
-      await this.ensure(path2);
+    const dir = String((_a = model.work.dir) != null ? _a : "");
+    const isQuranText = model.work.collection === "quran-text";
+    const canonical = isQuranText && this.isCanonicalQuran(model);
+    const normalized = (0, import_obsidian7.normalizePath)(path2);
+    for (const unit of model.units) {
+      const dictRoot = model.work.collection === "dictionary" && unit.kind === "dict";
+      const base = String((_b = unit.base) != null ? _b : "");
+      const stem = canonical || dictRoot ? base : `${dir} - ${base}`;
+      const folder = canonical ? this.canonicalRoot() : `${this.outRoot()}/${dir}`;
+      if ((0, import_obsidian7.normalizePath)(`${folder}/${stem}.md`) === normalized)
+        return unitKey(unit);
     }
+    return null;
   }
-  notes() {
-    var _a, _b;
-    return Object.keys((_b = (_a = this.index) == null ? void 0 : _a.notes) != null ? _b : {});
+  async resolve(path2) {
+    var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m;
+    const normalized = (0, import_obsidian7.normalizePath)(path2);
+    const file = this.app.vault.getAbstractFileByPath(normalized);
+    if (!(file instanceof import_obsidian7.TFile))
+      return null;
+    const frontmatter = (_a = this.app.metadataCache.getFileCache(file)) == null ? void 0 : _a.frontmatter;
+    const masWork = typeof (frontmatter == null ? void 0 : frontmatter["mas-work"]) === "string" ? String(frontmatter["mas-work"]) : "";
+    const masUnit = typeof (frontmatter == null ? void 0 : frontmatter["mas-unit"]) === "string" ? String(frontmatter["mas-unit"]) : "";
+    const works = await this.manifest();
+    const outRoot = this.outRoot();
+    let work = (_b = works.find((candidate) => workKey(candidate) === masWork)) != null ? _b : null;
+    if (!work) {
+      work = (_c = works.find((candidate) => {
+        var _a2;
+        const dir2 = String((_a2 = candidate.dir) != null ? _a2 : "");
+        if (!dir2)
+          return false;
+        return normalized === (0, import_obsidian7.normalizePath)(`${outRoot}/${dir2}.md`) || normalized.startsWith((0, import_obsidian7.normalizePath)(`${outRoot}/${dir2}/`));
+      })) != null ? _c : null;
+    }
+    if (!work && masWork) {
+      work = { key: masWork, title: masWork, dir: (_d = normalized.split("/").slice(-2, -1)[0]) != null ? _d : masWork, status: "installed" };
+    }
+    if (!work)
+      return null;
+    const dir = String((_e = work.dir) != null ? _e : "");
+    const hubPath = (0, import_obsidian7.normalizePath)(`${outRoot}/${dir}.md`);
+    const isHub = normalized === hubPath;
+    if (masUnit) {
+      return {
+        workKey: workKey(work),
+        unitKey: masUnit,
+        notePath: normalized,
+        workTitle: String((_g = (_f = work.title) != null ? _f : dir) != null ? _g : workKey(work)),
+        workDir: dir,
+        sourceStatus: statusOf(work)
+      };
+    }
+    const model = await this.model(work);
+    if (model) {
+      if (isHub) {
+        const unit2 = model.units.length === 1 ? unitKey(model.units[0]) : "hub";
+        return {
+          workKey: workKey(work),
+          unitKey: unit2,
+          notePath: normalized,
+          workTitle: String((_i = (_h = work.title) != null ? _h : dir) != null ? _i : workKey(work)),
+          workDir: dir,
+          sourceStatus: statusOf(work)
+        };
+      }
+      const unit = this.findUnitByPath(model, normalized);
+      if (unit) {
+        return {
+          workKey: workKey(work),
+          unitKey: unit,
+          notePath: normalized,
+          workTitle: String((_k = (_j = work.title) != null ? _j : dir) != null ? _k : workKey(work)),
+          workDir: dir,
+          sourceStatus: statusOf(work)
+        };
+      }
+    }
+    if (isHub) {
+      return {
+        workKey: workKey(work),
+        unitKey: "hub",
+        notePath: normalized,
+        workTitle: String((_m = (_l = work.title) != null ? _l : dir) != null ? _m : workKey(work)),
+        workDir: dir,
+        sourceStatus: statusOf(work)
+      };
+    }
+    return null;
   }
-  get(path2) {
-    var _a;
-    return (_a = this.cache.get(path2)) != null ? _a : null;
+  async metaForWork(workKeyValue, notePath) {
+    var _a, _b, _c;
+    const works = await this.manifest();
+    const work = works.find((candidate) => workKey(candidate) === workKeyValue);
+    const dir = String((_b = (_a = work == null ? void 0 : work.dir) != null ? _a : notePath.split("/").slice(-2, -1)[0]) != null ? _b : workKeyValue);
+    const title = String((_c = work == null ? void 0 : work.title) != null ? _c : dir);
+    return { title, dir, note: "" };
   }
 };
 
-// src/sourceAnnotations/spike.ts
+// src/sourceAnnotations/service.ts
 function cmOf(view) {
   const cm = view.editor.cm;
   return cm != null ? cm : null;
 }
 function markdownViews(app) {
-  return app.workspace.getLeavesOfType("markdown").map((leaf) => leaf.view).filter((view) => view instanceof import_obsidian5.MarkdownView);
+  return app.workspace.getLeavesOfType("markdown").map((leaf) => leaf.view).filter((view) => view instanceof import_obsidian8.MarkdownView);
 }
-function registerAnnotationSpike(plugin) {
-  const app = plugin.app;
-  const store = new AnnotationSpikeStore(app);
-  const paintPreview = (view, annotations) => {
-    const sizer = view.containerEl.querySelector(".markdown-preview-sizer");
-    if (!sizer)
-      return false;
-    applyReadingAnnotations(sizer, annotations != null ? annotations : []);
-    return !!annotations && annotations.length > 0;
-  };
-  const refreshViews = async (announce) => {
-    let applied = 0;
-    for (const view of markdownViews(app)) {
+function isSourceFrontmatter(frontmatter) {
+  if (!frontmatter)
+    return false;
+  const rawType = frontmatter["document-type"];
+  const type = typeof rawType === "string" ? rawType : "";
+  return type.includes("text-source") || !!frontmatter["mas-key"];
+}
+var AnnotationService = class {
+  constructor(host) {
+    this.pathAnnotations = new Map();
+    this.verifyTimers = new Map();
+    this.disposed = false;
+    this.host = host;
+    this.app = host.app;
+    this.plugin = host.plugin;
+    this.settings = host.settings;
+    this.store = new AnnotationStore(host.app);
+    this.resolver = new AnnotationTargetResolver(host.app, host.settings);
+  }
+  async start() {
+    await this.store.load();
+    const migrated = await this.store.migrateSpike((workKey2, notePath) => this.migrationMeta(workKey2, notePath));
+    try {
+      await this.syncStartup(migrated);
+    } catch (error) {
+      console.error("[midad-arabic-sources] annotation startup", error);
+    }
+    this.plugin.registerEditorExtension(annotationEditorExtension);
+    registerReadingAnnotations(this.plugin, (path2) => {
+      var _a;
+      return (_a = this.pathAnnotations.get((0, import_obsidian8.normalizePath)(path2))) != null ? _a : null;
+    });
+    this.registerCommands();
+    this.registerEvents();
+    window.setTimeout(() => {
+      void this.refreshViews();
+      refreshReadingViews(this.app);
+    }, 900);
+  }
+  dispose() {
+    this.disposed = true;
+    for (const timer of this.verifyTimers.values())
+      window.clearTimeout(timer);
+    this.verifyTimers.clear();
+  }
+  async migrationMeta(workKey2, notePath) {
+    const meta = await this.resolver.metaForWork(workKey2, notePath);
+    if (!meta)
+      return null;
+    const folder = this.settings.annotationNoteFolder.trim() || `${this.settings.sourceImportRoot.trim() || "_7 Sources"}/Notes`;
+    const note = (0, import_obsidian8.normalizePath)(`${folder}/${meta.dir.replace(/[\\/:*?"<>|#^]/g, "-").trim() || "Annotations"} - Annotations.md`);
+    return { ...meta, note };
+  }
+  async syncStartup(migrated) {
+    for (const key of Object.keys(this.store.getIndex().works)) {
+      const work = await this.store.getWork(key);
+      if (!work)
+        continue;
+      const exists = work.note ? await this.app.vault.adapter.exists((0, import_obsidian8.normalizePath)(work.note)) : false;
+      if (migrated || !work.note || !exists) {
+        await renderAnnotationNote(this.app, this.store, this.settings, key);
+      }
+    }
+    await renderAnnotationMoc(this.app, this.store, this.settings);
+    await this.refreshParent();
+  }
+  registerCommands() {
+    this.plugin.addCommand({
+      id: "annotate-selection",
+      name: "Annotate the selected text",
+      editorCheckCallback: (checking, editor, view) => {
+        const draft = this.draftFromEditor(editor, view.file);
+        if (!draft)
+          return false;
+        if (!checking)
+          void this.openAnnotate(editor, view.file);
+        return true;
+      }
+    });
+    this.plugin.addCommand({
+      id: "edit-annotation-at-cursor",
+      name: "Edit annotation",
+      editorCheckCallback: (checking, editor, view) => {
+        if (!view.file || !this.store.findTarget(view.file.path))
+          return false;
+        if (!checking)
+          void this.openEditAtCursor(editor, view.file);
+        return true;
+      }
+    });
+    this.plugin.addCommand({
+      id: "delete-annotation-at-cursor",
+      name: "Delete annotation",
+      editorCheckCallback: (checking, editor, view) => {
+        if (!view.file || !this.store.findTarget(view.file.path))
+          return false;
+        if (!checking)
+          void this.confirmDeleteAtCursor(editor, view.file);
+        return true;
+      }
+    });
+    this.plugin.addCommand({
+      id: "delete-source-annotations",
+      name: "Delete annotations for this source\u2026",
+      callback: async () => {
+        const view = this.app.workspace.getActiveViewOfType(import_obsidian8.MarkdownView);
+        if (!(view == null ? void 0 : view.file)) {
+          new import_obsidian8.Notice("No active note.");
+          return;
+        }
+        await this.confirmTrashWork(view.file.path);
+      }
+    });
+    this.plugin.addCommand({
+      id: "open-source-annotation-note",
+      name: "Open source annotations",
+      callback: async () => {
+        const view = this.app.workspace.getActiveViewOfType(import_obsidian8.MarkdownView);
+        if (!(view == null ? void 0 : view.file))
+          return;
+        const target = await this.targetForPath(view.file.path);
+        if (!target) {
+          new import_obsidian8.Notice("This note is not part of an imported source.");
+          return;
+        }
+        const path2 = await renderAnnotationNote(this.app, this.store, this.settings, target.workKey);
+        if (!path2)
+          return;
+        const file = this.app.vault.getAbstractFileByPath(path2);
+        if (file instanceof import_obsidian8.TFile)
+          await this.app.workspace.getLeaf().openFile(file);
+      }
+    });
+    this.plugin.addCommand({
+      id: "open-source-annotation-moc",
+      name: "Open source annotations",
+      callback: async () => {
+        const path2 = await renderAnnotationMoc(this.app, this.store, this.settings);
+        const file = this.app.vault.getAbstractFileByPath(path2);
+        if (file instanceof import_obsidian8.TFile)
+          await this.app.workspace.getLeaf().openFile(file);
+      }
+    });
+    this.plugin.addCommand({
+      id: "reload-annotations",
+      name: "Reload annotations",
+      callback: async () => {
+        this.resolver.invalidate();
+        await this.store.load();
+        await this.refreshViews();
+        refreshReadingViews(this.app);
+        new import_obsidian8.Notice("Annotations reloaded.");
+      }
+    });
+    this.plugin.addCommand({
+      id: "annotation-status",
+      name: "Show annotation status",
+      callback: () => {
+        const works = Object.values(this.store.getIndex().works);
+        const count = works.reduce((sum, work) => sum + work.count, 0);
+        new import_obsidian8.Notice(`${works.length} annotated source(s), ${count} annotation(s).`);
+      }
+    });
+  }
+  registerEvents() {
+    this.plugin.registerEvent(this.app.workspace.on("active-leaf-change", () => {
+      window.setTimeout(() => {
+        if (!this.disposed)
+          void this.refreshViews();
+      }, 150);
+    }));
+    this.plugin.registerEvent(this.app.workspace.on("editor-menu", (menu, editor, view) => {
+      const draft = this.draftFromEditor(editor, view.file);
+      if (!draft)
+        return;
+      menu.addItem((item) => item.setTitle("Annotate selection").setIcon("highlighter").onClick(() => {
+        void this.openAnnotate(editor, view.file);
+      }));
+    }));
+    this.plugin.registerEvent(this.app.vault.on("modify", (file) => {
+      if (!(file instanceof import_obsidian8.TFile))
+        return;
+      if (!this.store.findTarget(file.path))
+        return;
+      this.scheduleVerify(file.path);
+    }));
+  }
+  scheduleVerify(path2) {
+    if (this.disposed)
+      return;
+    const existing = this.verifyTimers.get(path2);
+    if (existing)
+      window.clearTimeout(existing);
+    const timer = window.setTimeout(() => {
+      this.verifyTimers.delete(path2);
+      void this.verify(path2);
+    }, 1800);
+    this.verifyTimers.set(path2, timer);
+  }
+  async verify(path2) {
+    const stored = this.store.findTarget(path2);
+    if (!stored)
+      return;
+    const work = await this.store.getWork(stored.workKey);
+    if (!work)
+      return;
+    const target = {
+      workKey: stored.workKey,
+      unitKey: stored.unitKey,
+      notePath: (0, import_obsidian8.normalizePath)(path2),
+      workTitle: work.title,
+      workDir: work.dir,
+      sourceStatus: work.sourceStatus
+    };
+    const unit = await this.store.getUnit(target.workKey, target.unitKey);
+    if (!unit)
+      return;
+    let text = "";
+    try {
+      text = await this.app.vault.adapter.read((0, import_obsidian8.normalizePath)(path2));
+    } catch (e) {
+      return;
+    }
+    const bounds = managedBounds(text);
+    if (!bounds)
+      return;
+    let changed = false;
+    let orphanChanged = false;
+    const annotations = unit.annotations.map((annotation) => {
+      var _a, _b;
+      const found = findNormalized(text, annotation.quote || annotation.quoteText, annotation.ordinal);
+      if (!found) {
+        if (annotation.anchorStatus !== "orphaned") {
+          changed = true;
+          orphanChanged = true;
+          return { ...annotation, anchorStatus: "orphaned", anchored: annotationNow() };
+        }
+        return annotation;
+      }
+      const segments = visibleSegments(text, found.start, found.end).map((range) => [range.start - bounds.bodyStart, range.end - bounds.bodyStart]);
+      const next = {
+        ...annotation,
+        position: { start: found.start - bounds.bodyStart, end: found.end - bounds.bodyStart },
+        segments,
+        anchored: annotationNow(),
+        anchorStatus: "ok",
+        quoteChanged: text.slice(found.start, found.end) !== annotation.quote
+      };
+      if (!annotation.position || annotation.position.start !== ((_a = next.position) == null ? void 0 : _a.start) || annotation.position.end !== ((_b = next.position) == null ? void 0 : _b.end) || annotation.anchorStatus !== "ok" || annotation.quoteChanged !== next.quoteChanged) {
+        changed = true;
+        if (annotation.anchorStatus !== "ok")
+          orphanChanged = true;
+      }
+      return next;
+    });
+    if (!changed)
+      return;
+    await this.store.saveUnit(target, annotations);
+    if (orphanChanged)
+      await this.syncArtifacts(target.workKey);
+    await this.refreshViews();
+  }
+  draftFromEditor(editor, file) {
+    if (!file)
+      return null;
+    const cache = this.app.metadataCache.getFileCache(file);
+    if (!isSourceFrontmatter(cache == null ? void 0 : cache.frontmatter))
+      return null;
+    const value = editor.getValue();
+    const bounds = managedBounds(value);
+    if (!bounds)
+      return null;
+    let from = editor.posToOffset(editor.getCursor("from"));
+    let to = editor.posToOffset(editor.getCursor("to"));
+    if (from > to)
+      [from, to] = [to, from];
+    if (from < bounds.contentStart || to > bounds.contentEnd)
+      return null;
+    while (from < to && /\s/.test(value.charAt(from)))
+      from++;
+    while (to > from && /\s/.test(value.charAt(to - 1)))
+      to--;
+    if (from >= to)
+      return null;
+    if (crossesHeading(value, from, to))
+      return null;
+    const raw = value.slice(from, to);
+    const quoteText = markdownToText(raw);
+    if (!quoteText.trim())
+      return null;
+    const segments = visibleSegments(value, from, to).map((range) => [range.start - bounds.bodyStart, range.end - bounds.bodyStart]);
+    return {
+      quote: raw,
+      quoteText,
+      quoteMarkdown: cleanQuoteMarkdown(raw),
+      section: sectionAt(value, from),
+      ordinal: occurrencesBefore(value, from, raw),
+      position: { start: from - bounds.bodyStart, end: to - bounds.bodyStart },
+      segments
+    };
+  }
+  async openAnnotate(editor, file) {
+    if (!file)
+      return;
+    const draft = this.draftFromEditor(editor, file);
+    if (!draft) {
+      new import_obsidian8.Notice("Select text inside a source note\u2019s managed region.");
+      return;
+    }
+    const target = await this.targetForPath(file.path);
+    if (!target) {
+      new import_obsidian8.Notice("Could not identify the source work. Re-render the source and try again.");
+      return;
+    }
+    const from = editor.getCursor("from");
+    const to = editor.getCursor("to");
+    new AnnotationModal(this.app, {
+      draft,
+      defaultColor: this.settings.annotationDefaultColor,
+      onSubmit: async (color, comment) => {
+        await this.createAnnotation(target, draft, color, comment);
+      },
+      onCancel: () => {
+        editor.focus();
+        editor.setSelection(from, to);
+      }
+    }).open();
+  }
+  async createAnnotation(target, draft, color, comment) {
+    const annotations = await this.annotationsFor(target);
+    const now = annotationNow();
+    annotations.push({
+      id: newAnnotationId(),
+      color,
+      quote: draft.quote,
+      quoteText: draft.quoteText,
+      quoteMarkdown: draft.quoteMarkdown,
+      comment: comment || void 0,
+      ordinal: draft.ordinal,
+      position: draft.position,
+      segments: draft.segments,
+      section: draft.section,
+      created: now,
+      modified: now,
+      anchored: now,
+      anchorStatus: "ok",
+      quoteChanged: false,
+      previousQuotes: [],
+      tags: []
+    });
+    await this.store.saveUnit(target, annotations);
+    this.pathAnnotations.set((0, import_obsidian8.normalizePath)(target.notePath), annotations);
+    await this.syncArtifacts(target.workKey);
+    await this.refreshViews();
+    new import_obsidian8.Notice("Annotation added.");
+  }
+  async openEditAtCursor(editor, file) {
+    var _a, _b;
+    const target = await this.targetForPath(file.path);
+    if (!target)
+      return;
+    const annotations = await this.annotationsFor(target);
+    const value = editor.getValue();
+    const offset = editor.posToOffset(editor.getCursor("from"));
+    const resolved = resolveAnnotations(value, annotations, false);
+    const hit = resolved.filter((annotation) => annotation.ranges.some((range) => offset >= range.start && offset <= range.end)).sort((a, b) => a.end - a.start - (b.end - b.start))[0];
+    if (!hit) {
+      new import_obsidian8.Notice("No annotation here.");
+      return;
+    }
+    const draft = {
+      annotation: hit,
+      quote: hit.quote,
+      quoteText: hit.quoteText,
+      quoteMarkdown: hit.quoteMarkdown,
+      section: hit.section,
+      ordinal: hit.ordinal,
+      position: (_a = hit.position) != null ? _a : { start: 0, end: 0 },
+      segments: (_b = hit.segments) != null ? _b : []
+    };
+    const from = editor.getCursor("from");
+    const to = editor.getCursor("to");
+    new AnnotationModal(this.app, {
+      draft,
+      defaultColor: hit.color,
+      onSubmit: async (color, comment) => {
+        const updated = annotations.map((annotation) => annotation.id === hit.id ? { ...annotation, color, comment: comment || void 0, modified: annotationNow() } : annotation);
+        await this.store.saveUnit(target, updated);
+        this.pathAnnotations.set((0, import_obsidian8.normalizePath)(target.notePath), updated);
+        await this.syncArtifacts(target.workKey);
+        await this.refreshViews();
+        new import_obsidian8.Notice("Annotation updated.");
+      },
+      onDelete: async () => {
+        const kept = annotations.filter((annotation) => annotation.id !== hit.id);
+        await this.store.saveUnit(target, kept);
+        this.pathAnnotations.set((0, import_obsidian8.normalizePath)(target.notePath), kept);
+        await this.syncArtifacts(target.workKey);
+        await this.refreshViews();
+        new import_obsidian8.Notice("Annotation deleted.");
+      },
+      onCancel: () => {
+        editor.focus();
+        editor.setSelection(from, to);
+      }
+    }).open();
+  }
+  async confirmDeleteAtCursor(editor, file) {
+    const target = await this.targetForPath(file.path);
+    if (!target)
+      return;
+    const annotations = await this.annotationsFor(target);
+    const value = editor.getValue();
+    const offset = editor.posToOffset(editor.getCursor("from"));
+    const hit = resolveAnnotations(value, annotations, false).filter((annotation) => annotation.ranges.some((range) => offset >= range.start && offset <= range.end)).sort((a, b) => a.end - a.start - (b.end - b.start))[0];
+    if (!hit) {
+      new import_obsidian8.Notice("No annotation here.");
+      return;
+    }
+    new ConfirmModal(this.app, {
+      title: "Delete annotation",
+      message: "Delete this annotation? The quote and comment will be removed from this source\u2019s annotation note.",
+      confirmText: "Delete",
+      onConfirm: async () => {
+        const kept = annotations.filter((annotation) => annotation.id !== hit.id);
+        await this.store.saveUnit(target, kept);
+        this.pathAnnotations.set((0, import_obsidian8.normalizePath)(target.notePath), kept);
+        await this.syncArtifacts(target.workKey);
+        await this.refreshViews();
+        new import_obsidian8.Notice("Annotation deleted.");
+      }
+    }).open();
+  }
+  async confirmTrashWork(path2) {
+    const target = await this.targetForPath(path2);
+    if (!target) {
+      new import_obsidian8.Notice("This note is not part of an imported source.");
+      return;
+    }
+    const work = await this.store.getWork(target.workKey);
+    if (!work) {
+      new import_obsidian8.Notice("No annotations for this source.");
+      return;
+    }
+    const count = Object.values(work.units).reduce((sum, unit) => sum + unit.count, 0);
+    if (!count) {
+      new import_obsidian8.Notice("No annotations for this source.");
+      return;
+    }
+    new ConfirmModal(this.app, {
+      title: "Delete annotations for this source",
+      message: `Move ${count} annotation(s) and the annotation note to the annotation trash? The source itself is not affected.`,
+      confirmText: "Move to trash",
+      onConfirm: async () => {
+        await this.store.trashWork(target.workKey);
+        this.pathAnnotations.delete((0, import_obsidian8.normalizePath)(target.notePath));
+        await renderAnnotationMoc(this.app, this.store, this.settings);
+        await this.refreshParent();
+        await this.refreshViews();
+        refreshReadingViews(this.app);
+        new import_obsidian8.Notice("Annotations moved to the annotation trash.");
+      }
+    }).open();
+  }
+  async annotationsFor(target) {
+    const unit = await this.store.getUnit(target.workKey, target.unitKey);
+    return unit ? [...unit.annotations] : [];
+  }
+  async targetForPath(path2) {
+    const stored = this.store.findTarget(path2);
+    if (stored) {
+      const work2 = await this.store.getWork(stored.workKey);
+      if (work2) {
+        if (work2.sourceStatus !== "installed" && this.app.vault.getAbstractFileByPath((0, import_obsidian8.normalizePath)(path2))) {
+          await this.store.setSourceStatus(stored.workKey, "installed");
+          work2.sourceStatus = "installed";
+          await renderAnnotationNote(this.app, this.store, this.settings, stored.workKey);
+          await renderAnnotationMoc(this.app, this.store, this.settings);
+          await this.refreshParent();
+        }
+        return {
+          workKey: stored.workKey,
+          unitKey: stored.unitKey,
+          notePath: (0, import_obsidian8.normalizePath)(path2),
+          workTitle: work2.title,
+          workDir: work2.dir,
+          sourceStatus: work2.sourceStatus
+        };
+      }
+    }
+    const target = await this.resolver.resolve(path2);
+    if (!target)
+      return null;
+    const work = await this.store.getWork(target.workKey);
+    if (!work)
+      return target;
+    return {
+      ...target,
+      workTitle: work.title,
+      workDir: work.dir,
+      sourceStatus: work.sourceStatus
+    };
+  }
+  async syncArtifacts(workKey2) {
+    await renderAnnotationNote(this.app, this.store, this.settings, workKey2);
+    await renderAnnotationMoc(this.app, this.store, this.settings);
+    await this.refreshParent();
+  }
+  async refreshParent() {
+    try {
+      await this.host.refreshParent();
+    } catch (error) {
+      console.error("[midad-arabic-sources] annotation parent refresh", error);
+    }
+  }
+  async refreshViews() {
+    if (this.disposed)
+      return;
+    for (const view of markdownViews(this.app)) {
       if (!view.file)
         continue;
-      const annotations = await store.ensure(view.file.path);
+      const path2 = view.file.path;
+      const target = await this.targetForPath(path2);
+      const annotations = target ? await this.annotationsFor(target) : [];
+      if (target)
+        this.pathAnnotations.set((0, import_obsidian8.normalizePath)(path2), annotations);
+      else
+        this.pathAnnotations.delete((0, import_obsidian8.normalizePath)(path2));
       const cm = cmOf(view);
       if (cm) {
-        if (!annotations || !annotations.length) {
-          clearSpikeAnnotations(cm);
-        } else {
-          applySpikeAnnotations(cm, resolveForEditor(view.editor.getValue(), annotations));
-          applied++;
-        }
+        if (annotations.length)
+          applyEditorAnnotations(cm, resolveForEditor(view.editor.getValue(), annotations));
+        else
+          clearEditorAnnotations(cm);
       }
-      if (paintPreview(view, annotations))
-        applied++;
+      const sizer = view.containerEl.querySelector(".markdown-preview-sizer");
+      if (sizer)
+        applyReadingAnnotations(sizer, annotations);
     }
-    if (announce) {
-      new import_obsidian5.Notice(applied ? `${applied} annotation view(s) updated.` : "No spike annotations for the open notes.");
+  }
+  async onSourceRemoved(workKey2) {
+    const work = await this.store.getWork(workKey2);
+    if (!work)
+      return;
+    await this.store.setSourceStatus(workKey2, "removed");
+    await renderAnnotationNote(this.app, this.store, this.settings, workKey2);
+    await renderAnnotationMoc(this.app, this.store, this.settings);
+    await this.refreshParent();
+    await this.refreshViews();
+  }
+  async onSourceRenamed(workKey2, oldDir, newDir) {
+    const work = await this.store.getWork(workKey2);
+    if (!work)
+      return;
+    const outRoot = this.settings.sourceImportRoot.trim() || "_7 Sources";
+    const unitNotes = new Map();
+    for (const [unitKey2, entry] of Object.entries(work.units)) {
+      const oldHub = (0, import_obsidian8.normalizePath)(`${outRoot}/${oldDir}.md`);
+      const oldPrefix = (0, import_obsidian8.normalizePath)(`${outRoot}/${oldDir}/`);
+      unitNotes.set(unitKey2, entry.note === oldHub ? (0, import_obsidian8.normalizePath)(`${outRoot}/${newDir}.md`) : entry.note.startsWith(oldPrefix) ? (0, import_obsidian8.normalizePath)(`${outRoot}/${newDir}/${entry.note.slice(oldPrefix.length)}`) : entry.note);
     }
-  };
-  plugin.registerEditorExtension(annotationEditorExtension);
-  registerReadingAnnotations(plugin, (path2) => store.get(path2));
-  const paintReading = async () => {
-    const view = app.workspace.getActiveViewOfType(import_obsidian5.MarkdownView);
-    if (!(view == null ? void 0 : view.file))
-      return "No active note.";
-    const sizer = view.containerEl.querySelector(".markdown-preview-sizer");
-    if (!sizer)
-      return "The active note is not in Reading view.";
-    const annotations = await store.ensure(view.file.path);
-    if (!annotations || !annotations.length)
-      return "No spike annotations for this note.";
-    applyReadingAnnotations(sizer, annotations);
-    const marks = sizer.querySelectorAll(".mas-annotation").length;
-    const multis = sizer.querySelectorAll(".mas-annotation-multi").length;
-    const icons = sizer.querySelectorAll(".mas-ann-icon").length;
-    return `Reading view: ${marks} mark(s), ${multis} multi, ${icons} icon(s).`;
-  };
-  plugin.addCommand({
-    id: "annotations-spike-reload",
-    name: "Annotation spike: reload annotations",
-    callback: async () => {
-      await store.load();
-      await store.loadAll();
-      refreshReadingViews(app);
-      window.setTimeout(() => {
-        void refreshViews(true);
-      }, 250);
+    const folder = this.settings.annotationNoteFolder.trim() || `${outRoot}/Notes`;
+    const newNote = (0, import_obsidian8.normalizePath)(`${folder}/${newDir.replace(/[\\/:*?"<>|#^]/g, "-").trim() || "Annotations"} - Annotations.md`);
+    const oldNote = work.note;
+    if (oldNote && oldNote !== newNote && await this.app.vault.adapter.exists((0, import_obsidian8.normalizePath)(oldNote))) {
+      const parent = newNote.split("/").slice(0, -1).join("/");
+      if (parent && !await this.app.vault.adapter.exists((0, import_obsidian8.normalizePath)(parent))) {
+        await this.app.vault.adapter.mkdir((0, import_obsidian8.normalizePath)(parent));
+      }
+      try {
+        await this.app.vault.adapter.rename((0, import_obsidian8.normalizePath)(oldNote), newNote);
+      } catch (e) {
+      }
     }
-  });
-  plugin.addCommand({
-    id: "annotations-spike-paint-reading",
-    name: "Annotation spike: paint reading view",
-    callback: async () => {
-      new import_obsidian5.Notice(await paintReading());
-    }
-  });
-  plugin.registerEvent(app.workspace.on("active-leaf-change", () => {
-    window.setTimeout(() => {
-      void refreshViews(false);
-    }, 120);
-  }));
-  window.setTimeout(() => {
-    void store.load().then(() => store.loadAll()).then(() => {
-      refreshReadingViews(app);
-      window.setTimeout(() => {
-        void refreshViews(false);
-      }, 250);
-    });
-  }, 1200);
+    await this.store.updatePaths(workKey2, newDir, newNote, unitNotes);
+    this.resolver.invalidate();
+    await this.syncArtifacts(workKey2);
+    await this.refreshViews();
+  }
+  mocPath() {
+    return annotationMocPath(this.settings);
+  }
+  hasAnnotatedWorks() {
+    return Object.values(this.store.getIndex().works).some((entry) => entry.count > 0);
+  }
+  mocExists() {
+    return !!this.app.vault.getAbstractFileByPath(this.mocPath());
+  }
+};
+async function registerAnnotations(host) {
+  const service = new AnnotationService(host);
+  await service.start();
+  return service;
 }
 
 // src/main.ts
@@ -9788,6 +11340,9 @@ var DEFAULT_SETTINGS = {
   canonicalQuranRiw\u0101ya: "",
   canonicalQuranFolder: "_7 Sources/Quran",
   sourceMocParent: "Sources",
+  annotationNoteFolder: "_7 Sources/Notes",
+  annotationDefaultColor: "yellow",
+  annotationTrashDays: 30,
   manageShowFilter: "all",
   manageGenreFilter: [],
   zoteroExport: false,
@@ -9799,7 +11354,7 @@ var DEFAULT_SETTINGS = {
   zoteroAutoCreate: false,
   sourceUpdateCheckDays: 7
 };
-var ArabicSupportPlugin = class extends import_obsidian6.Plugin {
+var ArabicSupportPlugin = class extends import_obsidian9.Plugin {
   constructor() {
     super(...arguments);
     this.lastUnknown = [];
@@ -9812,6 +11367,7 @@ var ArabicSupportPlugin = class extends import_obsidian6.Plugin {
     this.sourceOperationActive = false;
     this.sourceOperationKind = null;
     this.activeSourceProc = null;
+    this.annotations = null;
     this.pythonPromise = null;
     this.serverPythonPromise = null;
     this.promptDefaults = null;
@@ -9827,19 +11383,30 @@ var ArabicSupportPlugin = class extends import_obsidian6.Plugin {
     await this.loadSettings();
     this.extractBundledAssets();
     this.addSettingTab(new ArabicSupportSettingTab(this.app, this));
-    registerAnnotationSpike(this);
+    try {
+      this.annotations = await registerAnnotations({
+        app: this.app,
+        plugin: this,
+        settings: this.settings,
+        refreshParent: () => this.refreshAnnotationParent()
+      });
+      await this.refreshAnnotationParent();
+    } catch (error) {
+      console.error("[midad-arabic-sources] annotations failed to start", error);
+      new import_obsidian9.Notice("The annotation layer could not start. See the developer console for details.");
+    }
     this.addCommand({
       id: "transliterate-selection-to-clipboard",
       name: "Transliterate selection to clipboard",
       editorCallback: async (editor) => {
         const text = editor.getSelection() || editor.getLine(editor.getCursor().line);
         if (!text.trim()) {
-          new import_obsidian6.Notice("Nothing selected.");
+          new import_obsidian9.Notice("Nothing selected.");
           return;
         }
         new TransliterateModal(this.app, this, text, async (result) => {
           await navigator.clipboard.writeText(result);
-          new import_obsidian6.Notice("Romanized text copied to clipboard.");
+          new import_obsidian9.Notice("Romanized text copied to clipboard.");
         }).open();
       }
     });
@@ -9848,9 +11415,9 @@ var ArabicSupportPlugin = class extends import_obsidian6.Plugin {
       name: "Transliterate note to new note",
       callback: async () => {
         var _a, _b;
-        const view = this.app.workspace.getActiveViewOfType(import_obsidian6.MarkdownView);
+        const view = this.app.workspace.getActiveViewOfType(import_obsidian9.MarkdownView);
         if (!view || !view.file) {
-          new import_obsidian6.Notice("No active note.");
+          new import_obsidian9.Notice("No active note.");
           return;
         }
         const editor = view.editor;
@@ -9865,7 +11432,7 @@ var ArabicSupportPlugin = class extends import_obsidian6.Plugin {
         const folder = (_b = (_a = view.file.parent) == null ? void 0 : _a.path) != null ? _b : "";
         const path2 = this.uniquePath(folder, `${view.file.basename} (romanized)`);
         const file = await this.app.vault.create(path2, result);
-        new import_obsidian6.Notice(`Created ${path2}`);
+        new import_obsidian9.Notice(`Created ${path2}`);
         this.maybePromptUnknown(source, async (r) => {
           await this.app.vault.modify(file, r);
         }, opts);
@@ -9986,7 +11553,7 @@ var ArabicSupportPlugin = class extends import_obsidian6.Plugin {
       name: "Apply template changes to imported sources",
       callback: async () => {
         const n = await this.applyTemplateChanges();
-        new import_obsidian6.Notice(n ? `Re-rendered ${n} source(s) for template changes.` : "No template changes to apply.");
+        new import_obsidian9.Notice(n ? `Re-rendered ${n} source(s) for template changes.` : "No template changes to apply.");
       }
     });
     this.addCommand({
@@ -10009,7 +11576,7 @@ var ArabicSupportPlugin = class extends import_obsidian6.Plugin {
       callback: async () => {
         const incomplete = await this.findIncompleteSources();
         if (!incomplete.length) {
-          new import_obsidian6.Notice("All imported sources are complete.");
+          new import_obsidian9.Notice("All imported sources are complete.");
           return;
         }
         new ReconcileSourcesModal(this.app, this, incomplete).open();
@@ -10066,19 +11633,20 @@ var ArabicSupportPlugin = class extends import_obsidian6.Plugin {
       void this.pollTemplateChanges();
     }, 45e3));
     this.registerEvent(this.app.vault.on("modify", (file) => {
-      if (file instanceof import_obsidian6.TFile && this.isSourceTemplateFile(file.path)) {
+      if (file instanceof import_obsidian9.TFile && this.isSourceTemplateFile(file.path)) {
         void this.recordSourceTemplateAndCheck();
       }
     }));
   }
   onunload() {
-    var _a;
+    var _a, _b;
+    (_a = this.annotations) == null ? void 0 : _a.dispose();
     this.sourceCancelled = true;
     this.sourceOperationId += 1;
     this.sourceOperationActive = false;
     this.sourceOperationKind = null;
     try {
-      (_a = this.activeSourceProc) == null ? void 0 : _a.kill("SIGTERM");
+      (_b = this.activeSourceProc) == null ? void 0 : _b.kill("SIGTERM");
     } catch (e) {
     }
     this.statusPanels.forEach((p) => p.destroy());
@@ -10153,7 +11721,7 @@ var ArabicSupportPlugin = class extends import_obsidian6.Plugin {
       s.open();
       s.openTabById("midad-arabic-sources");
     } else {
-      new import_obsidian6.Notice("Open Settings \u2192 Community plugins \u2192 Midad Arabic Sources.");
+      new import_obsidian9.Notice("Open Settings \u2192 Community plugins \u2192 Midad Arabic Sources.");
     }
   }
   ensureApiKey() {
@@ -10163,7 +11731,7 @@ var ArabicSupportPlugin = class extends import_obsidian6.Plugin {
     return false;
   }
   activeItem() {
-    const view = this.app.workspace.getActiveViewOfType(import_obsidian6.MarkdownView);
+    const view = this.app.workspace.getActiveViewOfType(import_obsidian9.MarkdownView);
     if (!(view == null ? void 0 : view.file))
       return null;
     const base = view.file.basename;
@@ -10251,7 +11819,7 @@ var ArabicSupportPlugin = class extends import_obsidian6.Plugin {
     });
     if (!result) {
       const tail = lines.slice(-3).join("  |  ");
-      new import_obsidian6.Notice(`Midad Arabic Sources: no result (exit ${code}). ${lastError || tail || "no output"}`);
+      new import_obsidian9.Notice(`Midad Arabic Sources: no result (exit ${code}). ${lastError || tail || "no output"}`);
       console.error("[midad-arabic-sources] pipeline", args, { code, lines });
     }
     return result;
@@ -10287,7 +11855,7 @@ var ArabicSupportPlugin = class extends import_obsidian6.Plugin {
       (_a = this.activeSourceProc) == null ? void 0 : _a.kill("SIGTERM");
     } catch (e) {
     }
-    new import_obsidian6.Notice("Stopping source operation\u2026");
+    new import_obsidian9.Notice("Stopping source operation\u2026");
   }
   async runWithProgress(title, args, scriptRel) {
     var _a, _b;
@@ -10308,9 +11876,9 @@ var ArabicSupportPlugin = class extends import_obsidian6.Plugin {
     panel.finish(code === 0);
     panel.addResultLinks((_b = (_a = result == null ? void 0 : result.notes) != null ? _a : result == null ? void 0 : result.sources) != null ? _b : []);
     if (code === 0)
-      new import_obsidian6.Notice(`${title}: finished.`);
+      new import_obsidian9.Notice(`${title}: finished.`);
     else
-      new import_obsidian6.Notice(`${title}: failed \u2014 use \u201CShow pipeline status\u201D to see the log.`);
+      new import_obsidian9.Notice(`${title}: failed \u2014 use \u201CShow pipeline status\u201D to see the log.`);
     return result;
   }
   async runResume(statePath) {
@@ -10328,7 +11896,7 @@ var ArabicSupportPlugin = class extends import_obsidian6.Plugin {
     });
     panel.finish(code === 0);
     panel.addResultLinks((_b = (_a = result == null ? void 0 : result.notes) != null ? _a : result == null ? void 0 : result.sources) != null ? _b : []);
-    new import_obsidian6.Notice(code === 0 ? "Resume: finished." : "Resume: failed \u2014 see the log.");
+    new import_obsidian9.Notice(code === 0 ? "Resume: finished." : "Resume: failed \u2014 see the log.");
     return result;
   }
   jobPath(title, ext) {
@@ -10360,18 +11928,18 @@ var ArabicSupportPlugin = class extends import_obsidian6.Plugin {
     try {
       const dir = `${this.vaultPath()}/.midad-arabic-sources/jobs`;
       if (!fs2.existsSync(dir)) {
-        new import_obsidian6.Notice("No pipeline logs yet.");
+        new import_obsidian9.Notice("No pipeline logs yet.");
         return;
       }
       const files = fs2.readdirSync(dir).filter((f) => f.endsWith(".log")).sort();
       if (!files.length) {
-        new import_obsidian6.Notice("No pipeline logs yet.");
+        new import_obsidian9.Notice("No pipeline logs yet.");
         return;
       }
       const name = files[files.length - 1];
       new LogModal(this.app, name, fs2.readFileSync(`${dir}/${name}`, "utf8")).open();
     } catch (e) {
-      new import_obsidian6.Notice("Could not read the pipeline logs.");
+      new import_obsidian9.Notice("Could not read the pipeline logs.");
     }
   }
   async loadDefaultPrompts() {
@@ -10386,10 +11954,10 @@ var ArabicSupportPlugin = class extends import_obsidian6.Plugin {
     return this.promptDefaults;
   }
   promptPath(kind) {
-    return (0, import_obsidian6.normalizePath)(PROMPT_FILES[kind]);
+    return (0, import_obsidian9.normalizePath)(PROMPT_FILES[kind]);
   }
   async savePromptSet(kind, prompts) {
-    const dir = (0, import_obsidian6.normalizePath)(".midad-arabic-sources");
+    const dir = (0, import_obsidian9.normalizePath)(".midad-arabic-sources");
     try {
       if (!await this.app.vault.adapter.exists(dir))
         await this.app.vault.adapter.mkdir(dir);
@@ -10413,7 +11981,7 @@ var ArabicSupportPlugin = class extends import_obsidian6.Plugin {
       }
     } catch (e) {
       console.error("[midad-arabic-sources] prompt file", kind, e);
-      new import_obsidian6.Notice(`Could not read the ${PROMPT_KIND_LABEL[kind]} prompts file; it will be recreated.`);
+      new import_obsidian9.Notice(`Could not read the ${PROMPT_KIND_LABEL[kind]} prompts file; it will be recreated.`);
       prompts = [];
     }
     const seen = new Set();
@@ -10457,7 +12025,7 @@ var ArabicSupportPlugin = class extends import_obsidian6.Plugin {
       return path2;
     } catch (e) {
       console.error("[midad-arabic-sources] prompt file", kind, e);
-      new import_obsidian6.Notice("Could not write the prompt file \u2014 see the developer console.");
+      new import_obsidian9.Notice("Could not write the prompt file \u2014 see the developer console.");
       return null;
     }
   }
@@ -10465,7 +12033,7 @@ var ArabicSupportPlugin = class extends import_obsidian6.Plugin {
     var _a, _b;
     const item = this.activeItem();
     if (!item) {
-      new import_obsidian6.Notice("Open a literature note (@citekey) first.");
+      new import_obsidian9.Notice("Open a literature note (@citekey) first.");
       return;
     }
     if (!this.ensureApiKey())
@@ -10481,7 +12049,7 @@ var ArabicSupportPlugin = class extends import_obsidian6.Plugin {
       }
     }
     if (!pdfs.length) {
-      new import_obsidian6.Notice("No PDF attachments found for this item.");
+      new import_obsidian9.Notice("No PDF attachments found for this item.");
       return;
     }
     let prompts;
@@ -10489,7 +12057,7 @@ var ArabicSupportPlugin = class extends import_obsidian6.Plugin {
       prompts = await this.loadPromptSet("transcription");
     } catch (e) {
       console.error("[midad-arabic-sources] transcription prompts", e);
-      new import_obsidian6.Notice("Could not load the transcription prompts \u2014 see the developer console.");
+      new import_obsidian9.Notice("Could not load the transcription prompts \u2014 see the developer console.");
       return;
     }
     new TranscribeModal(this.app, this, item.citekey, pdfs, prompts).open();
@@ -10498,7 +12066,7 @@ var ArabicSupportPlugin = class extends import_obsidian6.Plugin {
     var _a, _b, _c, _d;
     const item = this.activeItem();
     if (!item) {
-      new import_obsidian6.Notice("Open a literature note (@citekey) first.");
+      new import_obsidian9.Notice("Open a literature note (@citekey) first.");
       return;
     }
     if (!this.ensureApiKey())
@@ -10510,7 +12078,7 @@ var ArabicSupportPlugin = class extends import_obsidian6.Plugin {
       prompts = await this.loadPromptSet("translation");
     } catch (e) {
       console.error("[midad-arabic-sources] translation prompts", e);
-      new import_obsidian6.Notice("Could not load the translation prompts \u2014 see the developer console.");
+      new import_obsidian9.Notice("Could not load the translation prompts \u2014 see the developer console.");
       return;
     }
     new TranslateModal(this.app, this, item.citekey, notes, pdfs, prompts).open();
@@ -10532,7 +12100,7 @@ var ArabicSupportPlugin = class extends import_obsidian6.Plugin {
     return works;
   }
   customWorksPath() {
-    return (0, import_obsidian6.normalizePath)(".midad-arabic-sources/turath-custom-works.json");
+    return (0, import_obsidian9.normalizePath)(".midad-arabic-sources/turath-custom-works.json");
   }
   async loadCustomWorks() {
     try {
@@ -10559,7 +12127,7 @@ var ArabicSupportPlugin = class extends import_obsidian6.Plugin {
     if (!value)
       return "";
     try {
-      const res = await (0, import_obsidian6.requestUrl)({
+      const res = await (0, import_obsidian9.requestUrl)({
         url: this.baseUrl() + "/transliterate",
         method: "POST",
         contentType: "application/json",
@@ -10575,19 +12143,19 @@ var ArabicSupportPlugin = class extends import_obsidian6.Plugin {
     var _a, _b, _c;
     const id = this.parseTurathId(input);
     if (!id) {
-      new import_obsidian6.Notice("Paste a Turath book URL (or its numeric ID).");
+      new import_obsidian9.Notice("Paste a Turath book URL (or its numeric ID).");
       return null;
     }
     let meta;
     try {
-      const res = await (0, import_obsidian6.requestUrl)({ url: `https://api.turath.io/book?id=${id}&include=indexes&ver=3`, method: "GET" });
+      const res = await (0, import_obsidian9.requestUrl)({ url: `https://api.turath.io/book?id=${id}&include=indexes&ver=3`, method: "GET" });
       meta = (_a = res.json) == null ? void 0 : _a.meta;
     } catch (e) {
-      new import_obsidian6.Notice(`Could not fetch Turath book ${id}: ${e instanceof Error ? e.message : e}`);
+      new import_obsidian9.Notice(`Could not fetch Turath book ${id}: ${e instanceof Error ? e.message : e}`);
       return null;
     }
     if (!(meta == null ? void 0 : meta.name)) {
-      new import_obsidian6.Notice(`Turath book ${id} was not found (or has no metadata).`);
+      new import_obsidian9.Notice(`Turath book ${id} was not found (or has no metadata).`);
       return null;
     }
     const cat = Number((_b = meta.cat_id) != null ? _b : 0);
@@ -10615,7 +12183,7 @@ var ArabicSupportPlugin = class extends import_obsidian6.Plugin {
     else
       list.push(work);
     await this.saveCustomWorks(list);
-    new import_obsidian6.Notice(`Added \u201C${work.title}\u201D. Open Manage text sources to install it.`);
+    new import_obsidian9.Notice(`Added \u201C${work.title}\u201D. Open Manage text sources to install it.`);
   }
   async removeTurathWork(id) {
     await this.saveCustomWorks((await this.loadCustomWorks()).filter((w) => String(w.id) !== String(id)));
@@ -10630,7 +12198,7 @@ var ArabicSupportPlugin = class extends import_obsidian6.Plugin {
     var _a;
     if (!force && this.sourceCatalog)
       return this.sourceCatalog;
-    const path2 = (0, import_obsidian6.normalizePath)(".midad-arabic-sources/source-catalog.json");
+    const path2 = (0, import_obsidian9.normalizePath)(".midad-arabic-sources/source-catalog.json");
     let cached = null;
     try {
       cached = JSON.parse(await this.app.vault.adapter.read(path2));
@@ -10662,7 +12230,7 @@ var ArabicSupportPlugin = class extends import_obsidian6.Plugin {
       const works = await this.listSources();
       if (works.length) {
         this.sourceCatalog = works;
-        await this.app.vault.adapter.write((0, import_obsidian6.normalizePath)(".midad-arabic-sources/source-catalog.json"), JSON.stringify({ at: Date.now(), schema: SOURCE_CATALOG_SCHEMA, works }));
+        await this.app.vault.adapter.write((0, import_obsidian9.normalizePath)(".midad-arabic-sources/source-catalog.json"), JSON.stringify({ at: Date.now(), schema: SOURCE_CATALOG_SCHEMA, works }));
       }
     } catch (e) {
       console.error("[midad-arabic-sources] catalogue refresh", e);
@@ -10673,7 +12241,7 @@ var ArabicSupportPlugin = class extends import_obsidian6.Plugin {
   async maybeRefreshSourceCatalog() {
     var _a;
     try {
-      const text = await this.app.vault.adapter.read((0, import_obsidian6.normalizePath)(".midad-arabic-sources/source-catalog.json"));
+      const text = await this.app.vault.adapter.read((0, import_obsidian9.normalizePath)(".midad-arabic-sources/source-catalog.json"));
       const cached = JSON.parse(text);
       if (Date.now() - ((_a = cached.at) != null ? _a : 0) >= SOURCE_CATALOG_TTL)
         await this.refreshSourceCatalogInBackground();
@@ -10686,7 +12254,7 @@ var ArabicSupportPlugin = class extends import_obsidian6.Plugin {
   async loadZoteroState() {
     var _a;
     try {
-      const text = await this.app.vault.adapter.read((0, import_obsidian6.normalizePath)(this.zoteroStatePath()));
+      const text = await this.app.vault.adapter.read((0, import_obsidian9.normalizePath)(this.zoteroStatePath()));
       const parsed = JSON.parse(text);
       return (_a = parsed.items) != null ? _a : {};
     } catch (e) {
@@ -10695,13 +12263,13 @@ var ArabicSupportPlugin = class extends import_obsidian6.Plugin {
   }
   async saveZoteroState(items) {
     try {
-      await this.app.vault.adapter.write((0, import_obsidian6.normalizePath)(this.zoteroStatePath()), JSON.stringify({ items }, null, 1));
+      await this.app.vault.adapter.write((0, import_obsidian9.normalizePath)(this.zoteroStatePath()), JSON.stringify({ items }, null, 1));
     } catch (e) {
     }
   }
   async loadSourceStats() {
     try {
-      const text = await this.app.vault.adapter.read((0, import_obsidian6.normalizePath)(".midad-arabic-sources/source-stats.json"));
+      const text = await this.app.vault.adapter.read((0, import_obsidian9.normalizePath)(".midad-arabic-sources/source-stats.json"));
       const parsed = JSON.parse(text);
       return (parsed == null ? void 0 : parsed.works) && typeof parsed.works === "object" ? parsed.works : {};
     } catch (e) {
@@ -10710,15 +12278,15 @@ var ArabicSupportPlugin = class extends import_obsidian6.Plugin {
   }
   async saveSourceStats(works) {
     try {
-      await this.app.vault.adapter.write((0, import_obsidian6.normalizePath)(".midad-arabic-sources/source-stats.json"), JSON.stringify({ works }, null, 1));
+      await this.app.vault.adapter.write((0, import_obsidian9.normalizePath)(".midad-arabic-sources/source-stats.json"), JSON.stringify({ works }, null, 1));
     } catch (e) {
     }
   }
   hubUpdatedMs(work) {
     var _a, _b;
     const outRoot = this.settings.sourceImportRoot.trim() || "_7 Sources";
-    const file = this.app.vault.getAbstractFileByPath((0, import_obsidian6.normalizePath)(`${outRoot}/${work.dir}.md`));
-    const fm = file instanceof import_obsidian6.TFile ? (_a = this.app.metadataCache.getFileCache(file)) == null ? void 0 : _a.frontmatter : null;
+    const file = this.app.vault.getAbstractFileByPath((0, import_obsidian9.normalizePath)(`${outRoot}/${work.dir}.md`));
+    const fm = file instanceof import_obsidian9.TFile ? (_a = this.app.metadataCache.getFileCache(file)) == null ? void 0 : _a.frontmatter : null;
     return (_b = frontmatterTimeMs(fm == null ? void 0 : fm["updated"])) != null ? _b : 0;
   }
   workRenderedMs(work, stat) {
@@ -10759,7 +12327,7 @@ var ArabicSupportPlugin = class extends import_obsidian6.Plugin {
       if (!p)
         continue;
       try {
-        const text = await this.app.vault.adapter.read((0, import_obsidian6.normalizePath)(p));
+        const text = await this.app.vault.adapter.read((0, import_obsidian9.normalizePath)(p));
         return (_a = JSON.parse(text)) != null ? _a : {};
       } catch (e) {
       }
@@ -10913,7 +12481,7 @@ var ArabicSupportPlugin = class extends import_obsidian6.Plugin {
       text = r.text;
       hdrs = r.headers;
     } else {
-      const resp = await (0, import_obsidian6.requestUrl)({
+      const resp = await (0, import_obsidian9.requestUrl)({
         method,
         url,
         headers,
@@ -10975,7 +12543,7 @@ var ArabicSupportPlugin = class extends import_obsidian6.Plugin {
   }
   async addCitekeyUp(work, citekey) {
     const outRoot = this.settings.sourceImportRoot.trim() || "_7 Sources";
-    const hub = (0, import_obsidian6.normalizePath)(`${outRoot}/${work.dir}.md`);
+    const hub = (0, import_obsidian9.normalizePath)(`${outRoot}/${work.dir}.md`);
     try {
       const text = await this.app.vault.adapter.read(hub);
       if (text.includes(`[[@${citekey}]]`))
@@ -11086,14 +12654,14 @@ var ArabicSupportPlugin = class extends import_obsidian6.Plugin {
         note: it.extra || void 0
       };
     });
-    const path2 = (0, import_obsidian6.normalizePath)("_7 Sources/zotero-export.csl.json");
+    const path2 = (0, import_obsidian9.normalizePath)("_7 Sources/zotero-export.csl.json");
     await this.app.vault.adapter.write(path2, JSON.stringify(csl, null, 2));
     return path2;
   }
   async exportToZotero(onlyKeys, silent = false) {
     if (!this.settings.zoteroExport) {
       if (!silent)
-        new import_obsidian6.Notice("Enable Zotero export in settings first.");
+        new import_obsidian9.Notice("Enable Zotero export in settings first.");
       return;
     }
     const method = this.settings.zoteroMethod;
@@ -11102,10 +12670,10 @@ var ArabicSupportPlugin = class extends import_obsidian6.Plugin {
       pending2 = pending2.filter((p) => onlyKeys.has(String(p.work.key)));
     if (!pending2.length) {
       if (!silent)
-        new import_obsidian6.Notice("Nothing to send \u2014 the selection is already up to date.");
+        new import_obsidian9.Notice("Nothing to send \u2014 the selection is already up to date.");
       return;
     }
-    const progress = silent ? null : new import_obsidian6.Notice(`Sending ${pending2.length} source(s) to Zotero\u2026`, 0);
+    const progress = silent ? null : new import_obsidian9.Notice(`Sending ${pending2.length} source(s) to Zotero\u2026`, 0);
     try {
       const state = await this.loadZoteroState();
       if (method === "csl") {
@@ -11113,7 +12681,7 @@ var ArabicSupportPlugin = class extends import_obsidian6.Plugin {
         for (const p of pending2)
           state[String(p.work.key)] = { itemKey: "", hash: p.hash };
         if (!silent)
-          new import_obsidian6.Notice(`Wrote ${pending2.length} item(s) to ${path2}. Import it in Zotero (File \u2192 Import).`);
+          new import_obsidian9.Notice(`Wrote ${pending2.length} item(s) to ${path2}. Import it in Zotero (File \u2192 Import).`);
       } else {
         progress == null ? void 0 : progress.setMessage(`Sending ${pending2.length} source(s) to Zotero (${method} API)\u2026`);
         const coll = await this.ensureZoteroCollection(method);
@@ -11126,12 +12694,12 @@ var ArabicSupportPlugin = class extends import_obsidian6.Plugin {
         });
         await this.applyCitekeys(pending2, keys, method);
         if (!silent)
-          new import_obsidian6.Notice(`Sent ${pending2.length} item(s) to Zotero.`);
+          new import_obsidian9.Notice(`Sent ${pending2.length} item(s) to Zotero.`);
       }
       await this.saveZoteroState(state);
     } catch (e) {
       if (!silent)
-        new import_obsidian6.Notice(`Zotero export failed: ${e instanceof Error ? e.message : e}`);
+        new import_obsidian9.Notice(`Zotero export failed: ${e instanceof Error ? e.message : e}`);
       console.error("[midad-arabic-sources] zotero export", e);
     } finally {
       progress == null ? void 0 : progress.hide();
@@ -11172,29 +12740,29 @@ var ArabicSupportPlugin = class extends import_obsidian6.Plugin {
   }
   async openZoteroSend() {
     if (!this.settings.zoteroExport) {
-      new import_obsidian6.Notice("Enable Zotero export in settings first.");
+      new import_obsidian9.Notice("Enable Zotero export in settings first.");
       return;
     }
     const entries = await this.zoteroEntries();
     if (!entries.length) {
-      new import_obsidian6.Notice("No installed sources to send.");
+      new import_obsidian9.Notice("No installed sources to send.");
       return;
     }
     new ZoteroSendModal(this.app, this, entries).open();
   }
   async sendActiveSource() {
     if (!this.settings.zoteroExport) {
-      new import_obsidian6.Notice("Enable Zotero export in settings first.");
+      new import_obsidian9.Notice("Enable Zotero export in settings first.");
       return;
     }
     const file = this.app.workspace.getActiveFile();
     if (!file) {
-      new import_obsidian6.Notice("Open a source note first.");
+      new import_obsidian9.Notice("Open a source note first.");
       return;
     }
     const work = await this.workForPath(file.path);
     if (!work) {
-      new import_obsidian6.Notice("That note is not an imported source.");
+      new import_obsidian9.Notice("That note is not an imported source.");
       return;
     }
     await this.exportToZotero(new Set([this.workKey(work)]));
@@ -11219,7 +12787,7 @@ var ArabicSupportPlugin = class extends import_obsidian6.Plugin {
     var _a;
     const id = (_a = key.split(":")[1]) != null ? _a : key;
     try {
-      const listed = await this.app.vault.adapter.list((0, import_obsidian6.normalizePath)(".midad-arabic-sources/cache/text-sources"));
+      const listed = await this.app.vault.adapter.list((0, import_obsidian9.normalizePath)(".midad-arabic-sources/cache/text-sources"));
       const needle = new RegExp(`_${id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?:_|\\.json$)`);
       return listed.files.some((f) => needle.test(f));
     } catch (e) {
@@ -11228,11 +12796,11 @@ var ArabicSupportPlugin = class extends import_obsidian6.Plugin {
   }
   async openManageSources(force = false) {
     var _a;
-    const loading = new import_obsidian6.Notice("Loading available sources\u2026", 0);
+    const loading = new import_obsidian9.Notice("Loading available sources\u2026", 0);
     try {
       const works = await this.listSourcesCached(force);
       if (!works.length) {
-        new import_obsidian6.Notice("No sources found. Is Python configured and the importer script present?");
+        new import_obsidian9.Notice("No sources found. Is Python configured and the importer script present?");
         return;
       }
       const manifest = await this.loadSourceManifest();
@@ -11273,6 +12841,7 @@ var ArabicSupportPlugin = class extends import_obsidian6.Plugin {
     }
   }
   async removeSource(work, onProgress) {
+    var _a;
     const outRoot = this.settings.sourceImportRoot.trim() || "_7 Sources";
     const dir = work.dir;
     const adapter = this.app.vault.adapter;
@@ -11280,9 +12849,9 @@ var ArabicSupportPlugin = class extends import_obsidian6.Plugin {
     const key = this.workKey(work);
     await this.markPendingDeletion(key);
     try {
-      const modelPath = (0, import_obsidian6.normalizePath)(`.midad-arabic-sources/source-models/${work.collection}/${work.id}.json`);
-      const hubPath = (0, import_obsidian6.normalizePath)(`${outRoot}/${dir}.md`);
-      const folderPath = (0, import_obsidian6.normalizePath)(`${outRoot}/${dir}`);
+      const modelPath = (0, import_obsidian9.normalizePath)(`.midad-arabic-sources/source-models/${work.collection}/${work.id}.json`);
+      const hubPath = (0, import_obsidian9.normalizePath)(`${outRoot}/${dir}.md`);
+      const folderPath = (0, import_obsidian9.normalizePath)(`${outRoot}/${dir}`);
       if (await adapter.exists(modelPath)) {
         try {
           await adapter.remove(modelPath);
@@ -11317,13 +12886,18 @@ var ArabicSupportPlugin = class extends import_obsidian6.Plugin {
         await this.saveSourceManifest(manifest.filter((w) => !(w.collection === work.collection && w.id === work.id) && w.dir !== dir));
       }
       await this.refreshSourcesIndex();
+      try {
+        await ((_a = this.annotations) == null ? void 0 : _a.onSourceRemoved(key));
+      } catch (e) {
+        console.error("[midad-arabic-sources] annotation status after removal", e);
+      }
     } catch (e) {
       problems.push(e instanceof Error ? e.message : String(e));
       console.error("[midad-arabic-sources] removeSource", key, e);
     }
     if (problems.length) {
       console.error("[midad-arabic-sources] removeSource", key, problems);
-      new import_obsidian6.Notice(`Removed \u201C${work.title || dir}\u201D with problems: ${problems.join("; ")}`);
+      new import_obsidian9.Notice(`Removed \u201C${work.title || dir}\u201D with problems: ${problems.join("; ")}`);
     }
   }
   async listFilesUnder(path2) {
@@ -11350,13 +12924,13 @@ var ArabicSupportPlugin = class extends import_obsidian6.Plugin {
     const adapter = this.app.vault.adapter;
     let total = Number((_a = work.cache_bytes) != null ? _a : 0);
     try {
-      const s = await adapter.stat((0, import_obsidian6.normalizePath)(`.midad-arabic-sources/source-models/${work.collection}/${work.id}.json`));
+      const s = await adapter.stat((0, import_obsidian9.normalizePath)(`.midad-arabic-sources/source-models/${work.collection}/${work.id}.json`));
       if (s)
         total += s.size;
     } catch (e) {
     }
-    const hub = (0, import_obsidian6.normalizePath)(`${outRoot}/${work.dir}.md`);
-    const prefix = (0, import_obsidian6.normalizePath)(`${outRoot}/${work.dir}/`);
+    const hub = (0, import_obsidian9.normalizePath)(`${outRoot}/${work.dir}.md`);
+    const prefix = (0, import_obsidian9.normalizePath)(`${outRoot}/${work.dir}/`);
     for (const f of this.app.vault.getFiles()) {
       if (f.path === hub || f.path.startsWith(prefix))
         total += f.stat.size;
@@ -11372,7 +12946,7 @@ var ArabicSupportPlugin = class extends import_obsidian6.Plugin {
     if (!dir || !title || !key || dir === title)
       return;
     const adapter = this.app.vault.adapter;
-    const hub = (0, import_obsidian6.normalizePath)(`${outRoot}/${title}.md`);
+    const hub = (0, import_obsidian9.normalizePath)(`${outRoot}/${title}.md`);
     try {
       if (!await adapter.exists(hub))
         return;
@@ -11382,13 +12956,14 @@ var ArabicSupportPlugin = class extends import_obsidian6.Plugin {
       if (!content.includes(`mas-key: ${key}`) && !content.includes(`mas-key: "${key}"`))
         return;
       await adapter.remove(hub);
-      const folder = (0, import_obsidian6.normalizePath)(`${outRoot}/${title}`);
+      const folder = (0, import_obsidian9.normalizePath)(`${outRoot}/${title}`);
       if (await adapter.exists(folder))
         await adapter.rmdir(folder, true);
     } catch (e) {
     }
   }
   async refreshSourcesIndex() {
+    var _a, _b;
     const userFolder = this.settings.sourceTemplateFolder.trim() || null;
     let templates;
     try {
@@ -11405,7 +12980,7 @@ var ArabicSupportPlugin = class extends import_obsidian6.Plugin {
       if (byKey.has(key))
         continue;
       try {
-        const rel = (0, import_obsidian6.normalizePath)(`.midad-arabic-sources/source-models/${key.replace(":", "/")}.json`);
+        const rel = (0, import_obsidian9.normalizePath)(`.midad-arabic-sources/source-models/${key.replace(":", "/")}.json`);
         const m = JSON.parse(await this.app.vault.adapter.read(rel));
         byKey.set(key, m.work);
       } catch (e) {
@@ -11417,6 +12992,10 @@ var ArabicSupportPlugin = class extends import_obsidian6.Plugin {
     const today = new Date().toISOString().slice(0, 10);
     const written = await renderMocs(this.app, templates, installed, outRoot, today, this.settings.sourceMocParent.trim() || "Sources", true);
     const mocNames = [...new Set(installed.flatMap((w) => Array.isArray(w.mocs) ? w.mocs : typeof w.moc === "string" ? [w.moc] : []))].filter(Boolean).sort();
+    if (((_a = this.annotations) == null ? void 0 : _a.hasAnnotatedWorks()) || ((_b = this.annotations) == null ? void 0 : _b.mocExists())) {
+      if (!mocNames.includes("source-annotation"))
+        mocNames.push("source-annotation");
+    }
     const parentPath = await this.updateSourceParent(templates, mocNames, today);
     if (parentPath)
       written.push(parentPath);
@@ -11445,7 +13024,7 @@ var ArabicSupportPlugin = class extends import_obsidian6.Plugin {
       }
       let model;
       try {
-        const rel = (0, import_obsidian6.normalizePath)(`.midad-arabic-sources/source-models/${work.collection}/${work.id}.json`);
+        const rel = (0, import_obsidian9.normalizePath)(`.midad-arabic-sources/source-models/${work.collection}/${work.id}.json`);
         model = JSON.parse(await this.app.vault.adapter.read(rel));
       } catch (e) {
         out.push({ work, missing: 0, total: 0, reason: "model" });
@@ -11458,7 +13037,7 @@ var ArabicSupportPlugin = class extends import_obsidian6.Plugin {
       const paths = expectedNotePaths(model, outRoot, canonicalRoot, canonicalId);
       let missing = 0;
       for (const p of paths)
-        if (!this.app.vault.getAbstractFileByPath((0, import_obsidian6.normalizePath)(p)))
+        if (!this.app.vault.getAbstractFileByPath((0, import_obsidian9.normalizePath)(p)))
           missing++;
       if (missing > 0)
         out.push({ work, missing, total: paths.length, reason: "notes" });
@@ -11467,8 +13046,8 @@ var ArabicSupportPlugin = class extends import_obsidian6.Plugin {
   }
   countWorkFiles(work) {
     const outRoot = this.settings.sourceImportRoot.trim() || "_7 Sources";
-    const hub = (0, import_obsidian6.normalizePath)(`${outRoot}/${work.dir}.md`);
-    const prefix = (0, import_obsidian6.normalizePath)(`${outRoot}/${work.dir}/`);
+    const hub = (0, import_obsidian9.normalizePath)(`${outRoot}/${work.dir}.md`);
+    const prefix = (0, import_obsidian9.normalizePath)(`${outRoot}/${work.dir}/`);
     let n = 0;
     for (const f of this.app.vault.getFiles()) {
       if (f.path === hub || f.path.startsWith(prefix))
@@ -11501,7 +13080,7 @@ var ArabicSupportPlugin = class extends import_obsidian6.Plugin {
       for (const k of pending2)
         keys.delete(k);
       if (!keys.size) {
-        new import_obsidian6.Notice("No imported sources to check.");
+        new import_obsidian9.Notice("No imported sources to check.");
         return [];
       }
       const args = ["check-updates"];
@@ -11513,7 +13092,7 @@ var ArabicSupportPlugin = class extends import_obsidian6.Plugin {
       const changed = (_a = result == null ? void 0 : result.changed) != null ? _a : [];
       const dateOnly = (_b = result == null ? void 0 : result.date_only) != null ? _b : [];
       if (!changed.length && !dateOnly.length) {
-        new import_obsidian6.Notice("All imported sources are up to date.");
+        new import_obsidian9.Notice("All imported sources are up to date.");
         return [];
       }
       if (dateOnly.length)
@@ -11521,7 +13100,7 @@ var ArabicSupportPlugin = class extends import_obsidian6.Plugin {
       if (this.isSourceCancelled(op))
         return [];
       if (changed.length) {
-        new import_obsidian6.Notice(`Text changed in ${changed.length} work(s); updating\u2026`);
+        new import_obsidian9.Notice(`Text changed in ${changed.length} work(s); updating\u2026`);
         await this.importSources(changed, true, op);
       }
       return changed;
@@ -11559,7 +13138,7 @@ var ArabicSupportPlugin = class extends import_obsidian6.Plugin {
     const days = (_a = this.settings.sourceUpdateCheckDays) != null ? _a : 7;
     if (!days || days <= 0)
       return;
-    const path2 = (0, import_obsidian6.normalizePath)(".midad-arabic-sources/last-update-check.json");
+    const path2 = (0, import_obsidian9.normalizePath)(".midad-arabic-sources/last-update-check.json");
     let last = 0;
     try {
       const parsed = JSON.parse(await this.app.vault.adapter.read(path2));
@@ -11583,7 +13162,7 @@ var ArabicSupportPlugin = class extends import_obsidian6.Plugin {
   async isSourceInstalled(dir) {
     const outRoot = this.settings.sourceImportRoot.trim() || "_7 Sources";
     try {
-      return await this.app.vault.adapter.exists((0, import_obsidian6.normalizePath)(`${outRoot}/${dir}.md`));
+      return await this.app.vault.adapter.exists((0, import_obsidian9.normalizePath)(`${outRoot}/${dir}.md`));
     } catch (e) {
       return false;
     }
@@ -11591,7 +13170,7 @@ var ArabicSupportPlugin = class extends import_obsidian6.Plugin {
   async importSources(keys, refresh = false, operationId, kind = "explicit") {
     var _a;
     if (!keys.length) {
-      new import_obsidian6.Notice("Select at least one source.");
+      new import_obsidian9.Notice("Select at least one source.");
       return;
     }
     const op = operationId != null ? operationId : this.beginSourceOperation(kind);
@@ -11624,20 +13203,20 @@ var ArabicSupportPlugin = class extends import_obsidian6.Plugin {
       const allCached = !refresh && (await Promise.all(keys.map((k) => this.sourceIsCached(k)))).every(Boolean);
       const result = await this.runWithProgress(allCached ? "Preparing sources (from cache)" : "Downloading sources", args, this.settings.sourceImportScript);
       if (this.isSourceCancelled(op)) {
-        new import_obsidian6.Notice("Stopped. The work is not installed; install it again to resume.");
+        new import_obsidian9.Notice("Stopped. The work is not installed; install it again to resume.");
         return;
       }
       const models = (_a = result == null ? void 0 : result.models) != null ? _a : [];
       if (!models.length) {
-        new import_obsidian6.Notice("No models were produced \u2014 see the pipeline status.");
+        new import_obsidian9.Notice("No models were produced \u2014 see the pipeline status.");
         return;
       }
       const written = await this.renderWithProgress(models, false, "Rendering notes", op);
       if (this.isSourceCancelled(op)) {
-        new import_obsidian6.Notice("Stopped. Partial notes remain; install again to finish.");
+        new import_obsidian9.Notice("Stopped. Partial notes remain; install again to finish.");
         return;
       }
-      new import_obsidian6.Notice(`Rendered ${written.length} notes.`);
+      new import_obsidian9.Notice(`Rendered ${written.length} notes.`);
       void this.maybeWarnEngineFallback();
     } finally {
       if (owns)
@@ -11649,7 +13228,7 @@ var ArabicSupportPlugin = class extends import_obsidian6.Plugin {
     if (op === null)
       return [];
     const owns = operationId === void 0;
-    const progress = new import_obsidian6.Notice(`${title}\u2026`, 0);
+    const progress = new import_obsidian9.Notice(`${title}\u2026`, 0);
     const stop = progress.messageEl.createEl("button", { text: "Stop" });
     stop.addEventListener("click", () => {
       stop.disabled = true;
@@ -11693,7 +13272,7 @@ var ArabicSupportPlugin = class extends import_obsidian6.Plugin {
     try {
       templates = await loadTemplates(this.app, this.bundledTemplateDir(), userFolder);
     } catch (e) {
-      new import_obsidian6.Notice(`Import templates could not be loaded: ${e instanceof Error ? e.message : e}`);
+      new import_obsidian9.Notice(`Import templates could not be loaded: ${e instanceof Error ? e.message : e}`);
       return [];
     }
     const outRoot = this.settings.sourceImportRoot.trim() || "_7 Sources";
@@ -11761,7 +13340,7 @@ var ArabicSupportPlugin = class extends import_obsidian6.Plugin {
         if (shouldCancel == null ? void 0 : shouldCancel())
           break;
         console.error("[midad-arabic-sources] render failed", this.workKey(model.work), e);
-        new import_obsidian6.Notice(`Could not render ${work}: ${e instanceof Error ? e.message : e}`);
+        new import_obsidian9.Notice(`Could not render ${work}: ${e instanceof Error ? e.message : e}`);
       }
       await this.pruneRenamedFolder(model.work);
     }
@@ -11772,6 +13351,31 @@ var ArabicSupportPlugin = class extends import_obsidian6.Plugin {
     await this.autoSyncZotero();
     return written;
   }
+  async refreshAnnotationParent() {
+    var _a, _b;
+    const userFolder = this.settings.sourceTemplateFolder.trim() || null;
+    let templates;
+    try {
+      templates = await loadTemplates(this.app, this.bundledTemplateDir(), userFolder);
+    } catch (e) {
+      return;
+    }
+    try {
+      const manifest = await this.loadSourceManifest();
+      const installed = manifest.filter((w) => this.workStatus(w) === "installed");
+      const mocNames = [...new Set(installed.flatMap((w) => Array.isArray(w.mocs) ? w.mocs : typeof w.moc === "string" ? [w.moc] : []))].filter(Boolean).sort();
+      if (((_a = this.annotations) == null ? void 0 : _a.hasAnnotatedWorks()) || ((_b = this.annotations) == null ? void 0 : _b.mocExists())) {
+        if (!mocNames.includes("source-annotation"))
+          mocNames.push("source-annotation");
+      }
+      if (!mocNames.length)
+        return;
+      const today = new Date().toISOString().slice(0, 10);
+      await this.updateSourceParent(templates, mocNames, today);
+    } catch (error) {
+      console.error("[midad-arabic-sources] annotation parent", error);
+    }
+  }
   async updateSourceParent(templates, mocs, generated) {
     const name = (this.settings.sourceMocParent || "").trim() || "Sources";
     if (!mocs.length)
@@ -11779,9 +13383,9 @@ var ArabicSupportPlugin = class extends import_obsidian6.Plugin {
     let file = this.app.metadataCache.getFirstLinkpathDest(name, "");
     if (!file) {
       const outRoot = this.settings.sourceImportRoot.trim() || "_7 Sources";
-      const path2 = (0, import_obsidian6.normalizePath)(`${outRoot}/${name}.md`);
+      const path2 = (0, import_obsidian9.normalizePath)(`${outRoot}/${name}.md`);
       const existing = this.app.vault.getAbstractFileByPath(path2);
-      if (existing instanceof import_obsidian6.TFile)
+      if (existing instanceof import_obsidian9.TFile)
         file = existing;
       else {
         try {
@@ -11797,7 +13401,7 @@ var ArabicSupportPlugin = class extends import_obsidian6.Plugin {
   }
   async loadSourceManifest() {
     try {
-      const text = await this.app.vault.adapter.read((0, import_obsidian6.normalizePath)(".midad-arabic-sources/source-imports.json"));
+      const text = await this.app.vault.adapter.read((0, import_obsidian9.normalizePath)(".midad-arabic-sources/source-imports.json"));
       const parsed = JSON.parse(text);
       return Array.isArray(parsed.works) ? parsed.works : [];
     } catch (e) {
@@ -11806,7 +13410,7 @@ var ArabicSupportPlugin = class extends import_obsidian6.Plugin {
   }
   async saveSourceManifest(works) {
     try {
-      await this.app.vault.adapter.write((0, import_obsidian6.normalizePath)(".midad-arabic-sources/source-imports.json"), JSON.stringify({ works }, null, 1));
+      await this.app.vault.adapter.write((0, import_obsidian9.normalizePath)(".midad-arabic-sources/source-imports.json"), JSON.stringify({ works }, null, 1));
     } catch (e) {
     }
   }
@@ -11901,21 +13505,21 @@ var ArabicSupportPlugin = class extends import_obsidian6.Plugin {
   async copyImportTemplates() {
     const folder = this.settings.sourceTemplateFolder.trim();
     if (!folder) {
-      new import_obsidian6.Notice("Set a template folder in the Midad Arabic Sources settings first.");
+      new import_obsidian9.Notice("Set a template folder in the Midad Arabic Sources settings first.");
       return;
     }
     const src = this.bundledTemplateDir();
-    const dest = (0, import_obsidian6.normalizePath)(`${folder}/${TEMPLATE_FOLDER}`);
+    const dest = (0, import_obsidian9.normalizePath)(`${folder}/${TEMPLATE_FOLDER}`);
     try {
       if (!await this.app.vault.adapter.exists(dest))
         await this.app.vault.createFolder(dest);
       for (const file of Object.values(TEMPLATE_FILES)) {
-        const text = await this.app.vault.adapter.read((0, import_obsidian6.normalizePath)(`${src}/${file}`));
-        await this.app.vault.adapter.write((0, import_obsidian6.normalizePath)(`${dest}/${file}`), text);
+        const text = await this.app.vault.adapter.read((0, import_obsidian9.normalizePath)(`${src}/${file}`));
+        await this.app.vault.adapter.write((0, import_obsidian9.normalizePath)(`${dest}/${file}`), text);
       }
-      new import_obsidian6.Notice(`Copied import templates to ${dest}.`);
+      new import_obsidian9.Notice(`Copied import templates to ${dest}.`);
     } catch (e) {
-      new import_obsidian6.Notice(`Could not copy templates: ${e}`);
+      new import_obsidian9.Notice(`Could not copy templates: ${e}`);
     }
   }
   async redownloadSources() {
@@ -11923,21 +13527,21 @@ var ArabicSupportPlugin = class extends import_obsidian6.Plugin {
     const pending2 = await this.loadPendingDeletions();
     const keys = manifest.filter((w) => this.workStatus(w) === "installed" && !pending2.has(this.workKey(w))).map((w) => this.workKey(w));
     if (!keys.length) {
-      new import_obsidian6.Notice("No installed sources to re-download.");
+      new import_obsidian9.Notice("No installed sources to re-download.");
       return;
     }
-    new import_obsidian6.Notice(`Re-downloading ${keys.length} source(s)\u2026`);
+    new import_obsidian9.Notice(`Re-downloading ${keys.length} source(s)\u2026`);
     await this.importSources(keys);
   }
   async migrateSourceNaming() {
-    var _a, _b;
+    var _a, _b, _c;
     const adapter = this.app.vault.adapter;
     const canonicalId = this.resolveCanonicalQuran();
     let catalogue;
     try {
       catalogue = await this.listSources(true);
     } catch (e) {
-      new import_obsidian6.Notice(`Could not read the catalogue: ${e instanceof Error ? e.message : e}`);
+      new import_obsidian9.Notice(`Could not read the catalogue: ${e instanceof Error ? e.message : e}`);
       return;
     }
     const targets = new Map(catalogue.map((w) => [w.key, w.dir]));
@@ -11946,7 +13550,7 @@ var ArabicSupportPlugin = class extends import_obsidian6.Plugin {
     const migrated = [];
     const models = [];
     const problems = [];
-    const notice = new import_obsidian6.Notice("Checking source names\u2026", 0);
+    const notice = new import_obsidian9.Notice("Checking source names\u2026", 0);
     try {
       for (const work of manifest) {
         if (this.workStatus(work) !== "installed" || pending2.has(this.workKey(work)))
@@ -11956,7 +13560,7 @@ var ArabicSupportPlugin = class extends import_obsidian6.Plugin {
         const newDir = String((_b = targets.get(key)) != null ? _b : "");
         if (!oldDir || !newDir || oldDir === newDir)
           continue;
-        const modelRel = (0, import_obsidian6.normalizePath)(`.midad-arabic-sources/source-models/${work.collection}/${work.id}.json`);
+        const modelRel = (0, import_obsidian9.normalizePath)(`.midad-arabic-sources/source-models/${work.collection}/${work.id}.json`);
         let text;
         try {
           text = await adapter.read(modelRel);
@@ -11980,6 +13584,11 @@ var ArabicSupportPlugin = class extends import_obsidian6.Plugin {
         model.work.dir = newDir;
         await adapter.write(modelRel, JSON.stringify(model));
         work.dir = newDir;
+        try {
+          await ((_c = this.annotations) == null ? void 0 : _c.onSourceRenamed(key, oldDir, newDir));
+        } catch (e) {
+          console.error("[midad-arabic-sources] annotation paths after rename", e);
+        }
         migrated.push(key);
         models.push(`${this.vaultPath()}/${modelRel}`);
         notice.setMessage(`Renaming sources: ${migrated.length} moved \u2014 ${newDir}`);
@@ -11992,16 +13601,16 @@ var ArabicSupportPlugin = class extends import_obsidian6.Plugin {
       await this.renderWithProgress(models, false, "Renaming imported sources");
     }
     const summary = migrated.length ? `Renamed ${migrated.length} source(s) and re-rendered their notes.` : "No source folders needed renaming.";
-    new import_obsidian6.Notice(problems.length ? `${summary} Problems: ${problems.join("; ")}` : summary);
+    new import_obsidian9.Notice(problems.length ? `${summary} Problems: ${problems.join("; ")}` : summary);
   }
   async moveWorkFiles(work, model, oldDir, newDir, canonicalId) {
     var _a;
     const outRoot = this.settings.sourceImportRoot.trim() || "_7 Sources";
     const adapter = this.app.vault.adapter;
-    const oldHub = (0, import_obsidian6.normalizePath)(`${outRoot}/${oldDir}.md`);
-    const newHub = (0, import_obsidian6.normalizePath)(`${outRoot}/${newDir}.md`);
-    const oldFolder = (0, import_obsidian6.normalizePath)(`${outRoot}/${oldDir}`);
-    const newFolder = (0, import_obsidian6.normalizePath)(`${outRoot}/${newDir}`);
+    const oldHub = (0, import_obsidian9.normalizePath)(`${outRoot}/${oldDir}.md`);
+    const newHub = (0, import_obsidian9.normalizePath)(`${outRoot}/${newDir}.md`);
+    const oldFolder = (0, import_obsidian9.normalizePath)(`${outRoot}/${oldDir}`);
+    const newFolder = (0, import_obsidian9.normalizePath)(`${outRoot}/${newDir}`);
     if (await adapter.exists(newHub) || await adapter.exists(newFolder)) {
       throw new Error(`\u201C${newDir}\u201D already exists`);
     }
@@ -12017,8 +13626,8 @@ var ArabicSupportPlugin = class extends import_obsidian6.Plugin {
       const base = String((_a = unit.base) != null ? _a : "");
       if (!base)
         continue;
-      const from = (0, import_obsidian6.normalizePath)(`${newFolder}/${oldDir} - ${base}.md`);
-      const to = (0, import_obsidian6.normalizePath)(`${newFolder}/${newDir} - ${base}.md`);
+      const from = (0, import_obsidian9.normalizePath)(`${newFolder}/${oldDir} - ${base}.md`);
+      const to = (0, import_obsidian9.normalizePath)(`${newFolder}/${newDir} - ${base}.md`);
       if (from !== to && await adapter.exists(from))
         await adapter.rename(from, to);
     }
@@ -12027,22 +13636,22 @@ var ArabicSupportPlugin = class extends import_obsidian6.Plugin {
     var _a, _b;
     const target = file != null ? file : this.app.workspace.getActiveFile();
     if (!target) {
-      new import_obsidian6.Notice("Open a note that belongs to an imported source first.");
+      new import_obsidian9.Notice("Open a note that belongs to an imported source first.");
       return;
     }
     const work = await this.workForPath(target.path);
     if (!work) {
-      new import_obsidian6.Notice("That note does not belong to an imported source.");
+      new import_obsidian9.Notice("That note does not belong to an imported source.");
       return;
     }
-    const rel = (0, import_obsidian6.normalizePath)(`.midad-arabic-sources/source-models/${work.collection}/${work.id}.json`);
+    const rel = (0, import_obsidian9.normalizePath)(`.midad-arabic-sources/source-models/${work.collection}/${work.id}.json`);
     if (!await this.app.vault.adapter.exists(rel)) {
-      new import_obsidian6.Notice("That source has no cached model \u2014 install it again from Manage text sources.");
+      new import_obsidian9.Notice("That source has no cached model \u2014 install it again from Manage text sources.");
       return;
     }
     const label = String((_b = (_a = work.title) != null ? _a : work.dir) != null ? _b : work.id);
     await this.renderWithProgress([`${this.vaultPath()}/${rel}`], true, `Re-rendering ${label}`);
-    new import_obsidian6.Notice(`Re-rendered ${label}.`);
+    new import_obsidian9.Notice(`Re-rendered ${label}.`);
   }
   async rerenderAllSources() {
     const root = `${this.vaultPath()}/.midad-arabic-sources/source-models`;
@@ -12061,11 +13670,11 @@ var ArabicSupportPlugin = class extends import_obsidian6.Plugin {
     } catch (e) {
     }
     if (!models.length) {
-      new import_obsidian6.Notice("No cached source models found.");
+      new import_obsidian9.Notice("No cached source models found.");
       return [];
     }
     const written = await this.renderWithProgress(models, true, "Re-rendering imported sources");
-    new import_obsidian6.Notice(`Re-rendered ${written.length} notes.`);
+    new import_obsidian9.Notice(`Re-rendered ${written.length} notes.`);
     return written;
   }
   sourceHistoryPath() {
@@ -12102,7 +13711,7 @@ var ArabicSupportPlugin = class extends import_obsidian6.Plugin {
   }
   async loadSourceHashes() {
     try {
-      const text = await this.app.vault.adapter.read((0, import_obsidian6.normalizePath)(this.sourceHistoryPath()));
+      const text = await this.app.vault.adapter.read((0, import_obsidian9.normalizePath)(this.sourceHistoryPath()));
       const parsed = JSON.parse(text);
       const templates = parsed == null ? void 0 : parsed.templates;
       return { templates: templates && typeof templates === "object" ? templates : {} };
@@ -12112,7 +13721,7 @@ var ArabicSupportPlugin = class extends import_obsidian6.Plugin {
   }
   async saveSourceHashes(store) {
     try {
-      await this.app.vault.adapter.write((0, import_obsidian6.normalizePath)(this.sourceHistoryPath()), JSON.stringify(store, null, 1));
+      await this.app.vault.adapter.write((0, import_obsidian9.normalizePath)(this.sourceHistoryPath()), JSON.stringify(store, null, 1));
     } catch (e) {
     }
   }
@@ -12130,7 +13739,7 @@ var ArabicSupportPlugin = class extends import_obsidian6.Plugin {
     const folder = this.settings.sourceTemplateFolder.trim();
     if (!folder)
       return false;
-    return path2.startsWith((0, import_obsidian6.normalizePath)(`${folder}/${TEMPLATE_FOLDER}/`));
+    return path2.startsWith((0, import_obsidian9.normalizePath)(`${folder}/${TEMPLATE_FOLDER}/`));
   }
   scheduleSourceTemplateCheck() {
     if (this.sourceTemplateCheckTimer != null)
@@ -12180,7 +13789,7 @@ var ArabicSupportPlugin = class extends import_obsidian6.Plugin {
         out.push({ work, kinds: null });
         continue;
       }
-      const modelRel = (0, import_obsidian6.normalizePath)(`.midad-arabic-sources/source-models/${work.collection}/${work.id}.json`);
+      const modelRel = (0, import_obsidian9.normalizePath)(`.midad-arabic-sources/source-models/${work.collection}/${work.id}.json`);
       const modelStat = await this.app.vault.adapter.stat(modelRel).catch(() => null);
       const renderedAt = hasRendered ? Math.max(0, ...Object.values(rendered != null ? rendered : {})) : legacyMs;
       if (renderedAt > 0 && modelStat && modelStat.mtime > 0 && modelStat.mtime > renderedAt) {
@@ -12205,7 +13814,7 @@ var ArabicSupportPlugin = class extends import_obsidian6.Plugin {
     try {
       templates = await loadTemplates(this.app, this.bundledTemplateDir(), userFolder);
     } catch (e) {
-      new import_obsidian6.Notice(`Import templates could not be loaded: ${e instanceof Error ? e.message : e}`);
+      new import_obsidian9.Notice(`Import templates could not be loaded: ${e instanceof Error ? e.message : e}`);
       this.endSourceOperation(op);
       return;
     }
@@ -12213,7 +13822,7 @@ var ArabicSupportPlugin = class extends import_obsidian6.Plugin {
     const canonicalId = this.resolveCanonicalQuran();
     const canonicalRoot = this.settings.canonicalQuranFolder.trim() || `${outRoot}/Quran`;
     const stats = await this.loadSourceStats();
-    const notice = new import_obsidian6.Notice("Updating imported sources\u2026", 0);
+    const notice = new import_obsidian9.Notice("Updating imported sources\u2026", 0);
     const stop = notice.messageEl.createEl("button", { text: "Stop" });
     stop.addEventListener("click", () => {
       stop.disabled = true;
@@ -12230,7 +13839,7 @@ var ArabicSupportPlugin = class extends import_obsidian6.Plugin {
         notice.setMessage(`Updating imported sources: ${nth} \u2014 ${label}`);
         const key = this.workKey(it.work);
         const legacy = this.hubUpdatedMs(it.work);
-        const rel = (0, import_obsidian6.normalizePath)(`.midad-arabic-sources/source-models/${it.work.collection}/${it.work.id}.json`);
+        const rel = (0, import_obsidian9.normalizePath)(`.midad-arabic-sources/source-models/${it.work.collection}/${it.work.id}.json`);
         try {
           if (!await this.app.vault.adapter.exists(rel))
             continue;
@@ -12281,7 +13890,7 @@ var ArabicSupportPlugin = class extends import_obsidian6.Plugin {
       const cancelled = this.isSourceCancelled(op);
       this.endSourceOperation(op);
       if (cancelled)
-        new import_obsidian6.Notice("Stopped updating sources.");
+        new import_obsidian9.Notice("Stopped updating sources.");
     }
   }
   async applyTemplateChanges(kind = "explicit") {
@@ -12342,7 +13951,7 @@ var ArabicSupportPlugin = class extends import_obsidian6.Plugin {
     const apply = async () => {
       const rerender = [];
       for (const it of incomplete) {
-        const rel = (0, import_obsidian6.normalizePath)(`.midad-arabic-sources/source-models/${it.work.collection}/${it.work.id}.json`);
+        const rel = (0, import_obsidian9.normalizePath)(`.midad-arabic-sources/source-models/${it.work.collection}/${it.work.id}.json`);
         if (it.reason === "notes" && await this.app.vault.adapter.exists(rel)) {
           rerender.push({ work: it.work, kinds: null });
           continue;
@@ -12385,7 +13994,7 @@ var ArabicSupportPlugin = class extends import_obsidian6.Plugin {
   }
   async runTransliteration(text, opts) {
     var _a, _b;
-    const loading = new import_obsidian6.Notice("Transliterating\u2026", 0);
+    const loading = new import_obsidian9.Notice("Transliterating\u2026", 0);
     try {
       const body = { text };
       let path2 = "/transliterate";
@@ -12406,7 +14015,7 @@ var ArabicSupportPlugin = class extends import_obsidian6.Plugin {
         body.dotless_ya = this.settings.dotlessYa;
         body.name = this.settings.nameMode;
       }
-      const res = await (0, import_obsidian6.requestUrl)({
+      const res = await (0, import_obsidian9.requestUrl)({
         url: this.baseUrl() + path2,
         method: "POST",
         contentType: "application/json",
@@ -12415,12 +14024,12 @@ var ArabicSupportPlugin = class extends import_obsidian6.Plugin {
       const data = (_a = res.json) != null ? _a : {};
       this.lastUnknown = Array.isArray(data.unknown) ? data.unknown : [];
       if (data.error) {
-        new import_obsidian6.Notice(`Transliteration error: ${data.error}`);
+        new import_obsidian9.Notice(`Transliteration error: ${data.error}`);
         return null;
       }
       return (_b = data.romanized) != null ? _b : "";
     } catch (e) {
-      new import_obsidian6.Notice(`Transliteration server not reachable at ${this.settings.serverUrl}. Start it with: python3 scripts/transliterate-server.py`);
+      new import_obsidian9.Notice(`Transliteration server not reachable at ${this.settings.serverUrl}. Start it with: python3 scripts/transliterate-server.py`);
       return null;
     } finally {
       loading.hide();
@@ -12439,20 +14048,20 @@ var ArabicSupportPlugin = class extends import_obsidian6.Plugin {
   }
   async saveLexicon(entries) {
     try {
-      await (0, import_obsidian6.requestUrl)({
+      await (0, import_obsidian9.requestUrl)({
         url: this.baseUrl() + "/lexicon",
         method: "POST",
         contentType: "application/json",
         body: JSON.stringify({ entries })
       });
-      new import_obsidian6.Notice(`Lexicon updated (${Object.keys(entries).length} term(s)).`);
+      new import_obsidian9.Notice(`Lexicon updated (${Object.keys(entries).length} term(s)).`);
     } catch (e) {
-      new import_obsidian6.Notice("Could not update the lexicon.");
+      new import_obsidian9.Notice("Could not update the lexicon.");
     }
   }
   async health() {
     try {
-      const res = await (0, import_obsidian6.requestUrl)({ url: this.baseUrl() + "/health", method: "GET" });
+      const res = await (0, import_obsidian9.requestUrl)({ url: this.baseUrl() + "/health", method: "GET" });
       return res.json;
     } catch (e) {
       return null;
@@ -12466,7 +14075,7 @@ var ArabicSupportPlugin = class extends import_obsidian6.Plugin {
     if (!actual || !actual.bert || actual.bert === "bert")
       return;
     this.engineFallbackWarned = true;
-    new import_obsidian6.Notice("Transliteration is using the MLE engine because BERT could not be loaded. For best results, install `transformers` and the BERT model data (`camel_data -i disambig-bert-unfactored-msa`), then restart the transliteration server.", 15e3);
+    new import_obsidian9.Notice("Transliteration is using the MLE engine because BERT could not be loaded. For best results, install `transformers` and the BERT model data (`camel_data -i disambig-bert-unfactored-msa`), then restart the transliteration server.", 15e3);
   }
   async serverStatusSummary() {
     var _a, _b;
@@ -12487,7 +14096,7 @@ var ArabicSupportPlugin = class extends import_obsidian6.Plugin {
   async startTransliterationServer() {
     var _a;
     if (await this.health()) {
-      new import_obsidian6.Notice(`Transliteration server already running at ${this.settings.serverUrl}.`);
+      new import_obsidian9.Notice(`Transliteration server already running at ${this.settings.serverUrl}.`);
       return;
     }
     const vault = this.vaultPath();
@@ -12518,15 +14127,15 @@ var ArabicSupportPlugin = class extends import_obsidian6.Plugin {
       proc.unref();
       this.translitServerPid = (_a = proc.pid) != null ? _a : null;
     } catch (e) {
-      new import_obsidian6.Notice(`Could not start the transliteration server: ${e}`);
+      new import_obsidian9.Notice(`Could not start the transliteration server: ${e}`);
       return;
     }
-    const loading = new import_obsidian6.Notice("Starting transliteration server\u2026", 0);
+    const loading = new import_obsidian9.Notice("Starting transliteration server\u2026", 0);
     try {
       for (let i = 0; i < 40; i++) {
         await new Promise((resolve) => window.setTimeout(resolve, 1e3));
         if (await this.health()) {
-          new import_obsidian6.Notice("Transliteration server started.");
+          new import_obsidian9.Notice("Transliteration server started.");
           await this.maybeWarnEngineFallback();
           return;
         }
@@ -12536,7 +14145,7 @@ var ArabicSupportPlugin = class extends import_obsidian6.Plugin {
         tail = fs2.readFileSync(logPath, "utf8").trim().split("\n").slice(-4).join("\n");
       } catch (e) {
       }
-      new import_obsidian6.Notice("The transliteration server did not start." + (tail ? `
+      new import_obsidian9.Notice("The transliteration server did not start." + (tail ? `
 
 ${tail}` : "") + "\n\nIf it mentions a missing module, set the Python path under Transliteration \u2192 Python path.", 2e4);
     } finally {
@@ -12573,7 +14182,7 @@ ${tail}` : "") + "\n\nIf it mentions a missing module, set the Python path under
         break;
       await new Promise((resolve) => window.setTimeout(resolve, 150));
     }
-    new import_obsidian6.Notice(found ? "Transliteration server stopped." : "No running transliteration server found.");
+    new import_obsidian9.Notice(found ? "Transliteration server stopped." : "No running transliteration server found.");
   }
   baseUrl() {
     return this.settings.serverUrl.replace(/\/+$/, "");
@@ -12593,7 +14202,7 @@ ${tail}` : "") + "\n\nIf it mentions a missing module, set the Python path under
     this.settings = Object.assign({}, DEFAULT_SETTINGS, data != null ? data : {});
     if (!this.settings.canonicalQuranRiw\u0101ya.trim()) {
       try {
-        if (await this.app.vault.adapter.exists((0, import_obsidian6.normalizePath)(".midad-arabic-sources/source-models/quran-text/hafs.json"))) {
+        if (await this.app.vault.adapter.exists((0, import_obsidian9.normalizePath)(".midad-arabic-sources/source-models/quran-text/hafs.json"))) {
           this.settings.canonicalQuranRiw\u0101ya = "hafs";
           await this.saveSettings();
         }
@@ -12605,7 +14214,7 @@ ${tail}` : "") + "\n\nIf it mentions a missing module, set the Python path under
     await this.saveData(this.settings);
   }
 };
-var TransliterationServerModal = class extends import_obsidian6.Modal {
+var TransliterationServerModal = class extends import_obsidian9.Modal {
   constructor(app, plugin) {
     super(app);
     this.button = null;
@@ -12615,7 +14224,7 @@ var TransliterationServerModal = class extends import_obsidian6.Modal {
   onOpen() {
     this.contentEl.createEl("h2", { text: "Transliteration server" });
     this.statusEl = this.contentEl.createEl("p", { text: "Checking\u2026" });
-    new import_obsidian6.Setting(this.contentEl).addButton((button) => {
+    new import_obsidian9.Setting(this.contentEl).addButton((button) => {
       this.button = button;
       button.onClick(async () => {
         button.setDisabled(true);
@@ -12641,7 +14250,7 @@ var TransliterationServerModal = class extends import_obsidian6.Modal {
     this.contentEl.empty();
   }
 };
-var TransliterateModal = class extends import_obsidian6.Modal {
+var TransliterateModal = class extends import_obsidian9.Modal {
   constructor(app, plugin, text, onDone) {
     super(app);
     this.plugin = plugin;
@@ -12653,13 +14262,13 @@ var TransliterateModal = class extends import_obsidian6.Modal {
   onOpen() {
     const { contentEl } = this;
     contentEl.createEl("h3", { text: "Transliterate" });
-    new import_obsidian6.Setting(contentEl).setName("Full vocalization").setDesc("Retain case endings and tanw\u012Bn (pausal shortening at the end of a passage).").addToggle((toggle) => toggle.setValue(this.fullVocalization).onChange((value) => {
+    new import_obsidian9.Setting(contentEl).setName("Full vocalization").setDesc("Retain case endings and tanw\u012Bn (pausal shortening at the end of a passage).").addToggle((toggle) => toggle.setValue(this.fullVocalization).onChange((value) => {
       this.fullVocalization = value;
     }));
-    new import_obsidian6.Setting(contentEl).setName("Use LLM").setDesc("Romanize with the configured API instead of the rule engine.").addToggle((toggle) => toggle.setValue(this.useLlm).onChange((value) => {
+    new import_obsidian9.Setting(contentEl).setName("Use LLM").setDesc("Romanize with the configured API instead of the rule engine.").addToggle((toggle) => toggle.setValue(this.useLlm).onChange((value) => {
       this.useLlm = value;
     }));
-    new import_obsidian6.Setting(contentEl).addButton((button) => button.setButtonText("Transliterate").setCta().onClick(async () => {
+    new import_obsidian9.Setting(contentEl).addButton((button) => button.setButtonText("Transliterate").setCta().onClick(async () => {
       this.plugin.settings.useLlm = this.useLlm;
       this.plugin.settings.fullVocalization = this.fullVocalization;
       await this.plugin.saveSettings();
@@ -12677,7 +14286,7 @@ var TransliterateModal = class extends import_obsidian6.Modal {
     this.contentEl.empty();
   }
 };
-var LexiconModal = class extends import_obsidian6.Modal {
+var LexiconModal = class extends import_obsidian9.Modal {
   constructor(app, plugin, unknown, onSaved = null) {
     super(app);
     this.inputs = [];
@@ -12692,12 +14301,12 @@ var LexiconModal = class extends import_obsidian6.Modal {
       text: "These terms had no morphological analysis. Edit or confirm their romanization to remember them for next time."
     });
     for (const item of this.unknown) {
-      new import_obsidian6.Setting(contentEl).setName(item.term).addText((text) => {
+      new import_obsidian9.Setting(contentEl).setName(item.term).addText((text) => {
         text.setValue(item.guess || "");
         this.inputs.push({ term: item.term, comp: text });
       });
     }
-    new import_obsidian6.Setting(contentEl).addButton((button) => button.setButtonText("Save").setCta().onClick(async () => {
+    new import_obsidian9.Setting(contentEl).addButton((button) => button.setButtonText("Save").setCta().onClick(async () => {
       const entries = {};
       for (const { term, comp } of this.inputs) {
         const value = comp.getValue().trim();
@@ -12718,7 +14327,7 @@ var LexiconModal = class extends import_obsidian6.Modal {
     this.contentEl.empty();
   }
 };
-var ArabicSupportSettingTab = class extends import_obsidian6.PluginSettingTab {
+var ArabicSupportSettingTab = class extends import_obsidian9.PluginSettingTab {
   constructor(app, plugin) {
     super(app, plugin);
     this.zoteroProbed = false;
@@ -12751,14 +14360,14 @@ var ArabicSupportSettingTab = class extends import_obsidian6.PluginSettingTab {
   async detectZotero() {
     const found = await this.plugin.detectZoteroLocal();
     if (!found) {
-      new import_obsidian6.Notice("No local Zotero found on port 23119.");
+      new import_obsidian9.Notice("No local Zotero found on port 23119.");
       return;
     }
     this.plugin.settings.zoteroLibraryId = String(found.libraryId);
     this.plugin.settings.zoteroServerId = found.serverId;
     await this.plugin.saveSettings();
     this.update();
-    new import_obsidian6.Notice(`Local Zotero: library ${found.libraryId}.`);
+    new import_obsidian9.Notice(`Local Zotero: library ${found.libraryId}.`);
   }
   probeZotero() {
     if (this.zoteroProbed)
@@ -12981,6 +14590,41 @@ var ArabicSupportSettingTab = class extends import_obsidian6.PluginSettingTab {
       },
       {
         type: "page",
+        name: "Annotations",
+        desc: "Highlights, comments, the annotation note, and the Source Annotations MOC.",
+        items: [
+          {
+            name: "Annotation note folder",
+            desc: "Folder for the generated per-work annotation notes. They are ordinary notes; the plugin only owns their annotations region.",
+            control: { type: "text", key: "annotationNoteFolder", placeholder: "_7 Sources/Notes" }
+          },
+          {
+            name: "Default annotation colour",
+            desc: "Colour selected when the annotation dialog opens.",
+            control: {
+              type: "dropdown",
+              key: "annotationDefaultColor",
+              options: {
+                yellow: "Yellow",
+                orange: "Orange",
+                red: "Red",
+                purple: "Purple",
+                magenta: "Magenta",
+                blue: "Blue",
+                green: "Green",
+                gray: "Gray"
+              }
+            }
+          },
+          {
+            name: "Annotation trash retention (days)",
+            desc: "How long deleted annotations and their notes stay in the plugin trash before permanent removal.",
+            control: { type: "number", key: "annotationTrashDays", defaultValue: 30, placeholder: "30", min: 1 }
+          }
+        ]
+      },
+      {
+        type: "page",
         name: "Zotero",
         desc: "Send imported works to your Zotero library, and keep them up to date.",
         items: [
@@ -13179,7 +14823,7 @@ var StatusPanel = class {
     const vault = (_b = (_a = adapter == null ? void 0 : adapter.getBasePath) == null ? void 0 : _a.call(adapter)) != null ? _b : "";
     const rel = vault && path2.startsWith(vault) ? path2.slice(vault.length + 1) : path2;
     const file = this.app.vault.getAbstractFileByPath(rel);
-    if (file instanceof import_obsidian6.TFile)
+    if (file instanceof import_obsidian9.TFile)
       void this.app.workspace.getLeaf("tab").openFile(file);
     else
       void this.app.workspace.openLinkText(rel, "", true);
@@ -13206,7 +14850,7 @@ var StatusPanel = class {
       this.onClose();
   }
 };
-var LogModal = class extends import_obsidian6.Modal {
+var LogModal = class extends import_obsidian9.Modal {
   constructor(app, title, text) {
     super(app);
     this.title = title;
@@ -13228,7 +14872,7 @@ var LogModal = class extends import_obsidian6.Modal {
     this.contentEl.empty();
   }
 };
-var ApiKeyModal = class extends import_obsidian6.Modal {
+var ApiKeyModal = class extends import_obsidian9.Modal {
   constructor(app, plugin) {
     super(app);
     this.plugin = plugin;
@@ -13242,7 +14886,7 @@ var ApiKeyModal = class extends import_obsidian6.Modal {
     contentEl.createEl("p", {
       text: "Set it in the Midad Arabic Sources plugin settings (recommended): it is passed to the pipeline automatically. Alternatively, provide GEMINI_API_KEY (or GOOGLE_API_KEY) in the environment Obsidian was launched from."
     });
-    new import_obsidian6.Setting(contentEl).addButton((b) => b.setButtonText("Open plugin settings").setCta().onClick(() => {
+    new import_obsidian9.Setting(contentEl).addButton((b) => b.setButtonText("Open plugin settings").setCta().onClick(() => {
       this.close();
       this.plugin.openSettings();
     })).addButton((b) => b.setButtonText("Cancel").onClick(() => this.close()));
@@ -13251,7 +14895,7 @@ var ApiKeyModal = class extends import_obsidian6.Modal {
     this.contentEl.empty();
   }
 };
-var ResumeModal = class extends import_obsidian6.Modal {
+var ResumeModal = class extends import_obsidian9.Modal {
   constructor(app, plugin, state) {
     super(app);
     this.plugin = plugin;
@@ -13270,7 +14914,7 @@ var ResumeModal = class extends import_obsidian6.Modal {
       overflow: "auto",
       fontSize: "var(--font-ui-smaller)"
     });
-    const setting = new import_obsidian6.Setting(contentEl);
+    const setting = new import_obsidian9.Setting(contentEl);
     let alive = false;
     try {
       if (this.state.pid) {
@@ -13328,7 +14972,7 @@ var PromptPicker = class {
   }
   render() {
     this.containerEl.empty();
-    const row = new import_obsidian6.Setting(this.containerEl).setName("Prompt");
+    const row = new import_obsidian9.Setting(this.containerEl).setName("Prompt");
     row.addDropdown((dd) => {
       for (const p of this.entries)
         dd.addOption(p.name, p.name);
@@ -13346,7 +14990,7 @@ var PromptPicker = class {
       var _a;
       return (_a = this.onSelectNone) == null ? void 0 : _a.call(this);
     }));
-    const actions = new import_obsidian6.Setting(this.containerEl).setName("Manage prompts");
+    const actions = new import_obsidian9.Setting(this.containerEl).setName("Manage prompts");
     actions.addButton((b) => b.setButtonText("Modify selected").onClick(() => this.openEditor("edit")));
     actions.addButton((b) => b.setButtonText("Create a new prompt from selected").onClick(() => this.openEditor("new")));
     actions.addButton((b) => {
@@ -13354,7 +14998,7 @@ var PromptPicker = class {
       b.setButtonText("Delete selected prompt").onClick(() => {
         void this.deleteSelected().catch((e) => {
           console.error("[midad-arabic-sources] delete prompt", e);
-          new import_obsidian6.Notice("Could not delete the prompt \u2014 see the developer console.");
+          new import_obsidian9.Notice("Could not delete the prompt \u2014 see the developer console.");
         });
       });
     });
@@ -13387,10 +15031,10 @@ var PromptPicker = class {
     this.entries = remaining;
     this.selectedName = (_d = (_c = (_a = remaining.find((e) => e.builtin)) == null ? void 0 : _a.name) != null ? _c : (_b = remaining[0]) == null ? void 0 : _b.name) != null ? _d : "";
     this.render();
-    new import_obsidian6.Notice(`Deleted prompt \u201C${entry.name}\u201D.`);
+    new import_obsidian9.Notice(`Deleted prompt \u201C${entry.name}\u201D.`);
   }
 };
-var PromptEditorModal = class extends import_obsidian6.Modal {
+var PromptEditorModal = class extends import_obsidian9.Modal {
   constructor(plugin, kind, mode, source, initialName, onSaved) {
     super(plugin.app);
     this.plugin = plugin;
@@ -13415,7 +15059,7 @@ var PromptEditorModal = class extends import_obsidian6.Modal {
     contentEl.createEl("p", {
       text: `The text below is appended to the pipeline's built-in page-formatting and ${kindLabel} instructions. Describe the document and any text-specific handling here.`
     });
-    new import_obsidian6.Setting(contentEl).setName("Name").addText((t) => {
+    new import_obsidian9.Setting(contentEl).setName("Name").addText((t) => {
       t.setValue(this.name).onChange((v) => this.name = v);
       t.inputEl.setCssStyles({ width: "100%" });
     });
@@ -13431,30 +15075,30 @@ var PromptEditorModal = class extends import_obsidian6.Modal {
       lineHeight: "1.45"
     });
     textarea.addEventListener("input", () => this.text = textarea.value);
-    new import_obsidian6.Setting(contentEl).addButton((b) => b.setButtonText("Save").setCta().onClick(() => {
+    new import_obsidian9.Setting(contentEl).addButton((b) => b.setButtonText("Save").setCta().onClick(() => {
       void this.save(false).catch((e) => {
         console.error("[midad-arabic-sources] save prompt", e);
-        new import_obsidian6.Notice("Could not save the prompt \u2014 see the developer console.");
+        new import_obsidian9.Notice("Could not save the prompt \u2014 see the developer console.");
       });
     })).addButton((b) => b.setButtonText("Save as").onClick(() => {
       void this.save(true).catch((e) => {
         console.error("[midad-arabic-sources] save prompt copy", e);
-        new import_obsidian6.Notice("Could not save the prompt \u2014 see the developer console.");
+        new import_obsidian9.Notice("Could not save the prompt \u2014 see the developer console.");
       });
     })).addButton((b) => b.setButtonText("Cancel").onClick(() => this.close()));
   }
   async save(asCopy) {
     const name = this.name.trim();
     if (!name) {
-      new import_obsidian6.Notice("Enter a prompt name.");
+      new import_obsidian9.Notice("Enter a prompt name.");
       return;
     }
     if (!this.text.trim()) {
-      new import_obsidian6.Notice("The prompt cannot be empty.");
+      new import_obsidian9.Notice("The prompt cannot be empty.");
       return;
     }
     if (asCopy && this.mode === "edit" && name === this.originalName) {
-      new import_obsidian6.Notice("Enter a different name in the name field to save a copy.");
+      new import_obsidian9.Notice("Enter a different name in the name field to save a copy.");
       return;
     }
     const entries = await this.plugin.loadPromptSet(this.kind);
@@ -13462,11 +15106,11 @@ var PromptEditorModal = class extends import_obsidian6.Modal {
     if (this.mode === "edit" && !asCopy) {
       const target = entries.find((e) => e.name === this.originalName);
       if (!target) {
-        new import_obsidian6.Notice("This prompt no longer exists.");
+        new import_obsidian9.Notice("This prompt no longer exists.");
         return;
       }
       if (!target.builtin && name !== this.originalName && existing) {
-        new import_obsidian6.Notice(`A prompt named \u201C${name}\u201D already exists.`);
+        new import_obsidian9.Notice(`A prompt named \u201C${name}\u201D already exists.`);
         return;
       }
       target.text = this.text;
@@ -13480,7 +15124,7 @@ var PromptEditorModal = class extends import_obsidian6.Modal {
       await this.onSaved(target.name);
     } else {
       if (existing) {
-        new import_obsidian6.Notice(`A prompt named \u201C${name}\u201D already exists.`);
+        new import_obsidian9.Notice(`A prompt named \u201C${name}\u201D already exists.`);
         return;
       }
       entries.push({ name, text: this.text });
@@ -13493,7 +15137,7 @@ var PromptEditorModal = class extends import_obsidian6.Modal {
     this.contentEl.empty();
   }
 };
-var TranscribeModal = class extends import_obsidian6.Modal {
+var TranscribeModal = class extends import_obsidian9.Modal {
   constructor(app, plugin, citekey, pdfs, prompts) {
     super(app);
     this.checks = [];
@@ -13521,20 +15165,20 @@ var TranscribeModal = class extends import_obsidian6.Modal {
       cb.disabled = !pdf.exists;
       row.createSpan({ text: ` ${pdf.filename}${pdf.exists ? "" : " (file not found)"} ` });
       row.createSpan({ text: "vol." });
-      const vol = new import_obsidian6.TextComponent(row);
+      const vol = new import_obsidian9.TextComponent(row);
       vol.setValue(pdf.volume != null ? String(pdf.volume) : "").setPlaceholder("\u2014");
       vol.inputEl.setCssStyles({ width: "3.5em" });
       this.checks.push({ pdf, el: cb, vol });
     }
-    new import_obsidian6.Setting(contentEl).addButton((b) => b.setButtonText("Transcribe").setCta().onClick(async () => {
+    new import_obsidian9.Setting(contentEl).addButton((b) => b.setButtonText("Transcribe").setCta().onClick(async () => {
       const chosen = this.checks.filter((c) => c.el.checked);
       if (!chosen.length) {
-        new import_obsidian6.Notice("Select at least one PDF.");
+        new import_obsidian9.Notice("Select at least one PDF.");
         return;
       }
       const prompt = this.picker.selectedEntry();
       if (!prompt) {
-        new import_obsidian6.Notice("Select a prompt.");
+        new import_obsidian9.Notice("Select a prompt.");
         return;
       }
       const args = ["transcribe", "--citekey", this.citekey];
@@ -13554,7 +15198,7 @@ var TranscribeModal = class extends import_obsidian6.Modal {
     this.contentEl.empty();
   }
 };
-var TranslateModal = class extends import_obsidian6.Modal {
+var TranslateModal = class extends import_obsidian9.Modal {
   constructor(app, plugin, citekey, notes, pdfs, prompts) {
     super(app);
     this.checks = [];
@@ -13594,16 +15238,16 @@ var TranslateModal = class extends import_obsidian6.Modal {
         ul.createEl("li", { text: `${p.filename}${p.exists ? "" : " (file not found)"}` });
       }
     }
-    new import_obsidian6.Setting(contentEl).setName("Volume").setDesc("Optional volume number.").addText((t) => t.setPlaceholder("E.g. 2").onChange((v) => this.volume = v.trim()));
-    new import_obsidian6.Setting(contentEl).addButton((b) => b.setButtonText("Translate").setCta().onClick(async () => {
+    new import_obsidian9.Setting(contentEl).setName("Volume").setDesc("Optional volume number.").addText((t) => t.setPlaceholder("E.g. 2").onChange((v) => this.volume = v.trim()));
+    new import_obsidian9.Setting(contentEl).addButton((b) => b.setButtonText("Translate").setCta().onClick(async () => {
       const chosen = this.checks.filter((c) => c.el.checked).map((c) => c.note.path);
       if (!chosen.length) {
-        new import_obsidian6.Notice("Select at least one transcription.");
+        new import_obsidian9.Notice("Select at least one transcription.");
         return;
       }
       const prompt = this.picker.selectedEntry();
       if (!prompt) {
-        new import_obsidian6.Notice("Select a prompt.");
+        new import_obsidian9.Notice("Select a prompt.");
         return;
       }
       const args = ["translate", "--citekey", this.citekey];
@@ -13623,7 +15267,7 @@ var TranslateModal = class extends import_obsidian6.Modal {
     this.contentEl.empty();
   }
 };
-var ReprocessModal = class extends import_obsidian6.Modal {
+var ReprocessModal = class extends import_obsidian9.Modal {
   constructor(app, plugin, zips) {
     super(app);
     this.checks = [];
@@ -13645,10 +15289,10 @@ var ReprocessModal = class extends import_obsidian6.Modal {
       row.createSpan({ text: ` ${z.name}` });
       this.checks.push({ zip: z, el: cb });
     }
-    new import_obsidian6.Setting(contentEl).addButton((b) => b.setButtonText("Reprocess").setCta().onClick(async () => {
+    new import_obsidian9.Setting(contentEl).addButton((b) => b.setButtonText("Reprocess").setCta().onClick(async () => {
       const chosen = this.checks.filter((c) => c.el.checked).map((c) => c.zip.path);
       if (!chosen.length) {
-        new import_obsidian6.Notice("Select at least one archive.");
+        new import_obsidian9.Notice("Select at least one archive.");
         return;
       }
       this.close();
@@ -13660,7 +15304,7 @@ var ReprocessModal = class extends import_obsidian6.Modal {
     this.contentEl.empty();
   }
 };
-var SourceTemplateUpdateConsentModal = class extends import_obsidian6.Modal {
+var SourceTemplateUpdateConsentModal = class extends import_obsidian9.Modal {
   constructor(app, count, onChoose) {
     super(app);
     this.count = count;
@@ -13672,7 +15316,7 @@ var SourceTemplateUpdateConsentModal = class extends import_obsidian6.Modal {
     contentEl.createEl("p", {
       text: `The import templates changed. ${this.count} note(s) were rendered with an older version. Re-render them now? Your own edits and out-of-template properties are preserved.`
     });
-    new import_obsidian6.Setting(contentEl).addButton((b) => b.setButtonText("Yes, update").setCta().onClick(() => {
+    new import_obsidian9.Setting(contentEl).addButton((b) => b.setButtonText("Yes, update").setCta().onClick(() => {
       this.close();
       this.onChoose("yes");
     })).addButton((b) => b.setButtonText("Not now").onClick(() => {
@@ -13687,7 +15331,7 @@ var SourceTemplateUpdateConsentModal = class extends import_obsidian6.Modal {
     this.contentEl.empty();
   }
 };
-var ReconcileSourcesModal = class extends import_obsidian6.Modal {
+var ReconcileSourcesModal = class extends import_obsidian9.Modal {
   constructor(app, plugin, items) {
     super(app);
     this.checks = [];
@@ -13709,33 +15353,33 @@ var ReconcileSourcesModal = class extends import_obsidian6.Modal {
       row.createSpan({ text: ` ${it.work.title} \u2014 ${detail}` });
       this.checks.push({ work: it.work, el: cb });
     }
-    new import_obsidian6.Setting(contentEl).addButton((b) => b.setButtonText("Reinstall selected").setCta().onClick(async () => {
+    new import_obsidian9.Setting(contentEl).addButton((b) => b.setButtonText("Reinstall selected").setCta().onClick(async () => {
       const chosen = this.checks.filter((c) => c.el.checked);
       if (!chosen.length) {
-        new import_obsidian6.Notice("Select at least one work.");
+        new import_obsidian9.Notice("Select at least one work.");
         return;
       }
       this.close();
       for (const c of chosen)
         await this.plugin.reinstallSource(c.work);
-      new import_obsidian6.Notice(`Reinstalled ${chosen.length} work(s).`);
+      new import_obsidian9.Notice(`Reinstalled ${chosen.length} work(s).`);
     })).addButton((b) => b.setButtonText("Remove selected").setDestructive().onClick(async () => {
       const chosen = this.checks.filter((c) => c.el.checked);
       if (!chosen.length) {
-        new import_obsidian6.Notice("Select at least one work.");
+        new import_obsidian9.Notice("Select at least one work.");
         return;
       }
       this.close();
       for (const c of chosen)
         await this.plugin.removeSource(c.work);
-      new import_obsidian6.Notice(`Removed ${chosen.length} work(s).`);
+      new import_obsidian9.Notice(`Removed ${chosen.length} work(s).`);
     })).addButton((b) => b.setButtonText("Decide later").onClick(() => this.close()));
   }
   onClose() {
     this.contentEl.empty();
   }
 };
-var TransliterationUnavailableModal = class extends import_obsidian6.Modal {
+var TransliterationUnavailableModal = class extends import_obsidian9.Modal {
   constructor(app, sourceName, resolve) {
     super(app);
     this.answered = false;
@@ -13747,7 +15391,7 @@ var TransliterationUnavailableModal = class extends import_obsidian6.Modal {
     this.contentEl.createEl("p", {
       text: `This source, ${this.sourceName}, requires transliteration to render, but the transliteration server is not running. Start it now, or proceed without transliteration.`
     });
-    const footer = new import_obsidian6.Setting(this.contentEl);
+    const footer = new import_obsidian9.Setting(this.contentEl);
     footer.addButton((b) => b.setButtonText("Start server").setCta().onClick(async () => {
       this.answered = true;
       this.resolve("start");
@@ -13997,7 +15641,7 @@ function buildUrlAdder(plugin, container) {
       return;
     }
     for (const w of works) {
-      new import_obsidian6.Setting(listEl).setName(w.title || w.arabic || w.id).setDesc(w.author ? `${w.author} \u2014 ${w.url}` : w.url).addButton((b) => b.setButtonText("Remove").setDestructive().onClick(async () => {
+      new import_obsidian9.Setting(listEl).setName(w.title || w.arabic || w.id).setDesc(w.author ? `${w.author} \u2014 ${w.url}` : w.url).addButton((b) => b.setButtonText("Remove").setDestructive().onClick(async () => {
         await plugin.removeTurathWork(w.id);
         await renderList();
       }));
@@ -14012,7 +15656,7 @@ function buildUrlAdder(plugin, container) {
     authorEl.value = work.author;
     preview.classList.remove("mas-manage__hidden");
   };
-  new import_obsidian6.Setting(container).addText((text) => {
+  new import_obsidian9.Setting(container).addText((text) => {
     inputEl = text.inputEl;
     text.setPlaceholder("https://app.turath.io/book/95864");
     text.inputEl.addEventListener("keydown", (ev) => {
@@ -14022,13 +15666,13 @@ function buildUrlAdder(plugin, container) {
       }
     });
   }).addButton((b) => b.setButtonText("Fetch").setCta().onClick(() => void pull()));
-  new import_obsidian6.Setting(preview).setName("Title (romanized)").addText((text) => {
+  new import_obsidian9.Setting(preview).setName("Title (romanized)").addText((text) => {
     titleEl = text.inputEl;
   });
-  new import_obsidian6.Setting(preview).setName("Author (romanized)").addText((text) => {
+  new import_obsidian9.Setting(preview).setName("Author (romanized)").addText((text) => {
     authorEl = text.inputEl;
   });
-  new import_obsidian6.Setting(preview).addButton((b) => b.setButtonText("Add to list").onClick(async () => {
+  new import_obsidian9.Setting(preview).addButton((b) => b.setButtonText("Add to list").onClick(async () => {
     if (!pending2)
       return;
     pending2.title = titleEl.value.trim() || pending2.title;
@@ -14041,7 +15685,7 @@ function buildUrlAdder(plugin, container) {
   }));
   void renderList();
 }
-var TurathUrlModal = class extends import_obsidian6.Modal {
+var TurathUrlModal = class extends import_obsidian9.Modal {
   constructor(app, plugin) {
     super(app);
     this.plugin = plugin;
@@ -14054,7 +15698,7 @@ var TurathUrlModal = class extends import_obsidian6.Modal {
     this.contentEl.empty();
   }
 };
-var ManageSourcesModal = class extends import_obsidian6.Modal {
+var ManageSourcesModal = class extends import_obsidian9.Modal {
   constructor(app, plugin, works, installed, deleting = new Set(), sizes = new Map(), zoteroStatus = new Map(), onReload) {
     super(app);
     this.rows = [];
@@ -14282,7 +15926,7 @@ var ManageSourcesModal = class extends import_obsidian6.Modal {
       if (this.mode === "zotero") {
         const keys = new Set(this.works.filter((w) => this.selected.has(w.key) && this.installed.has(w.key)).map((w) => w.key));
         if (!keys.size) {
-          new import_obsidian6.Notice("Nothing selected.");
+          new import_obsidian9.Notice("Nothing selected.");
           return;
         }
         this.close();
@@ -14300,11 +15944,11 @@ var ManageSourcesModal = class extends import_obsidian6.Modal {
           toRemove.push(w);
       }
       if (!toInstall.length && !toRemove.length) {
-        new import_obsidian6.Notice("Nothing to change.");
+        new import_obsidian9.Notice("Nothing to change.");
         return;
       }
       this.close();
-      const progress = new import_obsidian6.Notice(`Applying\u2026 (${toInstall.length} to install, ${toRemove.length} to remove)`, 0);
+      const progress = new import_obsidian9.Notice(`Applying\u2026 (${toInstall.length} to install, ${toRemove.length} to remove)`, 0);
       const failed = [];
       try {
         let n = 0;
@@ -14329,7 +15973,7 @@ var ManageSourcesModal = class extends import_obsidian6.Modal {
       } finally {
         progress.hide();
       }
-      new import_obsidian6.Notice(`Applied: ${toInstall.length} installed, ${toRemove.length} removed.` + (failed.length ? ` ${failed.length} failed \u2014 see the console.` : ""));
+      new import_obsidian9.Notice(`Applied: ${toInstall.length} installed, ${toRemove.length} removed.` + (failed.length ? ` ${failed.length} failed \u2014 see the console.` : ""));
       if (failed.length)
         console.error("[midad-arabic-sources] apply failures", failed);
     };
@@ -14375,7 +16019,7 @@ var ManageSourcesModal = class extends import_obsidian6.Modal {
     this.contentEl.empty();
   }
 };
-var ZoteroSendModal = class extends import_obsidian6.Modal {
+var ZoteroSendModal = class extends import_obsidian9.Modal {
   constructor(app, plugin, entries) {
     super(app);
     this.checks = [];
@@ -14422,11 +16066,11 @@ var ZoteroSendModal = class extends import_obsidian6.Modal {
     }
     all.onclick = () => this.checks.forEach((c) => c.el.checked = true);
     none.onclick = () => this.checks.forEach((c) => c.el.checked = false);
-    const footer = new import_obsidian6.Setting(contentEl);
+    const footer = new import_obsidian9.Setting(contentEl);
     footer.addButton((b) => b.setButtonText("Send to Zotero").setCta().onClick(async () => {
       const keys = new Set(this.checks.filter((c) => c.el.checked).map((c) => c.key));
       if (!keys.size) {
-        new import_obsidian6.Notice("Nothing selected.");
+        new import_obsidian9.Notice("Nothing selected.");
         return;
       }
       this.close();
