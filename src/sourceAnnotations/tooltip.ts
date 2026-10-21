@@ -1,5 +1,5 @@
-import { App, Component, MarkdownRenderer, setIcon } from "obsidian";
-import { annotationTint } from "./colors";
+import { App, Component } from "obsidian";
+import { renderAnnotationCard } from "./cards";
 import type { AnnotationTarget, SourceAnnotation } from "./types";
 
 export interface AnnotationTooltipOptions {
@@ -44,71 +44,28 @@ export class AnnotationTooltip {
 		this.component = component;
 
 		for (const annotation of annotations) {
-			const card = el.createDiv({ cls: "mas-ann-card" });
-			card.setCssStyles({ background: annotationTint(annotation.color, 92, 0.55) });
-			const dot = card.createSpan({ cls: "mas-ann-card-dot" });
-			dot.setCssStyles({ background: annotationTint(annotation.color, 62, 0.9) });
-			const body = card.createDiv({ cls: "mas-ann-card-body" });
-			const comment = body.createDiv({ cls: "mas-ann-card-comment" });
-			if (annotation.comment?.trim()) {
-				await MarkdownRenderer.render(this.app, annotation.comment, comment, target.notePath, component);
-			} else {
-				comment.addClass("is-empty");
-				comment.setText("No comment");
-			}
-			const actions = body.createDiv({ cls: "mas-ann-card-actions" });
-			const edit = actions.createEl("button", {
-				cls: "clickable-icon mas-ann-card-action",
-				attr: { type: "button", "aria-label": "Edit annotation" },
-			});
-			setIcon(edit, "pencil");
-			edit.addEventListener("click", (event) => {
-				event.preventDefault();
-				event.stopPropagation();
-				this.hide();
-				this.options.onEdit(annotation, target, anchor);
-			});
-			const openNote = actions.createEl("button", {
-				cls: "clickable-icon mas-ann-card-action",
-				attr: { type: "button", "aria-label": "Open annotation note" },
-			});
-			setIcon(openNote, "notebook-pen");
-			openNote.addEventListener("click", (event) => {
-				event.preventDefault();
-				event.stopPropagation();
-				this.hide();
-				this.options.onOpenNote(target);
-			});
-			const remove = actions.createEl("button", {
-				cls: "clickable-icon mas-ann-card-action",
-				attr: { type: "button", "aria-label": "Delete annotation" },
-			});
-			setIcon(remove, "trash-2");
-			remove.addEventListener("click", (event) => {
-				event.preventDefault();
-				event.stopPropagation();
-				this.hide();
-				this.options.onDelete(annotation, target);
+			await renderAnnotationCard(el, {
+				app: this.app,
+				annotation,
+				target,
+				component,
+				variant: "compact",
+				onEdit: () => {
+					this.hide();
+					this.options.onEdit(annotation, target, anchor);
+				},
+				onOpenNote: () => {
+					this.hide();
+					this.options.onOpenNote(target);
+				},
+				onDelete: () => {
+					this.hide();
+					this.options.onDelete(annotation, target);
+				},
 			});
 		}
 
 		if (this.el !== el) return;
-		el.addEventListener("click", (event) => {
-			const node = event.target as HTMLElement | null;
-			const link = node?.closest("a");
-			if (!link) return;
-			const href = link.getAttribute("data-href") ?? link.getAttribute("href");
-			if (!href) return;
-			event.preventDefault();
-			event.stopPropagation();
-			this.hide();
-			if (link.hasAttribute("data-href") || link.classList.contains("internal-link")) {
-				const newLeaf = event.metaKey || event.ctrlKey;
-				void this.app.workspace.openLinkText(href, target.notePath, newLeaf);
-			} else {
-				window.open(href, "_blank");
-			}
-		});
 		this.position(anchor, el, win);
 		this.outside = (event: PointerEvent) => {
 			const targetNode = event.target as Node | null;

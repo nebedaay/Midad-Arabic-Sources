@@ -26,6 +26,7 @@ import {
 import { refreshReadingViews, registerReadingAnnotations } from "./reading";
 import { reanchorAnnotation } from "./reanchor";
 import { resolveAnnotations, visibleSegments } from "./resolve";
+import { AnnotationSidebarView, ANNOTATION_SIDEBAR_VIEW, type AnnotationSidebarData } from "./sidebar";
 import { AnnotationStore, annotationNow, newAnnotationId, type AnnotationTrashBatch } from "./store";
 import { AnnotationTargetResolver } from "./target";
 import { AnnotationTooltip } from "./tooltip";
@@ -63,6 +64,15 @@ function markdownViews(app: App): MarkdownView[] {
 		.getLeavesOfType("markdown")
 		.map((leaf) => leaf.view)
 		.filter((view): view is MarkdownView => view instanceof MarkdownView);
+}
+
+/** The active Markdown view, or the most recent one when the sidebar has focus. */
+function activeMarkdownView(app: App): MarkdownView | null {
+	const active = app.workspace.getActiveViewOfType(MarkdownView);
+	if (active) return active;
+	const recent = app.workspace.getMostRecentLeaf();
+	if (recent?.view instanceof MarkdownView) return recent.view;
+	return markdownViews(app).find((view) => !!view.file) ?? null;
 }
 
 function isSourceFrontmatter(frontmatter: Record<string, unknown> | undefined): boolean {
@@ -139,6 +149,11 @@ export class AnnotationService {
 			selectionWatcher((view) => this.onEditorSelection(view)),
 		]);
 		registerReadingAnnotations(this.plugin, (path) => this.pathAnnotations.get(normalizePath(path)) ?? null);
+		this.plugin.registerView(
+			ANNOTATION_SIDEBAR_VIEW,
+			(leaf) => new AnnotationSidebarView(leaf, this)
+		);
+		this.plugin.addRibbonIcon("highlighter", "Open annotation sidebar", () => { void this.openSidebar(); });
 		this.registerCommands();
 		this.registerEvents();
 		window.setTimeout(() => {
@@ -260,6 +275,12 @@ export class AnnotationService {
 				const file = this.app.vault.getAbstractFileByPath(path);
 				if (file instanceof TFile) await this.app.workspace.getLeaf().openFile(file);
 			},
+		});
+
+		this.plugin.addCommand({
+			id: "open-annotation-sidebar",
+			name: "Open annotation sidebar",
+			callback: () => { void this.openSidebar(); },
 		});
 
 		this.plugin.addCommand({
@@ -733,13 +754,28 @@ export class AnnotationService {
 		return found ?? this.app.workspace.getActiveViewOfType(MarkdownView);
 	}
 
-	private async openEditAnnotation(
+	async editAnnotation(target: AnnotationTarget, annotation: SourceAnnotation): Promise<void> {
+		await this.revealAnnotation(target, annotation);
+		await this.openEditAnnotation(target, annotation);
+	}
+
+	async openEditAnnotation(
 		target: AnnotationTarget,
 		annotation: SourceAnnotation,
 		anchor?: PopupAnchor
 	): Promise<void> {
-		const view = this.viewForTarget(target);
+		let view = this.viewForTarget(target);
 		if (!view?.file || normalizePath(view.file.path) !== normalizePath(target.notePath)) {
+			const file = this.app.vault.getAbstractFileByPath(normalizePath(target.notePath));
+			if (!(file instanceof TFile)) {
+				new Notice("The source note is not available.");
+				return;
+			}
+			const leaf = this.app.workspace.getLeaf(false);
+			await leaf.openFile(file);
+			view = leaf.view instanceof MarkdownView ? leaf.view : null;
+		}
+		if (!view?.file) {
 			new Notice("Open the source note first.");
 			return;
 		}
@@ -822,7 +858,7 @@ export class AnnotationService {
 		this.confirmDeleteAnnotation(target, hit);
 	}
 
-	private confirmDeleteAnnotation(target: AnnotationTarget, annotation: SourceAnnotation): void {
+	confirmDeleteAnnotation(target: AnnotationTarget, annotation: SourceAnnotation): void {
 		this.tooltip.hide();
 		new ConfirmModal(this.app, {
 			title: "Delete annotation",
@@ -877,7 +913,7 @@ export class AnnotationService {
 		return unit ? [...unit.annotations] : [];
 	}
 
-	private async openAnnotationNoteForTarget(target: AnnotationTarget): Promise<void> {
+	async openAnnotationNoteForTarget(target: AnnotationTarget): Promise<void> {
 		const path = await renderAnnotationNote(this.app, this.store, this.settings, target.workKey);
 		if (!path) return;
 		const file = this.app.vault.getAbstractFileByPath(path);
@@ -951,6 +987,7 @@ export class AnnotationService {
 			const sizer = view.containerEl.querySelector<HTMLElement>(".markdown-preview-sizer");
 			if (sizer) applyReadingAnnotations(sizer, annotations);
 		}
+		this.refreshSidebar();
 	}
 
 	async onSourceRemoved(workKey: string): Promise<void> {
@@ -1063,6 +1100,138 @@ export class AnnotationService {
 				new Notice("Annotations moved to the annotation trash.");
 			},
 		}).open();
+	}
+
+	async sidebarData(): Promise<AnnotationSidebarData | null> {
+		const view = activeMarkdownView(this.app);
+		if (!view?.file) return null;
+		const target = await this.targetForPath(view.file.path);
+		if (!target) return null;
+		const annotations = await this.annotationsFor(target);
+		annotations.sort((a, b) => {
+			const orphan = (a.anchorStatus === "orphaned" ? 1 : 0) - (b.anchorStatus === "orphaned" ? 1 : 0);
+			if (orphan) return orphan;
+			return (a.position?.start ?? Number.MAX_SAFE_INTEGER) - (b.position?.start ?? Number.MAX_SAFE_INTEGER);
+		});
+		const work = await this.store.getWork(target.workKey);
+		return {
+			notePath: target.notePath,
+			noteName: view.file.basename,
+			workTitle: work?.title || target.workTitle,
+			target,
+			annotations,
+		};
+	}
+
+	async openSidebar(): Promise<void> {
+		const existing = this.app.workspace.getLeavesOfType(ANNOTATION_SIDEBAR_VIEW)[0];
+		if (existing) {
+			void this.app.workspace.revealLeaf(existing);
+			if (existing.view instanceof AnnotationSidebarView) await existing.view.refresh();
+			return;
+		}
+		const leaf = this.app.workspace.getRightLeaf(false);
+		if (!leaf) return;
+		await leaf.setViewState({ type: ANNOTATION_SIDEBAR_VIEW, active: true });
+		void this.app.workspace.revealLeaf(leaf);
+		if (leaf.view instanceof AnnotationSidebarView) await leaf.view.refresh();
+	}
+
+	private refreshSidebar(): void {
+		for (const leaf of this.app.workspace.getLeavesOfType(ANNOTATION_SIDEBAR_VIEW)) {
+			if (leaf.view instanceof AnnotationSidebarView) void leaf.view.refresh();
+		}
+	}
+
+	async revealAnnotation(target: AnnotationTarget, annotation: SourceAnnotation): Promise<void> {
+		let view = markdownViews(this.app).find((candidate) =>
+			candidate.file && normalizePath(candidate.file.path) === normalizePath(target.notePath)
+		);
+		if (!view) {
+			const file = this.app.vault.getAbstractFileByPath(normalizePath(target.notePath));
+			if (!(file instanceof TFile)) {
+				new Notice("The source note is not available.");
+				return;
+			}
+			const leaf = this.app.workspace.getLeaf(false);
+			await leaf.openFile(file);
+			await new Promise((resolve) => window.setTimeout(resolve, 160));
+			view = leaf.view instanceof MarkdownView
+				? leaf.view
+				: markdownViews(this.app).find((candidate) =>
+					candidate.file && normalizePath(candidate.file.path) === normalizePath(target.notePath)
+				);
+		}
+		if (!view) return;
+		void this.app.workspace.revealLeaf(view.leaf);
+
+		if (view.getMode() === "preview") {
+			const sizer = view.containerEl.querySelector<HTMLElement>(".markdown-preview-sizer");
+			if (sizer) {
+				applyReadingAnnotations(sizer, await this.annotationsFor(target));
+			}
+			const mark = view.containerEl.querySelector<HTMLElement>(
+				`.mas-annotation[data-ann-id="${CSS.escape(annotation.id)}"]`
+			);
+			if (mark) {
+				mark.scrollIntoView({ block: "center", behavior: "smooth" });
+				this.flashMarks(view.containerEl, annotation.id);
+			} else {
+				new Notice("This annotation is not visible in the current reading view.");
+			}
+			return;
+		}
+
+		const text = view.editor.getValue();
+		const resolved = resolveAnnotations(text, [annotation], false)[0];
+		if (!resolved && annotation.anchorStatus === "orphaned") {
+			new Notice("This annotation is unanchored. Open the annotation note to see the preserved quote.");
+			return;
+		}
+		const bounds = managedBounds(text);
+		const fallback = annotation.position && bounds
+			? bounds.bodyStart + annotation.position.start
+			: undefined;
+		const offset = resolved?.start ?? fallback;
+		if (offset === undefined) {
+			new Notice("This annotation could not be located in the source note.");
+			return;
+		}
+		const cm = cmOf(view);
+		if (!cm) {
+			view.editor.setCursor(view.editor.offsetToPos(offset));
+			return;
+		}
+		const at = Math.max(0, Math.min(cm.state.doc.length, offset));
+		cm.dispatch({
+			selection: { anchor: at, head: at },
+			effects: EditorView.scrollIntoView(at, { y: "center" }),
+		});
+		cm.focus();
+		this.flashMarks(view.containerEl, annotation.id, 100);
+	}
+
+	private flashMarks(container: HTMLElement, id: string, delay = 0): void {
+		const run = (): boolean => {
+			const marks = container.querySelectorAll<HTMLElement>(
+				`.mas-annotation[data-ann-id="${CSS.escape(id)}"]`
+			);
+			if (!marks.length) return false;
+			marks.forEach((mark) => mark.addClass("mas-ann-flash"));
+			window.setTimeout(() => marks.forEach((mark) => mark.removeClass("mas-ann-flash")), 1400);
+			return true;
+		};
+		if (!run()) window.setTimeout(run, Math.max(60, delay));
+	}
+
+	async openMoc(): Promise<void> {
+		const path = await renderAnnotationMoc(this.app, this.store, this.settings);
+		const file = this.app.vault.getAbstractFileByPath(path);
+		if (file instanceof TFile) await this.app.workspace.getLeaf().openFile(file);
+	}
+
+	openTrash(): void {
+		new AnnotationTrashModal(this.app, this).open();
 	}
 
 	mocPath(): string {
