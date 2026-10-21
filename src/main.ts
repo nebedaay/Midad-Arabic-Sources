@@ -2250,6 +2250,10 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 	 * can offer it for restore. Annotations are deliberately untouched.
 	 */
 	async archiveSource(work: JsonObject): Promise<boolean> {
+		if (this.sourceOperationActive) {
+			new Notice("Wait for the current source operation to finish before archiving.");
+			return false;
+		}
 		const key = this.workKey(work);
 		if (this.workStatus(work) === "archived") {
 			new Notice("That source is already archived.");
@@ -2293,6 +2297,10 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 
 	/** Expand an archived model, render its notes, and mark it installed again. */
 	async restoreArchivedSource(work: JsonObject): Promise<boolean> {
+		if (this.sourceOperationActive) {
+			new Notice("Wait for the current source operation to finish before restoring.");
+			return false;
+		}
 		const key = this.workKey(work);
 		const archive = this.sourceArchivePath(work);
 		if (!fs.existsSync(archive)) {

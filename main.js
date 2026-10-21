@@ -14737,6 +14737,10 @@ var MidadArabicSourcesPlugin = class extends import_obsidian13.Plugin {
   }
   async archiveSource(work) {
     var _a;
+    if (this.sourceOperationActive) {
+      new import_obsidian13.Notice("Wait for the current source operation to finish before archiving.");
+      return false;
+    }
     const key = this.workKey(work);
     if (this.workStatus(work) === "archived") {
       new import_obsidian13.Notice("That source is already archived.");
@@ -14775,6 +14779,10 @@ var MidadArabicSourcesPlugin = class extends import_obsidian13.Plugin {
   }
   async restoreArchivedSource(work) {
     var _a;
+    if (this.sourceOperationActive) {
+      new import_obsidian13.Notice("Wait for the current source operation to finish before restoring.");
+      return false;
+    }
     const key = this.workKey(work);
     const archive = this.sourceArchivePath(work);
     if (!fs2.existsSync(archive)) {
