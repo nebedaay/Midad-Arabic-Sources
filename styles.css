@@ -613,6 +613,26 @@ Displaying Qur'an sūras in the Qur'an vault
 .mas-manage__hidden {
     display: none;
 }
+
+.mas-manage__row.is-archived {
+    color: var(--text-muted);
+}
+
+.mas-manage__row.is-archived .mas-manage__title-main {
+    color: var(--text-muted);
+}
+
+.mas-manage__row.is-archived .mas-manage__ann {
+    opacity: 0.7;
+}
+
+.mas-manage__row.is-archiving {
+    cursor: default;
+}
+
+.mas-manage__row.is-archiving:hover {
+    background: transparent;
+}
 .mas-manage__lang,
 .mas-manage__mut {
     color: var(--text-muted);

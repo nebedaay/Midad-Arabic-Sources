@@ -491,6 +491,8 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 	sourceOperationKind: "explicit" | "auto" | null = null;
 	/** The Python process currently acquiring sources, if any. */
 	activeSourceProc: ReturnType<typeof spawn> | null = null;
+	/** Works whose models are being compressed by the archive command. */
+	archivingSources = new Set<string>();
 	/** Phase 1 annotation layer; null until startup succeeds. */
 	annotations: AnnotationService | null = null;
 
@@ -632,7 +634,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 					title: "Archive source",
 					message: `Archive “${work.title || work.dir}”? Its notes will be removed, but its annotations and a compressed model are kept.`,
 					confirmText: "Archive",
-					onConfirm: async () => { await this.archiveSource(work); },
+					onConfirm: () => { void this.archiveSourceWithProgress(work); },
 				}).open();
 			},
 		});
@@ -2078,6 +2080,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			const installedKeys = new Set(
 				manifest.filter((w) => w.status !== "archived" && this.workStatus(w) === "installed").map((w) => this.workKey(w))
 			);
+			for (const key of this.archivingSources) installedKeys.delete(key);
 			// A real footprint is known only for works we've downloaded (installed or
 			// cached); the repositories don't publish sizes, so the rest show "—".
 			// Measurements are cached (loadSourceStats): an installed work is
@@ -2111,7 +2114,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			}
 			new ManageSourcesModal(
 				this.app, this, works, installedKeys, statusKeys("deleting"), archivedKeys, sizes, zoteroStatus,
-				() => { void this.openManageSources(true); }
+				() => { void this.openManageSources(true); }, new Set(this.archivingSources)
 			).open();
 		} finally {
 			loading.hide();
@@ -2258,6 +2261,18 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 	 * the work as `archived`, so maintenance leaves it alone and the Manage filter
 	 * can offer it for restore. Annotations are deliberately untouched.
 	 */
+	async archiveSourceWithProgress(work: JsonObject): Promise<boolean> {
+		const key = this.workKey(work);
+		this.archivingSources.add(key);
+		const progress = new Notice(`Archiving “${work.title || work.dir}”…`, 0);
+		try {
+			return await this.archiveSource(work);
+		} finally {
+			this.archivingSources.delete(key);
+			progress.hide();
+		}
+	}
+
 	async archiveSource(work: JsonObject): Promise<boolean> {
 		if (this.sourceOperationActive) {
 			new Notice("Wait for the current source operation to finish before archiving.");
@@ -5518,12 +5533,13 @@ class ManageSourcesModal extends Modal {
 	installed: Set<string>;
 	deleting: Set<string>;
 	archived: Set<string>;
+	archiving: Set<string>;
 	annotationCounts: Map<string, number>;
 	sizes: Map<string, number>;
 	onReload?: () => void;
 	initial: Map<string, boolean>;
 	zoteroStatus: Map<string, string>;
-	rows: Array<{ work: SourceWork; el: HTMLElement; isInstalled: boolean; isArchived: boolean; annotationCount: number; genres: string[]; repo: string; collection: string }> = [];
+	rows: Array<{ work: SourceWork; el: HTMLElement; stateEl: HTMLElement; isInstalled: boolean; isArchived: boolean; isArchiving: boolean; annotationCount: number; genres: string[]; repo: string; collection: string }> = [];
 	headings: Map<string, HTMLElement> = new Map();
 	/** The works the user has highlighted; Apply acts on the difference. */
 	selected = new Set<string>();
@@ -5534,21 +5550,24 @@ class ManageSourcesModal extends Modal {
 	allSelected = false;
 	refreshSelection: () => void = () => {};
 	updateFilter: () => void = () => {};
+	markArchiving: (work: SourceWork) => void = () => {};
+	finishArchiving: (work: SourceWork, ok: boolean) => void = () => {};
 
-	constructor(app: App, plugin: MidadArabicSourcesPlugin, works: SourceWork[], installed: Set<string>, deleting: Set<string> = new Set(), archived: Set<string> = new Set(), sizes: Map<string, number> = new Map(), zoteroStatus: Map<string, string> = new Map(), onReload?: () => void) {
+	constructor(app: App, plugin: MidadArabicSourcesPlugin, works: SourceWork[], installed: Set<string>, deleting: Set<string> = new Set(), archived: Set<string> = new Set(), sizes: Map<string, number> = new Map(), zoteroStatus: Map<string, string> = new Map(), onReload?: () => void, archiving: Set<string> = new Set()) {
 		super(app);
 		this.plugin = plugin;
 		this.works = works;
 		this.installed = installed;
 		this.deleting = deleting;
 		this.archived = archived;
+		this.archiving = archiving;
 		this.annotationCounts = new Map(
 			Object.entries(plugin.annotations?.annotationSummary() ?? {}).map(([key, value]) => [key, value.count])
 		);
 		this.sizes = sizes;
 		this.zoteroStatus = zoteroStatus;
 		this.onReload = onReload;
-		this.initial = new Map(works.map((w) => [w.key, installed.has(w.key)]));
+		this.initial = new Map(works.map((w) => [w.key, installed.has(w.key) && !archiving.has(w.key)]));
 		const saved = plugin.settings.manageShowFilter;
 		this.show = saved === "installed" || saved === "not-installed" || saved === "archived" || saved === "annotated"
 			? saved
@@ -5672,8 +5691,9 @@ class ManageSourcesModal extends Modal {
 			}
 			const row = list.createDiv({ cls: "mas-manage__row" });
 			row.style.gridTemplateColumns = COLS;
-			const isInstalled = this.installed.has(w.key);
+			const isInstalled = this.installed.has(w.key) && !this.archiving.has(w.key);
 			const isArchived = this.archived.has(w.key);
+			const isArchiving = this.archiving.has(w.key);
 			const annotationCount = this.annotationCounts.get(w.key) ?? 0;
 			row.createSpan({ cls: "mas-manage__lang", text: w.language.toUpperCase() });
 			row.createSpan({ text: w.author || "" });
@@ -5694,21 +5714,28 @@ class ManageSourcesModal extends Modal {
 				text: known ? formatBytes(known) : w.est_bytes ? `≈${formatBytes(w.est_bytes)}` : "—",
 			});
 			size.title = known ? "On disk" : w.est_bytes ? "Estimated" : "Unknown";
-			row.createSpan({
-				cls: "mas-manage__mut",
-				text: this.deleting.has(w.key) ? "being removed" : isArchived ? "archived" : isInstalled ? "installed" : "",
+			row.classList.toggle("is-archived", isArchived || isArchiving);
+			row.classList.toggle("is-archiving", isArchiving);
+			const stateEl = row.createSpan({
+				cls: "mas-manage__mut mas-manage__state",
+				text: this.deleting.has(w.key) ? "Being removed" : isArchiving ? "Archiving" : isArchived ? "Archived" : isInstalled ? "Installed" : "",
 			});
 			row.oncontextmenu = (event) => {
-				if (!annotationCount && !isInstalled && !isArchived) return;
+				const current = this.rows.find((entry) => entry.work.key === w.key);
+				if (!current || current.isArchiving) return;
+				const isInstalledNow = current.isInstalled;
+				const isArchivedNow = current.isArchived;
+				const annotationCountNow = current.annotationCount;
+				if (!annotationCountNow && !isInstalledNow && !isArchivedNow) return;
 				event.preventDefault();
 				const menu = new Menu();
-				if (annotationCount) {
+				if (annotationCountNow) {
 					menu.addItem((item) => item
 						.setTitle("Delete annotations for this item…")
 						.setIcon("trash-2")
 						.onClick(() => { void this.plugin.annotations?.confirmDeleteAnnotations(w.key); }));
 				}
-				if (isInstalled && !isArchived) {
+				if (isInstalledNow && !isArchivedNow) {
 					menu.addItem((item) => item
 						.setTitle("Archive source…")
 						.setIcon("archive")
@@ -5717,35 +5744,65 @@ class ManageSourcesModal extends Modal {
 								title: "Archive source",
 								message: `Archive “${w.title || w.dir}”? Its notes will be removed, but its annotations and a compressed model are kept.`,
 								confirmText: "Archive",
-								onConfirm: async () => {
-									if (await this.plugin.archiveSource(w)) {
-										this.close();
-										void this.plugin.openManageSources(true);
-									}
+								onConfirm: () => {
+									this.markArchiving(w);
+									void (async () => {
+										const ok = await this.plugin.archiveSourceWithProgress(w);
+										this.finishArchiving(w, ok);
+									})();
 								},
 							}).open();
 						}));
 				}
-				if (isArchived) {
+				if (isArchivedNow) {
 					menu.addItem((item) => item
 						.setTitle("Restore from archive")
 						.setIcon("archive-restore")
-						.onClick(async () => {
-							if (await this.plugin.restoreArchivedSource(w)) {
-								this.close();
+						.onClick(() => {
+							this.close();
+							void (async () => {
+								await this.plugin.restoreArchivedSource(w);
 								void this.plugin.openManageSources(true);
-							}
+							})();
+						}));
+					menu.addItem((item) => item
+						.setTitle("Remove archived source…")
+						.setIcon("trash-2")
+						.onClick(() => {
+							new ConfirmModal(this.app, {
+								title: "Remove archived source",
+								message: `Remove “${w.title || w.dir}” completely? Its compressed model will be deleted; its annotations are kept.`,
+								confirmText: "Remove",
+								onConfirm: () => {
+									this.close();
+									void (async () => {
+										const progress = new Notice(`Removing “${w.title || w.dir}”…`, 0);
+										try {
+											await this.plugin.removeSource(w, (done, total) =>
+												progress.setMessage(`Removing “${w.title || w.dir}” — ${done}/${total} files…`)
+											);
+										} finally {
+											progress.hide();
+											void this.plugin.openManageSources(true);
+										}
+									})();
+								},
+							}).open();
 						}));
 				}
 				menu.showAtMouseEvent(event);
 			};
 			row.onclick = () => {
+				if (this.archiving.has(w.key)) {
+					new Notice("That source is still being archived.");
+					return;
+				}
 				if (this.selected.has(w.key)) this.selected.delete(w.key);
 				else this.selected.add(w.key);
 				this.refreshSelection();
 			};
 			this.rows.push({
-				work: w, el: row, isInstalled, isArchived, annotationCount,
+				work: w, el: row, stateEl, isInstalled, isArchived, isArchiving, annotationCount,
 				genres: workGenres(w),
 				repo: w.repository || "Other",
 				collection: w.collection,
@@ -5771,6 +5828,53 @@ class ManageSourcesModal extends Modal {
 			const visible = this.rows.filter((r) => !r.el.classList.contains("is-hidden")).length;
 			statusEl.setText(`${this.selected.size} selected · ${visible} shown`);
 		};
+		this.markArchiving = (work: SourceWork) => {
+			const key = work.key;
+			this.archiving.add(key);
+			this.archived.delete(key);
+			this.installed.delete(key);
+			this.selected.delete(key);
+			this.initial.set(key, false);
+			const row = this.rows.find((entry) => entry.work.key === key);
+			if (row) {
+				row.isInstalled = false;
+				row.isArchived = false;
+				row.isArchiving = true;
+				row.el.classList.add("is-archived", "is-archiving");
+				row.stateEl.setText("Archiving");
+			}
+			this.refreshSelection();
+			this.updateFilter();
+		};
+		this.finishArchiving = (work: SourceWork, ok: boolean) => {
+			const key = work.key;
+			this.archiving.delete(key);
+			const row = this.rows.find((entry) => entry.work.key === key);
+			if (ok) {
+				this.archived.add(key);
+				this.installed.delete(key);
+				if (row) {
+					row.isInstalled = false;
+					row.isArchived = true;
+					row.isArchiving = false;
+					row.el.classList.add("is-archived");
+					row.el.classList.remove("is-archiving");
+					row.stateEl.setText("Archived");
+				}
+			} else {
+				this.installed.add(key);
+				this.initial.set(key, true);
+				if (row) {
+					row.isInstalled = true;
+					row.isArchived = false;
+					row.isArchiving = false;
+					row.el.classList.remove("is-archived", "is-archiving");
+					row.stateEl.setText("Installed");
+				}
+			}
+			this.refreshSelection();
+			this.updateFilter();
+		};
 		this.refreshSelection = () => {
 			for (const r of this.rows) r.el.classList.toggle("is-selected", this.selected.has(r.work.key));
 			updateStatus();
@@ -5786,9 +5890,9 @@ class ManageSourcesModal extends Modal {
 					: this.show === "installed"
 						? r.isInstalled
 						: this.show === "not-installed"
-							? !r.isInstalled && !r.isArchived
+							? !r.isInstalled && !r.isArchived && !r.isArchiving
 							: this.show === "archived"
-								? r.isArchived
+								? r.isArchived || r.isArchiving
 								: r.annotationCount > 0;
 				const genreOk = !this.activeGenres.size || r.genres.some((g) => this.activeGenres.has(g));
 				const repoOk = !this.offRepos.has(r.repo);
@@ -5813,7 +5917,7 @@ class ManageSourcesModal extends Modal {
 		langSel.onchange = () => this.updateFilter();
 		selectAllBtn.onclick = () => {
 			this.allSelected = !this.allSelected;
-			const visible = this.rows.filter((r) => !r.el.classList.contains("is-hidden"));
+			const visible = this.rows.filter((r) => !r.el.classList.contains("is-hidden") && !this.archiving.has(r.work.key));
 			if (this.allSelected) for (const r of visible) this.selected.add(r.work.key);
 			else for (const r of visible) this.selected.delete(r.work.key);
 			this.refreshSelection();
@@ -5830,6 +5934,10 @@ class ManageSourcesModal extends Modal {
 				}
 				this.close();
 				await this.plugin.exportToZotero(keys);
+				return;
+			}
+			if (this.archiving.size) {
+				new Notice("Wait for the source archive to finish before applying other changes.");
 				return;
 			}
 			const toInstall: SourceWork[] = [];
