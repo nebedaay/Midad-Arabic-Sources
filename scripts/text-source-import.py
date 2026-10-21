@@ -664,12 +664,27 @@ def slug_to_dir(value: str) -> str:
     return re.sub(r"\s+", " ", value).strip()
 
 
+# A stable, short label per collection. The repository URL is still recorded in
+# full in `repository:`; this is only the parenthetical filename qualifier.
+_REPO_QUALIFIERS = {
+    "tafsir": "tafsir_api",
+    "tafsir-qul": "qul",
+    "quran": "quran-api",
+    "hadith": "hadith-json",
+    "quran-text": "quran-json",
+    "turath": "turath.io",
+}
+
+
 def repo_qualifier(work: dict) -> str:
     """A short repository label for the output folder, e.g. `turath.io`.
 
     Folder and file names carry it so the same work from two repositories (or two
     editions) can coexist; the `title:` properties and TOC aliases stay clean.
     """
+    mapped = _REPO_QUALIFIERS.get(str(work.get("collection") or ""))
+    if mapped:
+        return mapped
     repo = str(work.get("repository") or "").strip().rstrip("/")
     if not repo:
         return ""
@@ -1436,6 +1451,27 @@ def edition_variant(work_id: str) -> str:
     return ""
 
 
+def source_author(work: dict) -> str:
+    """The first author/translator-like name recorded for a work, if any."""
+    authors = work.get("authors")
+    if isinstance(authors, list) and authors:
+        return str(authors[0]).strip()
+    return str(work.get("author") or "").strip()
+
+
+def author_title_dir(work: dict, title: str) -> str:
+    """`Author - Title` for classical works, or the title alone when it already
+    carries the author (some tafsīr catalogues repeat the title in `author`, and
+    the dictionaries use their established nicknames)."""
+    author = source_author(work)
+    title = str(title or "").strip()
+    if not author or not title:
+        return title
+    if strip_diacritics(author).casefold() == strip_diacritics(title).casefold():
+        return title
+    return f"{author} - {title}"
+
+
 def apply_overrides(work: dict, overrides: dict[str, dict]) -> dict:
     merged = dict(work)
     merged["title_ar"] = ""
@@ -1452,7 +1488,7 @@ def apply_overrides(work: dict, overrides: dict[str, dict]) -> dict:
         merged["title_ar"] = "القرآن الكريم"
     elif work["collection"] == "hadith":
         merged["title"] = work["name"]
-        merged["dir"] = slug_to_dir(work["name"])
+        merged["dir"] = slug_to_dir(author_title_dir(work, work["name"]))
         merged["title_ar"] = work.get("arabic", "")
     elif work["collection"] == "quran-text":
         merged["title"] = work["name"]
@@ -1467,7 +1503,11 @@ def apply_overrides(work: dict, overrides: dict[str, dict]) -> dict:
         merged["title_ar"] = work.get("arabic", "")
     elif work["collection"] == "turath":
         merged["title"] = work["name"]
-        merged["dir"] = slug_to_dir(work["name"])
+        merged["dir"] = slug_to_dir(author_title_dir(work, work["name"]))
+        merged["title_ar"] = work.get("arabic", "")
+    elif work["collection"] in ("tafsir", "tafsir-qul"):
+        merged["title"] = work["name"]
+        merged["dir"] = slug_to_dir(author_title_dir(work, work["name"]))
         merged["title_ar"] = work.get("arabic", "")
     else:
         merged["title"] = work["name"]
@@ -1534,9 +1574,11 @@ def _installed_work_dirs() -> dict[str, str]:
 def with_unique_dirs(works: list[dict], *, preserve_installed: bool = True) -> None:
     """Give every work a stable, unique output folder (mutates in place).
 
-    The folder comes from the title, but two editions can share a title — one
-    translator into several languages, or the romanised `-la`/`-lad` variants of
-    one edition. Qualify the later ones with their language, then their id.
+    Classical works use `Author - Title (repository)`; Qur'ān editions and the
+    nickname dictionaries keep their established titles. Two editions can still
+    share a name — one translator into several languages, or the romanised
+    `-la`/`-lad` variants of one edition. Qualify the later ones with their
+    language, then their id.
 
     The result depends only on the catalogue order, never on which works are
     being fetched, so `list`, `fetch` and `check-updates` always agree on a

@@ -51,7 +51,7 @@ Annotations are painted over the generated text, never written into it. Select t
 
 ## Naming and provenance
 
-Every work’s folder and hub carry a **repository qualifier** in parentheses (`Tafsīr al-Ṭabarī (tafsir_api)`, `al-Arbaʿūn al-Nawawiyya (turath.io)`), so two editions of the same work can be installed side by side. A work known to exist only once across the imported repositories (the two dictionaries) is flagged `unique` and keeps its bare folder name. `title:` and the MOC/hub link aliases stay clean.
+Every classical work’s folder and hub use `Author - Title (repository)` — for example `ʿAbd al-Qādir al-Baghdādī - Khizānat al-adab (turath.io)` or `Aḥmad b. Ḥanbal - Musnad Aḥmad (hadith-json)` — so multiple works by one author and similar titles stay distinct. The repository qualifier is deliberately short (`tafsir_api`, `qul`, `hadith-json`, `quran-api`, `quran-json`, `turath.io`). The established nickname dictionaries (`Hans Wehr Dictionary`, `Lane's Lexicon`) and the Qur'ān editions keep their familiar titles; a work known to exist only once across the imported repositories is flagged `unique` and omits the repository qualifier. `title:` and the MOC/hub link aliases stay clean. Existing installs keep their old folders until **Migrate imported sources to the current naming scheme** is run.
 
 Every generated page carries `repository`, `license-attribution`, and `repository-updated` properties, and `[[Midad Arabic Sources]]` in its `up`, so the whole corpus is traceable to its source and to the plugin that imported it.
 

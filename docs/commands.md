@@ -36,7 +36,7 @@ See [Document import](./document-import.md) and [Templates](./templates.md).
 - **Re-render this source** — regenerate one work (also on the note’s right-click menu).
 - **Apply template changes to imported sources** — apply a detected template change on demand.
 - **Re-download imported sources (rebuild models)** — re-fetch the source JSON and rebuild every model.
-- **Migrate imported sources to the current naming scheme** — one-off rename to the repository-qualifier convention.
+- **Migrate imported sources to the current naming scheme** — rename installed works to `Author - Title (repository)`, updating notes, models, MOCs, and annotation paths.
 - **Check imported sources** — find works whose notes or cached model are missing.
 - **Check for source updates** — ask each repository whether a text changed upstream.
 - **Archive this source…** — compress a work's model, remove its notes, and keep its annotations.
