@@ -12840,6 +12840,7 @@ var AnnotationService = class {
     return null;
   }
   async openSidebar() {
+    var _a;
     const existing = this.app.workspace.getLeavesOfType(ANNOTATION_SIDEBAR_VIEW)[0];
     if (existing) {
       void this.app.workspace.revealLeaf(existing);
@@ -12847,7 +12848,7 @@ var AnnotationService = class {
         await existing.view.refresh();
       return;
     }
-    const leaf = this.app.workspace.getRightLeaf(false);
+    const leaf = (_a = this.app.workspace.getRightLeaf(false)) != null ? _a : this.app.workspace.getLeaf(true);
     if (!leaf)
       return;
     await leaf.setViewState({ type: ANNOTATION_SIDEBAR_VIEW, active: true });

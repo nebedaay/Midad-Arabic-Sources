@@ -1287,7 +1287,7 @@ export class AnnotationService {
 			if (existing.view instanceof AnnotationSidebarView) await existing.view.refresh();
 			return;
 		}
-		const leaf = this.app.workspace.getRightLeaf(false);
+		const leaf = this.app.workspace.getRightLeaf(false) ?? this.app.workspace.getLeaf(true);
 		if (!leaf) return;
 		await leaf.setViewState({ type: ANNOTATION_SIDEBAR_VIEW, active: true });
 		void this.app.workspace.revealLeaf(leaf);
