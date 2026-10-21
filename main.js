@@ -9271,7 +9271,9 @@ var AnnotationPopup = class {
     this.popup = null;
     this.submitted = false;
     this.closed = false;
+    this.busy = false;
     this.deleteArmed = false;
+    this.scope = null;
     this.swatches = [];
     this.textarea = null;
     this.deleteButton = null;
@@ -9353,6 +9355,18 @@ var AnnotationPopup = class {
         this.close("escape");
       }
     });
+    this.scope = new import_obsidian3.Scope(this.app.scope);
+    this.scope.register(["Mod"], "Enter", (event) => {
+      event.preventDefault();
+      void this.save();
+      return false;
+    });
+    this.scope.register([], "Escape", (event) => {
+      event.preventDefault();
+      this.close("escape");
+      return false;
+    });
+    this.app.keymap.pushScope(this.scope);
     this.outsideHandler = (event) => {
       var _a2;
       if (!((_a2 = this.popup) == null ? void 0 : _a2.contains(event.target)))
@@ -9424,6 +9438,9 @@ var AnnotationPopup = class {
   }
   async save() {
     var _a, _b;
+    if (this.busy || this.closed)
+      return;
+    this.busy = true;
     const comment = (_b = (_a = this.textarea) == null ? void 0 : _a.value.trim()) != null ? _b : "";
     try {
       await this.options.onSubmit(this.color, comment);
@@ -9432,11 +9449,13 @@ var AnnotationPopup = class {
     } catch (error) {
       console.error("[midad-arabic-sources] save annotation", error);
       new import_obsidian3.Notice(`Could not save annotation: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      this.busy = false;
     }
   }
   async delete() {
     var _a, _b;
-    if (!this.options.onDelete)
+    if (!this.options.onDelete || this.busy || this.closed)
       return;
     if (!this.deleteArmed) {
       this.deleteArmed = true;
@@ -9444,6 +9463,7 @@ var AnnotationPopup = class {
       (_b = this.deleteButton) == null ? void 0 : _b.setClass("mod-destructive");
       return;
     }
+    this.busy = true;
     try {
       await this.options.onDelete();
       this.submitted = true;
@@ -9451,6 +9471,8 @@ var AnnotationPopup = class {
     } catch (error) {
       console.error("[midad-arabic-sources] delete annotation", error);
       new import_obsidian3.Notice(`Could not delete annotation: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      this.busy = false;
     }
   }
   close(reason) {
@@ -9458,6 +9480,10 @@ var AnnotationPopup = class {
     if (this.closed)
       return;
     this.closed = true;
+    if (this.scope) {
+      this.app.keymap.popScope(this.scope);
+      this.scope = null;
+    }
     if (this.outsideHandler)
       this.doc.removeEventListener("pointerdown", this.outsideHandler, true);
     if (this.scrollHandler)

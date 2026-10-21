@@ -1,4 +1,4 @@
-import { App, ButtonComponent, Modal, Notice } from "obsidian";
+import { App, ButtonComponent, Modal, Notice, Scope } from "obsidian";
 import type { AnnotationColor, SourceAnnotation } from "./types";
 
 export interface AnnotationDraft {
@@ -111,7 +111,9 @@ export class AnnotationPopup {
 	private popup: HTMLElement | null = null;
 	private submitted = false;
 	private closed = false;
+	private busy = false;
 	private deleteArmed = false;
+	private scope: Scope | null = null;
 	private swatches: HTMLButtonElement[] = [];
 	private textarea: HTMLTextAreaElement | null = null;
 	private deleteButton: ButtonComponent | null = null;
@@ -206,6 +208,19 @@ export class AnnotationPopup {
 			}
 		});
 
+		this.scope = new Scope(this.app.scope);
+		this.scope.register(["Mod"], "Enter", (event) => {
+			event.preventDefault();
+			void this.save();
+			return false;
+		});
+		this.scope.register([], "Escape", (event) => {
+			event.preventDefault();
+			this.close("escape");
+			return false;
+		});
+		this.app.keymap.pushScope(this.scope);
+
 		this.outsideHandler = (event: PointerEvent) => {
 			if (!this.popup?.contains(event.target as Node)) this.close("outside");
 		};
@@ -271,6 +286,8 @@ export class AnnotationPopup {
 	}
 
 	private async save(): Promise<void> {
+		if (this.busy || this.closed) return;
+		this.busy = true;
 		const comment = this.textarea?.value.trim() ?? "";
 		try {
 			await this.options.onSubmit(this.color, comment);
@@ -279,17 +296,20 @@ export class AnnotationPopup {
 		} catch (error) {
 			console.error("[midad-arabic-sources] save annotation", error);
 			new Notice(`Could not save annotation: ${error instanceof Error ? error.message : String(error)}`);
+		} finally {
+			this.busy = false;
 		}
 	}
 
 	private async delete(): Promise<void> {
-		if (!this.options.onDelete) return;
+		if (!this.options.onDelete || this.busy || this.closed) return;
 		if (!this.deleteArmed) {
 			this.deleteArmed = true;
 			this.deleteButton?.setButtonText("Click again to delete");
 			this.deleteButton?.setClass("mod-destructive");
 			return;
 		}
+		this.busy = true;
 		try {
 			await this.options.onDelete();
 			this.submitted = true;
@@ -297,12 +317,18 @@ export class AnnotationPopup {
 		} catch (error) {
 			console.error("[midad-arabic-sources] delete annotation", error);
 			new Notice(`Could not delete annotation: ${error instanceof Error ? error.message : String(error)}`);
+		} finally {
+			this.busy = false;
 		}
 	}
 
 	private close(reason: "escape" | "button" | "outside"): void {
 		if (this.closed) return;
 		this.closed = true;
+		if (this.scope) {
+			this.app.keymap.popScope(this.scope);
+			this.scope = null;
+		}
 		if (this.outsideHandler) this.doc.removeEventListener("pointerdown", this.outsideHandler, true);
 		if (this.scrollHandler) this.win.removeEventListener("scroll", this.scrollHandler, true);
 		if (this.resizeHandler) this.win.removeEventListener("resize", this.resizeHandler);
