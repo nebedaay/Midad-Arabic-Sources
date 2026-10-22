@@ -50,7 +50,8 @@ TRANSCRIPTION_BASE_PROMPT = (
     "- Begin every couplet with the marker '§§§ ' (three section signs and a space), and separate its two hemistiches with '%%': '§§§ hemistich 1%%hemistich 2'.\n"
     "- A line with a single hemistich: '§§§ hemistich'.\n"
     "- The '§§§' marker and the '%%' separator are transcription signals only. Never use them for prose, italics, or list bullets, and never attach the marker to the first word.\n"
-    "- Do not use '*' to mark poetry. Asterisks are only for Qur'an quotes and ordinary italics.\n\n"
+    "- Do not use '*' to mark poetry. Asterisks are only for Qur'an quotes and ordinary italics.\n"
+    "- Before returning, check a poetry page line by line: every verse line must start with '§§§ '; if you left one unmarked, mark it and split it into hemistiches.\n\n"
 
     "FOOTNOTES\n"
     "- Put footnotes at the end of the page body, after a line containing only '***'.\n"
