@@ -19,6 +19,7 @@ See [Transliteration](./transliteration.md).
 See [Transcription](./transcription.md) and [Translation](./translation.md).
 
 - **Transcribe this item’s PDF file(s)** — burst, OCR, and post-process.
+- **Transcribe a PDF…** — choose any PDF on disk, without a Zotero item, and verify Gemini’s title/author guess afterwards.
 - **Translate this item’s transcription(s)** — translate an existing transcription.
 - **Reprocess from archive…** — re-run post-processing from an archived batch, without resubmitting.
 - **Check transcription pipeline** — list archived batches.

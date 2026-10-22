@@ -4,7 +4,7 @@ Post-process a raw transcription: formatting + YAML + Qur'an tashkīl.
 Usage: python3 scripts/transcription-postprocess.py <raw.md>
 Output: <raw>.processed.<timestamp>.md
 """
-import re, sys, os
+import re, sys, os, json
 from pathlib import Path
 from datetime import datetime
 from importlib.machinery import SourceFileLoader
@@ -12,7 +12,44 @@ from importlib.machinery import SourceFileLoader
 VAULT = Path(os.environ.get("OBSIDIAN_VAULT", os.path.expanduser("~/Documents/Obsidian Vault")))
 SCRIPTS = Path(__file__).resolve().parent
 
-def run(input_path, out_path=None):
+# Metadata lines the standalone-PDF prompt asks Gemini to put above the first
+# page. They are not part of the transcription, so remove them before
+# formatting and hand them to the pipeline as a sidecar.
+META_LINE = re.compile(
+    r'^\s*(?:[-*]\s*)?(?:\*\*)?(TITLE|AUTHOR)(?:\*\*)?\s*:\s*(?:\*\*)?\s*(.+?)\s*$',
+    re.I,
+)
+
+
+def extract_metadata(body: str) -> tuple[str, dict[str, str]]:
+    """Pull TITLE:/AUTHOR: lines out of the top of the transcription.
+
+    Only the first 60 lines are considered, so a discussion of an "author:"
+    field deep in the book is left alone.
+    """
+    meta: dict[str, str] = {}
+    lines = body.splitlines()
+    keep: list[str] = []
+    removed = False
+    for i, line in enumerate(lines):
+        m = META_LINE.match(line) if i < 60 else None
+        if m:
+            key = m.group(1).lower()
+            value = m.group(2).strip().strip('"').strip("'").strip("*").strip()
+            if value and key not in meta:
+                meta[key] = value
+                removed = True
+                continue
+        keep.append(line)
+    if not removed:
+        return body, {}
+    # Drop blank lines left at the very top by the removed markers.
+    while keep and not keep[0].strip():
+        keep.pop(0)
+    return "\n".join(keep), meta
+
+
+def run(input_path, out_path=None, metadata=False):
     """Format and Qur'an-process a raw transcription. Returns the output Path."""
     filepath = Path(input_path)
     if not filepath.exists():
@@ -29,7 +66,12 @@ def run(input_path, out_path=None):
     else:
         yaml = ""
         body = raw_content
-    
+
+    # Standalone PDFs can carry a title/author guess at the top. Pull those
+    # lines out before formatting and save them beside the processed note for
+    # the pipeline to put into YAML.
+    body, metadata_values = extract_metadata(body) if metadata else (body, {})
+
     import tempfile
     tmp = Path(tempfile.mktemp(suffix=".md"))
     tmp.write_text(body, encoding="utf-8")
@@ -120,16 +162,21 @@ def run(input_path, out_path=None):
         out_path = filepath.parent / f"{filepath.stem}.processed.{ts}.md"
     out = Path(out_path)
     out.write_text(content, encoding="utf-8")
+    meta_path = out.with_suffix(out.suffix + ".meta.json")
+    if metadata_values:
+        meta_path.write_text(json.dumps(metadata_values, ensure_ascii=False, indent=1), encoding="utf-8")
+    elif meta_path.exists():
+        meta_path.unlink()
     print(f"\nSaved: {out.name}")
     return out
 
 
 def main():
     if len(sys.argv) < 2:
-        print("Usage: python3 transcription-postprocess.py <raw.md> [out.md]")
+        print("Usage: python3 transcription-postprocess.py <raw.md> [out.md] [--metadata]")
         sys.exit(1)
-    out = sys.argv[2] if len(sys.argv) > 2 else None
-    run(sys.argv[1], out)
+    out = sys.argv[2] if len(sys.argv) > 2 and not sys.argv[2].startswith("--") else None
+    run(sys.argv[1], out, metadata="--metadata" in sys.argv)
 
 
 if __name__ == "__main__":

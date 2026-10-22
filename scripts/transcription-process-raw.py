@@ -396,7 +396,7 @@ up:
                     print(f"  WARNING: could not read prompt file: {e}")
         sys.path.insert(0, str(SCRIPTS))
         from midad_prompts import build_transcription_prompt
-        system_prompt = build_transcription_prompt(user_prompt)
+        system_prompt = build_transcription_prompt(user_prompt, metadata="--metadata" in sys.argv)
         
         # Find previous JSONL (same stem without " - try X" suffix)
         prev_jsonl = None

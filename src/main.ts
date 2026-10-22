@@ -1,4 +1,5 @@
 import { execFile, spawn } from "child_process";
+import { webUtils } from "electron";
 import * as fs from "fs";
 import * as http from "http";
 import * as os from "os";
@@ -21,6 +22,7 @@ import {
 	TextComponent,
 	setIcon,
 	normalizePath,
+	parseYaml,
 	requestUrl,
 } from "obsidian";
 import {
@@ -566,6 +568,12 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			id: "transcribe-item-pdfs",
 			name: "Transcribe this item's PDF file(s)",
 			callback: async () => { await this.openTranscribe(); },
+		});
+
+		this.addCommand({
+			id: "transcribe-pdf-standalone",
+			name: "Transcribe a PDF…",
+			callback: async () => { await this.openStandalonePdf(); },
 		});
 
 		this.addCommand({
@@ -1223,6 +1231,20 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			return;
 		}
 		new TranscribeModal(this.app, this, item.citekey, pdfs, prompts).open();
+	}
+
+	/** Transcribe any PDF the user chooses, without a Zotero/literature note. */
+	async openStandalonePdf() {
+		if (!this.ensureApiKey()) return;
+		let prompts: PromptEntry[];
+		try {
+			prompts = await this.loadPromptSet("transcription");
+		} catch (e) {
+			console.error("[midad-arabic-sources] transcription prompts", e);
+			new Notice("Could not load the transcription prompts — see the developer console.");
+			return;
+		}
+		new StandalonePdfModal(this.app, this, prompts).open();
 	}
 
 	async openTranslate() {
@@ -4823,8 +4845,10 @@ class PromptPicker {
 				this.updateDeleteButton();
 			});
 		});
-		row.addButton((b) => b.setButtonText("Select all").onClick(() => this.onSelectAll?.()));
-		row.addButton((b) => b.setButtonText("Select none").onClick(() => this.onSelectNone?.()));
+		if (this.onSelectAll || this.onSelectNone) {
+			row.addButton((b) => b.setButtonText("Select all").onClick(() => this.onSelectAll?.()));
+			row.addButton((b) => b.setButtonText("Select none").onClick(() => this.onSelectNone?.()));
+		}
 
 		const actions = new Setting(this.containerEl).setName("Manage prompts");
 		actions.addButton((b) => b.setButtonText("Modify selected").onClick(() => this.openEditor("edit")));
@@ -5070,6 +5094,316 @@ class TranscribeModal extends Modal {
 					await this.plugin.runWithProgress("Transcribing", args);
 				})
 		);
+	}
+
+	onClose(): void {
+		this.contentEl.empty();
+	}
+}
+
+/** The path Electron exposes for a file chosen from an `<input type=file>`. */
+function chosenFilePath(file: File): string {
+	const direct = (file as File & { path?: string }).path;
+	if (direct) return direct;
+	try {
+		return webUtils?.getPathForFile(file) ?? "";
+	} catch {
+		return "";
+	}
+}
+
+/** A stable, readable citekey for a PDF with no Zotero record. */
+function standaloneCitekey(path: string): string {
+	const name = basenameJS(path).replace(/\.pdf$/i, "");
+	const slug = name
+		.normalize("NFKD")
+		.replace(/[^\p{L}\p{N}]+/gu, "-")
+		.replace(/^-+|-+$/g, "")
+		.slice(0, 48)
+		.toLowerCase();
+	return `pdf-${slug || "document"}`;
+}
+
+/** The base title from a generated `Title (transcription)` value. */
+function stripTranscriptionSuffix(title: string): string {
+	return title
+		.replace(/\s*\((?:transcription|translation)(?:,\s*vol\.\s*\d+)?\)\s*$/i, "")
+		.trim();
+}
+
+/** Pick a PDF and transcribe it without a Zotero item or literature note. */
+class StandalonePdfModal extends Modal {
+	plugin: MidadArabicSourcesPlugin;
+	prompts: PromptEntry[];
+	path = "";
+	citekey = "";
+	citekeyTouched = false;
+	pathInput!: TextComponent;
+	citekeyInput!: TextComponent;
+	picker!: PromptPicker;
+
+	constructor(app: App, plugin: MidadArabicSourcesPlugin, prompts: PromptEntry[]) {
+		super(app);
+		this.plugin = plugin;
+		this.prompts = prompts;
+	}
+
+	onOpen(): void {
+		this.modalEl.addClass("mas-standalone-pdf-modal");
+		const { contentEl } = this;
+		contentEl.createEl("h3", { text: "Transcribe a PDF" });
+		contentEl.createEl("p", {
+			text: "Choose a PDF that is not attached to a Zotero item. The transcription goes into Arabic transcriptions; Gemini will guess the title and author from the title page so you can check them afterwards.",
+		});
+
+		const fileInput = contentEl.createEl("input");
+		fileInput.type = "file";
+		fileInput.accept = ".pdf,application/pdf";
+		fileInput.setCssStyles({ display: "none" });
+		fileInput.addEventListener("change", () => {
+			const file = fileInput.files?.[0];
+			if (!file) return;
+			const path = chosenFilePath(file);
+			fileInput.value = "";
+			if (!path) {
+				new Notice("Obsidian did not expose that file's path. Paste it into the field instead.");
+				return;
+			}
+			this.setPath(path);
+		});
+
+		new Setting(contentEl)
+			.setName("PDF file")
+			.setDesc("Choose a PDF, or paste its full path.")
+			.addText((t) => {
+				this.pathInput = t;
+				t.setPlaceholder("/Users/you/Downloads/book.pdf").onChange((v) => {
+					this.path = v.trim();
+					if (!this.citekeyTouched) this.setSuggestedCitekey();
+				});
+				t.inputEl.setCssStyles({ width: "100%" });
+			})
+			.addButton((b) =>
+				b.setButtonText("Choose PDF…").onClick(() => fileInput.click())
+			);
+
+		new Setting(contentEl)
+			.setName("Citekey")
+			.setDesc("Used in the transcription's filename and links. It can be edited.")
+			.addText((t) => {
+				this.citekeyInput = t;
+				t.setPlaceholder("Book title").onChange((v) => {
+					this.citekey = v.trim().replace(/^@+/, "");
+					this.citekeyTouched = true;
+				});
+				t.inputEl.setCssStyles({ width: "100%" });
+			});
+
+		const promptRow = contentEl.createDiv();
+		this.picker = new PromptPicker(this.plugin, "transcription", promptRow, this.prompts);
+
+		new Setting(contentEl)
+			.addButton((b) =>
+				b.setButtonText("Transcribe").setCta().onClick(() => {
+					void this.transcribe().catch((e) => {
+						console.error("[midad-arabic-sources] standalone transcribe", e);
+						new Notice("Could not start the transcription — see the developer console.");
+					});
+				})
+			)
+			.addButton((b) => b.setButtonText("Cancel").onClick(() => this.close()));
+	}
+
+	setPath(path: string): void {
+		this.path = path;
+		this.pathInput?.setValue(path);
+		if (!this.citekeyTouched) this.setSuggestedCitekey();
+	}
+
+	setSuggestedCitekey(): void {
+		if (!this.path.trim()) return;
+		this.citekey = standaloneCitekey(this.path);
+		this.citekeyInput?.setValue(this.citekey);
+	}
+
+	async transcribe(): Promise<void> {
+		const entered = (this.pathInput?.getValue() ?? this.path).trim();
+		const path = entered.startsWith("~/") ? `${os.homedir()}${entered.slice(1)}` : entered;
+		if (!path) { new Notice("Choose a PDF first."); return; }
+		if (!path.toLowerCase().endsWith(".pdf")) { new Notice("Choose a PDF file."); return; }
+		if (!fs.existsSync(path)) { new Notice("That PDF could not be found at the selected path."); return; }
+
+		const citekey = (this.citekeyInput?.getValue() ?? this.citekey)
+			.trim()
+			.replace(/^@+/, "")
+			.replace(/[\\/:*?"<>|\s]+/g, "-")
+			.replace(/^-+|-+$/g, "");
+		if (!citekey) { new Notice("Enter a citekey."); return; }
+		this.citekeyInput?.setValue(citekey);
+
+		const folder = "_2 Bibliographic notes/Arabic transcriptions";
+		const notePrefix = normalizePath(`${folder}/@${citekey} - transcription`);
+		const existing = this.app.vault
+			.getFiles()
+			.find((f) => f.extension === "md" && f.path.startsWith(notePrefix));
+		let existingName = existing?.name ?? "";
+		if (!existingName) {
+			try {
+				const folderAbs = `${this.plugin.vaultPath()}/${folder}`;
+				existingName = fs
+					.readdirSync(folderAbs)
+					.find((name) => name.startsWith(`@${citekey} - transcription`) && name.endsWith(".md")) ?? "";
+			} catch {
+				/* folder does not exist yet */
+			}
+		}
+		if (existingName) {
+			new Notice(`A transcription already exists at ${existingName}. Choose a different citekey.`);
+			return;
+		}
+
+		const prompt = this.picker.selectedEntry();
+		if (!prompt) { new Notice("Select a prompt."); return; }
+		const promptFile = this.plugin.writePromptFile("transcription", prompt.text);
+		if (!promptFile) return;
+
+		const args = [
+			"transcribe",
+			"--citekey", citekey,
+			"--pdf", path,
+			"--standalone",
+			"--prompt-file", promptFile,
+		];
+		this.close();
+		const result = await this.plugin.runWithProgress("Transcribing PDF", args);
+		const notePath = result?.notes?.[0];
+		if (!notePath) return;
+		const rel = vaultRelative(this.plugin.vaultPath(), notePath);
+		const note = await this.waitForNote(rel);
+		if (note) {
+			new VerifyTranscriptionMetadataModal(this.app, note).open();
+		} else {
+			new Notice(`Transcription written to ${rel}. Open it to check its title and author.`);
+		}
+	}
+
+	/** The pipeline writes outside Obsidian, so wait for its file watcher. */
+	async waitForNote(path: string): Promise<TFile | null> {
+		for (let i = 0; i < 40; i++) {
+			const file = this.app.vault.getAbstractFileByPath(path);
+			if (file instanceof TFile) return file;
+			await new Promise((resolve) => window.setTimeout(resolve, 150));
+		}
+		return null;
+	}
+
+	onClose(): void {
+		this.contentEl.empty();
+	}
+}
+
+/** Check Gemini's title/author guess before the standalone note is kept. */
+class VerifyTranscriptionMetadataModal extends Modal {
+	file: TFile;
+	title = "";
+	author = "";
+	titleInput!: TextComponent;
+	authorInput!: TextComponent;
+	loaded = false;
+
+	constructor(app: App, file: TFile) {
+		super(app);
+		this.file = file;
+	}
+
+	onOpen(): void {
+		const { contentEl } = this;
+		contentEl.createEl("h3", { text: "Check the transcription's title and author" });
+		contentEl.createEl("p", {
+			text: "Gemini guessed these from the title page. Correct them if needed, then save. They fill the same bibliography fields as a Zotero-derived transcription.",
+		});
+
+		new Setting(contentEl)
+			.setName("Title")
+			.addText((t) => {
+				this.titleInput = t;
+				t.setPlaceholder("Book title").onChange((v) => (this.title = v));
+				t.inputEl.setCssStyles({ width: "100%" });
+			});
+
+		new Setting(contentEl)
+			.setName("Author")
+			.setDesc("Separate multiple authors with semicolons.")
+			.addText((t) => {
+				this.authorInput = t;
+				t.setPlaceholder("Author").onChange((v) => (this.author = v));
+				t.inputEl.setCssStyles({ width: "100%" });
+			});
+
+		new Setting(contentEl)
+			.addButton((b) =>
+				b.setButtonText("Save").setCta().onClick(() => {
+					void this.save(false).catch((e) => this.reportError(e));
+				})
+			)
+			.addButton((b) =>
+				b.setButtonText("Save and open").onClick(() => {
+					void this.save(true).catch((e) => this.reportError(e));
+				})
+			)
+			.addButton((b) => b.setButtonText("Skip").onClick(() => this.close()));
+
+		void this.load();
+	}
+
+	async load(): Promise<void> {
+		try {
+			const text = await this.app.vault.read(this.file);
+			const match = /^---\r?\n([\s\S]*?)\r?\n---/.exec(text);
+			const parsed = match ? parseYaml(match[1]) as unknown : {};
+			const fm = parsed && typeof parsed === "object" ? parsed as Record<string, unknown> : {};
+			const rawTitle = typeof fm.title === "string" ? fm.title : "";
+			const rawAuthors = fm.authors;
+			const authors = Array.isArray(rawAuthors)
+				? rawAuthors.map((a) => String(a))
+				: typeof rawAuthors === "string" ? [rawAuthors] : [];
+			this.title = stripTranscriptionSuffix(rawTitle);
+			this.author = authors.join("; ");
+		} catch (e) {
+			console.error("[midad-arabic-sources] read transcription metadata", e);
+		}
+		this.loaded = true;
+		this.titleInput?.setValue(this.title);
+		this.authorInput?.setValue(this.author);
+	}
+
+	async save(open: boolean): Promise<void> {
+		if (!this.loaded) return;
+		const title = this.title.trim() || "Untitled";
+		const authors = this.author
+			.split(";")
+			.map((a) => a.trim())
+			.filter(Boolean);
+
+		await this.app.fileManager.processFrontMatter(this.file, (fm: Record<string, unknown>) => {
+			fm.title = `${title} (transcription)`;
+			if (authors.length) fm.authors = authors;
+			else delete fm.authors;
+			const suffix = typeof fm.volume === "number" ? `transcription, vol. ${fm.volume}` : "transcription";
+			const aliases = [`${title} (${suffix})`];
+			if (authors.length) aliases.push(`${authors[0]} - ${title} (${suffix})`);
+			fm.aliases = Array.from(new Set(aliases));
+		});
+		new Notice("Transcription metadata saved.");
+		this.close();
+		if (open) {
+			await this.app.workspace.getLeaf(false).openFile(this.file);
+		}
+	}
+
+	reportError(e: unknown): void {
+		console.error("[midad-arabic-sources] save transcription metadata", e);
+		new Notice("Could not save the metadata — see the developer console.");
 	}
 
 	onClose(): void {

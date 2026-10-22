@@ -213,6 +213,17 @@ def infer_volume(name: str):
     return int(nums[-1]) if nums else None
 
 
+def infer_explicit_volume(name: str):
+    """Volume only when the filename says so, for standalone PDFs.
+
+    An arbitrary user-chosen PDF may have a year or an edition number in its
+    name; treating the last number as a volume would be wrong.
+    """
+    stem = Path(name).stem
+    m = re.search(r'(?:vol(?:ume)?|juz|جزء|ج)\s*[._-]?\s*(\d+)', stem, re.I)
+    return int(m.group(1)) if m else None
+
+
 def _zotero_item(key: str):
     """One Zotero item (attachment) via the local API; None if Zotero is down."""
     try:
@@ -431,11 +442,30 @@ def _parse_pdf_arg(value: str):
     return value, None
 
 
+def _read_note_metadata(processed: Path) -> tuple[str | None, list[str] | None]:
+    """Read the title/author sidecar written by transcription-postprocess.py."""
+    sidecar = processed.with_suffix(processed.suffix + ".meta.json")
+    if not sidecar.exists():
+        return None, None
+    try:
+        meta = json.loads(sidecar.read_text(encoding="utf-8"))
+    except Exception:
+        return None, None
+    title = meta.get("title") if isinstance(meta.get("title"), str) else None
+    author = meta.get("author") if isinstance(meta.get("author"), str) else None
+    authors = [a.strip() for a in author.split(";") if a.strip()] if author else None
+    return title, authors
+
+
 def cmd_transcribe(args) -> int:
     citekey = args.citekey
+    standalone = bool(getattr(args, "standalone", False))
     specs = [_parse_pdf_arg(v) for v in (args.pdf or [])]
 
     if not specs:
+        if standalone:
+            fail("No PDF file supplied for standalone transcription.")
+            return 1
         note = BIB / f"@{citekey}.md"
         if not note.exists():
             fail(f"Literature note not found: {note}")
@@ -452,7 +482,12 @@ def cmd_transcribe(args) -> int:
         pdf = Path(pdf_path)
         volume = vol
         if volume is None:
-            volume = args.volume if args.volume is not None else infer_volume(pdf.name)
+            if args.volume is not None:
+                volume = args.volume
+            elif standalone:
+                volume = infer_explicit_volume(pdf.name)
+            else:
+                volume = infer_volume(pdf.name)
         stem = pdf.stem
         # Keep all intermediates inside the plugin cache, not beside the source PDF.
         work = WORK_DIR / f"{_slug(citekey)}-{_slug(stem)}"
@@ -463,12 +498,15 @@ def cmd_transcribe(args) -> int:
 
         save_state(stage="submitting", status="running", doc_type="transcription",
                    pid=os.getpid(), citekey=citekey, pdf=str(pdf), volume=volume,
+                   standalone=standalone,
                    work_dir=str(work), log=str(_LOG_PATH) if _LOG_PATH else "",
                    prompt_file=str(args.prompt_file) if getattr(args, "prompt_file", None) else "")
         step("transcribe", "start", f"{pdf.name}" + (f" (vol. {volume})" if volume else ""))
         submit_args = [str(pdf), "--work-dir", str(work)]
         if getattr(args, "prompt_file", None):
             submit_args += ["--prompt-file", str(args.prompt_file)]
+        if standalone:
+            submit_args.append("--metadata")
         if run_script("transcription-batch-submit.py", submit_args):
             save_state(stage="error", status="error")
             step("transcribe", "error", pdf.name); continue
@@ -480,14 +518,21 @@ def cmd_transcribe(args) -> int:
             fix_args = [str(batch_txt), "--fix"]
             if getattr(args, "prompt_file", None):
                 fix_args += ["--prompt-file", str(args.prompt_file)]
+            if standalone:
+                fix_args.append("--metadata")
             run_script("transcription-process-raw.py", fix_args)
 
         if not processed.exists() or processed.stat().st_mtime < raw.stat().st_mtime:
-            run_script("transcription-postprocess.py", [str(raw), str(processed)])
+            post_args = [str(raw), str(processed)]
+            if standalone:
+                post_args.append("--metadata")
+            run_script("transcription-postprocess.py", post_args)
 
         save_state(stage="writing", status="running")
+        title, authors = _read_note_metadata(processed)
         dest = mv.write_note(_strip_yaml(processed.read_text(encoding="utf-8")), citekey,
-                             "transcription", volume=volume)
+                             "transcription", volume=volume, standalone=standalone,
+                             title=title, authors=authors)
         _archive(batch_txt, citekey, "transcription", volume)
         # Only the vault note and the txt/json archive survive.
         shutil.rmtree(work, ignore_errors=True)
@@ -503,12 +548,14 @@ def _resume_transcription(st: dict) -> int:
     citekey = st.get("citekey")
     pdf = st.get("pdf")
     volume = st.get("volume")
+    standalone = bool(st.get("standalone"))
     stem = Path(pdf).stem
     work = Path(st.get("work_dir") or Path(pdf).parent)
     batch_txt = work / f"{stem}.batch.txt"
     if not batch_txt.exists():
         return cmd_transcribe(argparse.Namespace(citekey=citekey, pdf=[pdf], volume=volume,
-                                                pages=None, prompt_file=st.get("prompt_file") or None))
+                                                pages=None, standalone=standalone,
+                                                prompt_file=st.get("prompt_file") or None))
 
     mv = load_module("transcription-translation-move-to-vault.py")
     raw = work / f"{stem}-raw.md"
@@ -519,11 +566,18 @@ def _resume_transcription(st: dict) -> int:
         fix_args = [str(batch_txt), "--fix"]
         if st.get("prompt_file"):
             fix_args += ["--prompt-file", str(st["prompt_file"])]
+        if standalone:
+            fix_args.append("--metadata")
         run_script("transcription-process-raw.py", fix_args)
     if not processed.exists() or processed.stat().st_mtime < raw.stat().st_mtime:
-        run_script("transcription-postprocess.py", [str(raw), str(processed)])
+        post_args = [str(raw), str(processed)]
+        if standalone:
+            post_args.append("--metadata")
+        run_script("transcription-postprocess.py", post_args)
+    title, authors = _read_note_metadata(processed)
     dest = mv.write_note(_strip_yaml(processed.read_text(encoding="utf-8")), citekey,
-                         "transcription", volume=volume)
+                         "transcription", volume=volume, standalone=standalone,
+                         title=title, authors=authors)
     _archive(batch_txt, citekey, "transcription", volume)
     shutil.rmtree(work, ignore_errors=True)
     save_state(stage="done", status="done", note=str(dest))
@@ -609,6 +663,7 @@ def main() -> int:
     p.add_argument("--pdf", action="append")
     p.add_argument("--volume", type=int)
     p.add_argument("--pages", type=int)
+    p.add_argument("--standalone", action="store_true")
     p.add_argument("--prompt-file")
     p.add_argument("--log")
     p.add_argument("--state")

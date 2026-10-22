@@ -37,11 +37,12 @@ Settings cover the server URL and script, the engine (`bert` / `mle` / `none`), 
 
 ### Transcription and translation (scanned PDFs)
 
-A Gemini pipeline turns a literature item’s PDFs into page-separated Arabic markdown (and translations), with local post-processing for Qurʾān quotes, poetry callouts, footnotes, and tashkīl. Run it from a `@citekey` note.
+A Gemini pipeline turns a literature item’s PDFs into page-separated Arabic markdown (and translations), with local post-processing for Qurʾān quotes, poetry callouts, footnotes, and tashkīl. Run it from a `@citekey` note, or transcribe any PDF on disk without a Zotero item.
 
 - **Transcribe this item’s PDF file(s)** — burst to page PDFs, OCR via Gemini batch mode, post-process.
+- **Transcribe a PDF…** — pick any PDF on disk; Gemini guesses the title and author from the title page, and a verification dialog saves them into the new transcription’s bibliography.
 - **Translate this item’s transcription(s)** — translate an existing transcription.
-- **Prompt dropdown** in both dialogs — choose a named prompt, or edit, copy, and delete prompts for texts the built-in one does not suit.
+- **Prompt dropdown** in the transcription and translation dialogs — choose a named prompt, or edit, copy, and delete prompts for texts the built-in one does not suit.
 - **Reprocess from archive…** — re-run post-processing from an archived batch without resubmitting.
 - **Check transcription pipeline**, **Show pipeline status**, **Open last pipeline log** — status and diagnostics (non-modal corner panel).
 

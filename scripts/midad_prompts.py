@@ -10,7 +10,8 @@ final system instruction in three layers:
 
 That keeps page headings, `---` separators, blank lines, and the no-hard-wrap
 rule consistent across every text, while the user describes only the document
-in front of them.
+in front of them. Standalone PDFs (no Zotero item) add a fourth, optional
+`STANDALONE_METADATA_PROMPT` asking for the title-page title and author.
 
 The plugin's `default-prompts` pipeline command returns the two
 `DEFAULT_*_PROMPT` strings, which are the text-specific defaults it seeds into
@@ -108,14 +109,27 @@ DEFAULT_TRANSLATION_PROMPT = (
 )
 
 
-def build_transcription_prompt(user_prompt: str | None = None) -> str:
+STANDALONE_METADATA_PROMPT = (
+    "TITLE PAGE METADATA (standalone scanned book)\n"
+    "If the PDF has a title page or cover, start the reply with two plain lines before the first page heading:\n"
+    "TITLE: the book's title as printed\n"
+    "AUTHOR: the book's author as printed\n"
+    "Use the source's own language and script. Do not invent or romanize these values. "
+    "If one is not clearly visible, omit that line. Do not use YAML, bold, or quotation marks around them, and do not repeat them."
+)
+
+
+def build_transcription_prompt(user_prompt: str | None = None, metadata: bool = False) -> str:
     """Compose the hardcoded general rules with the text-specific part."""
     specific = (user_prompt or "").strip() or DEFAULT_TRANSCRIPTION_PROMPT
-    return "\n\n".join([
+    parts = [
         SHARED_FORMAT_PROMPT,
         TRANSCRIPTION_BASE_PROMPT,
         "TEXT-SPECIFIC INSTRUCTIONS\n" + specific,
-    ])
+    ]
+    if metadata:
+        parts.append(STANDALONE_METADATA_PROMPT)
+    return "\n\n".join(parts)
 
 
 def build_translation_prompt(user_prompt: str | None = None) -> str:

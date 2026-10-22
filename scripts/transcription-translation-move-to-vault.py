@@ -121,18 +121,34 @@ def compute_aliases(citekey: str, doc_type: str, volume: int = None) -> list[str
     return aliases
 
 
-def build_yaml(citekey: str, doc_type: str, related: list[str], volume: int = None) -> str:
-    """Build YAML frontmatter from the Zotero reference and the aliases."""
-    ref = find_zotero(citekey)
-    title_base = "Untitled"
-    short_base = "Untitled"
-    authors = None
+def _yaml_quote(value: str) -> str:
+    """Escape a value for a double-quoted YAML scalar."""
+    return str(value).replace("\\", "\\\\").replace('"', '\\"')
+
+
+def build_yaml(citekey: str, doc_type: str, related: list[str], volume: int = None,
+               standalone: bool = False, title: str | None = None,
+               authors: list[str] | None = None) -> str:
+    """Build YAML frontmatter from the Zotero reference and the aliases.
+
+    A standalone transcription (a PDF the user chose directly, with no Zotero
+    record) instead takes its title/authors from the metadata guessed during
+    transcription. It deliberately has no `[[@citekey]]` up link, because no
+    literature note exists.
+    """
+    ref = None if standalone else find_zotero(citekey)
+    title_base = (title or "").strip() or "Untitled"
+    short_base = title_base
+    raw_authors = [authors] if isinstance(authors, str) else (authors or [])
+    author_list = [a.strip() for a in raw_authors if a and a.strip()]
 
     if ref:
         text = ref.read_text(encoding="utf-8")
         title_base = extract_zotero_field(text, "title") or "Untitled"
         short_base = extract_zotero_field(text, "shorttitle") or title_base
-        authors = extract_zotero_field(text, "authors")
+        author_field = extract_zotero_field(text, "authors")
+        if author_field:
+            author_list = [author_field.lstrip('- ').strip().strip('"')]
 
     title = f"{title_base} ({doc_type})"
     shorttitle = f"{short_base} ({doc_type})" if short_base != title_base else ""
@@ -141,33 +157,44 @@ def build_yaml(citekey: str, doc_type: str, related: list[str], volume: int = No
     up_items = [
         f'  - "[[{up_category}]]"',
         f'  - "[[AI gen]]"',
-        f'  - "[[@{citekey}]]"',
     ]
-    if volume:
-        up_items.append(f'  - "[[@{citekey} - {doc_type}]]"')
+    if not standalone:
+        up_items.append(f'  - "[[@{citekey}]]"')
+        if volume:
+            up_items.append(f'  - "[[@{citekey} - {doc_type}]]"')
 
     yaml = f"""---
 created: {datetime.now().strftime('%Y-%m-%d %H:%M')}
 up:
 {chr(10).join(up_items)}
-title: "{title}"
+title: "{_yaml_quote(title)}"
 """
     if shorttitle:
-        yaml += f'shorttitle: "{shorttitle}"\n'
+        yaml += f'shorttitle: "{_yaml_quote(shorttitle)}"\n'
     if volume:
         yaml += f'volume: {volume}\n'
-    if authors:
-        authors = authors.lstrip('- ').strip().strip('"')
-        yaml += f'authors:\n  - "{authors}"\n'
-    aliases = compute_aliases(citekey, doc_type, volume)
+    if author_list:
+        yaml += "authors:\n"
+        for a in author_list:
+            yaml += f'  - "{_yaml_quote(a)}"\n'
+
+    if standalone:
+        aliases = []
+        suffix = doc_type if not volume else f"{doc_type}, vol. {volume}"
+        if title_base != "Untitled":
+            aliases.append(f"{title_base} ({suffix})")
+            if author_list:
+                aliases.append(f"{author_list[0]} - {title_base} ({suffix})")
+    else:
+        aliases = compute_aliases(citekey, doc_type, volume)
     if aliases:
         yaml += "aliases:\n"
         for a in aliases:
-            yaml += f'  - "{a}"\n'
+            yaml += f'  - "{_yaml_quote(a)}"\n'
     if related:
         yaml += "related:\n"
         for r in related:
-            yaml += f'  - "{r}"\n'
+            yaml += f'  - "{_yaml_quote(r)}"\n'
 
     yaml += "---\n"
     return yaml
@@ -270,16 +297,19 @@ def sync_collection_property(citekey: str, doc_type: str) -> bool:
 
 
 def write_note(body: str, citekey: str, doc_type: str, related: list[str] = None,
-               volume: int = None) -> Path:
+               volume: int = None, standalone: bool = False,
+               title: str | None = None, authors: list[str] | None = None) -> Path:
     """Build the YAML and write the finished note. Returns its path."""
     related = related or []
-    ensure_parent(citekey, doc_type, related, volume)
+    if not standalone:
+        ensure_parent(citekey, doc_type, related, volume)
     dest = dest_path(citekey, doc_type, volume)
-    dest.write_text(build_yaml(citekey, doc_type, related, volume=volume) + "\n" + body.strip() + "\n",
-                    encoding="utf-8")
+    yaml = build_yaml(citekey, doc_type, related, volume=volume, standalone=standalone,
+                      title=title, authors=authors)
+    dest.write_text(yaml + "\n" + body.strip() + "\n", encoding="utf-8")
     # Record/refresh the ordered transcriptions/translations list on the
     # literature note: parent note first, then volumes in numerical order.
-    if sync_collection_property(citekey, doc_type):
+    if not standalone and sync_collection_property(citekey, doc_type):
         print(f"Updated {doc_type} list on @{citekey}")
     return dest
 

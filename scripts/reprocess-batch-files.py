@@ -19,6 +19,7 @@ The result is written next to the input as
 (or without " - vol. N" for a single-volume work), or to --out.
 """
 import re
+import json
 import shutil
 import sys
 import tempfile
@@ -67,6 +68,36 @@ def resolve(src: Path, workdir: Path):
         if f.name.endswith("-output.jsonl"):
             return "transcription", f.name[:-len("-output.jsonl")], base
     raise SystemExit("ERROR: could not determine batch type/stem from the input")
+
+
+def existing_metadata(mv, citekey: str, doc_type: str, volume):
+    """Title/author from an existing note, for a standalone reprocess."""
+    path = mv.dest_path(citekey, doc_type, volume)
+    if not path.exists():
+        return None, None
+    text = path.read_text(encoding="utf-8")
+    title = mv.extract_zotero_field(text, "title")
+    if title:
+        title = re.sub(
+            r'\s*\((?:transcription|translation)(?:,\s*vol\.\s*\d+)?\)\s*$',
+            '', title, flags=re.I,
+        ).strip()
+    author = mv.extract_zotero_field(text, "authors")
+    authors = []
+    if author:
+        authors = [author.lstrip('- ').strip().strip('"')]
+    m = re.search(r'^authors:[ \t]*\n((?:[ \t]+-[ \t]*.+\n?)+)', text, re.M)
+    if m:
+        authors = []
+        for line in m.group(1).rstrip("\n").split("\n"):
+            mm = re.match(r'^[ \t]+-[ \t]*(.*)$', line)
+            if mm:
+                value = mm.group(1).strip()
+                if len(value) >= 2 and value[0] == '"' and value[-1] == '"':
+                    value = value[1:-1]
+                if value:
+                    authors.append(value)
+    return title or None, (authors or None)
 
 
 def main():
@@ -120,8 +151,11 @@ def main():
             raw_path.write_text(yaml.rstrip("\n") + "\n\n" + raw_text.lstrip("\n"), encoding="utf-8")
 
             processed = workdir / "processed.md"
+            # A standalone PDF has no literature note; only then does the
+            # post-processor extract TITLE:/AUTHOR: markers.
+            standalone = mv.find_zotero(citekey) is None
             tpp = load("transcription-postprocess.py")
-            tpp.run(raw_path, out_path=processed)
+            tpp.run(raw_path, out_path=processed, metadata=standalone)
 
             if out_override:
                 out_override.write_text(processed.read_text(encoding="utf-8"), encoding="utf-8")
@@ -132,7 +166,24 @@ def main():
                     end = body.find("---", 3)
                     if end > 0:
                         body = body[end + 3:].strip()
-                dest = mv.write_note(body, citekey, "transcription", volume=volume)
+                # A standalone PDF has no literature note. Preserve its
+                # title/author from the fresh sidecar or the existing note,
+                # and do not add a [[@citekey]] up link.
+                title, authors = (None, None)
+                if standalone:
+                    title, authors = existing_metadata(mv, citekey, "transcription", volume)
+                    meta_path = processed.with_suffix(processed.suffix + ".meta.json")
+                    if meta_path.exists():
+                        try:
+                            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+                            title = meta.get("title") or title
+                            author = meta.get("author")
+                            if author:
+                                authors = [a.strip() for a in author.split(";") if a.strip()]
+                        except Exception:
+                            pass
+                dest = mv.write_note(body, citekey, "transcription", volume=volume,
+                                     standalone=standalone, title=title, authors=authors)
 
         print(f"\nReprocessed -> {dest}")
     finally:

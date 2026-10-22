@@ -166,7 +166,7 @@ def submit_batch(jsonl_path: Path, client: genai.Client, pdf_stem: str) -> str:
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("Usage: python3 transcription-batch-submit.py input.pdf [--work-dir DIR] [--prompt-file PATH]")
+        print("Usage: python3 transcription-batch-submit.py input.pdf [--work-dir DIR] [--prompt-file PATH] [--metadata]")
         sys.exit(1)
     
     pdf_path = Path(sys.argv[1]).resolve()
@@ -186,7 +186,7 @@ if __name__ == "__main__":
         idx = sys.argv.index("--prompt-file")
         if idx + 1 < len(sys.argv):
             prompt_file = sys.argv[idx + 1]
-    system_prompt = build_transcription_prompt(read_prompt(prompt_file))
+    system_prompt = build_transcription_prompt(read_prompt(prompt_file), metadata="--metadata" in sys.argv)
 
     stem = pdf_path.stem
     pages_dir = work_dir / f"{stem}-pages"

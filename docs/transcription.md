@@ -1,6 +1,6 @@
 # Transcription (scanned PDFs)
 
-**Transcribe this item’s PDF file(s)** turns a literature item’s scanned PDFs into page-separated Arabic markdown, using a Gemini OCR pipeline with local post-processing. Run it from a `@citekey` note (the command reads that note’s Zotero attachments).
+**Transcribe this item’s PDF file(s)** turns a literature item’s scanned PDFs into page-separated Arabic markdown, using a Gemini OCR pipeline with local post-processing. Run it from a `@citekey` note (the command reads that note’s Zotero attachments). **Transcribe a PDF…** does the same for any PDF you choose, with no Zotero item or literature note.
 
 ## What happens
 
@@ -13,7 +13,15 @@ For each PDF the pipeline:
 
 The intermediates live under `.midad-arabic-sources/work/` and are removed once the vault note is written; the batch archive under `.midad-arabic-sources/archive/` is kept, and it is what **Reprocess from archive…** re-runs without resubmitting.
 
-The finished note is written to `_2 Bibliographic notes/Arabic transcriptions/` as `@<citekey> - transcription.md`, with one `#### p. N` heading per page. Transcriptions and translations are automatically made annotatable; multi-volume series share one annotation note. A multi-volume item gets `@<citekey> - transcription vol. N.md`, and the volume number is inferred from the PDF filename when the dialog does not supply one.
+The finished note is written to `_2 Bibliographic notes/Arabic transcriptions/` as `@<citekey> - transcription.md`, with one `#### p. N` heading per page. Transcriptions and translations are automatically made annotatable; multi-volume series share one annotation note. A multi-volume item gets `@<citekey> - transcription - vol. N.md`, and the volume number is inferred from the PDF filename when the dialog does not supply one.
+
+## Standalone PDFs (no Zotero item)
+
+**Transcribe a PDF…** opens a dialog with a file picker and an editable path, so it works for a PDF anywhere on disk. The citekey is generated from the filename (`pdf-<name>`) and can be changed before starting; it determines the note name, and the dialog refuses to overwrite an existing transcription with the same citekey.
+
+A standalone PDF has no Zotero record to supply its bibliography, so the transcription prompt adds a short title-page instruction: Gemini writes the printed title and author as `TITLE:` and `AUTHOR:` lines above the first page. Post-processing removes those lines from the body and saves them as a sidecar beside the processed text. The pipeline then writes them into the note’s `title:` and `authors:` fields. This instruction is passed only for standalone PDFs; literature-note transcriptions do not receive it.
+
+When the note is written, a second dialog shows the guessed title and author for verification. Correct them and choose **Save** (or **Save and open**); **Skip** keeps the guess and the note can be edited later. The resulting YAML carries the same bibliographic fields as a Zotero-derived transcription, except that there is no `[[@citekey]]` literature-note link in `up:` because no such note exists.
 
 ## Post-processing
 
@@ -41,6 +49,7 @@ The editor holds only the **text-specific** part. The pipeline appends it to a s
 ## Commands
 
 - **Transcribe this item’s PDF file(s)** — the full pipeline above.
+- **Transcribe a PDF…** — choose any PDF on disk, with no Zotero item, then verify the guessed title and author.
 - **Check transcription pipeline** — list the archived batches on disk.
 - **Show pipeline status** — reveal the live status panel while a job runs, resume a job that was interrupted, or open the last log when nothing is running.
 - **Open last pipeline log** — open the most recent job log.
@@ -56,6 +65,6 @@ Each job writes a log and a state file under `.midad-arabic-sources/jobs/`. The 
 
 - A **Gemini API key** (setting or `GEMINI_API_KEY`/`GOOGLE_API_KEY`).
 - Python 3 with `pymupdf`, `requests`, and `google-genai`.
-- The PDFs themselves, resolved from the item’s Zotero attachments (the local Zotero API, the ScholarWeft `zlinks` cache, or the Zotero storage folder, in that order).
+- The PDFs themselves: resolved from the item’s Zotero attachments (the local Zotero API, the ScholarWeft `zlinks` cache, or the Zotero storage folder, in that order) for **Transcribe this item’s PDF file(s)**, or chosen directly from disk for **Transcribe a PDF…**.
 
 See [Dependencies](./dependencies.md) for the install lines, and [Translation](./translation.md) for translating a finished transcription.
