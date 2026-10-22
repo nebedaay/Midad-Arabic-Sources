@@ -12002,6 +12002,7 @@ var AnnotationService = class {
     this.pathAnnotations = new Map();
     this.verifyTimers = new Map();
     this.autoTimers = new WeakMap();
+    this.lastSelection = null;
     this.tooltipHoverTimer = 0;
     this.tooltipHideTimer = 0;
     this.suppressAutoUntil = 0;
@@ -12059,7 +12060,9 @@ var AnnotationService = class {
     }
     this.plugin.registerEditorExtension([
       annotationEditorExtension,
-      selectionWatcher((view) => this.onEditorSelection(view))
+      selectionWatcher((view) => this.onEditorSelection(view), () => {
+        this.lastSelection = null;
+      })
     ]);
     registerReadingAnnotations(this.plugin, (path2) => {
       var _a;
@@ -12614,8 +12617,13 @@ ${MANAGED_CLOSE}
     }
     const selection = view.state.selection.main;
     if (selection.from === selection.to) {
+      this.lastSelection = null;
       this.suppressAutoSignature = "";
       return;
+    }
+    const currentRange = { from: selection.from, to: selection.to };
+    if (!this.lastSelection || this.lastSelection.view !== view || currentRange.to - currentRange.from >= this.lastSelection.to - this.lastSelection.from || !(this.lastSelection.from <= currentRange.from && this.lastSelection.to >= currentRange.to)) {
+      this.lastSelection = { view, ...currentRange, at: Date.now() };
     }
     if (!this.settings.annotateOnSelection)
       return;
@@ -12623,14 +12631,13 @@ ${MANAGED_CLOSE}
       return;
     if (Date.now() < this.suppressAutoUntil)
       return;
-    const signature = `${selection.from}:${selection.to}`;
+    const effective = this.effectiveSelection(view);
+    const signature = `${effective.from}:${effective.to}`;
     if (this.suppressAutoSignature && this.suppressAutoSignature !== signature) {
       this.suppressAutoSignature = "";
     }
     if (this.suppressAutoSignature === signature)
       return;
-    const from = selection.from;
-    const to = selection.to;
     const timer = window.setTimeout(() => {
       this.autoTimers.delete(view);
       if (this.disposed || !this.settings.annotateOnSelection)
@@ -12640,20 +12647,29 @@ ${MANAGED_CLOSE}
       if (Date.now() < this.suppressAutoUntil)
         return;
       const current = view.state.selection.main;
-      if (current.from !== from || current.to !== to)
+      if (current.from === current.to)
         return;
       const activeNow = this.app.workspace.getActiveViewOfType(import_obsidian13.MarkdownView);
       if (!(activeNow == null ? void 0 : activeNow.file) || cmOf(activeNow) !== view)
         return;
-      const draft = this.draftFromEditor(activeNow.editor, activeNow.file);
+      const range = this.effectiveSelection(view);
+      const draft = this.draftFromEditor(activeNow.editor, activeNow.file, range);
       if (!draft)
         return;
-      void this.openAnnotate(activeNow.editor, activeNow.file, signature);
+      void this.openAnnotate(activeNow.editor, activeNow.file, `${range.from}:${range.to}`, range);
     }, 420);
     this.autoTimers.set(view, timer);
   }
-  draftFromEditor(editor, file) {
-    var _a;
+  effectiveSelection(view) {
+    const current = view.state.selection.main;
+    const last = this.lastSelection;
+    if (last && last.view === view && Date.now() - last.at < 1500 && last.from <= current.from && last.to >= current.to && (last.from < current.from || last.to > current.to)) {
+      return { from: last.from, to: last.to };
+    }
+    return { from: current.from, to: current.to };
+  }
+  draftFromEditor(editor, file, range) {
+    var _a, _b, _c;
     if (!file)
       return null;
     const cache = this.app.metadataCache.getFileCache(file);
@@ -12665,8 +12681,8 @@ ${MANAGED_CLOSE}
     const bounds = (_a = managedBounds(value)) != null ? _a : adopted ? bodyBounds(value) : null;
     if (!bounds)
       return null;
-    let from = editor.posToOffset(editor.getCursor("from"));
-    let to = editor.posToOffset(editor.getCursor("to"));
+    let from = (_b = range == null ? void 0 : range.from) != null ? _b : editor.posToOffset(editor.getCursor("from"));
+    let to = (_c = range == null ? void 0 : range.to) != null ? _c : editor.posToOffset(editor.getCursor("to"));
     if (from > to)
       [from, to] = [to, from];
     if (from < bounds.contentStart || to > bounds.contentEnd)
@@ -12683,7 +12699,7 @@ ${MANAGED_CLOSE}
     const quoteText = markdownToText(raw);
     if (!quoteText.trim())
       return null;
-    const segments = visibleSegments(value, from, to).map((range) => [range.start - bounds.bodyStart, range.end - bounds.bodyStart]);
+    const segments = visibleSegments(value, from, to).map((range2) => [range2.start - bounds.bodyStart, range2.end - bounds.bodyStart]);
     return {
       quote: raw,
       quoteText,
@@ -12696,7 +12712,9 @@ ${MANAGED_CLOSE}
       segments
     };
   }
-  selectionSignatureForEditor(editor) {
+  selectionSignatureForEditor(editor, range) {
+    if (range)
+      return `${range.from}:${range.to}`;
     const cm = editor.cm;
     if (cm) {
       const selection = cm.state.selection.main;
@@ -12717,16 +12735,16 @@ ${MANAGED_CLOSE}
     const rect = cm.dom.getBoundingClientRect();
     return { left: rect.left + 20, top: rect.top + 20, bottom: rect.top + 40 };
   }
-  async openAnnotate(editor, file, autoSignature) {
+  async openAnnotate(editor, file, autoSignature, range) {
     var _a;
     if (!file)
       return;
-    const draft = this.draftFromEditor(editor, file);
+    const draft = this.draftFromEditor(editor, file, range);
     if (!draft) {
       new import_obsidian13.Notice("Select text inside a source note\u2019s managed region.");
       return;
     }
-    const signature = autoSignature != null ? autoSignature : this.selectionSignatureForEditor(editor);
+    const signature = autoSignature != null ? autoSignature : this.selectionSignatureForEditor(editor, range);
     const target = await this.targetForPath(file.path);
     if (!target) {
       new import_obsidian13.Notice("Could not identify the source work. Re-render the source and try again.");
@@ -12740,19 +12758,25 @@ ${MANAGED_CLOSE}
     if (bounds) {
       const expectedFrom = bounds.bodyStart + draft.position.start;
       const expectedTo = bounds.bodyStart + draft.position.end;
-      let currentFrom = editor.posToOffset(from);
-      let currentTo = editor.posToOffset(to);
-      if (currentFrom > currentTo)
-        [currentFrom, currentTo] = [currentTo, currentFrom];
-      while (currentFrom < currentTo && /\s/.test(value.charAt(currentFrom)))
-        currentFrom++;
-      while (currentTo > currentFrom && /\s/.test(value.charAt(currentTo - 1)))
-        currentTo--;
-      if (currentFrom !== expectedFrom || currentTo !== expectedTo)
-        return;
-      from = editor.offsetToPos(expectedFrom);
-      to = editor.offsetToPos(expectedTo);
-      anchorOffset = expectedTo;
+      if (range) {
+        from = editor.offsetToPos(expectedFrom);
+        to = editor.offsetToPos(expectedTo);
+        anchorOffset = expectedTo;
+      } else {
+        let currentFrom = editor.posToOffset(from);
+        let currentTo = editor.posToOffset(to);
+        if (currentFrom > currentTo)
+          [currentFrom, currentTo] = [currentTo, currentFrom];
+        while (currentFrom < currentTo && /\s/.test(value.charAt(currentFrom)))
+          currentFrom++;
+        while (currentTo > currentFrom && /\s/.test(value.charAt(currentTo - 1)))
+          currentTo--;
+        if (currentFrom !== expectedFrom || currentTo !== expectedTo)
+          return;
+        from = editor.offsetToPos(expectedFrom);
+        to = editor.offsetToPos(expectedTo);
+        anchorOffset = expectedTo;
+      }
     }
     const anchor = this.anchorForEditor(editor, anchorOffset);
     const orphans = (await this.annotationsFor(target)).filter((annotation) => annotation.anchorStatus === "orphaned");
