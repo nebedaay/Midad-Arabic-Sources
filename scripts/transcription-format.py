@@ -202,6 +202,138 @@ SURA_FIX = {
 }
 
 
+def _strip_arabic_marks(text: str) -> str:
+    return re.sub(r'[\u0610-\u061A\u064B-\u065F\u0670\u06D6-\u06ED]', '', text)
+
+
+def _is_toc_heading(line: str) -> bool:
+    s = _strip_arabic_marks(line.strip())
+    return bool(re.match(r'^#{1,6}\s+.*(?:فهرس|محتويات|contents?|toc)\b', s, re.I))
+
+
+def _is_toc_signal(line: str) -> bool:
+    s = _strip_arabic_marks(line.strip())
+    return s in ('صحيفة', 'صفحة', 'page', 'الصفحة')
+
+
+def _is_page_number_cell(cell: str) -> bool:
+    return bool(re.fullmatch(r'[\u0660-\u0669\d]{1,4}', cell.strip()))
+
+
+def _toc_entries(body_lines: list[str]) -> list[str]:
+    """Turn TOC lines or a TOC table into flat ``page + title`` entries."""
+    entries: list[str] = []
+    table_rows: list[list[tuple[str, str]]] = []
+    started = False
+    for raw in body_lines:
+        s = raw.strip()
+        if not s or s == '---' or _is_toc_signal(s):
+            continue
+        if s.startswith('#'):
+            continue
+
+        # A markdown table: the old 3.5 output used two page/text column pairs
+        # per row. Pull out each page-number + following-text pair.
+        if '|' in s:
+            if re.fullmatch(r'[\s|:\-–—]+', s):
+                continue
+            cells = [c.strip() for c in s.strip().strip('|').split('|')]
+            cells = [c for c in cells if c]
+            if cells and all(_is_toc_signal(c) for c in cells):
+                continue
+            row: list[tuple[str, str]] = []
+            i = 0
+            while i < len(cells):
+                if _is_page_number_cell(cells[i]) and i + 1 < len(cells) and not _is_page_number_cell(cells[i + 1]):
+                    row.append((cells[i], cells[i + 1]))
+                    started = True
+                    i += 2
+                else:
+                    i += 1
+            if row:
+                table_rows.append(row)
+            continue
+
+        m = re.match(r'^([\u0660-\u0669\d]{1,4})\s+(.+)$', s)
+        if m:
+            entries.append(f'{m.group(1)} {m.group(2).strip()}')
+            started = True
+        elif started and entries and not table_rows:
+            # A wrapped continuation of the previous entry.
+            entries[-1] += ' ' + s
+
+    if table_rows:
+        columns = max(len(row) for row in table_rows)
+        if columns > 1:
+            # The old table reads right-to-left: the rightmost page/text pair
+            # comes first, then the next column to its left.
+            for col in range(columns - 1, -1, -1):
+                for row in table_rows:
+                    if col < len(row):
+                        entries.append(f'{row[col][0]} {row[col][1]}')
+        else:
+            for row in table_rows:
+                entries.extend(f'{page} {title}' for page, title in row)
+    return entries
+
+
+def format_toc_blocks(text: str) -> str:
+    """Format fihris pages as a [!TOC] callout, one entry per list item.
+
+    A TOC may be introduced by a heading (فهرس / محتويات / Contents) or by a
+    'صحيفة' column header. Entries are page-number-plus-title lines, or a
+    markdown table with page/title column pairs. Only blocks with at least
+    three entries are changed, to avoid treating ordinary numbered prose as a
+    TOC. Page headings such as '#### Title page' are renamed to '#### TOC'
+    when the page's content is a TOC.
+    """
+    lines = text.split('\n')
+    out: list[str] = []
+    i = 0
+    n = len(lines)
+    while i < n:
+        s = lines[i].strip()
+        signal_start = _is_toc_signal(s)
+        heading_start = _is_toc_heading(s)
+        if not heading_start and not signal_start:
+            out.append(lines[i])
+            i += 1
+            continue
+
+        # The TOC starts after its heading, or at the signal line itself.
+        body_start = i + 1 if heading_start else i
+        j = body_start
+        while j < n:
+            t = lines[j].strip()
+            if t.startswith('#### ') or t == '---':
+                break
+            if j > body_start and re.match(r'^#{1,3}\s+', t):
+                break
+            j += 1
+
+        entries = _toc_entries(lines[body_start:j])
+        if len(entries) < 3:
+            out.append(lines[i])
+            i += 1
+            continue
+
+        # Rename an obviously misidentified cover/title page.
+        if heading_start:
+            for k in range(len(out) - 1, -1, -1):
+                if re.match(r'^####\s+', out[k].strip()):
+                    if re.match(r'^####\s+(?:Cover|Title page|Cover page)\s*$', out[k].strip(), re.I):
+                        out[k] = '#### TOC'
+                    break
+            out.append(lines[i])
+        out.append('')
+        out.append('>[!TOC]')
+        out.extend(f'>- {entry}' for entry in entries)
+        out.append('')
+        i = j
+
+    return '\n'.join(out)
+
+
 def normalize_spacing(text):
     """
     Ensure EXACTLY one blank line between all block-level elements.
@@ -343,6 +475,12 @@ def process(input_path):
         if _prev_blank and _next_blank:
             _lines[_i] = f'### {_inner}'
     c = '\n'.join(_lines)
+
+    # ── 0d. TOC pages ──────────────────────────────────────────
+    # Do this before paragraph joining: TOC lines are one entry per line but
+    # have no blank lines between them.
+    c = format_toc_blocks(c)
+    print(f"  TOC: {c.count('>[!TOC]')} callouts")
     
     # Gemini sometimes writes a hemistich pair as "h1 *** h2" (using *** as
     # the separator) instead of the required "* h1%%h2". Normalize it here,

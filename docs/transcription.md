@@ -30,6 +30,7 @@ Local scripts run after OCR and never call Gemini:
 - **Qurʾān quotes** — `﴿ … ﴾` spans are detected and rendered as the vault’s `quran-quote` callout, with tashkīl reconciled against the canonical Qurʾān notes.
 - **Poetry** — verse is wrapped in the `>[!arabic-poetry]` callout, one hemistich per `>- ` line. The OCR prompt asks for a `§§§` line marker and `%%` between hemistiches; post-processing also accepts the older `*` forms, including a marker stuck to the first word, and splits multiple couplets that were returned on one line.
 - **Footnotes** — the source’s footnote markers and bodies are reconstructed as markdown footnotes.
+- **TOC** — a fihris/contents page (recognized by a `فهرس`/`محتويات` heading or a `صحيفة` column header) is kept one entry per line and formatted as a `>[!TOC]` callout with `>-` list items. `#### Title page` is renamed `#### TOC` when the page’s content is a table of contents.
 - **Tashkīl** — the transcription’s vocalization is normalised (for example the waṣla alif and dagger alif), matching the transliteration engine’s conventions.
 
 `transcription-format.py` and `transcription-quran.py` are the two scripts behind this step; the orchestrator runs them in order.
