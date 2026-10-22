@@ -9320,11 +9320,23 @@ var annotationEditorExtension = [
   editorAnnotationsField,
   annotationRailPlugin
 ];
-function selectionWatcher(onSelection) {
-  return import_view.EditorView.updateListener.of((update) => {
-    if (update.selectionSet || update.docChanged)
-      onSelection(update.view);
-  });
+function selectionWatcher(onSelection, onPointerDown) {
+  return [
+    import_view.EditorView.updateListener.of((update) => {
+      if (update.selectionSet || update.docChanged)
+        onSelection(update.view);
+    }),
+    import_view.EditorView.domEventHandlers({
+      mousedown: (_event, view) => {
+        onPointerDown == null ? void 0 : onPointerDown(view);
+        return false;
+      },
+      mouseup: (_event, view) => {
+        onSelection(view);
+        return false;
+      }
+    })
+  ];
 }
 function resolveForEditor(doc, annotations) {
   return resolveAnnotations(doc, annotations, false);
@@ -9586,6 +9598,12 @@ var AnnotationPopup = class {
     popup.setAttribute("aria-label", this.options.draft.annotation ? "Edit annotation" : "Annotate selection");
     this.popup = popup;
     this.openedAt = Date.now();
+    popup.addEventListener("mousedown", (event) => {
+      const target = event.target;
+      if (target == null ? void 0 : target.closest("textarea, input, select, [contenteditable='true']"))
+        return;
+      event.preventDefault();
+    });
     const row = popup.createDiv({ cls: "mas-annotation-popup-row" });
     const label = row.createEl("label", { cls: "mas-annotation-label", text: "Comment" });
     label.setAttribute("for", "mas-annotation-comment");
@@ -9607,7 +9625,8 @@ var AnnotationPopup = class {
       button.setCssStyles({ background: annotationTint(color, 62, 0.9) });
       button.addEventListener("click", () => {
         this.selectColor(color);
-        button.focus();
+        if (this.options.focusPopup === true)
+          button.focus();
       });
       this.swatches.push(button);
     }
@@ -9630,7 +9649,7 @@ var AnnotationPopup = class {
     this.textarea = textarea;
     const footer = popup.createDiv({ cls: "mas-annotation-popup-footer" });
     const hint = footer.createDiv({ cls: "mas-annotation-hint" });
-    hint.setText("Esc \xB7 Cmd/Ctrl+Enter");
+    hint.setText("\u2190/\u2192 colour \xB7 Tab comment \xB7 Esc \xB7 Cmd/Ctrl+Enter");
     const buttons = footer.createDiv({ cls: "mas-annotation-popup-buttons" });
     if (this.options.onDelete) {
       this.deleteButton = new import_obsidian4.ButtonComponent(buttons).setButtonText("Delete").setClass("mod-warning").onClick(() => {
@@ -9664,6 +9683,28 @@ var AnnotationPopup = class {
     this.scope.register([], "Escape", (event) => {
       event.preventDefault();
       this.close("escape");
+      return false;
+    });
+    this.scope.register([], "ArrowLeft", (event) => {
+      if (this.focusInsidePopup())
+        return;
+      event.preventDefault();
+      this.cycleColor(-1);
+      return false;
+    });
+    this.scope.register([], "ArrowRight", (event) => {
+      if (this.focusInsidePopup())
+        return;
+      event.preventDefault();
+      this.cycleColor(1);
+      return false;
+    });
+    this.scope.register([], "Tab", (event) => {
+      var _a2;
+      if (this.focusInsidePopup())
+        return;
+      event.preventDefault();
+      (_a2 = this.textarea) == null ? void 0 : _a2.focus();
       return false;
     });
     this.app.keymap.pushScope(this.scope);
@@ -9725,6 +9766,19 @@ var AnnotationPopup = class {
       event.preventDefault();
       (_b = this.textarea) == null ? void 0 : _b.focus();
     }
+  }
+  focusInsidePopup() {
+    var _a;
+    const active = this.doc.activeElement;
+    return !!active && !!((_a = this.popup) == null ? void 0 : _a.contains(active));
+  }
+  cycleColor(delta) {
+    const index = ANNOTATION_COLORS.indexOf(this.color);
+    const next = (index + delta + ANNOTATION_COLORS.length) % ANNOTATION_COLORS.length;
+    this.selectColor(ANNOTATION_COLORS[next]);
+    const button = this.swatches[next];
+    if (button && this.options.focusPopup === true)
+      button.focus();
   }
   selectColor(color) {
     this.color = color;

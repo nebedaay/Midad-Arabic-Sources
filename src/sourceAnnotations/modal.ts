@@ -126,6 +126,15 @@ export class AnnotationPopup {
 		this.popup = popup;
 		this.openedAt = Date.now();
 
+		// Keep the editor focused when using the swatches, actions, or background.
+		// Else Live Preview re-renders a selected wikilink as soon as focus leaves
+		// and the visible selection appears to shrink. Text fields still focus.
+		popup.addEventListener("mousedown", (event) => {
+			const target = event.target as HTMLElement | null;
+			if (target?.closest("textarea, input, select, [contenteditable='true']")) return;
+			event.preventDefault();
+		});
+
 		const row = popup.createDiv({ cls: "mas-annotation-popup-row" });
 		const label = row.createEl("label", { cls: "mas-annotation-label", text: "Comment" });
 		label.setAttribute("for", "mas-annotation-comment");
@@ -148,7 +157,10 @@ export class AnnotationPopup {
 			button.setCssStyles({ background: annotationTint(color, 62, 0.9) });
 			button.addEventListener("click", () => {
 				this.selectColor(color);
-				button.focus();
+				// Do not focus on pointer selection: focusing a button blurs the
+				// editor, which makes Live Preview re-render a selected wikilink and
+				// appear to shrink the selection.
+				if (this.options.focusPopup === true) button.focus();
 			});
 			this.swatches.push(button);
 		}
@@ -173,7 +185,7 @@ export class AnnotationPopup {
 
 		const footer = popup.createDiv({ cls: "mas-annotation-popup-footer" });
 		const hint = footer.createDiv({ cls: "mas-annotation-hint" });
-		hint.setText("Esc · Cmd/Ctrl+Enter");
+		hint.setText("←/→ colour · Tab comment · Esc · Cmd/Ctrl+Enter");
 		const buttons = footer.createDiv({ cls: "mas-annotation-popup-buttons" });
 		if (this.options.onDelete) {
 			this.deleteButton = new ButtonComponent(buttons)
@@ -214,6 +226,24 @@ export class AnnotationPopup {
 		this.scope.register([], "Escape", (event) => {
 			event.preventDefault();
 			this.close("escape");
+			return false;
+		});
+		this.scope.register([], "ArrowLeft", (event) => {
+			if (this.focusInsidePopup()) return;
+			event.preventDefault();
+			this.cycleColor(-1);
+			return false;
+		});
+		this.scope.register([], "ArrowRight", (event) => {
+			if (this.focusInsidePopup()) return;
+			event.preventDefault();
+			this.cycleColor(1);
+			return false;
+		});
+		this.scope.register([], "Tab", (event) => {
+			if (this.focusInsidePopup()) return;
+			event.preventDefault();
+			this.textarea?.focus();
 			return false;
 		});
 		this.app.keymap.pushScope(this.scope);
@@ -271,6 +301,19 @@ export class AnnotationPopup {
 			event.preventDefault();
 			this.textarea?.focus();
 		}
+	}
+
+	private focusInsidePopup(): boolean {
+		const active = this.doc.activeElement;
+		return !!active && !!this.popup?.contains(active);
+	}
+
+	private cycleColor(delta: number): void {
+		const index = ANNOTATION_COLORS.indexOf(this.color);
+		const next = (index + delta + ANNOTATION_COLORS.length) % ANNOTATION_COLORS.length;
+		this.selectColor(ANNOTATION_COLORS[next]);
+		const button = this.swatches[next];
+		if (button && this.options.focusPopup === true) button.focus();
 	}
 
 	private selectColor(color: AnnotationColor): void {

@@ -242,10 +242,25 @@ export const annotationEditorExtension: Extension = [
 ];
 
 /** Report selection changes so the service can offer the creation dialog. */
-export function selectionWatcher(onSelection: (view: EditorView) => void): Extension {
-	return EditorView.updateListener.of((update) => {
-		if (update.selectionSet || update.docChanged) onSelection(update.view);
-	});
+export function selectionWatcher(
+	onSelection: (view: EditorView) => void,
+	onPointerDown?: (view: EditorView) => void
+): Extension {
+	return [
+		EditorView.updateListener.of((update) => {
+			if (update.selectionSet || update.docChanged) onSelection(update.view);
+		}),
+		EditorView.domEventHandlers({
+			mousedown: (_event, view) => {
+				onPointerDown?.(view);
+				return false;
+			},
+			mouseup: (_event, view) => {
+				onSelection(view);
+				return false;
+			},
+		}),
+	];
 }
 
 export function resolveForEditor(doc: string, annotations: SourceAnnotation[]): ResolvedAnnotation[] {
