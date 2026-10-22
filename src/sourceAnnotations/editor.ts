@@ -244,7 +244,8 @@ export const annotationEditorExtension: Extension = [
 /** Report selection changes so the service can offer the creation dialog. */
 export function selectionWatcher(
 	onSelection: (view: EditorView) => void,
-	onPointerDown?: (view: EditorView) => void
+	onPointerDown?: (view: EditorView) => void,
+	onDomSelection?: (view: EditorView) => void
 ): Extension {
 	return [
 		EditorView.updateListener.of((update) => {
@@ -257,6 +258,11 @@ export function selectionWatcher(
 			},
 			mouseup: (_event, view) => {
 				onSelection(view);
+				onDomSelection?.(view);
+				return false;
+			},
+			keyup: (event, view) => {
+				if (event.shiftKey) onDomSelection?.(view);
 				return false;
 			},
 		}),

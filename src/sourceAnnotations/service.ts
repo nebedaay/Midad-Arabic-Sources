@@ -108,6 +108,7 @@ export class AnnotationService {
 	private readonly verifyTimers = new Map<string, number>();
 	private readonly autoTimers = new WeakMap<EditorView, number>();
 	private lastSelection: { view: EditorView; from: number; to: number; at: number } | null = null;
+	private lastSelectionClearTimer = 0;
 	private tooltipHoverTimer = 0;
 	private tooltipHideTimer = 0;
 	private suppressAutoUntil = 0;
@@ -170,7 +171,11 @@ export class AnnotationService {
 			annotationEditorExtension,
 			selectionWatcher(
 				(view) => this.onEditorSelection(view),
-				() => { this.lastSelection = null; }
+				() => {
+					this.lastSelection = null;
+					window.clearTimeout(this.lastSelectionClearTimer);
+				},
+				(view) => this.captureDomSelection(view)
 			),
 		]);
 		registerReadingAnnotations(this.plugin, (path) => this.pathAnnotations.get(normalizePath(path)) ?? null);
@@ -199,6 +204,7 @@ export class AnnotationService {
 		this.tooltip.hide();
 		for (const timer of this.verifyTimers.values()) window.clearTimeout(timer);
 		this.verifyTimers.clear();
+		window.clearTimeout(this.lastSelectionClearTimer);
 	}
 
 	private async migrationMeta(
@@ -726,10 +732,17 @@ export class AnnotationService {
 		}
 		const selection = view.state.selection.main;
 		if (selection.from === selection.to) {
-			this.lastSelection = null;
+			// A wikilink re-render can briefly collapse and then restore the
+			// selection. Keep the remembered range through that flicker, but clear
+			// it if the collapse is deliberate.
+			window.clearTimeout(this.lastSelectionClearTimer);
+			this.lastSelectionClearTimer = window.setTimeout(() => {
+				this.lastSelection = null;
+			}, 600);
 			this.suppressAutoSignature = "";
 			return;
 		}
+		window.clearTimeout(this.lastSelectionClearTimer);
 		// Live Preview can re-render a selected wikilink and hand CM6 a smaller
 		// selection a moment after the mouse/keyboard selection was complete.
 		// Remember the larger range so the annotation uses what the user selected.
@@ -768,6 +781,26 @@ export class AnnotationService {
 		this.autoTimers.set(view, timer);
 	}
 
+	/** Map the browser's selection over rendered links back to source offsets. */
+	private captureDomSelection(view: EditorView): void {
+		const win = view.dom.ownerDocument.defaultView;
+		const selection = win?.getSelection();
+		if (!selection || !selection.rangeCount || selection.isCollapsed) return;
+		const range = selection.getRangeAt(0);
+		if (!view.contentDOM.contains(range.startContainer) || !view.contentDOM.contains(range.endContainer)) return;
+		try {
+			let from = view.posAtDOM(range.startContainer, range.startOffset);
+			let to = view.posAtDOM(range.endContainer, range.endOffset);
+			if (from > to) [from, to] = [to, from];
+			if (from === to) return;
+			const last = this.lastSelection;
+			if (!last || last.view !== view || (from <= last.from && to >= last.to)) {
+				this.lastSelection = { view, from, to, at: Date.now() };
+				window.clearTimeout(this.lastSelectionClearTimer);
+			}
+		} catch { /* a widget node may not map to a document position */ }
+	}
+
 	private effectiveSelection(view: EditorView): { from: number; to: number } {
 		const current = view.state.selection.main;
 		const last = this.lastSelection;
@@ -784,6 +817,26 @@ export class AnnotationService {
 		return { from: current.from, to: current.to };
 	}
 
+	/**
+	 * Selecting a rendered wikilink can give CM6 only a fragment of the link's
+	 * source. If the touched lines are a list of links, use complete lines so the
+	 * annotation includes the whole chapter list rather than half a link.
+	 */
+	private expandLinkListLines(value: string, from: number, to: number): { from: number; to: number } {
+		const lineStart = (offset: number): number => value.lastIndexOf("\n", Math.max(0, offset - 1)) + 1;
+		const lineEnd = (offset: number): number => {
+			const nl = value.indexOf("\n", offset);
+			return nl === -1 ? value.length : nl;
+		};
+		const start = lineStart(from);
+		const end = lineEnd(to);
+		const lines = value.slice(start, end).split("\n");
+		if (!lines.length || !lines.every((line) => !line.trim() || /^\s*[-*+]\s+\[\[/.test(line))) {
+			return { from, to };
+		}
+		return { from: start, to: end };
+	}
+
 	private draftFromEditor(editor: Editor, file: TFile | null, range?: { from: number; to: number }): AnnotationDraft | null {
 		if (!file) return null;
 		const cache = this.app.metadataCache.getFileCache(file);
@@ -796,6 +849,9 @@ export class AnnotationService {
 		let from = range?.from ?? editor.posToOffset(editor.getCursor("from"));
 		let to = range?.to ?? editor.posToOffset(editor.getCursor("to"));
 		if (from > to) [from, to] = [to, from];
+		const expanded = this.expandLinkListLines(value, from, to);
+		from = expanded.from;
+		to = expanded.to;
 		if (from < bounds.contentStart || to > bounds.contentEnd) return null;
 		while (from < to && /\s/.test(value.charAt(from))) from++;
 		while (to > from && /\s/.test(value.charAt(to - 1))) to--;
@@ -853,7 +909,6 @@ export class AnnotationService {
 			new Notice("Select text inside a source note’s managed region.");
 			return;
 		}
-		const signature = autoSignature ?? this.selectionSignatureForEditor(editor, range);
 		const target = await this.targetForPath(file.path);
 		if (!target) {
 			new Notice("Could not identify the source work. Re-render the source and try again.");
@@ -886,6 +941,10 @@ export class AnnotationService {
 				anchorOffset = expectedTo;
 			}
 		}
+		const signature = this.selectionSignatureForEditor(editor, {
+			from: editor.posToOffset(from),
+			to: editor.posToOffset(to),
+		});
 		const anchor = this.anchorForEditor(editor, anchorOffset);
 		const orphans = (await this.annotationsFor(target))
 			.filter((annotation) => annotation.anchorStatus === "orphaned");

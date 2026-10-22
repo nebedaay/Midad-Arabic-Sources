@@ -9320,7 +9320,7 @@ var annotationEditorExtension = [
   editorAnnotationsField,
   annotationRailPlugin
 ];
-function selectionWatcher(onSelection, onPointerDown) {
+function selectionWatcher(onSelection, onPointerDown, onDomSelection) {
   return [
     import_view.EditorView.updateListener.of((update) => {
       if (update.selectionSet || update.docChanged)
@@ -9333,6 +9333,12 @@ function selectionWatcher(onSelection, onPointerDown) {
       },
       mouseup: (_event, view) => {
         onSelection(view);
+        onDomSelection == null ? void 0 : onDomSelection(view);
+        return false;
+      },
+      keyup: (event, view) => {
+        if (event.shiftKey)
+          onDomSelection == null ? void 0 : onDomSelection(view);
         return false;
       }
     })
@@ -12003,6 +12009,7 @@ var AnnotationService = class {
     this.verifyTimers = new Map();
     this.autoTimers = new WeakMap();
     this.lastSelection = null;
+    this.lastSelectionClearTimer = 0;
     this.tooltipHoverTimer = 0;
     this.tooltipHideTimer = 0;
     this.suppressAutoUntil = 0;
@@ -12062,7 +12069,8 @@ var AnnotationService = class {
       annotationEditorExtension,
       selectionWatcher((view) => this.onEditorSelection(view), () => {
         this.lastSelection = null;
-      })
+        window.clearTimeout(this.lastSelectionClearTimer);
+      }, (view) => this.captureDomSelection(view))
     ]);
     registerReadingAnnotations(this.plugin, (path2) => {
       var _a;
@@ -12096,6 +12104,7 @@ var AnnotationService = class {
     for (const timer of this.verifyTimers.values())
       window.clearTimeout(timer);
     this.verifyTimers.clear();
+    window.clearTimeout(this.lastSelectionClearTimer);
   }
   async migrationMeta(workKey2, notePath) {
     const meta = await this.resolver.metaForWork(workKey2, notePath);
@@ -12617,10 +12626,14 @@ ${MANAGED_CLOSE}
     }
     const selection = view.state.selection.main;
     if (selection.from === selection.to) {
-      this.lastSelection = null;
+      window.clearTimeout(this.lastSelectionClearTimer);
+      this.lastSelectionClearTimer = window.setTimeout(() => {
+        this.lastSelection = null;
+      }, 600);
       this.suppressAutoSignature = "";
       return;
     }
+    window.clearTimeout(this.lastSelectionClearTimer);
     const currentRange = { from: selection.from, to: selection.to };
     if (!this.lastSelection || this.lastSelection.view !== view || currentRange.to - currentRange.from >= this.lastSelection.to - this.lastSelection.from || !(this.lastSelection.from <= currentRange.from && this.lastSelection.to >= currentRange.to)) {
       this.lastSelection = { view, ...currentRange, at: Date.now() };
@@ -12660,6 +12673,29 @@ ${MANAGED_CLOSE}
     }, 420);
     this.autoTimers.set(view, timer);
   }
+  captureDomSelection(view) {
+    const win = view.dom.ownerDocument.defaultView;
+    const selection = win == null ? void 0 : win.getSelection();
+    if (!selection || !selection.rangeCount || selection.isCollapsed)
+      return;
+    const range = selection.getRangeAt(0);
+    if (!view.contentDOM.contains(range.startContainer) || !view.contentDOM.contains(range.endContainer))
+      return;
+    try {
+      let from = view.posAtDOM(range.startContainer, range.startOffset);
+      let to = view.posAtDOM(range.endContainer, range.endOffset);
+      if (from > to)
+        [from, to] = [to, from];
+      if (from === to)
+        return;
+      const last = this.lastSelection;
+      if (!last || last.view !== view || from <= last.from && to >= last.to) {
+        this.lastSelection = { view, from, to, at: Date.now() };
+        window.clearTimeout(this.lastSelectionClearTimer);
+      }
+    } catch (e) {
+    }
+  }
   effectiveSelection(view) {
     const current = view.state.selection.main;
     const last = this.lastSelection;
@@ -12667,6 +12703,20 @@ ${MANAGED_CLOSE}
       return { from: last.from, to: last.to };
     }
     return { from: current.from, to: current.to };
+  }
+  expandLinkListLines(value, from, to) {
+    const lineStart = (offset) => value.lastIndexOf("\n", Math.max(0, offset - 1)) + 1;
+    const lineEnd = (offset) => {
+      const nl = value.indexOf("\n", offset);
+      return nl === -1 ? value.length : nl;
+    };
+    const start = lineStart(from);
+    const end = lineEnd(to);
+    const lines = value.slice(start, end).split("\n");
+    if (!lines.length || !lines.every((line) => !line.trim() || /^\s*[-*+]\s+\[\[/.test(line))) {
+      return { from, to };
+    }
+    return { from: start, to: end };
   }
   draftFromEditor(editor, file, range) {
     var _a, _b, _c;
@@ -12685,6 +12735,9 @@ ${MANAGED_CLOSE}
     let to = (_c = range == null ? void 0 : range.to) != null ? _c : editor.posToOffset(editor.getCursor("to"));
     if (from > to)
       [from, to] = [to, from];
+    const expanded = this.expandLinkListLines(value, from, to);
+    from = expanded.from;
+    to = expanded.to;
     if (from < bounds.contentStart || to > bounds.contentEnd)
       return null;
     while (from < to && /\s/.test(value.charAt(from)))
@@ -12744,7 +12797,6 @@ ${MANAGED_CLOSE}
       new import_obsidian13.Notice("Select text inside a source note\u2019s managed region.");
       return;
     }
-    const signature = autoSignature != null ? autoSignature : this.selectionSignatureForEditor(editor, range);
     const target = await this.targetForPath(file.path);
     if (!target) {
       new import_obsidian13.Notice("Could not identify the source work. Re-render the source and try again.");
@@ -12778,6 +12830,10 @@ ${MANAGED_CLOSE}
         anchorOffset = expectedTo;
       }
     }
+    const signature = this.selectionSignatureForEditor(editor, {
+      from: editor.posToOffset(from),
+      to: editor.posToOffset(to)
+    });
     const anchor = this.anchorForEditor(editor, anchorOffset);
     const orphans = (await this.annotationsFor(target)).filter((annotation) => annotation.anchorStatus === "orphaned");
     this.cancelTooltipTimers();
