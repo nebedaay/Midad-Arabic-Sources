@@ -25,9 +25,13 @@ export interface AnnotationPopupOptions {
 	draft: AnnotationDraft;
 	defaultColor: AnnotationColor;
 	onSubmit: (color: AnnotationColor, comment: string) => Promise<void> | void;
-	onCancel?: (reason: "escape" | "button" | "outside") => void;
+	onCancel?: (reason: "escape" | "button" | "outside" | "reanchor") => void;
 	onDelete?: () => Promise<void> | void;
 	onClosed?: () => void;
+	onReanchor?: () => void;
+	reanchorLabel?: string;
+	/** Keep the editor's selection/focus when the popup opens (used for re-anchoring). */
+	focusPopup?: boolean;
 }
 
 const COLOR_LABEL: Record<AnnotationColor, string> = {
@@ -175,6 +179,14 @@ export class AnnotationPopup {
 				.setClass("mod-warning")
 				.onClick(() => { void this.delete(); });
 		}
+		if (this.options.onReanchor) {
+			new ButtonComponent(buttons)
+				.setButtonText(this.options.reanchorLabel ?? "Re-anchor")
+				.onClick(() => {
+					this.options.onReanchor?.();
+					this.close("reanchor");
+				});
+		}
 		new ButtonComponent(buttons)
 			.setButtonText("Cancel")
 			.onClick(() => this.close("button"));
@@ -218,7 +230,7 @@ export class AnnotationPopup {
 		this.win.setTimeout(() => {
 			if (!this.popup) return;
 			this.position(anchor);
-			this.selectedSwatch()?.focus();
+			if (this.options.focusPopup !== false) this.selectedSwatch()?.focus();
 		}, 0);
 	}
 
@@ -305,7 +317,7 @@ export class AnnotationPopup {
 		}
 	}
 
-	private close(reason: "escape" | "button" | "outside"): void {
+	private close(reason: "escape" | "button" | "outside" | "reanchor"): void {
 		if (this.closed) return;
 		this.closed = true;
 		if (this.scope) {

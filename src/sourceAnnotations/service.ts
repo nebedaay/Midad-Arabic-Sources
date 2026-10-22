@@ -834,6 +834,8 @@ export class AnnotationService {
 		const from = editor.getCursor("from");
 		const to = editor.getCursor("to");
 		const anchor = this.anchorForEditor(editor);
+		const orphans = (await this.annotationsFor(target))
+			.filter((annotation) => annotation.anchorStatus === "orphaned");
 		this.cancelTooltipTimers();
 		this.tooltip.hide();
 		this.dialogOpen = true;
@@ -848,7 +850,7 @@ export class AnnotationService {
 			},
 			onCancel: (reason) => {
 				this.suppressAutoSignature = signature;
-				if (reason !== "outside") {
+				if (reason !== "outside" && reason !== "reanchor") {
 					editor.focus();
 					editor.setSelection(from, to);
 				}
@@ -856,7 +858,21 @@ export class AnnotationService {
 			onClosed: () => {
 				this.dialogOpen = false;
 			},
+			onReanchor: orphans.length
+				? () => { this.reanchorFromSelection(editor, file); }
+				: undefined,
+			reanchorLabel: orphans.length === 1 ? "Re-anchor" : "Re-anchor…",
+			focusPopup: orphans.length === 0,
 		}).open(anchor);
+	}
+
+	private reanchorFromSelection(editor: Editor, file: TFile): void {
+		const draft = this.draftFromEditor(editor, file);
+		if (!draft) {
+			new Notice("Select the replacement text first.");
+			return;
+		}
+		void this.reanchorOrphaned(file, draft);
 	}
 
 	private async createAnnotation(
@@ -1489,6 +1505,8 @@ export class AnnotationService {
 			if (mark) {
 				mark.scrollIntoView({ block: "center", behavior: "smooth" });
 				this.flashMarks(view.containerEl, annotation.id);
+			} else if (annotation.anchorStatus === "orphaned") {
+				new Notice("This annotation is unanchored. Switch to editing, select the corrected passage, and use re-anchor in the annotation popup.");
 			} else {
 				new Notice("This annotation is not visible in the current reading view.");
 			}
@@ -1497,14 +1515,27 @@ export class AnnotationService {
 
 		const text = view.editor.getValue();
 		const resolved = resolveAnnotations(text, [annotation], false)[0];
-		if (!resolved && annotation.anchorStatus === "orphaned") {
-			new Notice("This annotation is unanchored. Open the annotation note to see the preserved quote.");
-			return;
-		}
 		const bounds = managedBounds(text) ?? (target.sourceStatus === "adopted" ? bodyBounds(text) : null);
 		const fallback = annotation.position && bounds
 			? bounds.bodyStart + annotation.position.start
 			: undefined;
+		if (!resolved && annotation.anchorStatus === "orphaned") {
+			if (fallback !== undefined) {
+				const cm = cmOf(view);
+				if (cm) {
+					const at = Math.max(0, Math.min(cm.state.doc.length, fallback));
+					cm.dispatch({
+						selection: { anchor: at, head: at },
+						effects: EditorView.scrollIntoView(at, { y: "center" }),
+					});
+					cm.focus();
+				} else {
+					view.editor.setCursor(view.editor.offsetToPos(fallback));
+				}
+			}
+			new Notice("This annotation is unanchored. Select the corrected passage; the annotation popup will offer re-anchor.");
+			return;
+		}
 		const offset = resolved?.start ?? fallback;
 		if (offset === undefined) {
 			new Notice("This annotation could not be located in the source note.");

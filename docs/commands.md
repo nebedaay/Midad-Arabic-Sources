@@ -47,7 +47,7 @@ See [Document import](./document-import.md#annotations).
 
 - **Annotate the selected text** — open the colour/comment popup for a managed-region selection.
 - **Edit annotation** / **Delete annotation** — act on the annotation under the cursor.
-- **Re-anchor orphaned annotation…** — use the current selection as the new anchor for an unanchored annotation.
+- **Re-anchor orphaned annotation…** — use the current selection as the new anchor for an unanchored annotation. The selection popup also offers Re-anchor when the current note has orphans.
 - **Delete annotations for this source…** — move a work's annotation store and note to the plugin trash.
 - **Open Midad sidebar** — reveal the active annotatable note's cards, MOC links, and Manage sources button.
 - **Copy source with annotations** — copy the managed source text plus a colour-callout annotation section.
