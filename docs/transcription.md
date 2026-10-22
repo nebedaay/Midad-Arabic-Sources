@@ -51,6 +51,7 @@ The editor holds only the **text-specific** part. The pipeline appends it to a s
 
 - **Transcribe this item’s PDF file(s)** — the full pipeline above.
 - **Transcribe a PDF…** — choose any PDF on disk, with no Zotero item, then verify the guessed title and author.
+- **Re-render this source** — re-run post-processing for the active transcription/translation from its archived JSON. On a volume note, choose only that volume or all volumes.
 - **Check transcription pipeline** — list the archived batches on disk.
 - **Show pipeline status** — reveal the live status panel while a job runs, resume a job that was interrupted, or open the last log when nothing is running.
 - **Open last pipeline log** — open the most recent job log.

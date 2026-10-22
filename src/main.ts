@@ -210,6 +210,50 @@ interface ArchiveZip {
 	path: string;
 }
 
+type ArchivedDocType = "transcription" | "translation";
+
+/** A note that may have an archived JSON batch instead of a source model. */
+interface ArchivedNoteInfo {
+	citekey: string;
+	type: ArchivedDocType | null;
+	volume: number | null;
+}
+
+/** An archive name parsed into its citekey, kind, and optional volume. */
+interface ArchivedBatchInfo {
+	citekey: string;
+	type: ArchivedDocType;
+	volume: number | null;
+}
+
+function archivedNoteInfo(path: string): ArchivedNoteInfo | null {
+	const stem = basenameJS(path).replace(/\.md$/i, "");
+	const typed = stem.match(/^@(.+?) - (transcription|translation)(?: - (?:vol|v)\.\s*(\d+))?$/i);
+	if (typed) {
+		return {
+			citekey: typed[1],
+			type: typed[2].toLowerCase() as ArchivedDocType,
+			volume: typed[3] ? parseInt(typed[3], 10) : null,
+		};
+	}
+	// A literature note: re-render any archived transcription/translation for
+	// its citekey.
+	const literature = stem.match(/^@([^\s/]+)$/);
+	if (literature) return { citekey: literature[1], type: null, volume: null };
+	return null;
+}
+
+function archivedBatchInfo(name: string): ArchivedBatchInfo | null {
+	const stem = name.replace(/\.zip$/i, "");
+	const m = stem.match(/^(.+?) - (transcription|translation)(?: - (?:vol|v)\.\s*(\d+))? files$/i);
+	if (!m) return null;
+	return {
+		citekey: m[1],
+		type: m[2].toLowerCase() as ArchivedDocType,
+		volume: m[3] ? parseInt(m[3], 10) : null,
+	};
+}
+
 /** The `result` payload a pipeline script emits on its final stdout line. */
 interface PipelineResult {
 	notes?: string[];
@@ -682,7 +726,8 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		this.registerEvent(this.app.workspace.on("file-menu", (menu, file) => {
 			void (async () => {
 				const work = await this.workForPath(file.path);
-				if (!work) return;
+				const archived = work ? null : archivedNoteInfo(file.path);
+				if (!work && (!archived || !(file instanceof TFile) || file.extension !== "md")) return;
 				menu.addItem((item) => item
 					.setTitle("Re-render this source")
 					.setIcon("refresh-cw")
@@ -3304,7 +3349,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		}
 		const work = await this.workForPath(target.path);
 		if (!work) {
-			new Notice("That note does not belong to an imported source.");
+			await this.rerenderArchivedNote(target);
 			return;
 		}
 		const rel = normalizePath(`.midad-arabic-sources/source-models/${work.collection}/${work.id}.json`);
@@ -3315,6 +3360,64 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		const label = String(work.title ?? work.dir ?? work.id);
 		await this.renderWithProgress([`${this.vaultPath()}/${rel}`], true, `Re-rendering ${label}`);
 		new Notice(`Re-rendered ${label}.`);
+	}
+
+	/**
+	 * Re-render a transcribed note from its archived batch. Covers standalone
+	 * PDF transcriptions, literature-note transcriptions/translations, and
+	 * volume notes. The archive contains the OCR/translation JSON, so this
+	 * never calls Gemini.
+	 */
+	async rerenderArchivedNote(file: TAbstractFile): Promise<void> {
+		const info = archivedNoteInfo(file.path);
+		if (!info) {
+			new Notice("That note does not belong to an imported source and has no archived transcription.");
+			return;
+		}
+
+		const all = (await this.pipelineResult(["list-archive"]))?.zips ?? [];
+		const batches = all
+			.map((zip) => ({ zip, info: archivedBatchInfo(zip.name) }))
+			.filter((entry): entry is { zip: ArchiveZip; info: ArchivedBatchInfo } => {
+				if (!entry.info || entry.info.citekey !== info.citekey) return false;
+				return info.type === null || entry.info.type === info.type;
+			})
+			.sort((a, b) => (a.info.volume ?? -1) - (b.info.volume ?? -1));
+
+		if (!batches.length) {
+			const kind = info.type ? ` ${info.type}` : "";
+			new Notice(`No archived${kind} batch found for @${info.citekey}.`);
+			return;
+		}
+
+		let chosen = batches;
+		if (info.volume != null) {
+			const exact = batches.filter((entry) => entry.info.volume === info.volume);
+			if (!exact.length) {
+				new Notice(`No archived ${info.type ?? "transcription"} batch found for @${info.citekey}, vol. ${info.volume}.`);
+				return;
+			}
+			if (batches.some((entry) => entry.info.volume !== info.volume)) {
+				const scope = await new Promise<"one" | "all" | null>((resolve) => {
+					new ReRenderBatchScopeModal(
+						this.app,
+						info.citekey,
+						info.volume,
+						batches.length,
+						resolve
+					).open();
+				});
+				if (!scope) return;
+				chosen = scope === "one" ? exact : batches;
+			} else {
+				chosen = exact;
+			}
+		}
+
+		for (const entry of chosen) {
+			await this.runWithProgress(`Re-rendering @${info.citekey}`, ["reprocess", "--zip", entry.zip.path]);
+		}
+		new Notice(`Re-rendered ${chosen.length} archived batch(es) for @${info.citekey}.`);
 	}
 
 	async rerenderAllSources(): Promise<string[]> {
@@ -5491,6 +5594,59 @@ class TranslateModal extends Modal {
 
 	onClose(): void {
 		this.contentEl.empty();
+	}
+}
+
+class ReRenderBatchScopeModal extends Modal {
+	citekey: string;
+	volume: number;
+	count: number;
+	onChoose: (scope: "one" | "all" | null) => void;
+	settled = false;
+
+	constructor(
+		app: App,
+		citekey: string,
+		volume: number,
+		count: number,
+		onChoose: (scope: "one" | "all" | null) => void
+	) {
+		super(app);
+		this.citekey = citekey;
+		this.volume = volume;
+		this.count = count;
+		this.onChoose = onChoose;
+	}
+
+	choose(scope: "one" | "all" | null): void {
+		if (this.settled) return;
+		this.settled = true;
+		this.onChoose(scope);
+		this.close();
+	}
+
+	onOpen(): void {
+		const { contentEl } = this;
+		contentEl.createEl("h3", { text: `Re-render @${this.citekey}` });
+		contentEl.createEl("p", {
+			text: `This work has ${this.count} archived batch(es). Re-render only volume ${this.volume}, or every archived batch?`,
+		});
+		new Setting(contentEl)
+			.addButton((b) => b.setButtonText("Cancel").onClick(() => this.choose(null)))
+			.addButton((b) =>
+				b.setButtonText(`Only vol. ${this.volume}`).onClick(() => this.choose("one"))
+			)
+			.addButton((b) =>
+				b.setButtonText(`All ${this.count} archived batches`).setCta().onClick(() => this.choose("all"))
+			);
+	}
+
+	onClose(): void {
+		this.contentEl.empty();
+		if (!this.settled) {
+			this.settled = true;
+			this.onChoose(null);
+		}
 	}
 }
 

@@ -34,7 +34,7 @@ See [Document import](./document-import.md) and [Templates](./templates.md).
 - **Add Turath work by URL…** — add a Turath book to your personal list (see [Adding a work by URL](./document-import.md#adding-a-work-by-url)).
 - **Copy import templates to vault** — copy the editable ETA templates into your vault.
 - **Re-render imported sources** — regenerate every note from its cached model.
-- **Re-render this source** — regenerate one work (also on the note’s right-click menu).
+- **Re-render this source** — regenerate an imported work, or re-run a transcription/translation from its archived JSON (also on the note’s right-click menu). On a volume transcription, choose only that volume or all volumes.
 - **Apply template changes to imported sources** — apply a detected template change on demand.
 - **Re-download imported sources (rebuild models)** — re-fetch the source JSON and rebuild every model.
 - **Migrate imported sources to the current naming scheme** — rename installed works to `Author - Title (repository)`, updating notes, models, MOCs, and annotation paths.
