@@ -2,7 +2,7 @@ import { TFile, type App } from "obsidian";
 import { AdoptedNotesRegistry } from "./adopted";
 import { findNormalized, resolveAnnotations, visibleSegments } from "./resolve";
 import { reanchorAnnotation } from "./reanchor";
-import { bodyBounds, expandLinkListSelection, selectionExclusion } from "./text";
+import { bodyBounds, expandLinkListSelection, findRenderedText, selectionExclusion } from "./text";
 
 export interface RegressionResult {
 	passed: number;
@@ -74,6 +74,11 @@ export async function runAnnotationRegressionTests(): Promise<RegressionResult> 
 	check("link-list selection expands to complete lines",
 		expanded.from === firstLink && expanded.to === secondLink + "- [[B|2]]".length);
 
+	const renderedRaw = "The **best** of [you](https://example.com) are [[chapter|here]].";
+	const rendered = findRenderedText(renderedRaw, "The best of you are here.");
+	check("rendered selection maps to raw markdown",
+		!!rendered && renderedRaw.slice(rendered.start, rendered.end) === "The **best** of [you](https://example.com) are [[chapter|here]].");
+
 	const withFront = "---\ntitle: Test\n---\n\n# Heading\n\nBody text.";
 	const body = bodyBounds(withFront);
 	check("body bounds skip frontmatter", !!body && withFront.slice(body.contentStart, body.contentEnd).includes("Body text"));
@@ -119,6 +124,16 @@ export async function runAnnotationRegressionTests(): Promise<RegressionResult> 
 	check("transcription volumes share one work", new Set(entries.filter((e) => e.kind === "transcription").map((e) => e.workKey)).size === 1);
 	check("translation is a separate work", entries.filter((e) => e.kind === "translation").every((e) => e.workKey !== entries.find((x) => x.kind === "transcription")?.workKey));
 	check("hub title is used for the series", entries.some((e) => e.workTitle === "Transcription - Demo Book"));
+
+	const recovered = new AdoptedNotesRegistry(fakeApp({}));
+	await recovered.restoreFromStore(
+		"adopted:recovered",
+		"Transcription - Recovered",
+		"@recovered - transcription",
+		[{ path: "_2 Bibliographic notes/@recovered - transcription.md", unitKey: "note", ord: 0 }]
+	);
+	check("adoption registry can be rebuilt from the store",
+		!!recovered.get("_2 Bibliographic notes/@recovered - transcription.md"));
 
 	const oldPath = "_2 Bibliographic notes/@demo - transcription - v. 2 - Variant.md";
 	const newPath = "_2 Bibliographic notes/@demo - transcription - v. 2 - Renamed.md";

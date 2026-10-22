@@ -280,3 +280,100 @@ export function expandLinkListSelection(
 	}
 	return { from: start, to: end };
 }
+
+interface VisibleChar {
+	char: string;
+	index: number;
+}
+
+/**
+ * A lightweight rendered-text projection with raw offsets, used to map a
+ * Reading-view selection back into the Markdown source when the selection
+ * crosses links or inline formatting.
+ */
+export function renderedTextProjection(markdown: string): { text: string; map: number[] } {
+	const visible: VisibleChar[] = [];
+	let lineStart = true;
+	let i = 0;
+	const push = (char: string, index: number): void => {
+		visible.push({ char, index });
+	};
+	while (i < markdown.length) {
+		if (lineStart) {
+			const end = markdown.indexOf("\n", i);
+			const line = markdown.slice(i, end === -1 ? markdown.length : end);
+			const prefix = /^\s*(?:>\s*)*(?:(?:[-*+]|\d+\.)\s+)?(?:\[[ xX]\]\s*)?(?:#{1,6}\s+)?/.exec(line);
+			if (prefix) i += prefix[0].length;
+			lineStart = false;
+		}
+		const char = markdown.charAt(i);
+		if (char === "\n") {
+			push(" ", i);
+			lineStart = true;
+			i++;
+			continue;
+		}
+		if (char === "[" && markdown.startsWith("[[", i)) {
+			const close = markdown.indexOf("]]", i + 2);
+			if (close !== -1) {
+				const inner = markdown.slice(i + 2, close);
+				const bar = inner.lastIndexOf("|");
+				const label = bar >= 0 ? inner.slice(bar + 1) : inner;
+				const labelStart = i + 2 + (bar >= 0 ? bar + 1 : 0);
+				for (let j = 0; j < label.length; j++) push(label.charAt(j), labelStart + j);
+				i = close + 2;
+				continue;
+			}
+		}
+		if (char === "[") {
+			const link = /^\[([^\]]*)\]\([^)]*\)/.exec(markdown.slice(i));
+			if (link) {
+				for (let j = 0; j < link[1].length; j++) push(link[1].charAt(j), i + 1 + j);
+				i += link[0].length;
+				continue;
+			}
+		}
+		if (char === "<") {
+			const tag = /^<[^>]+>/.exec(markdown.slice(i));
+			if (tag) {
+				i += tag[0].length;
+				continue;
+			}
+		}
+		if ("*_~`".includes(char)) {
+			i++;
+			continue;
+		}
+		push(char, i);
+		i++;
+	}
+	const out: string[] = [];
+	const map: number[] = [];
+	let lastSpace = false;
+	for (const item of visible) {
+		if (/\s/.test(item.char)) {
+			if (lastSpace) continue;
+			out.push(" ");
+			map.push(item.index);
+			lastSpace = true;
+		} else {
+			out.push(item.char);
+			map.push(item.index);
+			lastSpace = false;
+		}
+	}
+	return { text: out.join(""), map };
+}
+
+/** Locate rendered text in raw Markdown, returning raw offsets. */
+export function findRenderedText(markdown: string, rendered: string): { start: number; end: number } | null {
+	const needle = normalizeWhitespaceWithMap(rendered).text.trim();
+	if (!needle) return null;
+	const projection = renderedTextProjection(markdown);
+	const at = projection.text.indexOf(needle);
+	if (at < 0) return null;
+	const start = projection.map[at];
+	const end = projection.map[at + needle.length - 1];
+	if (start === undefined || end === undefined) return null;
+	return { start, end: end + 1 };
+}

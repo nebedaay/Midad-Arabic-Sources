@@ -131,8 +131,12 @@ export class AdoptedNotesRegistry {
 		return [...this.entries.values()];
 	}
 
-	private workFor(sourceKey: string): AdoptedEntry | null {
-		return [...this.entries.values()].find((entry) => entry.sourceKey === sourceKey) ?? null;
+	private workFor(sourceKey: string, workTitle = ""): AdoptedEntry | null {
+		const bySource = [...this.entries.values()].find((entry) => entry.sourceKey === sourceKey);
+		if (bySource) return bySource;
+		return workTitle
+			? [...this.entries.values()].find((entry) => !entry.sourceKey && entry.workTitle === workTitle) ?? null
+			: null;
 	}
 
 	private async registerFile(file: TFile): Promise<boolean> {
@@ -142,7 +146,7 @@ export class AdoptedNotesRegistry {
 		const title = typeof frontmatter?.title === "string" ? frontmatter.title : "";
 		const parsed = parseKnownNote(path, title);
 		if (!parsed) return false;
-		const existing = this.workFor(parsed.sourceKey);
+		const existing = this.workFor(parsed.sourceKey, parsed.workTitle);
 		// A note renamed while the plugin was closed leaves its old path entry
 		// behind; replace it instead of creating a second unit for the same volume.
 		const duplicate = [...this.entries.values()].find((entry) =>
@@ -184,6 +188,33 @@ export class AdoptedNotesRegistry {
 		};
 		this.entries.set(path, entry);
 		return true;
+	}
+
+	/** Rebuild registry entries for already-annotated works when the file is lost. */
+	async restoreFromStore(
+		workKey: string,
+		workTitle: string,
+		workDir: string,
+		units: Array<{ path: string; unitKey: string; ord: number }>
+	): Promise<boolean> {
+		let changed = false;
+		for (const unit of units) {
+			const path = normalizePath(unit.path);
+			if (!path || this.entries.has(path)) continue;
+			this.entries.set(path, {
+				path,
+				workKey,
+				unitKey: unit.unitKey,
+				workTitle,
+				workDir,
+				unitTitle: unit.unitKey,
+				ord: unit.ord,
+				kind: "note",
+				sourceKey: "",
+			});
+			changed = true;
+		}
+		return changed;
 	}
 
 	/** Register all transcription/translation notes Midad already produced. */

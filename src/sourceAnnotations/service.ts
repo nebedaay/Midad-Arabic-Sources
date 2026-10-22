@@ -28,7 +28,7 @@ import {
 } from "./note";
 import { refreshReadingViews, registerReadingAnnotations } from "./reading";
 import { reanchorAnnotation } from "./reanchor";
-import { annotationLabel, resolveAnnotations, visibleSegments } from "./resolve";
+import { annotationLabel, findNormalized, resolveAnnotations, visibleSegments } from "./resolve";
 import { AnnotationSidebarView, ANNOTATION_SIDEBAR_VIEW, type AnnotationSidebarData } from "./sidebar";
 import { AnnotationStore, annotationNow, newAnnotationId, type AnnotationTrashBatch } from "./store";
 import { AnnotationTargetResolver } from "./target";
@@ -42,6 +42,7 @@ import {
 	occurrencesBefore,
 	sectionAt,
 	expandLinkListSelection,
+	findRenderedText,
 	selectionExclusion,
 	type SelectionExclusion,
 } from "./text";
@@ -53,7 +54,7 @@ import type {
 	ResolvedAnnotation,
 	SourceAnnotation,
 } from "./types";
-import { applyReadingAnnotations } from "./wrap";
+import { applyReadingAnnotations, readingSelection } from "./wrap";
 
 const MIDAD_ICON = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path fill="currentColor" d="M17.5859375 7.598958333333334 16.921875 9.708333333333334Q16.088541666666664 9.630208333333334 15.111979166666664 9.591145833333334Q14.135416666666666 9.552083333333334 12.9375 9.552083333333334Q7.989583333333333 9.552083333333334 7.9765625 10.385416666666668L8.09375 10.8671875Q8.145833333333332 11.0234375 8.263020833333332 11.537760416666668Q8.380208333333332 12.052083333333334 8.588541666666666 12.9375Q8.9921875 14.760416666666668 9.220052083333332 16.21875Q9.447916666666666 17.677083333333336 9.421875 18.822916666666668Q9.421875 20.229166666666668 8.40625 22.0Q8.184895833333332 19.65625 7.846354166666666 17.598958333333336Q7.5078125 15.541666666666668 7.052083333333333 13.731770833333334Q6.739583333333333 12.494791666666668 6.576822916666666 11.635416666666668Q6.414062499999999 10.776041666666668 6.414062499999999 10.28125Q6.414062499999999 8.549479166666668 7.46875 7.950520833333334Q8.067708333333332 7.625 10.151041666666666 7.325520833333334Q11.986979166666666 7.052083333333334 12.78125 7.052083333333334Q13.067708333333332 7.052083333333334 13.2109375 7.104166666666667L11.0234375 4.643229166666667L8.171875 6.127604166666667L8.197916666666666 5.203125Q8.2109375 4.760416666666667 9.630208333333332 3.380208333333334Q11.036458333333332 2.0 11.505208333333332 2.0Q12.169270833333332 2.0 13.653645833333332 3.875Q15.502604166666666 6.244791666666667 15.736979166666666 6.427083333333334Q16.049479166666664 6.674479166666667 16.505208333333332 6.9609375Q16.9609375 7.247395833333334 17.5859375 7.598958333333334Z"/></svg>`;
 
@@ -109,6 +110,7 @@ export class AnnotationService {
 	private readonly tooltip: AnnotationTooltip;
 	private readonly pathAnnotations = new Map<string, SourceAnnotation[]>();
 	private readonly verifyTimers = new Map<string, number>();
+	private readingSelectionTimer = 0;
 	private readonly autoTimers = new WeakMap<EditorView, number>();
 	private lastSelection: { view: EditorView; from: number; to: number; at: number } | null = null;
 	private lastSelectionClearTimer = 0;
@@ -155,6 +157,7 @@ export class AnnotationService {
 	async start(): Promise<void> {
 		await this.store.load();
 		await this.adoption.load();
+		await this.recoverAdoptionRegistry();
 		try {
 			await this.adoption.scanKnownNotes();
 		} catch (error) {
@@ -178,6 +181,7 @@ export class AnnotationService {
 				() => {
 					this.lastSelection = null;
 					window.clearTimeout(this.lastSelectionClearTimer);
+		window.clearTimeout(this.readingSelectionTimer);
 				},
 				(view) => this.captureDomSelection(view)
 			),
@@ -209,6 +213,7 @@ export class AnnotationService {
 		for (const timer of this.verifyTimers.values()) window.clearTimeout(timer);
 		this.verifyTimers.clear();
 		window.clearTimeout(this.lastSelectionClearTimer);
+		window.clearTimeout(this.readingSelectionTimer);
 	}
 
 	private async migrationMeta(
@@ -307,6 +312,28 @@ export class AnnotationService {
 		await this.setSourceStatus(stored.workKey, "removed");
 	}
 
+	/** If adopted.json was lost, rebuild its work keys from the annotation store. */
+	private async recoverAdoptionRegistry(): Promise<void> {
+		let changed = false;
+		for (const entry of Object.values(this.store.getIndex().works)) {
+			if (!entry.key.startsWith("adopted:")) continue;
+			const work = await this.store.getWork(entry.key);
+			if (!work) continue;
+			const units = await this.store.allUnits(entry.key);
+			changed = await this.adoption.restoreFromStore(
+				entry.key,
+				work.title,
+				work.dir,
+				units.map((unit) => ({
+					path: unit.entry.note,
+					unitKey: unit.entry.unitKey,
+					ord: unit.entry.ord,
+				}))
+			) || changed;
+		}
+		if (changed) await this.adoption.save();
+	}
+
 	/** Repair unit paths left stale by an earlier source-folder rename. */
 	private async repairUnitNotePaths(): Promise<void> {
 		for (const entry of Object.values(this.store.getIndex().works)) {
@@ -319,10 +346,15 @@ export class AnnotationService {
 				} catch {
 					continue;
 				}
-				const actual = await this.resolver.notePathForUnit(entry.key, unitKey);
+				const actual = await this.resolver.notePathForUnit(entry.key, unitKey) ??
+					this.adoption.all().find((adopted) =>
+						adopted.workKey === entry.key && adopted.unitKey === unitKey
+					)?.path ?? null;
 				if (!actual) continue;
 				try {
-					if (await this.app.vault.adapter.exists(actual)) updates.set(unitKey, actual);
+					if (await this.app.vault.adapter.exists(normalizePath(actual))) {
+						updates.set(unitKey, normalizePath(actual));
+					}
 				} catch { /* skip */ }
 			}
 			if (!updates.size) continue;
@@ -372,6 +404,19 @@ export class AnnotationService {
 				if (!draft) return false;
 				if (!checking) void this.reanchorOrphaned(view.file, draft);
 				return true;
+			},
+		});
+
+		this.plugin.addCommand({
+			id: "reanchor-source-orphans",
+			name: "Re-anchor orphaned annotations in this source",
+			callback: async () => {
+				const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+				if (!view?.file) {
+					new Notice("Open a source note first.");
+					return;
+				}
+				await this.reanchorWork(view.file);
 			},
 		});
 
@@ -500,6 +545,9 @@ export class AnnotationService {
 		this.plugin.registerDomEvent(document, "copy", () => {
 			this.suppressAutoUntil = Date.now() + 1500;
 		});
+		this.plugin.registerDomEvent(document, "selectionchange", () => {
+			this.onReadingSelection();
+		});
 
 		this.plugin.registerDomEvent(document, ANNOTATION_EVENTS.hover, (event) => {
 			this.onAnnotationHover(event);
@@ -545,6 +593,116 @@ export class AnnotationService {
 			if (!this.store.findTarget(file.path)) return;
 			this.scheduleVerify(file.path);
 		}));
+	}
+
+	private onReadingSelection(): void {
+		if (this.disposed || !this.settings.annotateOnSelection) return;
+		if (this.dialogOpen || this.anyModalOpen()) return;
+		window.clearTimeout(this.readingSelectionTimer);
+		this.readingSelectionTimer = window.setTimeout(() => { void this.openReadingSelection(); }, 420);
+	}
+
+	private async openReadingSelection(): Promise<void> {
+		if (this.disposed || !this.settings.annotateOnSelection) return;
+		if (this.dialogOpen || this.anyModalOpen() || Date.now() < this.suppressAutoUntil) return;
+		const selection = window.getSelection();
+		if (!selection || selection.isCollapsed || !selection.rangeCount) return;
+		const range = selection.getRangeAt(0);
+		const startEl = range.startContainer.nodeType === Node.TEXT_NODE
+			? range.startContainer.parentElement
+			: range.startContainer as HTMLElement;
+		if (!startEl || startEl.closest("code, pre, table")) return;
+		const sizer = startEl.closest<HTMLElement>(".markdown-preview-sizer");
+		if (!sizer) return;
+		const view = markdownViews(this.app).find((candidate) =>
+			candidate.getMode() === "preview" && candidate.containerEl.contains(sizer)
+		);
+		if (!view?.file) return;
+		const mapped = readingSelection(sizer, range);
+		if (!mapped || !mapped.text.trim()) return;
+		const selectedText = mapped.text.trim();
+		const path = normalizePath(view.file.path);
+		const target = await this.targetForPath(path);
+		if (!target) return;
+		let raw = "";
+		try {
+			raw = await this.app.vault.adapter.read(path);
+		} catch {
+			return;
+		}
+		const after = window.getSelection();
+		if (!after || after.isCollapsed || !after.rangeCount) return;
+		const afterMapped = readingSelection(sizer, after.getRangeAt(0));
+		if (!afterMapped || afterMapped.text.trim() !== selectedText) return;
+		const draft = this.draftFromReadingText(raw, selectedText, target);
+		if (!draft) return;
+		const rect = range.getBoundingClientRect();
+		const anchor = { left: rect.left, top: rect.top, bottom: rect.bottom };
+		const orphans = (await this.annotationsFor(target))
+			.filter((annotation) => annotation.anchorStatus === "orphaned");
+		this.cancelTooltipTimers();
+		this.tooltip.hide();
+		this.dialogOpen = true;
+		new AnnotationPopup(this.app, {
+			draft,
+			defaultColor: this.settings.annotationDefaultColor,
+			onSubmit: async (color, comment) => {
+				await this.createAnnotation(target, draft, color, comment);
+				refreshReadingViews(this.app);
+			},
+			onClosed: () => { this.dialogOpen = false; },
+			onReanchor: orphans.length
+				? () => { void this.reanchorOrphaned(view.file, draft); }
+				: undefined,
+			reanchorLabel: orphans.length === 1 ? "Re-anchor" : "Re-anchor…",
+			focusPopup: false,
+		}).open(anchor);
+	}
+
+	private draftFromReadingText(
+		raw: string,
+		selectedText: string,
+		target: AnnotationTarget
+	): AnnotationDraft | null {
+		const found = findNormalized(raw, selectedText, 0);
+		let start = found?.start ?? -1;
+		let end = found?.end ?? -1;
+		if (!found) {
+			// A Reading-view selection can cross rendered links or inline formatting.
+			// Project the raw Markdown to its visible text and map the selected
+			// rendered text back to raw offsets.
+			const projected = findRenderedText(raw, selectedText);
+			if (projected) {
+				start = projected.start;
+				end = projected.end;
+			} else {
+				const lines = selectedText.split(/\n+/).map((line) => line.trim()).filter(Boolean);
+				if (lines.length < 2) return null;
+				const first = findNormalized(raw, lines[0], 0);
+				const last = findNormalized(raw, lines[lines.length - 1], 0);
+				if (!first || !last || last.end <= first.start) return null;
+				start = first.start;
+				end = last.end;
+			}
+		}
+		const bounds = managedBounds(raw) ?? (target.sourceStatus === "adopted" ? bodyBounds(raw) : null);
+		if (!bounds || start < bounds.contentStart || end > bounds.contentEnd) return null;
+		if (crossesHeading(raw, start, end) || selectionExclusion(raw, start, end)) return null;
+		const quote = raw.slice(start, end);
+		const quoteText = markdownToText(quote);
+		const segments = visibleSegments(raw, start, end)
+			.map((range) => [range.start - bounds.bodyStart, range.end - bounds.bodyStart] as [number, number]);
+		return {
+			quote,
+			quoteText: quoteText || selectedText,
+			quoteMarkdown: cleanQuoteMarkdown(quote),
+			prefix: raw.slice(Math.max(bounds.contentStart, start - 80), start),
+			suffix: raw.slice(end, Math.min(bounds.contentEnd, end + 80)),
+			section: sectionAt(raw, start),
+			ordinal: occurrencesBefore(raw, start, quote),
+			position: { start: start - bounds.bodyStart, end: end - bounds.bodyStart },
+			segments,
+		};
 	}
 
 	private scheduleVerify(path: string): void {
@@ -740,6 +898,7 @@ export class AnnotationService {
 			// selection. Keep the remembered range through that flicker, but clear
 			// it if the collapse is deliberate.
 			window.clearTimeout(this.lastSelectionClearTimer);
+		window.clearTimeout(this.readingSelectionTimer);
 			this.lastSelectionClearTimer = window.setTimeout(() => {
 				this.lastSelection = null;
 			}, 600);
@@ -747,6 +906,7 @@ export class AnnotationService {
 			return;
 		}
 		window.clearTimeout(this.lastSelectionClearTimer);
+		window.clearTimeout(this.readingSelectionTimer);
 		// Live Preview can re-render a selected wikilink and hand CM6 a smaller
 		// selection a moment after the mouse/keyboard selection was complete.
 		// Remember the larger range so the annotation uses what the user selected.
@@ -801,6 +961,7 @@ export class AnnotationService {
 			if (!last || last.view !== view || (from <= last.from && to >= last.to)) {
 				this.lastSelection = { view, from, to, at: Date.now() };
 				window.clearTimeout(this.lastSelectionClearTimer);
+		window.clearTimeout(this.readingSelectionTimer);
 			}
 		} catch { /* a widget node may not map to a document position */ }
 	}
@@ -1067,6 +1228,45 @@ export class AnnotationService {
 			return;
 		}
 		new OrphanPicker(this.app, orphans, (orphan) => { void apply(orphan); }).open();
+	}
+
+	async reanchorActiveSource(): Promise<void> {
+		const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+		if (!view?.file) {
+			new Notice("Open a source note first.");
+			return;
+		}
+		await this.reanchorWork(view.file);
+	}
+
+	private async reanchorWork(file: TFile): Promise<void> {
+		const target = await this.targetForPath(file.path);
+		if (!target) {
+			new Notice("This note is not part of an annotated source.");
+			return;
+		}
+		const work = await this.store.getWork(target.workKey);
+		if (!work) {
+			new Notice("No annotations for this source.");
+			return;
+		}
+		const units = await this.store.allUnits(target.workKey);
+		const before = units.reduce((sum, unit) =>
+			sum + unit.unit.annotations.filter((annotation) => annotation.anchorStatus === "orphaned").length, 0);
+		if (!before) {
+			new Notice("There are no unanchored annotations in this source.");
+			return;
+		}
+		for (const unit of units) {
+			if (!unit.unit.annotations.some((annotation) => annotation.anchorStatus === "orphaned")) continue;
+			await this.verify(unit.entry.note);
+		}
+		const afterUnits = await this.store.allUnits(target.workKey);
+		const after = afterUnits.reduce((sum, unit) =>
+			sum + unit.unit.annotations.filter((annotation) => annotation.anchorStatus === "orphaned").length, 0);
+		new Notice(before === after
+			? `No orphaned annotations could be re-anchored automatically; ${after} remain.`
+			: `Re-anchored ${before - after} annotation(s); ${after} remain unanchored.`);
 	}
 
 	private annotationAtOffset(

@@ -8827,7 +8827,7 @@ def main():
 if __name__ == '__main__':
     main()
 ` },
-  { path: "docs/commands.md", content: "# Commands\n\nEvery command is in the command palette under **Midad Arabic Sources**, grouped here by function. The guide for each group is linked from its heading.\n\n## Documentation\n\n- **Open documentation** \u2014 open the in-app guide (this collection of pages).\n\n## Transliteration\n\nSee [Transliteration](./transliteration.md).\n\n- **Transliterate selection to clipboard** \u2014 romanize the selection (or current line) to the clipboard.\n- **Transliterate note to new note** \u2014 romanize a whole note or selection into a sibling note.\n- **Transliteration server\u2026** \u2014 a dialog showing whether the service is running, which engines are loaded (and which is actually used), and the LLM providers, with one **Start** / **Stop** button.\n\n## Transcription and translation\n\nSee [Transcription](./transcription.md) and [Translation](./translation.md).\n\n- **Transcribe this item\u2019s PDF file(s)** \u2014 burst, OCR, and post-process.\n- **Translate this item\u2019s transcription(s)** \u2014 translate an existing transcription.\n- **Reprocess from archive\u2026** \u2014 re-run post-processing from an archived batch, without resubmitting.\n- **Check transcription pipeline** \u2014 list archived batches.\n- **Show pipeline status** \u2014 reveal the status panel, resume an interrupted job, or open the last log.\n- **Open last pipeline log** \u2014 open the newest job log.\n\n## Document import\n\nSee [Document import](./document-import.md) and [Templates](./templates.md).\n\n- **Manage text sources\u2026** \u2014 install, uninstall, or send works to Zotero.\n- **Add Turath work by URL\u2026** \u2014 add a Turath book to your personal list (see [Adding a work by URL](./document-import.md#adding-a-work-by-url)).\n- **Copy import templates to vault** \u2014 copy the editable ETA templates into your vault.\n- **Re-render imported sources** \u2014 regenerate every note from its cached model.\n- **Re-render this source** \u2014 regenerate one work (also on the note\u2019s right-click menu).\n- **Apply template changes to imported sources** \u2014 apply a detected template change on demand.\n- **Re-download imported sources (rebuild models)** \u2014 re-fetch the source JSON and rebuild every model.\n- **Migrate imported sources to the current naming scheme** \u2014 rename installed works to `Author - Title (repository)`, updating notes, models, MOCs, and annotation paths.\n- **Check imported sources** \u2014 find works whose notes or cached model are missing.\n- **Check for source updates** \u2014 ask each repository whether a text changed upstream.\n- **Archive this source\u2026** \u2014 compress a work's model, remove its notes, and keep its annotations.\n\n## Annotations\n\nSee [Document import](./document-import.md#annotations).\n\n- **Annotate the selected text** \u2014 open the colour/comment popup for a managed-region selection.\n- **Edit annotation** / **Delete annotation** \u2014 act on the annotation under the cursor.\n- **Re-anchor orphaned annotation\u2026** \u2014 use the current selection as the new anchor for an unanchored annotation. The selection popup also offers Re-anchor when the current note has orphans.\n- **Delete annotations for this source\u2026** \u2014 move a work's annotation store and note to the plugin trash.\n- **Open Midad sidebar** \u2014 reveal the active annotatable note's cards, MOC links, and Manage sources button.\n- **Copy source with annotations** \u2014 copy the managed source text plus a colour-callout annotation section.\n- **Adopt note for annotations** \u2014 make an arbitrary Markdown note annotatable by adding a stable work/unit identity and a managed body region. Known Midad transcriptions/translations are adopted automatically.\n- **Open source annotations** \u2014 open the generated per-work annotation note.\n- **Open annotation trash** \u2014 restore or permanently delete annotation batches.\n- **Reload annotations** \u2014 reload the store and repaint open source notes.\n\n## Zotero\n\nSee [Zotero export](./zotero.md).\n\n- **Send all installed sources to Zotero**\n- **Send selected sources to Zotero\u2026**\n- **Send this source to Zotero**\n", extract: false },
+  { path: "docs/commands.md", content: "# Commands\n\nEvery command is in the command palette under **Midad Arabic Sources**, grouped here by function. The guide for each group is linked from its heading.\n\n## Documentation\n\n- **Open documentation** \u2014 open the in-app guide (this collection of pages).\n\n## Transliteration\n\nSee [Transliteration](./transliteration.md).\n\n- **Transliterate selection to clipboard** \u2014 romanize the selection (or current line) to the clipboard.\n- **Transliterate note to new note** \u2014 romanize a whole note or selection into a sibling note.\n- **Transliteration server\u2026** \u2014 a dialog showing whether the service is running, which engines are loaded (and which is actually used), and the LLM providers, with one **Start** / **Stop** button.\n\n## Transcription and translation\n\nSee [Transcription](./transcription.md) and [Translation](./translation.md).\n\n- **Transcribe this item\u2019s PDF file(s)** \u2014 burst, OCR, and post-process.\n- **Translate this item\u2019s transcription(s)** \u2014 translate an existing transcription.\n- **Reprocess from archive\u2026** \u2014 re-run post-processing from an archived batch, without resubmitting.\n- **Check transcription pipeline** \u2014 list archived batches.\n- **Show pipeline status** \u2014 reveal the status panel, resume an interrupted job, or open the last log.\n- **Open last pipeline log** \u2014 open the newest job log.\n\n## Document import\n\nSee [Document import](./document-import.md) and [Templates](./templates.md).\n\n- **Manage text sources\u2026** \u2014 install, uninstall, or send works to Zotero.\n- **Add Turath work by URL\u2026** \u2014 add a Turath book to your personal list (see [Adding a work by URL](./document-import.md#adding-a-work-by-url)).\n- **Copy import templates to vault** \u2014 copy the editable ETA templates into your vault.\n- **Re-render imported sources** \u2014 regenerate every note from its cached model.\n- **Re-render this source** \u2014 regenerate one work (also on the note\u2019s right-click menu).\n- **Apply template changes to imported sources** \u2014 apply a detected template change on demand.\n- **Re-download imported sources (rebuild models)** \u2014 re-fetch the source JSON and rebuild every model.\n- **Migrate imported sources to the current naming scheme** \u2014 rename installed works to `Author - Title (repository)`, updating notes, models, MOCs, and annotation paths.\n- **Check imported sources** \u2014 find works whose notes or cached model are missing.\n- **Check for source updates** \u2014 ask each repository whether a text changed upstream.\n- **Archive this source\u2026** \u2014 compress a work's model, remove its notes, and keep its annotations.\n\n## Annotations\n\nSee [Document import](./document-import.md#annotations).\n\n- **Annotate the selected text** \u2014 open the colour/comment popup for a managed-region selection.\n- **Edit annotation** / **Delete annotation** \u2014 act on the annotation under the cursor.\n- **Re-anchor orphaned annotation\u2026** \u2014 use the current selection as the new anchor for an unanchored annotation. The selection popup also offers Re-anchor when the current note has orphans.\n- **Re-anchor orphaned annotations in this source** \u2014 scan every unit in the active work and retry automatic recovery for all orphans.\n- **Delete annotations for this source\u2026** \u2014 move a work's annotation store and note to the plugin trash.\n- **Open Midad sidebar** \u2014 reveal the active annotatable note's cards, MOC links, and Manage sources button.\n- **Copy source with annotations** \u2014 copy the managed source text plus a colour-callout annotation section.\n- **Adopt note for annotations** \u2014 make an arbitrary Markdown note annotatable by adding a stable work/unit identity and a managed body region. Known Midad transcriptions/translations are adopted automatically.\n- **Open source annotations** \u2014 open the generated per-work annotation note.\n- **Open annotation trash** \u2014 restore or permanently delete annotation batches.\n- **Reload annotations** \u2014 reload the store and repaint open source notes.\n\n## Zotero\n\nSee [Zotero export](./zotero.md).\n\n- **Send all installed sources to Zotero**\n- **Send selected sources to Zotero\u2026**\n- **Send this source to Zotero**\n", extract: false },
   { path: "docs/dependencies.md", content: "# Dependencies\n\nMidad Arabic Sources runs external Python for three of its four functions. Nothing has to be installed for the importer alone \u2014 it uses only Python\u2019s standard library \u2014 but the transliteration service, transcription, and translation each need packages.\n\nThe plugin finds a usable Python on its own (it probes common paths and virtual-environments), and you can pin one under **Transcription and translation \u2192 Python executable**.\n\n## Python 3\n\nAny reasonably recent Python 3 works. The plugin probes, in order: your configured interpreter, `python3`/`python`, a ScholarWeft virtualenv if present, the versioned `python3.13`/`3.12`/`3.11` names, Homebrew and system paths (`/opt/homebrew/bin/python3`, `/usr/local/bin/python3`, `/usr/bin/python3`), conda, and pyenv.\n\nIf auto-detection picks the wrong one, set the full path in **Python executable**.\n\n## Translations and transcription: Gemini\n\nScanned-PDF transcription and all translation call the **Gemini API**. You need an API key, from [Google AI Studio](https://aistudio.google.com/apikey), set in **Transcription and translation \u2192 Gemini API key**. It is passed to the pipeline as `GEMINI_API_KEY`; if you would rather not store it in the vault, launch Obsidian from a shell that already exports `GEMINI_API_KEY` (or `GOOGLE_API_KEY`) instead.\n\nPackages:\n\n```shell\npip install google-genai pymupdf requests\n```\n\n- `google-genai` \u2014 the Gemini client used for OCR and translation.\n- `pymupdf` (imported as `fitz`) \u2014 bursts a scanned PDF into page PDFs and reads page counts.\n- `requests` \u2014 used by the pipeline\u2019s helper scripts.\n\n## Transliteration: CAMeL Tools\n\nThe rule-based romanizer uses **CAMeL Tools**. The heavy model loads once into the resident server, so Obsidian does not pay for it on every call.\n\nInstall the recommended engine, **BERT**:\n\n```shell\npip install camel-tools transformers\ncamel_data -i disambig-bert-unfactored-msa\ncamel_data -i morphology-db-msa-r13\n```\n\nMLE is an optional, lighter alternative \u2014 install it **instead of** the bert package if you want it:\n\n```shell\npip install camel-tools\ncamel_data -i disambig-mle-calima-msa-r13\ncamel_data -i morphology-db-msa-r13\n```\n\n- `camel-tools` \u2014 the disambiguators and the morphological analyzer.\n- `transformers` \u2014 needed by the BERT engine to load its model. The model weights ship **inside** the `disambig-bert-unfactored-msa` package (`pytorch_model.bin`), so there is no separate download from Hugging Face.\n- `morphology-db-msa-r13` \u2014 the shared morphology database the romanizer's analyzer reads; both engines need it.\n- The `camel_data` package a machine lacks is the reason its engine will not load; the **Transliteration server\u2026** dialog reports which engines are actually loaded.\n\n### Which engine\n\n| | BERT (default, recommended) | MLE (optional) |\n| --- | --- | --- |\n| Quality on unvocalized classical text | Best \u2014 it reads context, so it resolves ambiguous diacritization | Rougher; a lexical/statistical model with no context |\n| Download | ~0.4 GB for the MSA model (the package here also carries the egy/glf/lev variants, ~1.7 GB total) | ~85 MB (`calima-msa`; ~110 MB for the whole package) |\n| Shared data | ~160 MB morphology DB | ~160 MB morphology DB |\n| Load into the server | ~16 s | ~2 s |\n\nBERT is the default and what the plugin's tuning targets; pick MLE under **Transliteration \u2192 Engine** only if you specifically prefer it. Nothing preloads or selects MLE for you, and if BERT cannot load the script falls back to MLE automatically and tells you (an Obsidian alert, or stderr at the CLI).\n\nStart the service from the plugin (**Transliteration server\u2026**) or by hand:\n\n```shell\npython3 scripts/transliterate-server.py --port 8756\n```\n\nIt loads `bert` at startup by default; do not pass `--preload mle` unless you have deliberately chosen MLE. `none` bypasses CAMeL entirely and only works on fully vocalized input. See [Transliteration](./transliteration.md).\n\n## LLM romanization (optional)\n\nIf you prefer an LLM over the rule engine for individual calls, the transliteration service can call **Gemini** or **DeepSeek**. Set the provider, model, and (optionally) an API key under **Transliteration \u2192 LLM romanization**, or export `GEMINI_API_KEY` / `GOOGLE_API_KEY` / `DEEPSEEK_API_KEY` for the server process. The provider SDKs are imported lazily, so a missing one only matters when you choose that provider.\n\n## Zotero (optional)\n\nSending imported works to Zotero needs either a running local Zotero (started and reachable on `127.0.0.1:23119`) or a Zotero web API key. No Python packages are involved. See [Zotero export](./zotero.md).\n\n## Troubleshooting\n\n- **\u201CNo usable Python found\u201D** \u2014 the plugin could not import `fitz`, `requests`, and `google.genai` from any candidate. Install them into the interpreter you want, then set its full path in **Python executable**.\n- **The BERT engine will not load** \u2014 install `transformers` and run `camel_data -i disambig-bert-unfactored-msa`; the first load also downloads the model and needs network access.\n- **Everything works, but the engine is out of date** \u2014 the resident server serves the code it loaded at startup. Restart it after any change to `arabic-bw-transliterate.py`. See [Troubleshooting](./troubleshooting.md).\n", extract: false },
   { path: "docs/document-import.md", content: "# Document import (text sources)\n\nThe importer pulls born-digital Arabic texts from public repositories into your vault, one note per s\u016Bra, chapter, or dictionary root, with full frontmatter and links back to the Qur\u02BE\u0101n text. It is catalog-driven, so more repositories and genres can be wired in over time.\n\n## Manage text sources\n\n**Manage text sources\u2026** opens a two-pane dialogue with two tabs.\n\nUnder the tabs sit the collection description and a top bar: a **Show** filter (All / Installed / Not installed / Archived / Annotated), a **filter box**, a **language** select sorted by language name, a \u21BB reload button, and **Add by URL\u2026**. On the left are **Kinds of sources** (toggle buttons, one per genre \u2014 Tafs\u012Br, \u1E24ad\u012Bth, Fiqh, U\u1E63\u016Bl al-Fiqh, Doctrine (\u02BFaq\u012Bda), T\u0101r\u012Bkh, Biography (rij\u0101l), Language (lugha), Lexicography, Grammar (na\u1E25w and \u1E63arf), Rhetoric, Adab, Dictionaries, and more; none selected means all) and **Repositories** (a selectable list). A work can sit in more than one kind (e.g. a \u1E25ad\u012Bth commentary is both \u1E24ad\u012Bth and \u1E24ad\u012Bth commentary). The right pane lists one clickable row per work \u2014 Language, Author, Title (with its subtitle beneath), Kind, Repository, Size, State \u2014 and the row is highlighted when selected, with no checkboxes. A row with annotations carries a highlighter icon and count. Archiving turns the row a muted gray and labels it **Archiving** while the progress notice runs; once complete it reads **Archived**. Right-clicking offers annotation deletion and, for installed works, **Archive source\u2026**; archived rows offer **Restore from archive** and **Remove archived source\u2026** (which deletes the compressed model but keeps annotations). The language filter is sorted by display name, so English appears before German. The modal is capped to the window and the footer stays reachable; the table scrolls inside its pane when the window is narrow.\n\n- In the **install/uninstall** tab, installed works start selected; deselecting one marks it for removal. Archived works start unselected; selecting one and applying restores it from its compressed model. There is no Select All, because there are far too many works to act on at once.\n- In the **Send references to Zotero** tab, a single **Select All/None** toggle selects, then clears, the visible installed works. See [Zotero export](./zotero.md).\n\nThe catalogue of available works is cached: per session and on disk (`.midad-arabic-sources/source-catalog.json`, 7 days). Opening the dialogue serves the cache immediately and refreshes it in the background when it is stale; the \u21BB button forces a fresh listing.\n\n## Adding a work by URL\n\nTurath has far more books than any catalogue can list. **Add by URL** (a tab in the manage dialog, or the **Add Turath work by URL\u2026** command) takes a link such as `https://app.turath.io/book/95864` (or just the numeric id), reads the book's metadata from Turath's API, and offers a **provisional romanization** in two editable fields \u2014 **Title (romanized)** and **Author (romanized)**. The title is sentence-cased for a non-English work (first word and proper nouns capitalised); review it before adding. **Add to list** stores the entry in `.midad-arabic-sources/turath-custom-works.json`; the tab lists everything you have added, with a **Remove** button, and keeps your current selections while you are in it. The entry stays in the Add by URL tab with **Install** and **Remove from list** buttons. **Install** runs the normal acquisition and render with corner notices; switching to the main tab refreshes the source list. **Remove from list** drops a built-in override but leaves the built-in work installed; for a custom-only work that is installed, it confirms and uninstalls the source, deleting its generated notes and keeping annotations. Adding a work that already exists asks whether to override the existing catalogue entry. A custom entry overrides the built-in title, author, genres, and subtitle for the same Turath id. Added works then appear in the catalogue like any other \u2014 choose their kinds, install them, re-render them. Search matches the title, Arabic title, aliases, author, subtitle, id, and repository. The JSON entry carries the id, Roman title, Arabic title, author, type, genres, and URL; edit it directly if you want a different title or kind.\n\n## Collections\n\n- **Qur\u02BE\u0101n commentaries (tafs\u012Br)** \u2014 `spa5k/tafsir_api` (a mirror of quran.com / altafsir.com): about 60 Arabic and 13 English commentaries (al-Jal\u0101layn, al-\u1E6Cabar\u012B, al-Qur\u1E6Dub\u012B, al-Baghaw\u012B, Ibn Kath\u012Br, al-Sa\u02BFd\u012B, al-Muyassar, al-Kashsh\u0101f, and more).\n- **Qur\u02BE\u0101n commentaries (QUL)** \u2014 the Qur\u02BE\u0101nic Universal Library (`qul.tarteel.ai`): 111 further tafs\u012Brs across Arabic and 30+ languages. Keyless, fetched one s\u016Bra at a time; shares the **Tafs\u012Br Sources** MOC with the spa5k collection.\n- **Qur\u02BE\u0101n translations** \u2014 `fawazahmed0/quran-api`: 50+ English translations.\n- **\u1E24ad\u012Bth collections** \u2014 `AhmedBaset/hadith-json`: 17 collections (Bukh\u0101r\u012B, Muslim, Ab\u016B D\u0101w\u016Bd, Tirmidh\u012B, Nas\u0101\u02BE\u012B, Ibn M\u0101jah, M\u0101lik, A\u1E25mad, and the forties), Arabic and English.\n- **Qur\u02BE\u0101n texts (riw\u0101y\u0101t)** \u2014 `risan/quran-json`: Warsh, Q\u0101l\u016Bn, al-D\u016Br\u012B, Shu\u02BFbah, al-S\u016Bs\u012B, plus canonical \u1E24af\u1E63.\n- **Dictionaries** \u2014 Hans Wehr\u2019s *Dictionary of Modern Written Arabic* and Lane\u2019s *An Arabic-English Lexicon*, both read from their SQLite editions (one note per root).\n- **Classical texts (Turath.io)** \u2014 the public API covering ~8,500 books across fiqh, u\u1E63\u016Bl, \u02BFaq\u012Bda, \u1E25ad\u012Bth commentary, t\u0101r\u012Bkh, adab, and language. One note per table-of-contents heading, with the source\u2019s pages preserved as `#### p. N` markers.\n\n## Commands\n\n- **Manage text sources\u2026** \u2014 install, uninstall, or send to Zotero.\n- **Copy import templates to vault** \u2014 copy the editable ETA templates into your vault so you can change how notes render. See [Templates](./templates.md).\n- **Re-render imported sources** \u2014 regenerate every note from its cached model; a prompt asks first when a template change is involved.\n- **Re-render this source** \u2014 the same for one work, from its note or its right-click menu.\n- **Apply template changes to imported sources** \u2014 apply any detected template change on demand (the plugin also polls for changes when auto-update is on).\n- **Re-download imported sources (rebuild models)** \u2014 fetch the source JSON again and rebuild every model, for when a repository changes its format.\n- **Migrate imported sources to the current naming scheme** \u2014 one-off; moves works that predate the repository-qualifier convention to the current folder and file names.\n- **Check imported sources** \u2014 find works whose notes or cached model are missing and offer to restore them.\n- **Check for source updates** \u2014 ask each repository whether a text changed upstream (also on the **Check repositories every \u2026 days** cadence, default 7).\n- **Archive this source\u2026** \u2014 compress the work's model to `.midad-arabic-sources/source-archives/<collection>/<id>.json.gz`, remove its notes, and keep its annotations and a restorable manifest entry.\n- **Annotate the selected text**, **Edit annotation**, **Delete annotation**, **Re-anchor orphaned annotation\u2026**, **Open Midad sidebar**, and **Copy source with annotations** \u2014 the annotation commands. See [Annotations](#annotations).\n\n## Re-rendering and your edits\n\nRegenerating a note never overwrites your work. Generated content lives inside a managed region (`<span class=\"mas-managed\">\u2026</span>`), and only template-declared frontmatter properties are reconciled. Everything else \u2014 including a `related:` property you edited \u2014 is preserved. See [Templates](./templates.md) for how the merge strategies work.\n\n## Annotations\n\nAnnotations are painted over the generated text, never written into it. Select text inside a work's managed region to open the colour/comment popup; selections covering fenced code, inline code, or Markdown tables are rejected; the **Annotate the selected text** command and editor menu are fallbacks. An animated margin icon opens a compact comment tooltip, and the automatically opened **Midad sidebar** (also available from its ribbon icon or command) lists the active note's annotations with the comment first and a two-line quote excerpt beneath, click-to-scroll, the same edit/annotation-note/delete icon actions, and links to the Source Annotations, Transcriptions, Translations, and Sources MOCs plus Manage sources. Each work gets one generated annotation note and the shared `source-annotation` MOC; each MOC entry links the annotation note as `<Work> Annotations` and the source notes that contain annotations. Re-rendering or updating a source re-anchors quotes by exact text and then by surrounding context; unmatched annotations stay in the note's **Unanchored** section. When the current note has unanchored annotations, the selection popup offers **Re-anchor** (or **Re-anchor\u2026** to choose among several), using the selected text as the new anchor. The **Re-anchor orphaned annotation\u2026** command remains available. **Copy source with annotations** copies the source plus a callout section for use elsewhere, and **Archive source\u2026** preserves the annotation store while its notes are removed.\n\nKnown Midad transcriptions and translations are registered automatically in `.midad-arabic-sources/annotations/adopted.json`; no filenames or YAML change. One annotation note covers all volumes of a series, with each volume as a unit. For any other note, use **Adopt note for annotations** (command palette or file context menu): it adds a stable `mas-work`/`mas-unit` identity and a managed region around the body, after which manual corrections re-anchor like a source note.\n\n## Naming and provenance\n\nEvery classical work\u2019s folder and hub use `Author - Title (repository)` \u2014 for example `\u02BFAbd al-Q\u0101dir al-Baghd\u0101d\u012B - Khiz\u0101nat al-adab (turath.io)` or `A\u1E25mad b. \u1E24anbal - Musnad A\u1E25mad (hadith-json)` \u2014 so multiple works by one author and similar titles stay distinct. The repository qualifier is deliberately short (`tafsir_api`, `qul`, `hadith-json`, `quran-api`, `quran-json`, `turath.io`). If author, title, and repository still coincide, the next copy gets a language or edition qualifier; if those also coincide, it gets `(2)`, `(3)`, and so on, with installed names reserved. A folder component longer than 110 UTF-8 bytes is truncated at a word boundary and given a short stable hash suffix, so long author/title combinations stay within filesystem limits without colliding; the repository suffix is always preserved. The established nickname dictionaries (`Hans Wehr Dictionary`, `Lane's Lexicon`) and the Qur'\u0101n editions keep their familiar titles; a work known to exist only once across the imported repositories is flagged `unique` and omits the repository qualifier. `title:` and the MOC/hub link aliases stay clean. Existing installs keep their old folders until **Migrate imported sources to the current naming scheme** is run.\n\nEvery generated page carries `repository`, `license-attribution`, and `repository-updated` properties, and `[[Midad Arabic Sources]]` in its `up`, so the whole corpus is traceable to its source and to the plugin that imported it.\n\n## Model JSON namespace\n\nThe hidden source models are deliberately named by identity rather than by title: `source-models/<collection>/<id>.json`. A collection is normally **repository-scoped** (the dictionary collection is the exception, with distinct ids for Wehr and Lane), and `(collection, id)` is the work's stable key. That makes the simple leaf names safe:\n\n- A Muwa\u1E6D\u1E6Da\u02BE from the \u1E25ad\u012Bth-json repository is `hadith/malik.json`; the Turath Muwa\u1E6D\u1E6Da\u02BE is a different collection and a numeric id under `turath/`.\n- A second repository for the same genre gets its own collection (as `tafsir` and `tafsir-qul` already do), so its `malik` cannot collide with `hadith/malik`.\n- Two versions in one repository must have distinct catalogue ids; they then become `hadith/malik.json` and `hadith/malik-v2.json`.\n- Two grammar works by one author have different repository ids, e.g. `turath/123.json` and `turath/456.json`; the author and title distinguish their visible notes, not their internal models.\n\nThe importer rejects duplicate `(collection, id)` keys and any two ids that sanitize to the same model path, rather than overwriting one model with another. The embedded `work.key` is authoritative, and `fetch` also refuses to replace a model that declares a different key. All 834 catalogue works currently map to 834 distinct model paths.\n\n## Where things go\n\n- **Notes**: under the **Import destination** (`_7 Sources` by default), one folder per work.\n- **Cached source JSON**: `.midad-arabic-sources/cache/text-sources/`.\n- **Render models**: `.midad-arabic-sources/source-models/<collection>/<id>.json`. The collection folder is the namespace: `hadith/malik.json` is the model for `hadith:malik`, while another collection with the same leaf lives in its own folder. The embedded `work.key` is authoritative; a fetch refuses to overwrite a model that declares a different key. All 834 catalogue works currently map to 834 distinct model paths.\n- **Archived models**: `.midad-arabic-sources/source-archives/<collection>/<id>.json.gz`.\n- **Annotations**: `.midad-arabic-sources/annotations/<collection>/<id>/`, with the generated note under the configured annotation-note folder.\n- **Manifest**: `.midad-arabic-sources/source-imports.json` \u2014 the authoritative list of works and their status (`installed`, `deleting`, `archived`).\n\nRemoving a work is a **hard delete** of its cached model and notes (not a trash move); the source JSON stays cached, so re-installing is quick. Archiving is different: it keeps a compressed model and the annotations, and can be restored without downloading again.\n", extract: false },
   { path: "docs/setup.md", content: "# Setup\n\n**Midad Arabic Sources** brings classical Arabic texts into your Obsidian vault and turns them into a linkable, searchable part of your notes. This page covers installing it, the folders it uses and writes to, and the first run.\n\nThe plugin is **desktop only**: it runs local Python scripts and reads files outside the vault.\n\n## Requirements\n\n- **Obsidian 1.13 or later.** The settings use Obsidian\u2019s declarative settings API.\n- **Python 3** and a few packages, for transcription, translation, and the transliteration engine \u2014 see [Dependencies](./dependencies.md).\n- A **Gemini API key**, if you want to transcribe or translate scanned PDFs.\n- **Zotero** (optional), if you want to send imported works to your library \u2014 see [Zotero export](./zotero.md).\n\n## Install\n\nThe plugin is not yet in the community directory.\n\n### Via BRAT\n\n1. In Obsidian, enable **Community plugins** (turn off Restricted Mode), then install and enable [BRAT](https://github.com/TfTHacker/obsidian42-brat).\n2. In BRAT\u2019s settings, add `nebedaay/Midad-Arabic-Sources` to the **Beta plugin list**.\n3. Enable **Midad Arabic Sources** in **Settings \u2192 Community plugins**. BRAT keeps it up to date from each release.\n\n### Manually\n\nDownload `main.js`, `manifest.json`, and `styles.css` from the [latest release](https://github.com/nebedaay/Midad-Arabic-Sources/releases) and copy them into `.obsidian/plugins/midad-arabic-sources/`, then enable the plugin. The plugin extracts its Python scripts and import templates into the same folder on load, so nothing else needs copying.\n\n## What ships inside the plugin\n\nEverything the plugin needs is compiled into `main.js` and unpacked into `.obsidian/plugins/midad-arabic-sources/` on startup:\n\n- `scripts/` \u2014 the Python pipeline, the catalog-driven importer, and the transliteration service.\n- `midad-arabic-sources-import-templates/` \u2014 the default ETA templates the importer renders notes with.\n\nA plugin update therefore carries the new scripts and templates, which is what lets a template change trigger a re-render. See [Templates](./templates.md).\n\n## First run\n\n1. **Open the settings** (Settings \u2192 Community plugins \u2192 Midad Arabic Sources) and skim the five sections: Transliteration, Transcription and translation, Document import, Zotero, and Documentation. Each points to its guide here.\n2. Start the transliteration server if you will romanize Arabic: run **Transliteration server\u2026** from the command palette; it shows whether the service is running and gives one **Start** / **Stop** button. Restarting is only needed when the engine code changes \u2014 see [Transliteration](./transliteration.md).\n3. **Install some texts**: run **Manage text sources\u2026** and pick works from a repository. See [Document import](./document-import.md).\n4. **Set your import destination** under **Document import** if `_7 Sources` is not where you want the corpus. Every work gets its own subfolder there.\n\n## The folder layout\n\nNotes the plugin generates live under the **import destination** (`_7 Sources` by default), one folder per work:\n\n```text\n_7 Sources/\n  Tafs\u012Br al-\u1E6Cabar\u012B (tafsir_api)/\n    Tafs\u012Br al-\u1E6Cabar\u012B (tafsir_api).md    \u2190 the work hub (table of contents)\n    001 Al-Fatihah.md                   \u2190 one note per s\u016Bra / chapter / root\n    002 Al-Baqarah.md\n    \u2026\n  Tafs\u012Br Sources.md                     \u2190 a category MOC\n  \u1E24ad\u012Bth Sources.md\n  Sources.md                            \u2190 the parent note the MOCs point up to\n```\n\n- **A work hub** carries the bibliographic properties and links every note in the work.\n- **A content note** is one s\u016Bra, \u1E25ad\u012Bth chapter, book chapter, or dictionary root.\n- **A category MOC** lists every installed work of one kind (Tafs\u012Br Sources, \u1E24ad\u012Bth Sources, \u2026). The plugin rebuilds the list inside a managed region, so entries never duplicate.\n- **The parent note** (setting **Sources parent note**) is reused if a note with that name already exists anywhere in the vault; the plugin writes only its own managed region. Every generated page carries `[[Midad Arabic Sources]]` in its `up`.\n\nFile names are unique across the whole vault, so a work note carries its work name (`Tafs\u012Br al-\u1E6Cabar\u012B (tafsir_api) - 002 Al-Baqarah`) while its `title:` and the hub\u2019s link text stay clean (`2 Al-Baqarah`). A work whose folder name would collide can carry a **repository qualifier** in parentheses so two editions of the same work sit side by side. See [Document import](./document-import.md).\n\n## Where state lives\n\nThe plugin keeps its cache and bookkeeping in `.midad-arabic-sources/` at the vault root:\n\n| Path | Holds |\n| --- | --- |\n| `cache/text-sources/` | The raw source JSON downloaded from each repository. |\n| `source-models/<collection>/<id>.json` | The language-neutral **render model** each work is rendered from. |\n| `source-archives/<collection>/<id>.json.gz` | The compressed model of an archived work. |\n| `annotations/<collection>/<id>/` | The sharded annotation store and its derived indexes. |\n| `annotations/adopted.json` | The registry of automatically adopted transcriptions, translations, and known notes. |\n| `source-imports.json` | The manifest: every work and its status (`installed`, `deleting`, `archived`). |\n| `source-catalog.json` | The cached catalogue of available works (7-day TTL). |\n| `source-stats.json` | Measured sizes and the per-template render watermarks. |\n| `template-history.json` | The content-hash timeline that decides whether a template change affects notes. |\n| `archive/` | Archived transcription batches. |\n| `jobs/` | The persisted state of running pipeline jobs. |\n\nDeleting a work from the plugin removes its cached model and its notes (a hard delete, not a trash move); its source JSON stays cached, so re-installing is quick. Archiving instead writes a compressed model, removes the notes, and keeps the annotations; restore re-renders from that archive without downloading.\n\n## Updating and state\n\nRestart Obsidian after a plugin update \u2014 the plugin loads `main.js` only at startup. On the next run it unpacks the new scripts and templates, re-measures what changed, and re-renders only the notes whose templates moved. Your edits are preserved: generated content sits inside a managed region, and only template-declared frontmatter properties are reconciled. See [Templates](./templates.md).\n\nIf a source changes upstream, **Check for source updates** asks each repository whether the text moved and re-downloads only what did. See [Document import](./document-import.md).\n", extract: false },
@@ -9441,9 +9441,12 @@ var AdoptedNotesRegistry = class {
   all() {
     return [...this.entries.values()];
   }
-  workFor(sourceKey) {
+  workFor(sourceKey, workTitle = "") {
     var _a;
-    return (_a = [...this.entries.values()].find((entry) => entry.sourceKey === sourceKey)) != null ? _a : null;
+    const bySource = [...this.entries.values()].find((entry) => entry.sourceKey === sourceKey);
+    if (bySource)
+      return bySource;
+    return workTitle ? (_a = [...this.entries.values()].find((entry) => !entry.sourceKey && entry.workTitle === workTitle)) != null ? _a : null : null;
   }
   async registerFile(file) {
     var _a, _b;
@@ -9455,7 +9458,7 @@ var AdoptedNotesRegistry = class {
     const parsed = parseKnownNote(path2, title);
     if (!parsed)
       return false;
-    const existing = this.workFor(parsed.sourceKey);
+    const existing = this.workFor(parsed.sourceKey, parsed.workTitle);
     const duplicate = [...this.entries.values()].find((entry2) => entry2.sourceKey === parsed.sourceKey && entry2.unitKey === parsed.unitKey);
     if (duplicate) {
       const oldPath = duplicate.path;
@@ -9492,6 +9495,27 @@ var AdoptedNotesRegistry = class {
     };
     this.entries.set(path2, entry);
     return true;
+  }
+  async restoreFromStore(workKey2, workTitle, workDir, units) {
+    let changed = false;
+    for (const unit of units) {
+      const path2 = (0, import_obsidian3.normalizePath)(unit.path);
+      if (!path2 || this.entries.has(path2))
+        continue;
+      this.entries.set(path2, {
+        path: path2,
+        workKey: workKey2,
+        unitKey: unit.unitKey,
+        workTitle,
+        workDir,
+        unitTitle: unit.unitKey,
+        ord: unit.ord,
+        kind: "note",
+        sourceKey: ""
+      });
+      changed = true;
+    }
+    return changed;
   }
   async scanKnownNotes() {
     if (!this.loaded)
@@ -10782,6 +10806,97 @@ function expandLinkListSelection(text, from, to) {
   }
   return { from: start, to: end };
 }
+function renderedTextProjection(markdown) {
+  const visible = [];
+  let lineStart = true;
+  let i = 0;
+  const push = (char, index) => {
+    visible.push({ char, index });
+  };
+  while (i < markdown.length) {
+    if (lineStart) {
+      const end = markdown.indexOf("\n", i);
+      const line = markdown.slice(i, end === -1 ? markdown.length : end);
+      const prefix = /^\s*(?:>\s*)*(?:(?:[-*+]|\d+\.)\s+)?(?:\[[ xX]\]\s*)?(?:#{1,6}\s+)?/.exec(line);
+      if (prefix)
+        i += prefix[0].length;
+      lineStart = false;
+    }
+    const char = markdown.charAt(i);
+    if (char === "\n") {
+      push(" ", i);
+      lineStart = true;
+      i++;
+      continue;
+    }
+    if (char === "[" && markdown.startsWith("[[", i)) {
+      const close = markdown.indexOf("]]", i + 2);
+      if (close !== -1) {
+        const inner = markdown.slice(i + 2, close);
+        const bar = inner.lastIndexOf("|");
+        const label = bar >= 0 ? inner.slice(bar + 1) : inner;
+        const labelStart = i + 2 + (bar >= 0 ? bar + 1 : 0);
+        for (let j = 0; j < label.length; j++)
+          push(label.charAt(j), labelStart + j);
+        i = close + 2;
+        continue;
+      }
+    }
+    if (char === "[") {
+      const link = /^\[([^\]]*)\]\([^)]*\)/.exec(markdown.slice(i));
+      if (link) {
+        for (let j = 0; j < link[1].length; j++)
+          push(link[1].charAt(j), i + 1 + j);
+        i += link[0].length;
+        continue;
+      }
+    }
+    if (char === "<") {
+      const tag = /^<[^>]+>/.exec(markdown.slice(i));
+      if (tag) {
+        i += tag[0].length;
+        continue;
+      }
+    }
+    if ("*_~`".includes(char)) {
+      i++;
+      continue;
+    }
+    push(char, i);
+    i++;
+  }
+  const out = [];
+  const map = [];
+  let lastSpace = false;
+  for (const item of visible) {
+    if (/\s/.test(item.char)) {
+      if (lastSpace)
+        continue;
+      out.push(" ");
+      map.push(item.index);
+      lastSpace = true;
+    } else {
+      out.push(item.char);
+      map.push(item.index);
+      lastSpace = false;
+    }
+  }
+  return { text: out.join(""), map };
+}
+function findRenderedText(markdown, rendered) {
+  const needle = normalizeWhitespaceWithMap(rendered).text.trim();
+  if (!needle)
+    return null;
+  const projection = renderedTextProjection(markdown);
+  const at = projection.text.indexOf(needle);
+  if (at < 0)
+    return null;
+  const start = projection.map[at];
+  const end = projection.map[at + needle.length - 1];
+  if (start === void 0 || end === void 0)
+    return null;
+  return { start, end: end + 1 };
+}
 
 // src/sourceAnnotations/note.ts
 function nowStamp() {
@@ -11055,7 +11170,7 @@ function unwrapAnnotations(root) {
     mark = root.querySelector(".mas-annotation");
   }
 }
-function buildTextIndex(root) {
+function buildTextIndex(root, skipAnnotations = true) {
   const nodes = [];
   let text = "";
   const newline = () => {
@@ -11075,7 +11190,8 @@ function buildTextIndex(root) {
     if (node.nodeType !== 1)
       return;
     const el = node;
-    if (el.matches(SKIP_SELECTOR))
+    const skip = skipAnnotations ? SKIP_SELECTOR : SKIP_SELECTOR.replace(", .mas-annotation", "");
+    if (el.matches(skip))
       return;
     if (el.tagName === "BR") {
       text += "\n";
@@ -11120,6 +11236,51 @@ function makeSegment(dom, segment, active, logicalStart, logicalEnd) {
     mark.appendChild(current);
     current = mark;
   }
+}
+function readingSelection(root, range) {
+  if (!root.contains(range.startContainer) || !root.contains(range.endContainer))
+    return null;
+  const index = buildTextIndex(root, false);
+  const byNode = new Map();
+  for (const node of index.nodes)
+    byNode.set(node.node, node);
+  const firstText = (node) => {
+    if (node.nodeType === Node.TEXT_NODE)
+      return node;
+    const walker = root.ownerDocument.createTreeWalker(node, NodeFilter.SHOW_TEXT);
+    return walker.nextNode();
+  };
+  const lastText = (node) => {
+    if (node.nodeType === Node.TEXT_NODE)
+      return node;
+    const walker = root.ownerDocument.createTreeWalker(node, NodeFilter.SHOW_TEXT);
+    let last = null;
+    let next = walker.nextNode();
+    while (next) {
+      last = next;
+      next = walker.nextNode();
+    }
+    return last;
+  };
+  const locate = (container, offset) => {
+    var _a;
+    if (container.nodeType === Node.TEXT_NODE) {
+      const entry = byNode.get(container);
+      return entry ? entry.start + Math.min(offset, entry.end - entry.start) : null;
+    }
+    if (container.nodeType === Node.ELEMENT_NODE) {
+      const child = (_a = container.childNodes[offset]) != null ? _a : container.childNodes[container.childNodes.length - 1];
+      const text = child ? firstText(child) : lastText(container);
+      const entry = text ? byNode.get(text) : null;
+      return entry ? entry.start : null;
+    }
+    return null;
+  };
+  const start = locate(range.startContainer, range.startOffset);
+  const end = locate(range.endContainer, range.endOffset);
+  if (start === null || end === null || end <= start)
+    return null;
+  return { start, end, text: index.text.slice(start, end) };
 }
 function addMarginIcons(root, dom, annotations) {
   var _a, _b;
@@ -12125,6 +12286,7 @@ var AnnotationService = class {
   constructor(host) {
     this.pathAnnotations = new Map();
     this.verifyTimers = new Map();
+    this.readingSelectionTimer = 0;
     this.autoTimers = new WeakMap();
     this.lastSelection = null;
     this.lastSelectionClearTimer = 0;
@@ -12168,6 +12330,7 @@ var AnnotationService = class {
   async start() {
     await this.store.load();
     await this.adoption.load();
+    await this.recoverAdoptionRegistry();
     try {
       await this.adoption.scanKnownNotes();
     } catch (error) {
@@ -12189,6 +12352,7 @@ var AnnotationService = class {
       selectionWatcher((view) => this.onEditorSelection(view), () => {
         this.lastSelection = null;
         window.clearTimeout(this.lastSelectionClearTimer);
+        window.clearTimeout(this.readingSelectionTimer);
       }, (view) => this.captureDomSelection(view))
     ]);
     registerReadingAnnotations(this.plugin, (path2) => {
@@ -12224,6 +12388,7 @@ var AnnotationService = class {
       window.clearTimeout(timer);
     this.verifyTimers.clear();
     window.clearTimeout(this.lastSelectionClearTimer);
+    window.clearTimeout(this.readingSelectionTimer);
   }
   async migrationMeta(workKey2, notePath) {
     const meta = await this.resolver.metaForWork(workKey2, notePath);
@@ -12315,7 +12480,26 @@ ${MANAGED_CLOSE}
       return;
     await this.setSourceStatus(stored.workKey, "removed");
   }
+  async recoverAdoptionRegistry() {
+    let changed = false;
+    for (const entry of Object.values(this.store.getIndex().works)) {
+      if (!entry.key.startsWith("adopted:"))
+        continue;
+      const work = await this.store.getWork(entry.key);
+      if (!work)
+        continue;
+      const units = await this.store.allUnits(entry.key);
+      changed = await this.adoption.restoreFromStore(entry.key, work.title, work.dir, units.map((unit) => ({
+        path: unit.entry.note,
+        unitKey: unit.entry.unitKey,
+        ord: unit.entry.ord
+      }))) || changed;
+    }
+    if (changed)
+      await this.adoption.save();
+  }
   async repairUnitNotePaths() {
+    var _a, _b, _c;
     for (const entry of Object.values(this.store.getIndex().works)) {
       const work = await this.store.getWork(entry.key);
       if (!work)
@@ -12328,12 +12512,13 @@ ${MANAGED_CLOSE}
         } catch (e) {
           continue;
         }
-        const actual = await this.resolver.notePathForUnit(entry.key, unitKey2);
+        const actual = (_c = (_b = await this.resolver.notePathForUnit(entry.key, unitKey2)) != null ? _b : (_a = this.adoption.all().find((adopted) => adopted.workKey === entry.key && adopted.unitKey === unitKey2)) == null ? void 0 : _a.path) != null ? _c : null;
         if (!actual)
           continue;
         try {
-          if (await this.app.vault.adapter.exists(actual))
-            updates.set(unitKey2, actual);
+          if (await this.app.vault.adapter.exists((0, import_obsidian13.normalizePath)(actual))) {
+            updates.set(unitKey2, (0, import_obsidian13.normalizePath)(actual));
+          }
         } catch (e) {
         }
       }
@@ -12390,6 +12575,18 @@ ${MANAGED_CLOSE}
         if (!checking)
           void this.reanchorOrphaned(view.file, draft);
         return true;
+      }
+    });
+    this.plugin.addCommand({
+      id: "reanchor-source-orphans",
+      name: "Re-anchor orphaned annotations in this source",
+      callback: async () => {
+        const view = this.app.workspace.getActiveViewOfType(import_obsidian13.MarkdownView);
+        if (!(view == null ? void 0 : view.file)) {
+          new import_obsidian13.Notice("Open a source note first.");
+          return;
+        }
+        await this.reanchorWork(view.file);
       }
     });
     this.plugin.addCommand({
@@ -12523,6 +12720,9 @@ ${MANAGED_CLOSE}
     this.plugin.registerDomEvent(document, "copy", () => {
       this.suppressAutoUntil = Date.now() + 1500;
     });
+    this.plugin.registerDomEvent(document, "selectionchange", () => {
+      this.onReadingSelection();
+    });
     this.plugin.registerDomEvent(document, ANNOTATION_EVENTS.hover, (event) => {
       this.onAnnotationHover(event);
     });
@@ -12563,6 +12763,122 @@ ${MANAGED_CLOSE}
         return;
       this.scheduleVerify(file.path);
     }));
+  }
+  onReadingSelection() {
+    if (this.disposed || !this.settings.annotateOnSelection)
+      return;
+    if (this.dialogOpen || this.anyModalOpen())
+      return;
+    window.clearTimeout(this.readingSelectionTimer);
+    this.readingSelectionTimer = window.setTimeout(() => {
+      void this.openReadingSelection();
+    }, 420);
+  }
+  async openReadingSelection() {
+    if (this.disposed || !this.settings.annotateOnSelection)
+      return;
+    if (this.dialogOpen || this.anyModalOpen() || Date.now() < this.suppressAutoUntil)
+      return;
+    const selection = window.getSelection();
+    if (!selection || selection.isCollapsed || !selection.rangeCount)
+      return;
+    const range = selection.getRangeAt(0);
+    const startEl = range.startContainer.nodeType === Node.TEXT_NODE ? range.startContainer.parentElement : range.startContainer;
+    if (!startEl || startEl.closest("code, pre, table"))
+      return;
+    const sizer = startEl.closest(".markdown-preview-sizer");
+    if (!sizer)
+      return;
+    const view = markdownViews(this.app).find((candidate) => candidate.getMode() === "preview" && candidate.containerEl.contains(sizer));
+    if (!(view == null ? void 0 : view.file))
+      return;
+    const mapped = readingSelection(sizer, range);
+    if (!mapped || !mapped.text.trim())
+      return;
+    const selectedText = mapped.text.trim();
+    const path2 = (0, import_obsidian13.normalizePath)(view.file.path);
+    const target = await this.targetForPath(path2);
+    if (!target)
+      return;
+    let raw = "";
+    try {
+      raw = await this.app.vault.adapter.read(path2);
+    } catch (e) {
+      return;
+    }
+    const after = window.getSelection();
+    if (!after || after.isCollapsed || !after.rangeCount)
+      return;
+    const afterMapped = readingSelection(sizer, after.getRangeAt(0));
+    if (!afterMapped || afterMapped.text.trim() !== selectedText)
+      return;
+    const draft = this.draftFromReadingText(raw, selectedText, target);
+    if (!draft)
+      return;
+    const rect = range.getBoundingClientRect();
+    const anchor = { left: rect.left, top: rect.top, bottom: rect.bottom };
+    const orphans = (await this.annotationsFor(target)).filter((annotation) => annotation.anchorStatus === "orphaned");
+    this.cancelTooltipTimers();
+    this.tooltip.hide();
+    this.dialogOpen = true;
+    new AnnotationPopup(this.app, {
+      draft,
+      defaultColor: this.settings.annotationDefaultColor,
+      onSubmit: async (color, comment) => {
+        await this.createAnnotation(target, draft, color, comment);
+        refreshReadingViews(this.app);
+      },
+      onClosed: () => {
+        this.dialogOpen = false;
+      },
+      onReanchor: orphans.length ? () => {
+        void this.reanchorOrphaned(view.file, draft);
+      } : void 0,
+      reanchorLabel: orphans.length === 1 ? "Re-anchor" : "Re-anchor\u2026",
+      focusPopup: false
+    }).open(anchor);
+  }
+  draftFromReadingText(raw, selectedText, target) {
+    var _a, _b, _c;
+    const found = findNormalized(raw, selectedText, 0);
+    let start = (_a = found == null ? void 0 : found.start) != null ? _a : -1;
+    let end = (_b = found == null ? void 0 : found.end) != null ? _b : -1;
+    if (!found) {
+      const projected = findRenderedText(raw, selectedText);
+      if (projected) {
+        start = projected.start;
+        end = projected.end;
+      } else {
+        const lines = selectedText.split(/\n+/).map((line) => line.trim()).filter(Boolean);
+        if (lines.length < 2)
+          return null;
+        const first = findNormalized(raw, lines[0], 0);
+        const last = findNormalized(raw, lines[lines.length - 1], 0);
+        if (!first || !last || last.end <= first.start)
+          return null;
+        start = first.start;
+        end = last.end;
+      }
+    }
+    const bounds = (_c = managedBounds(raw)) != null ? _c : target.sourceStatus === "adopted" ? bodyBounds(raw) : null;
+    if (!bounds || start < bounds.contentStart || end > bounds.contentEnd)
+      return null;
+    if (crossesHeading(raw, start, end) || selectionExclusion(raw, start, end))
+      return null;
+    const quote = raw.slice(start, end);
+    const quoteText = markdownToText(quote);
+    const segments = visibleSegments(raw, start, end).map((range) => [range.start - bounds.bodyStart, range.end - bounds.bodyStart]);
+    return {
+      quote,
+      quoteText: quoteText || selectedText,
+      quoteMarkdown: cleanQuoteMarkdown(quote),
+      prefix: raw.slice(Math.max(bounds.contentStart, start - 80), start),
+      suffix: raw.slice(end, Math.min(bounds.contentEnd, end + 80)),
+      section: sectionAt(raw, start),
+      ordinal: occurrencesBefore(raw, start, quote),
+      position: { start: start - bounds.bodyStart, end: end - bounds.bodyStart },
+      segments
+    };
   }
   scheduleVerify(path2) {
     if (this.disposed)
@@ -12746,6 +13062,7 @@ ${MANAGED_CLOSE}
     const selection = view.state.selection.main;
     if (selection.from === selection.to) {
       window.clearTimeout(this.lastSelectionClearTimer);
+      window.clearTimeout(this.readingSelectionTimer);
       this.lastSelectionClearTimer = window.setTimeout(() => {
         this.lastSelection = null;
       }, 600);
@@ -12753,6 +13070,7 @@ ${MANAGED_CLOSE}
       return;
     }
     window.clearTimeout(this.lastSelectionClearTimer);
+    window.clearTimeout(this.readingSelectionTimer);
     const currentRange = { from: selection.from, to: selection.to };
     if (!this.lastSelection || this.lastSelection.view !== view || currentRange.to - currentRange.from >= this.lastSelection.to - this.lastSelection.from || !(this.lastSelection.from <= currentRange.from && this.lastSelection.to >= currentRange.to)) {
       this.lastSelection = { view, ...currentRange, at: Date.now() };
@@ -12811,6 +13129,7 @@ ${MANAGED_CLOSE}
       if (!last || last.view !== view || from <= last.from && to >= last.to) {
         this.lastSelection = { view, from, to, at: Date.now() };
         window.clearTimeout(this.lastSelectionClearTimer);
+        window.clearTimeout(this.readingSelectionTimer);
       }
     } catch (e) {
     }
@@ -13064,6 +13383,40 @@ ${MANAGED_CLOSE}
     new OrphanPicker(this.app, orphans, (orphan) => {
       void apply(orphan);
     }).open();
+  }
+  async reanchorActiveSource() {
+    const view = this.app.workspace.getActiveViewOfType(import_obsidian13.MarkdownView);
+    if (!(view == null ? void 0 : view.file)) {
+      new import_obsidian13.Notice("Open a source note first.");
+      return;
+    }
+    await this.reanchorWork(view.file);
+  }
+  async reanchorWork(file) {
+    const target = await this.targetForPath(file.path);
+    if (!target) {
+      new import_obsidian13.Notice("This note is not part of an annotated source.");
+      return;
+    }
+    const work = await this.store.getWork(target.workKey);
+    if (!work) {
+      new import_obsidian13.Notice("No annotations for this source.");
+      return;
+    }
+    const units = await this.store.allUnits(target.workKey);
+    const before = units.reduce((sum, unit) => sum + unit.unit.annotations.filter((annotation) => annotation.anchorStatus === "orphaned").length, 0);
+    if (!before) {
+      new import_obsidian13.Notice("There are no unanchored annotations in this source.");
+      return;
+    }
+    for (const unit of units) {
+      if (!unit.unit.annotations.some((annotation) => annotation.anchorStatus === "orphaned"))
+        continue;
+      await this.verify(unit.entry.note);
+    }
+    const afterUnits = await this.store.allUnits(target.workKey);
+    const after = afterUnits.reduce((sum, unit) => sum + unit.unit.annotations.filter((annotation) => annotation.anchorStatus === "orphaned").length, 0);
+    new import_obsidian13.Notice(before === after ? `No orphaned annotations could be re-anchored automatically; ${after} remain.` : `Re-anchored ${before - after} annotation(s); ${after} remain unanchored.`);
   }
   annotationAtOffset(text, annotations, offset) {
     var _a;
@@ -17347,6 +17700,26 @@ var MidadArabicSourcesSettingTab = class extends import_obsidian14.PluginSetting
             name: "Annotation trash retention (days)",
             desc: "How long deleted annotations and their notes stay in the plugin trash before permanent removal.",
             control: { type: "number", key: "annotationTrashDays", defaultValue: 30, placeholder: "30", min: 1 }
+          },
+          {
+            name: "Annotation maintenance",
+            desc: "Open the annotation trash, re-anchor orphans in the active source, or open the Midad sidebar.",
+            render: (setting) => {
+              setting.addButton((button) => button.setButtonText("Open trash").onClick(() => {
+                if (this.plugin.annotations)
+                  new AnnotationTrashModal(this.app, this.plugin.annotations).open();
+                else
+                  new import_obsidian14.Notice("The annotation layer is not running.");
+              }));
+              setting.addButton((button) => button.setButtonText("Re-anchor active source").onClick(async () => {
+                var _a;
+                await ((_a = this.plugin.annotations) == null ? void 0 : _a.reanchorActiveSource());
+              }));
+              setting.addButton((button) => button.setButtonText("Open Midad sidebar").onClick(() => {
+                var _a;
+                void ((_a = this.plugin.annotations) == null ? void 0 : _a.openSidebar());
+              }));
+            }
           }
         ]
       },

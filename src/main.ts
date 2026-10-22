@@ -4417,6 +4417,24 @@ class MidadArabicSourcesSettingTab extends PluginSettingTab {
 						desc: "How long deleted annotations and their notes stay in the plugin trash before permanent removal.",
 						control: { type: "number", key: "annotationTrashDays", defaultValue: 30, placeholder: "30", min: 1 },
 					},
+					{
+						name: "Annotation maintenance",
+						desc: "Open the annotation trash, re-anchor orphans in the active source, or open the Midad sidebar.",
+						render: (setting: Setting) => {
+							setting.addButton((button) => button
+								.setButtonText("Open trash")
+								.onClick(() => {
+									if (this.plugin.annotations) new AnnotationTrashModal(this.app, this.plugin.annotations).open();
+									else new Notice("The annotation layer is not running.");
+								}));
+							setting.addButton((button) => button
+								.setButtonText("Re-anchor active source")
+								.onClick(async () => { await this.plugin.annotations?.reanchorActiveSource(); }));
+							setting.addButton((button) => button
+								.setButtonText("Open Midad sidebar")
+								.onClick(() => { void this.plugin.annotations?.openSidebar(); }));
+						},
+					},
 				],
 			},
 			{

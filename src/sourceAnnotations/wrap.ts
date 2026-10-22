@@ -94,7 +94,7 @@ export function unwrapAnnotations(root: HTMLElement): void {
 }
 
 /** Build a logical text string and a map back to the rendered text nodes. */
-function buildTextIndex(root: HTMLElement): TextIndex {
+function buildTextIndex(root: HTMLElement, skipAnnotations = true): TextIndex {
 	const nodes: IndexedTextNode[] = [];
 	let text = "";
 	const newline = () => {
@@ -111,7 +111,8 @@ function buildTextIndex(root: HTMLElement): TextIndex {
 		}
 		if (node.nodeType !== 1) return;
 		const el = node as HTMLElement;
-		if (el.matches(SKIP_SELECTOR)) return;
+		const skip = skipAnnotations ? SKIP_SELECTOR : SKIP_SELECTOR.replace(", .mas-annotation", "");
+		if (el.matches(skip)) return;
 		if (el.tagName === "BR") {
 			text += "\n";
 			return;
@@ -162,6 +163,50 @@ function makeSegment(
 		mark.appendChild(current);
 		current = mark;
 	}
+}
+
+/** Map a browser selection inside a Reading-view sizer to its visible text. */
+export function readingSelection(
+	root: HTMLElement,
+	range: Range
+): { start: number; end: number; text: string } | null {
+	if (!root.contains(range.startContainer) || !root.contains(range.endContainer)) return null;
+	const index = buildTextIndex(root, false);
+	const byNode = new Map<Text, IndexedTextNode>();
+	for (const node of index.nodes) byNode.set(node.node, node);
+	const firstText = (node: Node): Text | null => {
+		if (node.nodeType === Node.TEXT_NODE) return node as Text;
+		const walker = root.ownerDocument.createTreeWalker(node, NodeFilter.SHOW_TEXT);
+		return walker.nextNode() as Text | null;
+	};
+	const lastText = (node: Node): Text | null => {
+		if (node.nodeType === Node.TEXT_NODE) return node as Text;
+		const walker = root.ownerDocument.createTreeWalker(node, NodeFilter.SHOW_TEXT);
+		let last: Text | null = null;
+		let next = walker.nextNode();
+		while (next) {
+			last = next as Text;
+			next = walker.nextNode();
+		}
+		return last;
+	};
+	const locate = (container: Node, offset: number): number | null => {
+		if (container.nodeType === Node.TEXT_NODE) {
+			const entry = byNode.get(container as Text);
+			return entry ? entry.start + Math.min(offset, entry.end - entry.start) : null;
+		}
+		if (container.nodeType === Node.ELEMENT_NODE) {
+			const child = (container as Element).childNodes[offset] ?? (container as Element).childNodes[(container as Element).childNodes.length - 1];
+			const text = child ? firstText(child) : lastText(container);
+			const entry = text ? byNode.get(text) : null;
+			return entry ? entry.start : null;
+		}
+		return null;
+	};
+	const start = locate(range.startContainer, range.startOffset);
+	const end = locate(range.endContainer, range.endOffset);
+	if (start === null || end === null || end <= start) return null;
+	return { start, end, text: index.text.slice(start, end) };
 }
 
 function addMarginIcons(root: HTMLElement, dom: DomFactory, annotations: ResolvedAnnotation[]): void {
