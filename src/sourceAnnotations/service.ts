@@ -177,7 +177,7 @@ export class AnnotationService {
 		);
 		this.plugin.addRibbonIcon("midad", "Open Midad sidebar", () => { void this.openSidebar(); });
 		this.app.workspace.onLayoutReady(() => {
-			if (!this.disposed) void this.openSidebar();
+			this.autoOpenSidebar();
 		});
 		this.registerCommands();
 		this.registerEvents();
@@ -797,10 +797,10 @@ export class AnnotationService {
 		return `${from}:${to}`;
 	}
 
-	private anchorForEditor(editor: Editor): PopupAnchor | undefined {
+	private anchorForEditor(editor: Editor, offset?: number): PopupAnchor | undefined {
 		const cm = (editor as unknown as { cm?: EditorView }).cm;
 		if (!cm) return undefined;
-		const to = editor.posToOffset(editor.getCursor("to"));
+		const to = offset ?? editor.posToOffset(editor.getCursor("to"));
 		const coords = cm.coordsAtPos(to);
 		if (coords) return { left: coords.left, top: coords.top, bottom: coords.bottom };
 		const rect = cm.dom.getBoundingClientRect();
@@ -820,20 +820,26 @@ export class AnnotationService {
 			new Notice("Could not identify the source work. Re-render the source and try again.");
 			return;
 		}
-		const bounds = managedBounds(editor.getValue());
+		const value = editor.getValue();
+		const bounds = managedBounds(value) ??
+			(target.sourceStatus === "adopted" ? bodyBounds(value) : null);
+		let from = editor.getCursor("from");
+		let to = editor.getCursor("to");
+		let anchorOffset: number | undefined;
 		if (bounds) {
 			const expectedFrom = bounds.bodyStart + draft.position.start;
 			const expectedTo = bounds.bodyStart + draft.position.end;
-			if (
-				editor.posToOffset(editor.getCursor("from")) !== expectedFrom ||
-				editor.posToOffset(editor.getCursor("to")) !== expectedTo
-			) {
-				return;
-			}
+			let currentFrom = editor.posToOffset(from);
+			let currentTo = editor.posToOffset(to);
+			if (currentFrom > currentTo) [currentFrom, currentTo] = [currentTo, currentFrom];
+			while (currentFrom < currentTo && /\s/.test(value.charAt(currentFrom))) currentFrom++;
+			while (currentTo > currentFrom && /\s/.test(value.charAt(currentTo - 1))) currentTo--;
+			if (currentFrom !== expectedFrom || currentTo !== expectedTo) return;
+			from = editor.offsetToPos(expectedFrom);
+			to = editor.offsetToPos(expectedTo);
+			anchorOffset = expectedTo;
 		}
-		const from = editor.getCursor("from");
-		const to = editor.getCursor("to");
-		const anchor = this.anchorForEditor(editor);
+		const anchor = this.anchorForEditor(editor, anchorOffset);
 		const orphans = (await this.annotationsFor(target))
 			.filter((annotation) => annotation.anchorStatus === "orphaned");
 		this.cancelTooltipTimers();
@@ -859,20 +865,18 @@ export class AnnotationService {
 				this.dialogOpen = false;
 			},
 			onReanchor: orphans.length
-				? () => { this.reanchorFromSelection(editor, file); }
+				? () => { void this.reanchorOrphaned(file, draft); }
 				: undefined,
 			reanchorLabel: orphans.length === 1 ? "Re-anchor" : "Re-anchor…",
-			focusPopup: orphans.length === 0,
+			focusPopup: false,
 		}).open(anchor);
-	}
-
-	private reanchorFromSelection(editor: Editor, file: TFile): void {
-		const draft = this.draftFromEditor(editor, file);
-		if (!draft) {
-			new Notice("Select the replacement text first.");
-			return;
-		}
-		void this.reanchorOrphaned(file, draft);
+		// Recover from a popup that failed to attach or whose close callback was
+		// missed; otherwise every later selection would be treated as dialog-open.
+		window.setTimeout(() => {
+			if (this.dialogOpen && !document.querySelector(".mas-annotation-popup")) {
+				this.dialogOpen = false;
+			}
+		}, 1000);
 	}
 
 	private async createAnnotation(
@@ -1450,6 +1454,18 @@ export class AnnotationService {
 			};
 		}
 		return null;
+	}
+
+	/** Open on startup, but never while a modal such as Settings is in the way. */
+	private autoOpenSidebar(attempt = 0): void {
+		if (this.disposed) return;
+		if (this.anyModalOpen()) {
+			if (attempt < 40) {
+				window.setTimeout(() => this.autoOpenSidebar(attempt + 1), 500);
+			}
+			return;
+		}
+		void this.openSidebar();
 	}
 
 	async openSidebar(): Promise<void> {

@@ -104,6 +104,7 @@ export class AnnotationPopup {
 	private swatches: HTMLButtonElement[] = [];
 	private textarea: HTMLTextAreaElement | null = null;
 	private deleteButton: ButtonComponent | null = null;
+	private openedAt = 0;
 	private readonly doc: Document;
 	private readonly win: Window;
 	private outsideHandler: ((event: PointerEvent) => void) | null = null;
@@ -123,6 +124,7 @@ export class AnnotationPopup {
 		popup.setAttribute("role", "dialog");
 		popup.setAttribute("aria-label", this.options.draft.annotation ? "Edit annotation" : "Annotate selection");
 		this.popup = popup;
+		this.openedAt = Date.now();
 
 		const row = popup.createDiv({ cls: "mas-annotation-popup-row" });
 		const label = row.createEl("label", { cls: "mas-annotation-label", text: "Comment" });
@@ -217,11 +219,13 @@ export class AnnotationPopup {
 		this.app.keymap.pushScope(this.scope);
 
 		this.outsideHandler = (event: PointerEvent) => {
+			if (Date.now() - this.openedAt < 150) return;
 			if (!this.popup?.contains(event.target as Node)) this.close("outside");
 		};
 		this.doc.addEventListener("pointerdown", this.outsideHandler, true);
-		this.scrollHandler = (event: Event) => {
-			if (!this.popup?.contains(event.target as Node)) this.close("outside");
+		this.scrollHandler = () => {
+			// A live-preview link can re-render and emit a scroll immediately after
+			// selection; keep the popup until the user dismisses it explicitly.
 		};
 		this.win.addEventListener("scroll", this.scrollHandler, true);
 		this.resizeHandler = () => this.close("outside");
@@ -230,7 +234,7 @@ export class AnnotationPopup {
 		this.win.setTimeout(() => {
 			if (!this.popup) return;
 			this.position(anchor);
-			if (this.options.focusPopup !== false) this.selectedSwatch()?.focus();
+			if (this.options.focusPopup === true) this.selectedSwatch()?.focus();
 		}, 0);
 	}
 

@@ -9568,6 +9568,7 @@ var AnnotationPopup = class {
     this.swatches = [];
     this.textarea = null;
     this.deleteButton = null;
+    this.openedAt = 0;
     this.outsideHandler = null;
     this.scrollHandler = null;
     this.resizeHandler = null;
@@ -9584,6 +9585,7 @@ var AnnotationPopup = class {
     popup.setAttribute("role", "dialog");
     popup.setAttribute("aria-label", this.options.draft.annotation ? "Edit annotation" : "Annotate selection");
     this.popup = popup;
+    this.openedAt = Date.now();
     const row = popup.createDiv({ cls: "mas-annotation-popup-row" });
     const label = row.createEl("label", { cls: "mas-annotation-label", text: "Comment" });
     label.setAttribute("for", "mas-annotation-comment");
@@ -9667,14 +9669,13 @@ var AnnotationPopup = class {
     this.app.keymap.pushScope(this.scope);
     this.outsideHandler = (event) => {
       var _a2;
+      if (Date.now() - this.openedAt < 150)
+        return;
       if (!((_a2 = this.popup) == null ? void 0 : _a2.contains(event.target)))
         this.close("outside");
     };
     this.doc.addEventListener("pointerdown", this.outsideHandler, true);
-    this.scrollHandler = (event) => {
-      var _a2;
-      if (!((_a2 = this.popup) == null ? void 0 : _a2.contains(event.target)))
-        this.close("outside");
+    this.scrollHandler = () => {
     };
     this.win.addEventListener("scroll", this.scrollHandler, true);
     this.resizeHandler = () => this.close("outside");
@@ -9684,7 +9685,7 @@ var AnnotationPopup = class {
       if (!this.popup)
         return;
       this.position(anchor);
-      if (this.options.focusPopup !== false)
+      if (this.options.focusPopup === true)
         (_a2 = this.selectedSwatch()) == null ? void 0 : _a2.focus();
     }, 0);
   }
@@ -12016,8 +12017,7 @@ var AnnotationService = class {
       void this.openSidebar();
     });
     this.app.workspace.onLayoutReady(() => {
-      if (!this.disposed)
-        void this.openSidebar();
+      this.autoOpenSidebar();
     });
     this.registerCommands();
     this.registerEvents();
@@ -12652,11 +12652,11 @@ ${MANAGED_CLOSE}
     const to = editor.posToOffset(editor.getCursor("to"));
     return `${from}:${to}`;
   }
-  anchorForEditor(editor) {
+  anchorForEditor(editor, offset) {
     const cm = editor.cm;
     if (!cm)
       return void 0;
-    const to = editor.posToOffset(editor.getCursor("to"));
+    const to = offset != null ? offset : editor.posToOffset(editor.getCursor("to"));
     const coords = cm.coordsAtPos(to);
     if (coords)
       return { left: coords.left, top: coords.top, bottom: coords.bottom };
@@ -12664,6 +12664,7 @@ ${MANAGED_CLOSE}
     return { left: rect.left + 20, top: rect.top + 20, bottom: rect.top + 40 };
   }
   async openAnnotate(editor, file, autoSignature) {
+    var _a;
     if (!file)
       return;
     const draft = this.draftFromEditor(editor, file);
@@ -12677,17 +12678,29 @@ ${MANAGED_CLOSE}
       new import_obsidian13.Notice("Could not identify the source work. Re-render the source and try again.");
       return;
     }
-    const bounds = managedBounds(editor.getValue());
+    const value = editor.getValue();
+    const bounds = (_a = managedBounds(value)) != null ? _a : target.sourceStatus === "adopted" ? bodyBounds(value) : null;
+    let from = editor.getCursor("from");
+    let to = editor.getCursor("to");
+    let anchorOffset;
     if (bounds) {
       const expectedFrom = bounds.bodyStart + draft.position.start;
       const expectedTo = bounds.bodyStart + draft.position.end;
-      if (editor.posToOffset(editor.getCursor("from")) !== expectedFrom || editor.posToOffset(editor.getCursor("to")) !== expectedTo) {
+      let currentFrom = editor.posToOffset(from);
+      let currentTo = editor.posToOffset(to);
+      if (currentFrom > currentTo)
+        [currentFrom, currentTo] = [currentTo, currentFrom];
+      while (currentFrom < currentTo && /\s/.test(value.charAt(currentFrom)))
+        currentFrom++;
+      while (currentTo > currentFrom && /\s/.test(value.charAt(currentTo - 1)))
+        currentTo--;
+      if (currentFrom !== expectedFrom || currentTo !== expectedTo)
         return;
-      }
+      from = editor.offsetToPos(expectedFrom);
+      to = editor.offsetToPos(expectedTo);
+      anchorOffset = expectedTo;
     }
-    const from = editor.getCursor("from");
-    const to = editor.getCursor("to");
-    const anchor = this.anchorForEditor(editor);
+    const anchor = this.anchorForEditor(editor, anchorOffset);
     const orphans = (await this.annotationsFor(target)).filter((annotation) => annotation.anchorStatus === "orphaned");
     this.cancelTooltipTimers();
     this.tooltip.hide();
@@ -12712,19 +12725,16 @@ ${MANAGED_CLOSE}
         this.dialogOpen = false;
       },
       onReanchor: orphans.length ? () => {
-        this.reanchorFromSelection(editor, file);
+        void this.reanchorOrphaned(file, draft);
       } : void 0,
       reanchorLabel: orphans.length === 1 ? "Re-anchor" : "Re-anchor\u2026",
-      focusPopup: orphans.length === 0
+      focusPopup: false
     }).open(anchor);
-  }
-  reanchorFromSelection(editor, file) {
-    const draft = this.draftFromEditor(editor, file);
-    if (!draft) {
-      new import_obsidian13.Notice("Select the replacement text first.");
-      return;
-    }
-    void this.reanchorOrphaned(file, draft);
+    window.setTimeout(() => {
+      if (this.dialogOpen && !document.querySelector(".mas-annotation-popup")) {
+        this.dialogOpen = false;
+      }
+    }, 1e3);
   }
   async createAnnotation(target, draft, color, comment) {
     const annotations = await this.annotationsFor(target);
@@ -13272,6 +13282,17 @@ ${MANAGED_CLOSE}
       };
     }
     return null;
+  }
+  autoOpenSidebar(attempt = 0) {
+    if (this.disposed)
+      return;
+    if (this.anyModalOpen()) {
+      if (attempt < 40) {
+        window.setTimeout(() => this.autoOpenSidebar(attempt + 1), 500);
+      }
+      return;
+    }
+    void this.openSidebar();
   }
   async openSidebar() {
     var _a;
