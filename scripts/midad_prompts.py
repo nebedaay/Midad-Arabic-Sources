@@ -46,10 +46,11 @@ TRANSCRIPTION_BASE_PROMPT = (
     "- On a cover or title page, render the title as '# Title', the subtitle or author as '## ...', and the remaining cover text as plain paragraphs.\n\n"
 
     "POETRY\n"
-    "- Treat consecutive poetry lines as one block, with NO blank lines between them.\n"
-    "- Format each couplet on one line exactly as '* hemistich 1%%hemistich 2' (leading asterisk and space, the two hemistiches joined by '%%').\n"
-    "- A line with a single hemistich: '* hemistich'.\n"
-    "- The leading '* ' and the '%%' marker are used ONLY for poetry, never for italics or list bullets.\n\n"
+    "- Treat consecutive verse lines as one poetry block, with NO blank lines between couplets.\n"
+    "- Begin every couplet with the marker '§§§ ' (three section signs and a space), and separate its two hemistiches with '%%': '§§§ hemistich 1%%hemistich 2'.\n"
+    "- A line with a single hemistich: '§§§ hemistich'.\n"
+    "- The '§§§' marker and the '%%' separator are transcription signals only. Never use them for prose, italics, or list bullets, and never attach the marker to the first word.\n"
+    "- Do not use '*' to mark poetry. Asterisks are only for Qur'an quotes and ordinary italics.\n\n"
 
     "FOOTNOTES\n"
     "- Put footnotes at the end of the page body, after a line containing only '***'.\n"
@@ -79,7 +80,7 @@ TRANSLATION_BASE_PROMPT = (
 
     "INTERPOLATIONS: use (parentheses), never [square brackets].\n\n"
 
-    "ITALICS: use *asterisks*, never underscores. QUOTES: use curly single and double quotes/apostrophes, never straight quotes."
+    "ITALICS: use *asterisks* attached to words, never underscores. QUOTES: use curly single and double quotes/apostrophes, never straight quotes."
 )
 
 DEFAULT_TRANSCRIPTION_PROMPT = (
@@ -111,10 +112,10 @@ DEFAULT_TRANSLATION_PROMPT = (
 
 STANDALONE_METADATA_PROMPT = (
     "TITLE PAGE METADATA (standalone scanned book)\n"
-    "If the PDF has a title page or cover, start the reply with two plain lines before the first page heading:\n"
+    "If the PDF looks like a title page or cover, start the reply with two plain lines before the first page heading:\n"
     "TITLE: the book's title as printed\n"
     "AUTHOR: the book's author as printed\n"
-    "Use the source's own language and script. Do not invent or romanize these values. "
+    "Use the source's own language and script. Do not invent, guess, or romanize these values. "
     "If one is not clearly visible, omit that line. Do not use YAML, bold, or quotation marks around them, and do not repeat them."
 )
 

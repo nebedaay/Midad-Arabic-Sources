@@ -27,7 +27,7 @@ PAGES_PER_BATCH = 2
 # Single source of truth for the model. The Gemini Batch API runs the model
 # given to batches.create(); the per-request "model" field is ignored, so both
 # are set from here.
-MODEL = "models/gemini-3.5-flash-lite"
+MODEL = "models/gemini-2.5-flash"
 
 # ornate brackets used for Qur'an quotes: U+FD3E open, U+FD3F close
 _QO = "\uFD3E"

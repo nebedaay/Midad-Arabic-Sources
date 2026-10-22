@@ -14,32 +14,52 @@ SCRIPTS = Path(__file__).resolve().parent
 
 # Metadata lines the standalone-PDF prompt asks Gemini to put above the first
 # page. They are not part of the transcription, so remove them before
-# formatting and hand them to the pipeline as a sidecar.
-META_LINE = re.compile(
-    r'^\s*(?:[-*]\s*)?(?:\*\*)?(TITLE|AUTHOR)(?:\*\*)?\s*:\s*(?:\*\*)?\s*(.+?)\s*$',
+# formatting and hand them to the pipeline as a sidecar. Gemini often repeats
+# them on later pages, sometimes with TITLE and AUTHOR on the same line, so the
+# removal is global rather than limited to the title page.
+META_PAIR = re.compile(
+    r'^\s*(?:\*\*)?TITLE(?:\*\*)?\s*:\s*(?:\*\*)?\s*(.*?)\s+'
+    r'(?:\*\*)?AUTHOR(?:\*\*)?\s*:\s*(?:\*\*)?\s*(.*?)\s*$',
+    re.I,
+)
+META_SINGLE = re.compile(
+    r'^\s*(?:\*\*)?(TITLE|AUTHOR)(?:\*\*)?\s*:\s*(?:\*\*)?\s*(.*?)\s*$',
     re.I,
 )
 
 
-def extract_metadata(body: str) -> tuple[str, dict[str, str]]:
-    """Pull TITLE:/AUTHOR: lines out of the top of the transcription.
+def _clean_meta(value: str) -> str:
+    return value.strip().strip('"').strip("'").strip("*").strip()
 
-    Only the first 60 lines are considered, so a discussion of an "author:"
-    field deep in the book is left alone.
+
+def extract_metadata(body: str) -> tuple[str, dict[str, str]]:
+    """Remove TITLE:/AUTHOR: lines anywhere and keep the first values.
+
+    Gemini sometimes puts the markers on every page, and sometimes puts
+    TITLE and AUTHOR on one line because there is no blank line between them.
+    Both forms are removed; only the first title and author are kept.
     """
     meta: dict[str, str] = {}
-    lines = body.splitlines()
     keep: list[str] = []
     removed = False
-    for i, line in enumerate(lines):
-        m = META_LINE.match(line) if i < 60 else None
-        if m:
-            key = m.group(1).lower()
-            value = m.group(2).strip().strip('"').strip("'").strip("*").strip()
+    for line in body.splitlines():
+        pair = META_PAIR.match(line)
+        single = None if pair else META_SINGLE.match(line)
+        if pair:
+            title, author = _clean_meta(pair.group(1)), _clean_meta(pair.group(2))
+            if title and "title" not in meta:
+                meta["title"] = title
+            if author and "author" not in meta:
+                meta["author"] = author
+            removed = True
+            continue
+        if single:
+            key = single.group(1).lower()
+            value = _clean_meta(single.group(2))
             if value and key not in meta:
                 meta[key] = value
-                removed = True
-                continue
+            removed = True
+            continue
         keep.append(line)
     if not removed:
         return body, {}

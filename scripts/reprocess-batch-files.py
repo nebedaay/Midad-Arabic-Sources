@@ -124,7 +124,16 @@ def main():
 
         mv = load("transcription-translation-move-to-vault.py")
         tbp = load("translate-batch-process.py")
-        citekey, volume = tbp.citekey_and_volume(stem)
+        # The batch stem is the PDF filename, which need not match the
+        # citekey. The archive's own name carries the citekey (and volume), so
+        # prefer it when it follows the archive naming pattern; a loose or
+        # renamed batch file uses its stem.
+        archive_stem = stem
+        if src.suffix.lower() == ".zip" and re.search(
+            r'\s+-\s+(?:transcription|translation)\b', src.stem, re.I
+        ):
+            archive_stem = src.stem
+        citekey, volume = tbp.citekey_and_volume(archive_stem)
 
         if doc_type == "translation":
             jsonl = base / f"{stem}.translate-output.jsonl"
@@ -166,22 +175,26 @@ def main():
                     end = body.find("---", 3)
                     if end > 0:
                         body = body[end + 3:].strip()
-                # A standalone PDF has no literature note. Preserve its
-                # title/author from the fresh sidecar or the existing note,
-                # and do not add a [[@citekey]] up link.
+                # A standalone PDF has no literature note. Preserve the
+                # existing note's verified title/author, fill any gap from the
+                # fresh sidecar, and do not add a [[@citekey]] up link.
                 title, authors = (None, None)
                 if standalone:
                     title, authors = existing_metadata(mv, citekey, "transcription", volume)
-                    meta_path = processed.with_suffix(processed.suffix + ".meta.json")
-                    if meta_path.exists():
-                        try:
-                            meta = json.loads(meta_path.read_text(encoding="utf-8"))
-                            title = meta.get("title") or title
-                            author = meta.get("author")
-                            if author:
-                                authors = [a.strip() for a in author.split(";") if a.strip()]
-                        except Exception:
-                            pass
+                    # The existing note is authoritative: the user may have
+                    # verified/edited its romanized title and author. Use the
+                    # fresh sidecar only to fill a missing value.
+                    if not title or not authors:
+                        meta_path = processed.with_suffix(processed.suffix + ".meta.json")
+                        if meta_path.exists():
+                            try:
+                                meta = json.loads(meta_path.read_text(encoding="utf-8"))
+                                title = title or meta.get("title") or None
+                                author = meta.get("author")
+                                if not authors and author:
+                                    authors = [a.strip() for a in author.split(";") if a.strip()]
+                            except Exception:
+                                pass
                 dest = mv.write_note(body, citekey, "transcription", volume=volume,
                                      standalone=standalone, title=title, authors=authors)
 

@@ -123,7 +123,7 @@ def build_jsonl(uploaded: list, jsonl_path: Path, system_prompt: str = SYSTEM_PR
             payload = {
                 "key": item["local_name"],
                 "request": {
-                    "model": "models/gemini-3.5-flash-lite",
+                    "model": "models/gemini-2.5-flash",
                     "system_instruction": {"parts": [{"text": system_prompt}]},
                     "contents": [{
                         "role": "user",
@@ -154,7 +154,7 @@ def submit_batch(jsonl_path: Path, client: genai.Client, pdf_stem: str) -> str:
     )
     
     batch = client.batches.create(
-        model="models/gemini-3.5-flash-lite",
+        model="models/gemini-2.5-flash",
         src=config_upload.name,
         config=types.CreateBatchJobConfig(display_name=f"{safe_stem}_batch")
     )

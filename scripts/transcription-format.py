@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Unified post-processing script for Gemini 3.1 Flash Lite Batch OCR output.
+Unified post-processing script for Gemini Batch OCR output.
 Applies all formatting fixes in one pass for any volume of Fi riyad al-tafsir.
 
 Usage: python3 scripts/postprocess-gemini-batch.py <input.md>
@@ -9,7 +9,7 @@ Output: <input>.formatted.md with timestamp
 Fixes applied:
 1. Quran formatting: *﴿...﴾{.quran-quote}* with proper placement
 2. Footnotes: *** divider → >[!arabic-footnotes] callouts  
-3. Poetry: %% hemistich delimiter → >[!arabic-poetry] callouts with sublists
+3. Poetry: '§§§' / legacy '*' markers and '%%' hemistich separators → >[!arabic-poetry] callouts with sublists
 4. Sura name normalization to match vault file names
 5. TOC: - text [[####p. N|N]] → >[!TOC] with proper entries
 6. Spacing: exactly one blank line between all block elements
@@ -27,6 +27,35 @@ from datetime import datetime
 LQ = '\uFD3F'
 LQE = '\uFD3E'
 NBSP = '\u202f'
+
+# The line marker for poetry. A rare, non-Markdown character avoids the
+# ambiguity between a leading '*' and italics.
+POETRY_MARK_RE = re.compile(r'^(?:§{2,}|\${3,})\s*')
+ARABIC_RE = re.compile(r'[\u0600-\u06FF]')
+
+
+def is_poetry_line(line: str) -> bool:
+    """True for a line Gemini marked as poetry, including malformed markers.
+
+    Accepts the current '§§§' marker, the legacy '* h1%%h2' form, a line with
+    a '%%' hemistich separator, and the common failure where Gemini attaches
+    the asterisk directly to the first Arabic word. A closed '*italic*' span is
+    left as prose; a Qur'an quote is never poetry.
+    """
+    s = line.strip()
+    if not s:
+        return False
+    if "%%" in s or POETRY_MARK_RE.match(s):
+        return True
+    if s.startswith("*") and not s.startswith("**"):
+        if LQ in s or LQE in s:
+            return False
+        if s.startswith("* ") and " * " in s[2:]:
+            return True
+        if s.count("*") >= 2:
+            return False
+        return bool(ARABIC_RE.search(s))
+    return False
 
 # Page-block markers added by transcription-process-raw.py (NBSP distinguishes
 # the pipeline's PDF-index heading from the model's printed-page heading).
@@ -327,8 +356,10 @@ def process(input_path):
     i = 0
     while i < len(lines):
         s = lines[i].strip()
-        # Skip empty lines, headings, callout lines, poetry markers
-        if not s or s.startswith('#') or s.startswith('>') or s.startswith('*') or s == '---':
+        # Skip empty lines, headings, callout lines, and poetry markers. A
+        # '%%' line has no leading marker in some Gemini output; do not join
+        # it into the surrounding prose before the poetry pass sees it.
+        if not s or s.startswith('#') or s.startswith('>') or s.startswith('*') or s == '---' or is_poetry_line(s):
             out.append(lines[i]); i += 1; continue
         
         # Collect consecutive prose lines (single \n between them)
@@ -336,7 +367,7 @@ def process(input_path):
         j = i + 1
         while j < len(lines):
             ns = lines[j].strip()
-            if not ns or ns.startswith('#') or ns.startswith('>') or ns.startswith('*') or ns == '---':
+            if not ns or ns.startswith('#') or ns.startswith('>') or ns.startswith('*') or ns == '---' or is_poetry_line(ns):
                 break
             if j > i + 1 and lines[j-1].strip() == '':
                 break  # blank line between → new paragraph
@@ -407,40 +438,45 @@ def process(input_path):
     
     for i, line in enumerate(lines):
         s = line.strip()
-        is_poetry = '%%' in s 
-        
-        # Bare * line: * hemistich (single, no %%)
-        if not is_poetry and s.startswith('* ') and 5 < len(s) < 250:
-            is_poetry = True
-        
-        # * text * text: hemistichs separated by * (space before and after)
-        if not is_poetry and s.startswith('* ') and ' * ' in s[2:] and len(s) < 250:
-            is_poetry = True
-            inner = s[2:]  # strip '* '
+        is_poetry = is_poetry_line(s)
+
+        # Legacy '* text * text' form: two hemistiches separated by a bare
+        # asterisk. Convert it to the canonical '%%' form before parsing.
+        if s.startswith('* ') and ' * ' in s[2:] and len(s) < 250:
+            inner = s[2:]
             parts = inner.rsplit(' * ', 1)
             if len(parts) == 2 and len(parts[0].strip()) > 3 and len(parts[1].strip()) > 3:
-                s = f"* {parts[0].strip()}%%{parts[1].strip()}"
+                s = f"§§§ {parts[0].strip()}%%{parts[1].strip()}"
+                is_poetry = True
+
         if is_poetry:
+            # Remove the line marker, then any legacy '*' or '-' marker.
+            inner = POETRY_MARK_RE.sub('', s).strip()
+            inner = re.sub(r'^[\*\-]\s*', '', inner).strip()
+            parts = [
+                p.strip().strip('*').strip()
+                for p in inner.split('%%')
+                if p.strip().strip('*').strip()
+            ]
+            if not parts:
+                continue
             if not in_poetry:
                 out.append('>[!arabic-poetry]')
                 in_poetry = True
-            # Strip leading * or -, then split on %%
-            inner = re.sub(r'^[\*\-]\s*', '', s).strip()
-            if '%%' in inner:
-                h1, h2 = inner.split('%%', 1)
+            # A line may carry more than one couplet when Gemini ignored the
+            # no-line-breaks instruction. Pair the hemistiches in order.
+            for k in range(0, len(parts), 2):
                 out.append('>-')
-                out.append(f'>\t- {h1.strip().strip("*").strip()}')
-                out.append(f'>\t- {h2.strip().strip("*").strip()}')
-            else:
-                # Single hemistich
-                out.append(f'>- {inner.strip("*").strip()}')
+                out.append(f'>\t- {parts[k]}')
+                if k + 1 < len(parts):
+                    out.append(f'>\t- {parts[k + 1]}')
             continue
         
         if in_poetry:
             if s == '':
                 j = i + 1
                 while j < len(lines) and lines[j].strip() == '': j += 1
-                if j < len(lines) and '%%' in lines[j]:
+                if j < len(lines) and is_poetry_line(lines[j]):
                     continue
             in_poetry = False
             out.append(line)

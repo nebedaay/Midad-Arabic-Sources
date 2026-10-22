@@ -7,7 +7,7 @@
 For each PDF the pipeline:
 
 1. **Bursts** the PDF into one PDF per page.
-2. **Submits** a Gemini batch job over the pages (batch mode is cheaper and handles a whole book at once).
+2. **Submits** a Gemini 2.5 Flash batch job over the pages (batch mode is cheaper and handles a whole book at once).
 3. **Collects** the raw OCR output and re-OCRs any page the model flagged as a hallucination.
 4. **Post-processes** locally.
 
@@ -28,7 +28,7 @@ When the note is written, a second dialog shows the guessed title and author for
 Local scripts run after OCR and never call Gemini:
 
 - **Qurʾān quotes** — `﴿ … ﴾` spans are detected and rendered as the vault’s `quran-quote` callout, with tashkīl reconciled against the canonical Qurʾān notes.
-- **Poetry** — verse is wrapped in the `>[!arabic-poetry]` callout, one hemistich per `>- ` line.
+- **Poetry** — verse is wrapped in the `>[!arabic-poetry]` callout, one hemistich per `>- ` line. The OCR prompt asks for a `§§§` line marker and `%%` between hemistiches; post-processing also accepts the older `*` forms, including a marker stuck to the first word, and splits multiple couplets that were returned on one line.
 - **Footnotes** — the source’s footnote markers and bodies are reconstructed as markdown footnotes.
 - **Tashkīl** — the transcription’s vocalization is normalised (for example the waṣla alif and dagger alif), matching the transliteration engine’s conventions.
 
