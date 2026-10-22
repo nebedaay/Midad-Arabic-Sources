@@ -41,6 +41,9 @@ import {
 	markdownToText,
 	occurrencesBefore,
 	sectionAt,
+	expandLinkListSelection,
+	selectionExclusion,
+	type SelectionExclusion,
 } from "./text";
 import { MANAGED_CLOSE, MANAGED_OPEN, joinNote, splitNote } from "../sourceImport/merge";
 import type {
@@ -115,6 +118,7 @@ export class AnnotationService {
 	private suppressAutoSignature = "";
 	private dialogOpen = false;
 	private disposed = false;
+	private lastDraftIssue: SelectionExclusion = null;
 	private lastSidebarPath = "";
 
 	constructor(host: AnnotationHost) {
@@ -817,27 +821,8 @@ export class AnnotationService {
 		return { from: current.from, to: current.to };
 	}
 
-	/**
-	 * Selecting a rendered wikilink can give CM6 only a fragment of the link's
-	 * source. If the touched lines are a list of links, use complete lines so the
-	 * annotation includes the whole chapter list rather than half a link.
-	 */
-	private expandLinkListLines(value: string, from: number, to: number): { from: number; to: number } {
-		const lineStart = (offset: number): number => value.lastIndexOf("\n", Math.max(0, offset - 1)) + 1;
-		const lineEnd = (offset: number): number => {
-			const nl = value.indexOf("\n", offset);
-			return nl === -1 ? value.length : nl;
-		};
-		const start = lineStart(from);
-		const end = lineEnd(to);
-		const lines = value.slice(start, end).split("\n");
-		if (!lines.length || !lines.every((line) => !line.trim() || /^\s*[-*+]\s+\[\[/.test(line))) {
-			return { from, to };
-		}
-		return { from: start, to: end };
-	}
-
 	private draftFromEditor(editor: Editor, file: TFile | null, range?: { from: number; to: number }): AnnotationDraft | null {
+		this.lastDraftIssue = null;
 		if (!file) return null;
 		const cache = this.app.metadataCache.getFileCache(file);
 		const frontmatter = cache?.frontmatter as Record<string, unknown> | undefined;
@@ -849,7 +834,7 @@ export class AnnotationService {
 		let from = range?.from ?? editor.posToOffset(editor.getCursor("from"));
 		let to = range?.to ?? editor.posToOffset(editor.getCursor("to"));
 		if (from > to) [from, to] = [to, from];
-		const expanded = this.expandLinkListLines(value, from, to);
+		const expanded = expandLinkListSelection(value, from, to);
 		from = expanded.from;
 		to = expanded.to;
 		if (from < bounds.contentStart || to > bounds.contentEnd) return null;
@@ -857,6 +842,11 @@ export class AnnotationService {
 		while (to > from && /\s/.test(value.charAt(to - 1))) to--;
 		if (from >= to) return null;
 		if (crossesHeading(value, from, to)) return null;
+		const exclusion = selectionExclusion(value, from, to);
+		if (exclusion) {
+			this.lastDraftIssue = exclusion;
+			return null;
+		}
 		const raw = value.slice(from, to);
 		const quoteText = markdownToText(raw);
 		if (!quoteText.trim()) return null;
@@ -906,7 +896,16 @@ export class AnnotationService {
 		if (!file) return;
 		const draft = this.draftFromEditor(editor, file, range);
 		if (!draft) {
-			new Notice("Select text inside a source note’s managed region.");
+			if (!autoSignature && this.lastDraftIssue) {
+				const label = this.lastDraftIssue === "fenced-code"
+					? "a code block"
+					: this.lastDraftIssue === "inline-code"
+						? "inline code"
+						: "a table";
+				new Notice(`Annotations cannot cover ${label}.`);
+			} else {
+				new Notice("Select text inside a source note’s managed region.");
+			}
 			return;
 		}
 		const target = await this.targetForPath(file.path);

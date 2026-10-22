@@ -16,7 +16,8 @@
     "lint:fix": "eslint ./src --fix",
     "bump": "node version-bump.mjs && git add manifest.json versions.json package.json package-lock.json",
     "rlnotes": "node release-notes.mjs && git add release-notes.md",
-    "release": "version=$(node -p \"require('./manifest.json').version\") && git commit -m \"$version\" && git tag \"$version\" && git push && git push --tags"
+    "release": "version=$(node -p \"require('./manifest.json').version\") && git commit -m \"$version\" && git tag \"$version\" && git push && git push --tags",
+    "test:annotations": "node scripts/test-annotations.mjs"
   },
   "author": "Joseph Hill <jbhill@ualberta.ca>",
   "license": "GPL-3.0-or-later",

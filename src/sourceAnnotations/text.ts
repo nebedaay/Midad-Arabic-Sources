@@ -145,3 +145,138 @@ export function noteHeadingLink(notePath: string, heading: string, label?: strin
 	const display = label || heading;
 	return `[[${target}#${heading}|${display}]]`;
 }
+
+export type SelectionExclusion = "fenced-code" | "inline-code" | "table" | null;
+
+interface LineSpan {
+	start: number;
+	end: number;
+}
+
+function noteLines(text: string): LineSpan[] {
+	const out: LineSpan[] = [];
+	let start = 0;
+	for (let i = 0; i <= text.length; i++) {
+		if (i === text.length || text.charAt(i) === "\n") {
+			out.push({ start, end: i });
+			start = i + 1;
+		}
+	}
+	return out;
+}
+
+function intersects(aStart: number, aEnd: number, bStart: number, bEnd: number): boolean {
+	return aStart < bEnd && aEnd > bStart;
+}
+
+function fencedCodeRanges(text: string, lines: LineSpan[]): Array<[number, number]> {
+	const ranges: Array<[number, number]> = [];
+	for (let i = 0; i < lines.length; i++) {
+		const line = text.slice(lines[i].start, lines[i].end);
+		const open = /^ {0,3}(`{3,}|~{3,})/.exec(line);
+		if (!open) continue;
+		const start = lines[i].start;
+		const marker = open[1];
+		const close = new RegExp(`^ {0,3}${marker[0] === "`" ? "`" : "~"}{${marker.length},}[ \\t]*$`);
+		let end = text.length;
+		let closed = false;
+		for (let j = i + 1; j < lines.length; j++) {
+			if (close.test(text.slice(lines[j].start, lines[j].end))) {
+				end = lines[j].end;
+				i = j;
+				closed = true;
+				break;
+			}
+		}
+		if (!closed) i = lines.length;
+		ranges.push([start, end]);
+	}
+	return ranges;
+}
+
+/** C0/CommonMark-ish inline code spans, ignoring fenced blocks. */
+function inlineCodeRanges(text: string, fenced: Array<[number, number]>): Array<[number, number]> {
+	const ranges: Array<[number, number]> = [];
+	const inFence = (offset: number): boolean => fenced.some(([start, end]) => offset >= start && offset < end);
+	for (let i = 0; i < text.length; i++) {
+		if (text.charAt(i) !== "`" || inFence(i)) continue;
+		let run = 1;
+		while (text.charAt(i + run) === "`") run++;
+		let close = -1;
+		for (let j = i + run; j < text.length; j++) {
+			if (text.charAt(j) !== "`" || inFence(j)) continue;
+			let length = 1;
+			while (text.charAt(j + length) === "`") length++;
+			if (length === run) {
+				close = j;
+				break;
+			}
+			j += length - 1;
+		}
+		if (close === -1) {
+			i += run - 1;
+			continue;
+		}
+		ranges.push([i, close + run]);
+		i = close + run - 1;
+	}
+	return ranges;
+}
+
+const TABLE_DELIMITER = /^ {0,3}\|?[ \t]*:?-{3,}:?[ \t]*(?:\|[ \t]*:?-{3,}:?[ \t]*)+\|?[ \t]*$/;
+
+function tableRanges(text: string, lines: LineSpan[], fenced: Array<[number, number]>): Array<[number, number]> {
+	const ranges: Array<[number, number]> = [];
+	const inFence = (offset: number): boolean => fenced.some(([start, end]) => offset >= start && offset < end);
+	for (let i = 0; i + 1 < lines.length; i++) {
+		if (inFence(lines[i].start)) continue;
+		const header = text.slice(lines[i].start, lines[i].end);
+		const delimiter = text.slice(lines[i + 1].start, lines[i + 1].end);
+		if (!header.includes("|") || !TABLE_DELIMITER.test(delimiter)) continue;
+		let last = i + 1;
+		while (last + 1 < lines.length && !inFence(lines[last + 1].start) &&
+			text.slice(lines[last + 1].start, lines[last + 1].end).includes("|")) {
+			last++;
+		}
+		ranges.push([lines[i].start, lines[last].end]);
+		i = last;
+	}
+	return ranges;
+}
+
+/**
+ * The annotation v1 exclusions: fenced code, inline code, and Markdown tables.
+ * Returns the first exclusion intersecting the range, or null.
+ */
+export function selectionExclusion(text: string, start: number, end: number): SelectionExclusion {
+	if (end <= start) return null;
+	const lines = noteLines(text);
+	const fenced = fencedCodeRanges(text, lines);
+	if (fenced.some(([a, b]) => intersects(start, end, a, b))) return "fenced-code";
+	if (tableRanges(text, lines, fenced).some(([a, b]) => intersects(start, end, a, b))) return "table";
+	if (inlineCodeRanges(text, fenced).some(([a, b]) => intersects(start, end, a, b))) return "inline-code";
+	return null;
+}
+
+/**
+ * Selecting rendered wikilinks can expose only a fragment of their source. When
+ * the touched lines are a list of links, expand to complete lines.
+ */
+export function expandLinkListSelection(
+	text: string,
+	from: number,
+	to: number
+): { from: number; to: number } {
+	const lineStart = (offset: number): number => text.lastIndexOf("\n", Math.max(0, offset - 1)) + 1;
+	const lineEnd = (offset: number): number => {
+		const nl = text.indexOf("\n", offset);
+		return nl === -1 ? text.length : nl;
+	};
+	const start = lineStart(from);
+	const end = lineEnd(to);
+	const lines = text.slice(start, end).split("\n");
+	if (!lines.length || !lines.every((line) => !line.trim() || /^\s*[-*+]\s+\[\[/.test(line))) {
+		return { from, to };
+	}
+	return { from: start, to: end };
+}
