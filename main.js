@@ -18156,13 +18156,15 @@ var MidadArabicSourcesSettingTab = class extends import_obsidian14.PluginSetting
       text.inputEl.type = "password";
       text.inputEl.setCssStyles({ width: "100%" });
     });
-    new import_obsidian14.Setting(card).setName("Base URL").setDesc("The endpoint for an OpenAI-compatible provider; leave blank to use its environment default.").addText((text) => {
-      text.setValue(config.baseUrl).onChange(async (value) => {
-        config.baseUrl = value.trim();
-        await this.plugin.saveSettings();
+    if (config.provider === "openai") {
+      new import_obsidian14.Setting(card).setName("Base URL").setDesc("The endpoint for an OpenAI-compatible provider; leave blank to use its environment default.").addText((text) => {
+        text.setValue(config.baseUrl).onChange(async (value) => {
+          config.baseUrl = value.trim();
+          await this.plugin.saveSettings();
+        });
+        text.inputEl.setCssStyles({ width: "100%" });
       });
-      text.inputEl.setCssStyles({ width: "100%" });
-    });
+    }
     new import_obsidian14.Setting(card).addButton((button) => button.setButtonText("Delete configuration").setDisabled(configs.length <= 1).onClick(async () => {
       this.plugin.settings.llmConfigs = configs.filter((c) => c.id !== config.id);
       await this.plugin.saveSettings();
@@ -18172,13 +18174,15 @@ var MidadArabicSourcesSettingTab = class extends import_obsidian14.PluginSetting
   }
   renderLlmConfigs(setting) {
     var _a;
-    setting.settingEl.addClass("mas-llm-configs-setting");
-    setting.addButton((button) => button.setButtonText("Add LLM configuration").setCta().onClick(() => {
+    setting.settingEl.querySelectorAll(":scope > .mas-llm-configs-dynamic").forEach((el) => el.remove());
+    const dynamic = setting.settingEl.createDiv({ cls: "mas-llm-configs-dynamic" });
+    const actions = dynamic.createDiv({ cls: "mas-llm-config-actions" });
+    new import_obsidian14.ButtonComponent(actions).setButtonText("Add LLM configuration").setCta().onClick(() => {
       this.addLlmConfig();
       this.update();
-    }));
+    });
     const configs = (_a = this.plugin.settings.llmConfigs) != null ? _a : [];
-    const list = setting.settingEl.createDiv({ cls: "mas-llm-config-list" });
+    const list = dynamic.createDiv({ cls: "mas-llm-config-list" });
     if (!configs.length) {
       list.createEl("p", { text: "No LLM configurations yet." });
       return;
@@ -18188,6 +18192,7 @@ var MidadArabicSourcesSettingTab = class extends import_obsidian14.PluginSetting
   }
   renderLlmTask(setting, task) {
     var _a;
+    setting.controlEl.empty();
     const configs = (_a = this.plugin.settings.llmConfigs) != null ? _a : [];
     const eligible = task === "transliteration" ? configs : configs.filter((config) => config.provider === "gemini");
     setting.addDropdown((dropdown) => {
@@ -18198,7 +18203,7 @@ var MidadArabicSourcesSettingTab = class extends import_obsidian14.PluginSetting
         return;
       }
       for (const config of eligible) {
-        dropdown.addOption(config.id, `${config.name || "Untitled configuration"} \u2014 ${config.model}`);
+        dropdown.addOption(config.id, `${config.name || "Untitled configuration"} \u2014 ${config.provider}/${config.model}`);
       }
       const assignments = this.plugin.settings.llmAssignments;
       const current = (_a2 = assignments == null ? void 0 : assignments[task]) != null ? _a2 : "";
@@ -18261,7 +18266,7 @@ var MidadArabicSourcesSettingTab = class extends import_obsidian14.PluginSetting
         openDocs(this.app, file);
       }
     });
-    return [
+    const pages = [
       {
         type: "page",
         name: "Transliteration",
@@ -18347,17 +18352,17 @@ var MidadArabicSourcesSettingTab = class extends import_obsidian14.PluginSetting
           },
           {
             name: "Transliteration",
-            desc: "Configuration used when \u201CUse LLM\u201D is checked in the transliterate dialog. Any provider is allowed here.",
+            desc: "Configuration used when \u201CUse LLM\u201D is checked. All providers are available for romanization.",
             render: (setting) => this.renderLlmTask(setting, "transliteration")
           },
           {
             name: "Transcription",
-            desc: "Configuration used for PDF OCR. The pipeline currently requires a Gemini configuration.",
+            desc: "Configuration used for PDF OCR. The PDF pipeline uses Gemini\u2019s Batch API, so only Gemini configurations can run it; other providers remain available for transliteration.",
             render: (setting) => this.renderLlmTask(setting, "transcription")
           },
           {
             name: "Translation",
-            desc: "Configuration used for translating transcriptions. The pipeline currently requires a Gemini configuration.",
+            desc: "Configuration used for translating transcriptions. The PDF pipeline uses Gemini\u2019s Batch API, so only Gemini configurations can run it.",
             render: (setting) => this.renderLlmTask(setting, "translation")
           }
         ]
@@ -18390,7 +18395,7 @@ var MidadArabicSourcesSettingTab = class extends import_obsidian14.PluginSetting
       },
       {
         type: "page",
-        name: "Document import",
+        name: "Source import from repository",
         desc: "Install, name, and maintain imported text sources.",
         items: [
           {
@@ -18584,6 +18589,24 @@ var MidadArabicSourcesSettingTab = class extends import_obsidian14.PluginSetting
         ]
       }
     ];
+    const order = [
+      "General",
+      "LLM",
+      "Transliteration",
+      "Transcription and translation",
+      "Source import from repository",
+      "Annotations",
+      "Zotero",
+      "Documentation"
+    ];
+    return [...pages].sort((a, b) => {
+      var _a, _b;
+      const an = String((_a = a.name) != null ? _a : "");
+      const bn = String((_b = b.name) != null ? _b : "");
+      const ai = order.indexOf(an);
+      const bi = order.indexOf(bn);
+      return (ai < 0 ? 999 : ai) - (bi < 0 ? 999 : bi);
+    });
   }
 };
 function formatEvent(ev) {

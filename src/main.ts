@@ -4492,16 +4492,18 @@ class MidadArabicSourcesSettingTab extends PluginSettingTab {
 				text.inputEl.type = "password";
 				text.inputEl.setCssStyles({ width: "100%" });
 			});
-		new Setting(card)
-			.setName("Base URL")
-			.setDesc("The endpoint for an OpenAI-compatible provider; leave blank to use its environment default.")
-			.addText((text) => {
-				text.setValue(config.baseUrl).onChange(async (value) => {
-					config.baseUrl = value.trim();
-					await this.plugin.saveSettings();
+		if (config.provider === "openai") {
+			new Setting(card)
+				.setName("Base URL")
+				.setDesc("The endpoint for an OpenAI-compatible provider; leave blank to use its environment default.")
+				.addText((text) => {
+					text.setValue(config.baseUrl).onChange(async (value) => {
+						config.baseUrl = value.trim();
+						await this.plugin.saveSettings();
+					});
+					text.inputEl.setCssStyles({ width: "100%" });
 				});
-				text.inputEl.setCssStyles({ width: "100%" });
-			});
+		}
 		new Setting(card).addButton((button) =>
 			button
 				.setButtonText("Delete configuration")
@@ -4516,15 +4518,21 @@ class MidadArabicSourcesSettingTab extends PluginSettingTab {
 	}
 
 	renderLlmConfigs(setting: Setting): void {
-		setting.settingEl.addClass("mas-llm-configs-setting");
-		setting.addButton((button) =>
-			button.setButtonText("Add LLM configuration").setCta().onClick(() => {
+		// Obsidian may invoke a definition's render more than once on the same
+		// element. Rebuild our own container instead of appending to it, or the
+		// cards (and Add button) multiply on every pass.
+		setting.settingEl.querySelectorAll(":scope > .mas-llm-configs-dynamic").forEach((el) => el.remove());
+		const dynamic = setting.settingEl.createDiv({ cls: "mas-llm-configs-dynamic" });
+		const actions = dynamic.createDiv({ cls: "mas-llm-config-actions" });
+		new ButtonComponent(actions)
+			.setButtonText("Add LLM configuration")
+			.setCta()
+			.onClick(() => {
 				this.addLlmConfig();
 				this.update();
-			})
-		);
+			});
 		const configs = this.plugin.settings.llmConfigs ?? [];
-		const list = setting.settingEl.createDiv({ cls: "mas-llm-config-list" });
+		const list = dynamic.createDiv({ cls: "mas-llm-config-list" });
 		if (!configs.length) {
 			list.createEl("p", { text: "No LLM configurations yet." });
 			return;
@@ -4533,6 +4541,8 @@ class MidadArabicSourcesSettingTab extends PluginSettingTab {
 	}
 
 	renderLlmTask(setting: Setting, task: LlmTask): void {
+		// Same duplicate-render guard for the task dropdown.
+		setting.controlEl.empty();
 		const configs = this.plugin.settings.llmConfigs ?? [];
 		const eligible = task === "transliteration"
 			? configs
@@ -4544,7 +4554,7 @@ class MidadArabicSourcesSettingTab extends PluginSettingTab {
 				return;
 			}
 			for (const config of eligible) {
-				dropdown.addOption(config.id, `${config.name || "Untitled configuration"} — ${config.model}`);
+				dropdown.addOption(config.id, `${config.name || "Untitled configuration"} — ${config.provider}/${config.model}`);
 			}
 			const assignments = this.plugin.settings.llmAssignments;
 			const current = assignments?.[task] ?? "";
@@ -4618,7 +4628,7 @@ class MidadArabicSourcesSettingTab extends PluginSettingTab {
 			action: () => { openDocs(this.app, file); },
 		});
 
-		return [
+		const pages: SettingDefinitionItem[] = [
 			{
 				type: "page",
 				name: "Transliteration",
@@ -4702,17 +4712,17 @@ class MidadArabicSourcesSettingTab extends PluginSettingTab {
 					},
 					{
 						name: "Transliteration",
-						desc: "Configuration used when “Use LLM” is checked in the transliterate dialog. Any provider is allowed here.",
+						desc: "Configuration used when “Use LLM” is checked. All providers are available for romanization.",
 						render: (setting: Setting) => this.renderLlmTask(setting, "transliteration"),
 					},
 					{
 						name: "Transcription",
-						desc: "Configuration used for PDF OCR. The pipeline currently requires a Gemini configuration.",
+						desc: "Configuration used for PDF OCR. The PDF pipeline uses Gemini’s Batch API, so only Gemini configurations can run it; other providers remain available for transliteration.",
 						render: (setting: Setting) => this.renderLlmTask(setting, "transcription"),
 					},
 					{
 						name: "Translation",
-						desc: "Configuration used for translating transcriptions. The pipeline currently requires a Gemini configuration.",
+						desc: "Configuration used for translating transcriptions. The PDF pipeline uses Gemini’s Batch API, so only Gemini configurations can run it.",
 						render: (setting: Setting) => this.renderLlmTask(setting, "translation"),
 					},
 				],
@@ -4746,7 +4756,7 @@ class MidadArabicSourcesSettingTab extends PluginSettingTab {
 			},
 			{
 				type: "page",
-				name: "Document import",
+				name: "Source import from repository",
 				desc: "Install, name, and maintain imported text sources.",
 				items: [
 					{
@@ -4933,6 +4943,23 @@ class MidadArabicSourcesSettingTab extends PluginSettingTab {
 				],
 			},
 		];
+		const order = [
+			"General",
+			"LLM",
+			"Transliteration",
+			"Transcription and translation",
+			"Source import from repository",
+			"Annotations",
+			"Zotero",
+			"Documentation",
+		];
+		return [...pages].sort((a, b) => {
+			const an = String((a as { name?: string }).name ?? "");
+			const bn = String((b as { name?: string }).name ?? "");
+			const ai = order.indexOf(an);
+			const bi = order.indexOf(bn);
+			return (ai < 0 ? 999 : ai) - (bi < 0 ? 999 : bi);
+		});
 	}
 }
 

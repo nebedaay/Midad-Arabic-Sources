@@ -1363,14 +1363,15 @@ body.theme-dark {
 }
 
 /* LLM settings: reusable configurations */
-.mas-llm-configs-setting {
-    display: block;
+.mas-llm-configs-dynamic {
+    width: 100%;
+    margin-top: 8px;
 }
 
-.mas-llm-configs-setting > .setting-item-info,
-.mas-llm-configs-setting > .setting-item-control {
-    display: inline-flex;
-    vertical-align: top;
+.mas-llm-config-actions {
+    display: flex;
+    justify-content: flex-end;
+    margin-bottom: 8px;
 }
 
 .mas-llm-config-list {
