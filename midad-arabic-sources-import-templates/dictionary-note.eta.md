@@ -4,10 +4,10 @@
 <% add_property('created', generated); -%>
 <% add_property('updated', updated()); -%>
 <% add_property('mas-up', [unit.section_page ? wikilink(unit.section_page) : null, wikilink(work.dir), '[[Midad Arabic Sources]]'].filter(Boolean)); -%>
-<% add_property('mas-id', 'repo:' + work.key + ':' + unit.kind + ':' + unit.base); -%>
+<% add_property('mas-id', 'repo:' + work.key + ':' + unit.kind + ':' + unit.id); -%>
 <% add_property('mas-kind', 'repo-unit'); -%>
 <% add_property('mas-work', 'repo:' + work.key); -%>
-<% add_property('mas-unit', unit.base); -%>
+<% add_property('mas-unit', unit.id); -%>
 <% add_property('related', [], { force: true, merge: 'keep' }); -%>
 <% add_property('title', unit.title || `${unit.root.arabic} ${unit.root.roman}`); -%>
 <% add_property('term-ar', unit.root.arabic); -%>
