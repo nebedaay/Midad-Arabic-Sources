@@ -1,7 +1,7 @@
 import { App, TFile, normalizePath } from "obsidian";
 import { makeEngine, SourceTemplateEngine } from "./engine";
 import { YamlFieldSpec } from "./yaml";
-import { mergeNote, substantiveContentDiffers } from "./merge";
+import { joinNote, mergeFrontmatter, mergeNote, splitNote, substantiveContentDiffers } from "./merge";
 
 /** Loosely-typed JSON data: importer work/unit models (fields are template-driven). */
 export type JsonObject = Record<string, any>;
@@ -137,6 +137,43 @@ export function renderHub(engine: SourceTemplateEngine, templates: TemplateSet, 
 	});
 }
 
+/** Render only a template's YAML-building block, through end_YAML(). */
+function renderYamlTemplate(engine: SourceTemplateEngine, tpl: string, data: Record<string, unknown>): RenderOutput {
+	const marker = "end_YAML()";
+	const idx = tpl.lastIndexOf(marker);
+	if (idx < 0) return renderTemplate(engine, tpl, data);
+	const close = tpl.indexOf("%>", idx);
+	const end = close < 0 ? tpl.length : close + 2;
+	return renderTemplate(engine, tpl.slice(0, end), data);
+}
+
+export function renderUnitYaml(engine: SourceTemplateEngine, templates: TemplateSet, model: SourceModel, unit: JsonObject): RenderOutput {
+	const tpl = unit.kind === "hadith" ? templates.hadith
+		: unit.kind === "quran" ? templates.quran
+		: unit.kind === "dict" ? templates.dictionary
+		: unit.kind === "dict-index" ? templates.dictionaryIndex
+		: unit.kind === "book" ? templates.book
+		: unit.kind === "book-volume" ? templates.bookVolume
+		: templates.source;
+	return renderYamlTemplate(engine, tpl, {
+		work: model.work,
+		unit,
+		units: model.units,
+		layout: model.work.layout,
+		generated: model.generated,
+	});
+}
+
+export function renderHubYaml(engine: SourceTemplateEngine, templates: TemplateSet, model: SourceModel, singleUnit?: JsonObject): RenderOutput {
+	return renderYamlTemplate(engine, templates.hub, {
+		work: model.work,
+		units: model.units,
+		unit: singleUnit,
+		layout: model.work.layout,
+		generated: model.generated,
+	});
+}
+
 /** The note paths a model is expected to occupy (its hub plus its unit notes). */
 export function expectedNotePaths(
 	model: SourceModel,
@@ -230,6 +267,20 @@ export async function writeMerged(app: App, path: string, out: RenderOutput, for
 }
 
 /**
+ * Update only a note's frontmatter from a YAML-only render. Returns false when
+ * the note does not exist (the caller must do a full render to create it).
+ */
+async function writeFrontmatterOnly(app: App, path: string, out: RenderOutput): Promise<boolean> {
+	const existing = await readVaultFile(app, path);
+	if (existing == null || existing.trim() === "") return false;
+	const prior = splitNote(existing);
+	const frontmatter = mergeFrontmatter(prior.frontmatter, out.specs);
+	const merged = joinNote(frontmatter, prior.body);
+	if (substantiveContentDiffers(existing, merged)) await writeNote(app, path, merged);
+	return true;
+}
+
+/**
  * A hash of a rendered note, ignoring the one property that changes every time.
  *
  * `updated` is rewritten on every render, so counting it would make every note look
@@ -264,7 +315,9 @@ export async function renderModelToVault(
 	/** Note path → hash of the content last rendered there, updated in place. */
 	seen?: Map<string, string>,
 	/** Checked before every note, so a long dictionary render can be stopped. */
-	shouldCancel?: () => boolean
+	shouldCancel?: () => boolean,
+	/** Update only YAML frontmatter; bodies are preserved. */
+	yamlOnly = false
 ): Promise<string[]> {
 	const engine = makeEngine();
 	const dir = model.work.dir as string;
@@ -306,6 +359,19 @@ export async function renderModelToVault(
 		for (const unit of todo) {
 			if (shouldCancel?.()) throw new Error("Source render cancelled");
 			const path = `${unit.note_folder}/${unit.note_stem}.md`;
+			if (yamlOnly) {
+				const yaml = renderUnitYaml(engine, templates, model, unit);
+				const existing = await writeFrontmatterOnly(app, path, yaml);
+				if (!existing) {
+					// A missing note needs a body; create it with the full template.
+					const full = renderUnit(engine, templates, model, unit);
+					await writeMerged(app, path, full, force);
+					seen?.set(path, contentHash(full.content));
+					written.push(path);
+				}
+				tick();
+				continue;
+			}
 			const content = renderUnit(engine, templates, model, unit);
 			const hash = contentHash(content.content);
 			// Unchanged since we last rendered it: `writeMerged` would read the note,
@@ -344,10 +410,21 @@ export async function renderModelToVault(
 		}
 	}
 	const hubPath = `${outRoot}/${dir}.md`;
-	const hubContent = renderHub(engine, templates, model, isQuranText ? undefined : singleUnit);
-	await writeMerged(app, hubPath, hubContent, force);
-	seen?.set(hubPath, contentHash(hubContent.content));
-	written.push(hubPath);
+	if (yamlOnly) {
+		const hubYaml = renderHubYaml(engine, templates, model, isQuranText ? undefined : singleUnit);
+		const existing = await writeFrontmatterOnly(app, hubPath, hubYaml);
+		if (!existing) {
+			const full = renderHub(engine, templates, model, isQuranText ? undefined : singleUnit);
+			await writeMerged(app, hubPath, full, force);
+			seen?.set(hubPath, contentHash(full.content));
+			written.push(hubPath);
+		}
+	} else {
+		const hubContent = renderHub(engine, templates, model, isQuranText ? undefined : singleUnit);
+		await writeMerged(app, hubPath, hubContent, force);
+		seen?.set(hubPath, contentHash(hubContent.content));
+		written.push(hubPath);
+	}
 	tick();
 	return written;
 }

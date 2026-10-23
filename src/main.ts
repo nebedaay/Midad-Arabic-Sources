@@ -42,8 +42,10 @@ import {
 } from "./sourceImport/render";
 import {
 	TemplateHashes,
+	TemplateHashValue,
 	hashString,
 	recordTemplateHashes,
+	splitTemplateSource,
 	templateChangedAt,
 } from "./sourceImport/history";
 import { BUNDLED_ASSETS } from "./assets.generated";
@@ -3729,21 +3731,31 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 	}
 
 	/** A hash per template file, so a change can be attributed to its users. */
-	async sourceTemplateHashes(): Promise<Record<string, string>> {
+	async sourceTemplateHashes(): Promise<Record<string, TemplateHashValue>> {
 		const userFolder = this.settings.sourceTemplateFolder.trim() || null;
 		const t = await loadTemplates(this.app, this.bundledTemplateDir(), userFolder);
-		return {
-			source: hashString(t.source),
-			hadith: hashString(t.hadith),
-			quran: hashString(t.quran),
-			dictionary: hashString(t.dictionary),
-			dictionaryIndex: hashString(t.dictionaryIndex),
-			book: hashString(t.book),
-			bookVolume: hashString(t.bookVolume),
-			hub: hashString(t.hub),
-			moc: hashString(t.moc),
-			sources: hashString(t.sources),
+		const values: Record<string, string> = {
+			source: t.source,
+			hadith: t.hadith,
+			quran: t.quran,
+			dictionary: t.dictionary,
+			dictionaryIndex: t.dictionaryIndex,
+			book: t.book,
+			bookVolume: t.bookVolume,
+			hub: t.hub,
+			moc: t.moc,
+			sources: t.sources,
 		};
+		const out: Record<string, TemplateHashValue> = {};
+		for (const [key, source] of Object.entries(values)) {
+			const parts = splitTemplateSource(source);
+			out[key] = {
+				hash: hashString(source),
+				yaml: hashString(parts.yaml),
+				body: hashString(parts.body),
+			};
+		}
+		return out;
 	}
 
 	async loadSourceHashes(): Promise<TemplateHashes> {
@@ -3767,12 +3779,17 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 	}
 
 	/** Record the current per-template hashes; returns the keys that changed. */
-	async recordSourceTemplate(): Promise<string[]> {
+	async recordSourceTemplate(): Promise<{
+		changed: string[];
+		changedParts: Record<string, "yaml" | "body" | "both">;
+		yamlOnly: boolean;
+	}> {
 		const hashes = await this.sourceTemplateHashes();
 		const store = await this.loadSourceHashes();
-		const { store: next, changed } = recordTemplateHashes(store, hashes, Date.now());
+		const { store: next, changed, changedParts } = recordTemplateHashes(store, hashes, Date.now());
 		await this.saveSourceHashes(next);
-		return changed;
+		const yamlOnly = changed.length > 0 && changed.every((key) => changedParts[key] === "yaml");
+		return { changed, changedParts, yamlOnly };
 	}
 
 	async recordSourceTemplateAndCheck(): Promise<void> {
@@ -3870,7 +3887,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 	 * models — never the whole corpus.
 	 */
 	async renderStaleScoped(items: Array<{ work: JsonObject; kinds: Set<string> | null }>,
-		kind: "explicit" | "auto" = "auto"): Promise<void> {
+		kind: "explicit" | "auto" = "auto", yamlOnly = false): Promise<void> {
 		if (!items.length) return;
 		const op = this.beginSourceOperation(kind);
 		if (op === null) return;
@@ -3920,8 +3937,13 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 						notice.setMessage(`Updating imported sources: ${nth} — ${label} — ${step}/${steps} notes (${pct}%)`);
 					};
 					const seen = new Map(Object.entries(stats[key]?.units ?? {}));
-					await renderModelToVault(this.app, templates, model, outRoot, false, onStep,
-						it.kinds ?? undefined, seen, () => this.isSourceCancelled(op));
+					if (yamlOnly) {
+						await renderModelToVault(this.app, templates, model, outRoot, false, onStep,
+							it.kinds ?? undefined, seen, () => this.isSourceCancelled(op), true);
+					} else {
+						await renderModelToVault(this.app, templates, model, outRoot, false, onStep,
+							it.kinds ?? undefined, seen, () => this.isSourceCancelled(op));
+					}
 					// Record which templates this render brought up to date. A scoped
 					// render marks only the rendered kinds (plus the hub); a full render
 					// (kinds === null) marks every template the work uses. On the first
@@ -3967,11 +3989,11 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 	 * the poll and the command as well as from maintainSources.
 	 */
 	async applyTemplateChanges(kind: "explicit" | "auto" = "explicit"): Promise<number> {
-		const changedKeys = await this.recordSourceTemplate();
+		const { changed: changedKeys, yamlOnly } = await this.recordSourceTemplate();
 		const stale = await this.findStaleSourceWorks();
 		const indexDirty = changedKeys.some((k) => k === "moc" || k === "sources");
 		if (!stale.length && !indexDirty) return 0;
-		await this.renderStaleScoped(stale.map((s) => ({ work: s.work, kinds: s.kinds })), kind);
+		await this.renderStaleScoped(stale.map((s) => ({ work: s.work, kinds: s.kinds })), kind, yamlOnly);
 		if (indexDirty) await this.refreshSourcesIndex();
 		return stale.length;
 	}
@@ -3991,7 +4013,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		try {
 			const hashes = await this.sourceTemplateHashes();
 			const store = await this.loadSourceHashes();
-			const changed = Object.entries(hashes).some(([k, h]) => h && store.templates[k]?.hash !== h);
+			const changed = Object.entries(hashes).some(([k, h]) => h.hash && store.templates[k]?.hash !== h.hash);
 			if (changed) await this.applyTemplateChanges("auto");
 		} catch { /* templates unavailable */ } finally {
 			this.templateCheckRunning = false;
@@ -4031,7 +4053,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		// Per-template attribution: a change to one template only re-renders the
 		// works that use it. `changedKeys` is this pass's delta (used to decide
 		// whether the MOCs/parent need rebuilding); `staleWorks` is self-healing.
-		const changedKeys = await this.recordSourceTemplate();
+		const { changed: changedKeys, yamlOnly } = await this.recordSourceTemplate();
 		const stale = await this.findStaleSourceWorks();
 		const indexDirty = changedKeys.some((k) => k === "moc" || k === "sources");
 		if (!incomplete.length && !stale.length && !indexDirty) return;
@@ -4055,7 +4077,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			}
 			// Stale works: only the unit kinds whose template changed, plus the hub.
 			for (const s of stale) rerender.push({ work: s.work, kinds: s.kinds });
-			await this.renderStaleScoped(rerender, "auto");
+			await this.renderStaleScoped(rerender, "auto", yamlOnly && incomplete.length === 0);
 			if (indexDirty) await this.refreshSourcesIndex();
 		};
 		if (this.settings.autoUpdateSourceTemplates === true) {

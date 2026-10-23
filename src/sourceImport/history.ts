@@ -91,6 +91,28 @@ export function pruneTimeline(timeline: TemplateTimeline, minUpdatedMs: number |
 export interface TemplateHashEntry {
 	hash: string;
 	at: number;
+	/** Hash of the YAML-building part (through end_YAML()). */
+	yamlHash?: string;
+	/** Hash of the template body after end_YAML(). */
+	bodyHash?: string;
+}
+
+export interface TemplateHashValue {
+	hash: string;
+	yaml: string;
+	body: string;
+}
+
+export type TemplateChangePart = "yaml" | "body" | "both";
+
+/** Split a template at the end of its frontmatter-building block. */
+export function splitTemplateSource(source: string): { yaml: string; body: string } {
+	const marker = "end_YAML()";
+	const idx = source.lastIndexOf(marker);
+	if (idx < 0) return { yaml: "", body: source };
+	const close = source.indexOf("%>", idx);
+	const end = close < 0 ? source.length : close + 2;
+	return { yaml: source.slice(0, end), body: source.slice(end) };
 }
 
 export interface TemplateHashes {
@@ -99,24 +121,44 @@ export interface TemplateHashes {
 
 export function recordTemplateHashes(
 	store: TemplateHashes,
-	hashes: Record<string, string>,
+	hashes: Record<string, string | TemplateHashValue>,
 	at: number
-): { store: TemplateHashes; changed: string[] } {
+): { store: TemplateHashes; changed: string[]; changedParts: Record<string, TemplateChangePart> } {
 	const templates: Record<string, TemplateHashEntry> = { ...(store?.templates ?? {}) };
 	const changed: string[] = [];
-	for (const [key, hash] of Object.entries(hashes)) {
-		if (!hash) continue;
+	const changedParts: Record<string, TemplateChangePart> = {};
+	for (const [key, value] of Object.entries(hashes)) {
+		if (!value) continue;
+		const isParts = typeof value !== "string";
+		const hash = isParts ? value.hash : value;
 		const prev = templates[key];
 		if (!prev) {
-			templates[key] = { hash, at: 0 };
+			templates[key] = isParts
+				? { hash, at: 0, yamlHash: value.yaml, bodyHash: value.body }
+				: { hash, at: 0 };
+			continue;
+		}
+		if (prev.hash === hash) {
+			if (isParts && (prev.yamlHash == null || prev.bodyHash == null)) {
+				templates[key] = { ...prev, yamlHash: value.yaml, bodyHash: value.body };
+			}
 			continue;
 		}
 		if (prev.hash !== hash) {
-			templates[key] = { hash, at };
+			let part: TemplateChangePart = "both";
+			if (isParts && prev.yamlHash != null && prev.bodyHash != null) {
+				const yamlChanged = prev.yamlHash !== value.yaml;
+				const bodyChanged = prev.bodyHash !== value.body;
+				part = yamlChanged && !bodyChanged ? "yaml" : bodyChanged && !yamlChanged ? "body" : "both";
+			}
+			templates[key] = isParts
+				? { hash, at, yamlHash: value.yaml, bodyHash: value.body }
+				: { hash, at };
 			changed.push(key);
+			changedParts[key] = part;
 		}
 	}
-	return { store: { templates }, changed };
+	return { store: { templates }, changed, changedParts };
 }
 
 /** A recorded change age for one template (0 = never changed since tracking began). */
