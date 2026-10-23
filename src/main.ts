@@ -3283,18 +3283,36 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 	async updateSourceParent(templates: TemplateSet, mocs: string[], generated: string): Promise<string | null> {
 		const name = (this.settings.sourceMocParent || "").trim() || "Sources";
 		if (!mocs.length) return null;
-		let file = this.app.metadataCache.getFirstLinkpathDest(name, "");
+		const canonicalPath = normalizePath(`${this.sourcesRoot()}/${name}.md`);
+		const existingCanonical = this.app.vault.getAbstractFileByPath(canonicalPath);
+		let file = existingCanonical instanceof TFile ? existingCanonical : null;
 		if (!file) {
-			// Give a plugin-created parent a home beside the other source notes.
-			const path = normalizePath(`${this.sourcesRoot()}/${name}.md`);
-			const existing = this.app.vault.getAbstractFileByPath(path);
-			if (existing instanceof TFile) file = existing;
-			else {
+			// A note with the configured name may predate the source-folder layout.
+			// Move it into the sources root rather than creating a second Sources note.
+			const first = this.app.metadataCache.getFirstLinkpathDest(name, "");
+			if (first instanceof TFile && first.path !== canonicalPath) {
 				try {
-					file = await this.app.vault.create(path, "");
-				} catch {
-					return null;
+					const folder = canonicalPath.split("/").slice(0, -1).join("/");
+					if (folder && !(await this.app.vault.adapter.exists(folder))) {
+						await this.app.vault.createFolder(folder);
+					}
+					await this.app.fileManager.renameFile(first, canonicalPath);
+					const moved = this.app.vault.getAbstractFileByPath(canonicalPath);
+					if (moved instanceof TFile) file = moved;
+				} catch (e) {
+					console.error("[midad-arabic-sources] move source parent", e);
 				}
+			}
+		}
+		if (!file) {
+			try {
+				const folder = canonicalPath.split("/").slice(0, -1).join("/");
+				if (folder && !(await this.app.vault.adapter.exists(folder))) {
+					await this.app.vault.createFolder(folder);
+				}
+				file = await this.app.vault.create(canonicalPath, "");
+			} catch {
+				return null;
 			}
 		}
 		const out = renderSourcesNote(templates, mocs, generated);
@@ -4995,7 +5013,7 @@ class MidadArabicSourcesSettingTab extends PluginSettingTab {
 					},
 					{
 						name: "Sources parent note",
-						desc: "Top-level note every category MOC points up to. The plugin lists each category in its managed region, reusing your existing note if one exists.",
+						desc: "Top-level note every category MOC points up to. It lives at the root of the sources folder; an existing note with this name elsewhere is moved there.",
 						control: { type: "text", key: "sourceMocParent", placeholder: "Sources" },
 					},
 					{

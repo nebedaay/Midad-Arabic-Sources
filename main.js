@@ -17737,18 +17737,35 @@ var MidadArabicSourcesPlugin = class extends import_obsidian15.Plugin {
     const name = (this.settings.sourceMocParent || "").trim() || "Sources";
     if (!mocs.length)
       return null;
-    let file = this.app.metadataCache.getFirstLinkpathDest(name, "");
+    const canonicalPath = (0, import_obsidian15.normalizePath)(`${this.sourcesRoot()}/${name}.md`);
+    const existingCanonical = this.app.vault.getAbstractFileByPath(canonicalPath);
+    let file = existingCanonical instanceof import_obsidian15.TFile ? existingCanonical : null;
     if (!file) {
-      const path2 = (0, import_obsidian15.normalizePath)(`${this.sourcesRoot()}/${name}.md`);
-      const existing = this.app.vault.getAbstractFileByPath(path2);
-      if (existing instanceof import_obsidian15.TFile)
-        file = existing;
-      else {
+      const first = this.app.metadataCache.getFirstLinkpathDest(name, "");
+      if (first instanceof import_obsidian15.TFile && first.path !== canonicalPath) {
         try {
-          file = await this.app.vault.create(path2, "");
+          const folder = canonicalPath.split("/").slice(0, -1).join("/");
+          if (folder && !await this.app.vault.adapter.exists(folder)) {
+            await this.app.vault.createFolder(folder);
+          }
+          await this.app.fileManager.renameFile(first, canonicalPath);
+          const moved = this.app.vault.getAbstractFileByPath(canonicalPath);
+          if (moved instanceof import_obsidian15.TFile)
+            file = moved;
         } catch (e) {
-          return null;
+          console.error("[midad-arabic-sources] move source parent", e);
         }
+      }
+    }
+    if (!file) {
+      try {
+        const folder = canonicalPath.split("/").slice(0, -1).join("/");
+        if (folder && !await this.app.vault.adapter.exists(folder)) {
+          await this.app.vault.createFolder(folder);
+        }
+        file = await this.app.vault.create(canonicalPath, "");
+      } catch (e) {
+        return null;
       }
     }
     const out = renderSourcesNote(templates, mocs, generated);
@@ -19195,7 +19212,7 @@ var MidadArabicSourcesSettingTab = class extends import_obsidian15.PluginSetting
           },
           {
             name: "Sources parent note",
-            desc: "Top-level note every category MOC points up to. The plugin lists each category in its managed region, reusing your existing note if one exists.",
+            desc: "Top-level note every category MOC points up to. It lives at the root of the sources folder; an existing note with this name elsewhere is moved there.",
             control: { type: "text", key: "sourceMocParent", placeholder: "Sources" }
           },
           {
