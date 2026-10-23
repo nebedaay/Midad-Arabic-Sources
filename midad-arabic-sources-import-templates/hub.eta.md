@@ -25,7 +25,7 @@
 <% add_property('mas-key', work.key); -%>
 <% if (work.language_links.length > 1) { add_property('language', work.language_links.map(l => wikilink(l))); } else { add_property('language', wikilink(work.language_links[0])); } -%>
 <% if (work.repo) { add_property('repository', `[${work.repo_name || work.repo}](${work.repo})`); } -%>
-<% if (work.source) { add_property('source', `[${work.source_name || work.source}](${work.source})`); } -%>
+<% if (work.source) { const label = work.repo_name && work.source_name && work.repo_name !== work.source_name ? `${work.source_name} (upstream)` : (work.source_name || work.source); add_property('source', `[${label}](${work.source})`); } -%>
 <% if (work.license_attribution) { add_property('license-attribution', work.license_attribution); } -%>
 <% if (work.repository_updated) { add_property('repository-updated', work.repository_updated); } -%>
 <% add_property('aliases', work.aliases); -%>
