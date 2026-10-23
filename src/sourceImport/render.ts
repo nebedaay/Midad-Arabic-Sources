@@ -203,6 +203,17 @@ export function expectedNotePaths(
 }
 
 /** Group works into their MOC sections, dropping sections with no works. */
+/** Collapse the two Qurʾān category MOCs into one. */
+export function canonicalMocName(name: string): string {
+	if (name === "Qurʾān (text)" || name === "Qurʾān Translations") return "Qurʾān text and translations";
+	return name;
+}
+
+/** Rewrite old Qurʾān MOC links in generated `up` lists. */
+export function canonicalMocLink(value: string): string {
+	return value.replace(/\[\[(Qurʾān \(text\)|Qurʾān Translations)(?=\]\||\]\])/g, "[[Qurʾān text and translations");
+}
+
 export function buildMocSections(works: Array<JsonObject>): MocSection[] {
 	const order: string[] = [];
 	const map = new Map<string, Array<JsonObject>>();
@@ -320,6 +331,9 @@ export async function renderModelToVault(
 	yamlOnly = false
 ): Promise<string[]> {
 	const engine = makeEngine();
+	if (Array.isArray(model.work.up)) {
+		model.work.up = (model.work.up as string[]).map(canonicalMocLink);
+	}
 	const dir = model.work.dir as string;
 	const folder = `${outRoot}/${dir}`;
 	const isQuranText = model.work.collection === "quran-text";
@@ -442,6 +456,9 @@ export async function renderModelHub(
 	force = false
 ): Promise<string[]> {
 	const engine = makeEngine();
+	if (Array.isArray(model.work.up)) {
+		model.work.up = (model.work.up as string[]).map(canonicalMocLink);
+	}
 	const dir = model.work.dir as string;
 	const isQuranText = model.work.collection === "quran-text";
 	const isCanonical = isQuranText && model.work.canonical === true;
@@ -482,10 +499,11 @@ export async function renderMocs(
 		const listed = (w.mocs as string[] | undefined) ?? (w.moc ? [String(w.moc)] : []);
 		for (const moc of listed) {
 			if (!moc) continue;
-			let arr = groups.get(moc);
+			const canonical = canonicalMocName(moc);
+			let arr = groups.get(canonical);
 			if (!arr) {
 				arr = [];
-				groups.set(moc, arr);
+				groups.set(canonical, arr);
 			}
 			arr.push(w);
 		}

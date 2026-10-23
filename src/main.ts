@@ -37,6 +37,7 @@ import {
 	renderMocs,
 	renderModelToVault,
 	buildMocSections,
+	canonicalMocName,
 	renderMocIndex,
 	renderSourcesNote,
 	vaultRelative,
@@ -484,6 +485,7 @@ function requiredModelSchema(collection: string): number {
 
 /** Tag and collection every Zotero export carries, so its origin is traceable. */
 const ZOTERO_MARK = "Midad Arabic Sources";
+const SOURCE_INDEX_NOTE = "Midad Arabic Sources - By Source";
 
 /** Appended to an item whose bibliographic details are still unverified. */
 const BIB_PROVISIONAL = "Bibliographic details are provisional — verify against the edition you used before citing.";
@@ -2827,7 +2829,23 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 	 * installed. Unlike a full re-render this never touches work notes, so it
 	 * cannot resurrect a just-removed source.
 	 */
+	/** Rename the old “Midad Sources” index to its unambiguous name. */
+	async renameLegacySourceIndex(): Promise<void> {
+		const root = this.sourcesRoot();
+		const legacy = normalizePath(`${root}/Midad Sources.md`);
+		const canonical = normalizePath(`${root}/${SOURCE_INDEX_NOTE}.md`);
+		const old = this.app.vault.getAbstractFileByPath(legacy);
+		if (old instanceof TFile && !this.app.vault.getAbstractFileByPath(canonical)) {
+			try {
+				await this.app.fileManager.renameFile(old, canonical);
+			} catch (error) {
+				console.error("[midad-arabic-sources] source index rename", error);
+			}
+		}
+	}
+
 	async refreshSourcesIndex(): Promise<string[]> {
+		await this.renameLegacySourceIndex();
 		const userFolder = this.settings.sourceTemplateFolder.trim() || null;
 		let templates: TemplateSet;
 		try {
@@ -2885,7 +2903,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			written.push(await renderMocIndex(
 				this.app, templates, name,
 				sections.length ? sections : [{ name: "Works", works: group.works }],
-				this.sourcesRoot(), "Midad Sources", today, true
+				this.sourcesRoot(), SOURCE_INDEX_NOTE, today, true
 			));
 		}
 		try {
@@ -2893,9 +2911,10 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		} catch (error) {
 			console.error("[midad-arabic-sources] transcription MOCs", error);
 		}
-		const mocNames = [...new Set(installed.flatMap((w) => (
-			Array.isArray(w.mocs) ? (w.mocs as string[]) : (typeof w.moc === "string" ? [w.moc] : [])
-		)))].filter(Boolean).sort();
+		const mocNames = [...new Set(installed.flatMap((w): string[] => {
+			const names = Array.isArray(w.mocs) ? (w.mocs as string[]) : (typeof w.moc === "string" ? [w.moc] : []);
+			return names.map(canonicalMocName);
+		}))].filter(Boolean).sort();
 		if (this.annotations?.hasAnnotatedWorks() || this.annotations?.mocExists()) {
 			if (!mocNames.includes("source-annotation")) mocNames.push("source-annotation");
 		}
@@ -3334,7 +3353,11 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 
 	/** A stable, readable MOC name for a repository. */
 	repositoryMoc(work: JsonObject): { name: string; label: string } | null {
-		const repo = String(work.repository_name ?? work.repo_name ?? work.repo ?? "").trim();
+		const repo = [work.repo_name, work.repo, work.repository_name, work.source]
+			.map((value) => String(value ?? "").trim())
+			.find(Boolean)
+			?.replace(/^https?:\/\//, "")
+			.replace(/\/$/, "") ?? "";
 		if (!repo) return null;
 		const known: Record<string, [string, string]> = {
 			"app.turath.io": ["Turath", "Turath"],
@@ -3343,6 +3366,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			"altafsir.com": ["Altafsir", "Altafsir"],
 			"github.com/AhmedBaset/hadith-json": ["Hadith JSON", "Ḥadīth JSON"],
 			"github.com/fawazahmed0/quran-api": ["Quran API", "Qurʾān API"],
+			"github.com/risan/quran-json": ["Quran JSON", "Qurʾān JSON"],
 			"quran-json.risanb.com": ["Quran JSON", "Qurʾān JSON"],
 			"tanzil.net": ["Tanzil", "Tanzil"],
 			"github.com/GibreelAbdullah/HansWehrDictionary": ["Hans Wehr", "Hans Wehr"],
@@ -3534,7 +3558,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			const yaml = new YamlBuilder();
 			yaml.start();
 			yaml.add("created", today, { merge: "keep" });
-			yaml.add("mas-up", ["[[Midad Sources]]", "[[Midad Arabic Sources]]"]);
+			yaml.add("mas-up", [`[[${SOURCE_INDEX_NOTE}]]`, "[[Midad Arabic Sources]]"]);
 			const specs = yaml.fieldSpecs();
 			const content = `${yaml.end()}\n${lines.join("\n")}`;
 			await writeMerged(this.app, path, { content, specs }, true, false);
@@ -3604,16 +3628,16 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			[{ name: "Topics", works: topicMocs.map((m) => ({ dir: m, title: label(m) })) }],
 			this.sourcesRoot(), "Midad Arabic Sources", generated);
 		const repoItems = repositoryMocs.map((m) => ({ dir: m, title: label(m) }));
-		await renderMocIndex(this.app, templates, "Midad Sources",
+		await renderMocIndex(this.app, templates, SOURCE_INDEX_NOTE,
 			[
 				{ name: "Repositories", works: repoItems },
-				{ name: "Transcriptions", works: [{ dir: "Arabic transcriptions", title: "My transcriptions" }] },
-				{ name: "Translations", works: [{ dir: "Arabic translations", title: "My translations" }] },
+				{ name: "Local transcriptions", works: [{ dir: "Arabic transcriptions", title: "My transcriptions" }] },
+				{ name: "Local translations", works: [{ dir: "Arabic translations", title: "My translations" }] },
 			].filter((section) => section.works.length > 0),
 			this.sourcesRoot(), "Midad Arabic Sources", generated);
 		const groups = [
 			{ name: "Midad Arabic Sources - Topics", label: "By Topic", items: topicMocs.map((m) => ({ name: m, label: label(m) })) },
-			{ name: "Midad Sources", label: "By Source", items: sourceList.map((m) => ({ name: m, label: label(m) })) },
+			{ name: SOURCE_INDEX_NOTE, label: "By Source", items: sourceList.map((m) => ({ name: m, label: label(m) })) },
 			{ name: "source-annotation", label: "Annotations", items: [] },
 		];
 		const out = renderSourcesNote(templates, groups, generated);

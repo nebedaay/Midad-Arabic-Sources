@@ -4,8 +4,9 @@
 - Zotero literature notes (`_2 Bibliographic notes/@*.md`) get a stable
   `mas-id: zotero:<sw-zotero-id>` (falling back to `zotero:@<citekey>`).
 - Transcriptions/translations get a `mas-id`, `mas-kind`, `mas-source`,
-  `mas-work`, and `mas-unit`, and their filenames change from `@<citekey>` to
-  `mas-<citekey>`. Zotero `@citekey` links are left alone.
+  `mas-work`, and `mas-unit`. A Zotero-associated note keeps its
+  `@<citekey>` filename; only a standalone note with no Zotero reference
+  (a `pdf:` source) changes from `@<citekey>` to `mas-<citekey>`.
 - Repository hubs get `mas-id: repo:<collection>:<id>`.
 - Adopted arbitrary notes get a `mas-id` when they have a `mas-work`.
 - Explicit wikilinks, the adopted-annotation registry, the annotation store,
@@ -138,15 +139,18 @@ def main() -> int:
             ]
             if add_fields_to_note(note, fields, dry):
                 print(f"  source fields: {note.name} -> {mas_id}")
-            new_name = f"mas-{note.stem[1:]}.md"
-            target = note.with_name(new_name)
-            if target.exists():
-                print(f"  skip rename (exists): {target.name}")
-                continue
-            renames[str(note)] = str(target)
-            print(f"  rename: {note.name} -> {target.name}")
-            if not dry:
-                note.rename(target)
+            if source_id.startswith("pdf:"):
+                new_name = f"mas-{note.stem[1:]}.md"
+                target = note.with_name(new_name)
+                if target.exists():
+                    print(f"  skip rename (exists): {target.name}")
+                    continue
+                renames[str(note)] = str(target)
+                print(f"  rename: {note.name} -> {target.name}")
+                if not dry:
+                    note.rename(target)
+            else:
+                print(f"  keep Zotero filename: {note.name}")
 
     # 3. Repository hubs already in the manifest.
     works = []

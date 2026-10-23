@@ -87,14 +87,20 @@ def _strip_type_suffix(alias: str) -> str:
     return TYPE_SUFFIX.sub('', alias).strip()
 
 
-def _transcription_note(citekey: str, volume: int | None) -> Path:
+def _note_prefix(standalone: bool) -> str:
+    """Zotero-associated notes keep the @citekey; standalone PDFs use mas-."""
+    return "mas-" if standalone else "@"
+
+
+def _transcription_note(citekey: str, volume: int | None, standalone: bool = False) -> Path:
     folder = VAULT / DEST_FOLDERS["transcription"]
+    prefix = _note_prefix(standalone)
     if volume:
-        return folder / f"mas-{citekey} - transcription - vol. {volume}.md"
-    return folder / f"mas-{citekey} - transcription.md"
+        return folder / f"{prefix}{citekey} - transcription - vol. {volume}.md"
+    return folder / f"{prefix}{citekey} - transcription.md"
 
 
-def compute_aliases(citekey: str, doc_type: str, volume: int = None) -> list[str]:
+def compute_aliases(citekey: str, doc_type: str, volume: int = None, standalone: bool = False) -> list[str]:
     """Aliases for a note, each with '(type[, vol. N])' appended.
 
     A translation mirrors the corresponding transcription note's aliases (so the
@@ -104,7 +110,7 @@ def compute_aliases(citekey: str, doc_type: str, volume: int = None) -> list[str
     suffix = doc_type if not volume else f"{doc_type}, vol. {volume}"
 
     if doc_type == "translation":
-        trans = _transcription_note(citekey, volume)
+        trans = _transcription_note(citekey, volume, standalone)
         if trans.exists():
             return [
                 f"{_strip_type_suffix(a)} ({suffix})"
@@ -173,7 +179,8 @@ def build_yaml(citekey: str, doc_type: str, related: list[str], volume: int = No
     if not standalone:
         up_items.append(f'  - "[[@{citekey}]]"')
         if volume:
-            up_items.append(f'  - "[[mas-{citekey} - {doc_type}]]"')
+            prefix = _note_prefix(standalone)
+            up_items.append(f'  - "[[{prefix}{citekey} - {doc_type}]]"')
 
     yaml = f"""---
 created: {datetime.now().strftime('%Y-%m-%d %H:%M')}
@@ -206,7 +213,7 @@ title: "{_yaml_quote(title)}"
             if author_list:
                 aliases.append(f"{author_list[0]} - {title_base} ({suffix})")
     else:
-        aliases = compute_aliases(citekey, doc_type, volume)
+        aliases = compute_aliases(citekey, doc_type, volume, standalone)
     if aliases:
         yaml += "aliases:\n"
         for a in aliases:
@@ -231,26 +238,29 @@ def detect_volume(filename: str) -> int | None:
     return int(m.group(1)) if m else None
 
 
-def dest_path(citekey: str, doc_type: str, volume: int = None) -> Path:
+def dest_path(citekey: str, doc_type: str, volume: int = None, standalone: bool = False) -> Path:
     """Vault destination path for a note."""
     dest_dir = VAULT / DEST_FOLDERS[doc_type]
     dest_dir.mkdir(parents=True, exist_ok=True)
+    prefix = _note_prefix(standalone)
     if volume:
-        return dest_dir / f"mas-{citekey} - {doc_type} - vol. {volume}.md"
-    return dest_dir / f"mas-{citekey} - {doc_type}.md"
+        return dest_dir / f"{prefix}{citekey} - {doc_type} - vol. {volume}.md"
+    return dest_dir / f"{prefix}{citekey} - {doc_type}.md"
 
 
-def ensure_parent(citekey: str, doc_type: str, related: list[str], volume: int):
+def ensure_parent(citekey: str, doc_type: str, related: list[str], volume: int,
+                  standalone: bool = False):
     """Create/update the multivolume parent note and its volume list."""
     if not volume:
         return None
-    parent = dest_path(citekey, doc_type, None)
+    parent = dest_path(citekey, doc_type, None, standalone)
     if not parent.exists():
-        parent.write_text(build_yaml(citekey, doc_type, related) + "\n", encoding="utf-8")
+        parent.write_text(build_yaml(citekey, doc_type, related, standalone=standalone) + "\n", encoding="utf-8")
         print(f"Created parent: {parent.name}")
 
     content = parent.read_text(encoding="utf-8")
-    entry = f"[[mas-{citekey} - {doc_type} - vol. {volume}]]"
+    prefix = _note_prefix(standalone)
+    entry = f"[[{prefix}{citekey} - {doc_type} - vol. {volume}]]"
     if entry not in content:
         new_lines = []
         inserted = False
@@ -268,13 +278,14 @@ def ensure_parent(citekey: str, doc_type: str, related: list[str], volume: int):
     return parent
 
 
-def _collection_notes(citekey: str, doc_type: str):
+def _collection_notes(citekey: str, doc_type: str, standalone: bool = False):
     """(parent_name, [volume_names sorted numerically]) for a citekey."""
     folder = VAULT / DEST_FOLDERS[doc_type]
-    parent = f"mas-{citekey} - {doc_type}"
+    prefix = _note_prefix(standalone)
+    parent = f"{prefix}{citekey} - {doc_type}"
     vols = []
     if folder.exists():
-        for p in folder.glob(f"mas-{citekey} - {doc_type} - vol. *.md"):
+        for p in folder.glob(f"{prefix}{citekey} - {doc_type} - vol. *.md"):
             if "modified" in p.stem:
                 continue
             m = re.search(r'vol\.\s*(\d+)', p.stem)
@@ -307,11 +318,11 @@ def _write_list_property(citekey: str, prop: str, items: list) -> bool:
     return True
 
 
-def sync_collection_property(citekey: str, doc_type: str) -> bool:
+def sync_collection_property(citekey: str, doc_type: str, standalone: bool = False) -> bool:
     """Keep @citekey.md's transcriptions/translations list ordered:
     the parent note first, then the volumes in numerical order."""
     prop = "transcriptions" if doc_type == "transcription" else "translations"
-    parent, vols = _collection_notes(citekey, doc_type)
+    parent, vols = _collection_notes(citekey, doc_type, standalone)
     items = [parent] + vols if vols else [parent]
     return _write_list_property(citekey, prop, items)
 
@@ -322,14 +333,14 @@ def write_note(body: str, citekey: str, doc_type: str, related: list[str] = None
     """Build the YAML and write the finished note. Returns its path."""
     related = related or []
     if not standalone:
-        ensure_parent(citekey, doc_type, related, volume)
-    dest = dest_path(citekey, doc_type, volume)
+        ensure_parent(citekey, doc_type, related, volume, standalone)
+    dest = dest_path(citekey, doc_type, volume, standalone)
     yaml = build_yaml(citekey, doc_type, related, volume=volume, standalone=standalone,
                       title=title, authors=authors)
     dest.write_text(yaml + "\n" + body.strip() + "\n", encoding="utf-8")
     # Record/refresh the ordered transcriptions/translations list on the
     # literature note: parent note first, then volumes in numerical order.
-    if not standalone and sync_collection_property(citekey, doc_type):
+    if not standalone and sync_collection_property(citekey, doc_type, standalone):
         print(f"Updated {doc_type} list on @{citekey}")
     return dest
 
@@ -346,6 +357,7 @@ def main():
     citekey = None
     doc_type = "transcription"
     related = []
+    standalone = False
 
     i = 2
     while i < len(sys.argv):
@@ -356,6 +368,8 @@ def main():
             doc_type = sys.argv[i + 1]; i += 2
         elif arg == "--related" and i + 1 < len(sys.argv):
             related.append(sys.argv[i + 1]); i += 2
+        elif arg == "--standalone":
+            standalone = True; i += 1
         else:
             i += 1
 
@@ -385,7 +399,7 @@ def main():
             content = content[end + 3:].strip()
 
     volume = detect_volume(filepath.name)
-    dest = write_note(content, citekey, doc_type, related, volume)
+    dest = write_note(content, citekey, doc_type, related, volume, standalone=standalone)
 
     print(f"Moved: {dest.relative_to(VAULT)}")
     vol_info = f", vol. {volume}" if volume else ""

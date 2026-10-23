@@ -125,7 +125,7 @@ COLLECTIONS: dict[str, dict] = {
         "kind": "translation",
         "languages": {"en": "english"},
         "shape": "chapter",
-        "moc": "Qurʾān Translations",
+        "moc": "Qurʾān text and translations",
         "cssclass": "quran",
     },
     "hadith": {
@@ -149,7 +149,7 @@ COLLECTIONS: dict[str, dict] = {
         "kind": "quran-text",
         "languages": {"ar": "arabic"},
         "shape": "risan",
-        "moc": "Qurʾān (text)",
+        "moc": "Qurʾān text and translations",
         "cssclass": "quran",
     },
     "dictionary": {
