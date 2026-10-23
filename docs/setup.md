@@ -64,6 +64,8 @@ The plugin keeps everything under one **sources folder** (`Midad Arabic Sources`
 
 Existing installations are migrated once automatically on the first launch after the update. Changing **General → Sources folder** asks for confirmation when files exist, then moves the folders and rewrites explicit links in Markdown notes as well as the adopted-annotation registry. The MOCs and the parent note stay at the source root.
 
+**Source MOCs.** **Midad Arabic Sources** is the parent note and the distinctive index for everything MAS manages. Its managed block groups the source hierarchy into **By Topic** (`Midad Arabic Sources - Topics`, which lists the genre/type MOCs) and **By Source** (`Midad Sources`, which lists repository MOCs plus the transcription and translation MOCs), with **Annotations** alongside them. Repository MOCs list their works; the transcription/translation MOCs are split into works from literature notes and works transcribed/translated directly from PDFs.
+
 **Source identity.** MAS-created and adopted notes carry a `mas-id` (with `mas-kind`, `mas-source`, `mas-work`, and `mas-unit`). Repository works are identified at the hub (`repo:<collection>:<id>`) and tracked internally by work, so their individual sūra/chapter/root notes do not need their own ids. Zotero literature notes are indexed by their stable `sw-zotero-id`; transcriptions and translations use `mas-` filenames; arbitrary adopted notes use a generated `note:<uuid>`. The `@citekey` form is reserved for Zotero/Pandoc references. `.midad-arabic-sources/sources.json` is the unified index of every source kind.
 
 - **A work hub** carries the bibliographic properties and links every note in the work.
