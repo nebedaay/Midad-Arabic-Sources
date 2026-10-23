@@ -719,7 +719,7 @@ function makeEngine() {
     autoEscape: false,
     autoTrim: [false, false],
     functionHeader: [
-      "const { work, unit, units, sections, moc, mocs, parent, generated } = it;",
+      "const { work, unit, units, sections, moc, mocs, parent, generated, groups } = it;",
       "const bilingual = it.layout;",
       "const start_YAML = () => this.startYAML(it);",
       "const add_property = (k, v, o) => this.addProperty(it, k, v, o);",
