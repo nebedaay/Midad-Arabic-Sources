@@ -438,7 +438,7 @@ function frontmatterTimeMs(value: unknown): number | null {
 const SOURCE_CATALOG_TTL = 7 * 86_400_000;
 
 /** Bump when the catalogue's shape changes, to invalidate stale caches. */
-const SOURCE_CATALOG_SCHEMA = 3;
+const SOURCE_CATALOG_SCHEMA = 4;
 
 /**
  * The cached-model schema at which each collection's *acquisition* last changed.
