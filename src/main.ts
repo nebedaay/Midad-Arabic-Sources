@@ -160,7 +160,10 @@ interface MidadArabicSourcesSettings {
 	pythonPath: string;
 	pipelineScript: string;
 	geminiApiKey: string;
-	// Text-source importer (tafsīr, Qur'ān translations, ḥadīth, …)
+	// General
+	sourceRoot: string;
+	sourceLayoutMigrated?: boolean;
+	// Text-source importer (tafsīr, Qur’ān translations, ḥadīth, …)
 	sourceImportScript: string;
 	sourceImportRoot: string;
 	sourceTemplateFolder: string;
@@ -520,12 +523,14 @@ const DEFAULT_SETTINGS: MidadArabicSourcesSettings = {
 	pipelineScript: "scripts/midad-arabic-sources-pipeline.py",
 	geminiApiKey: "",
 	sourceImportScript: "scripts/text-source-import.py",
-	sourceImportRoot: "_7 Sources",
+	sourceRoot: "Midad Arabic Sources",
+	sourceLayoutMigrated: false,
+	sourceImportRoot: "Midad Arabic Sources/Installed Sources",
 	sourceTemplateFolder: "",
 	canonicalQuranRiwāya: "",
-	canonicalQuranFolder: "_7 Sources/Quran",
+	canonicalQuranFolder: "Midad Arabic Sources/Installed Sources/Quran",
 	sourceMocParent: "Sources",
-	annotationNoteFolder: "_7 Sources/Notes",
+	annotationNoteFolder: "Midad Arabic Sources/Annotation Notes",
 	annotationDefaultColor: "yellow",
 	annotationTrashDays: 30,
 	annotateOnSelection: true,
@@ -562,12 +567,15 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 	archivingSources = new Set<string>();
 	/** Phase 1 annotation layer; null until startup succeeds. */
 	annotations: AnnotationService | null = null;
+	/** Old locations captured during the one-time source-layout migration. */
+	sourceLayoutLegacy: { installedRoot: string; annotationNotes: string } | null = null;
 
 	async onload() {
 		await this.loadSettings();
 		// Extract the bundled templates and Python scripts into the plugin folder
 		// (they ship inside main.js; see gen-assets.mjs).
 		this.extractBundledAssets();
+		await this.ensureSourceLayout();
 		this.addSettingTab(new MidadArabicSourcesSettingTab(this.app, this));
 		try {
 			this.annotations = await registerAnnotations({
@@ -867,6 +875,26 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		return adapter?.basePath ?? "";
 	}
 
+	sourcesRoot(): string {
+		return normalizePath((this.settings.sourceRoot || "").trim() || "Midad Arabic Sources");
+	}
+
+	installedSourcesRoot(): string {
+		return normalizePath((this.settings.sourceImportRoot || "").trim() || `${this.sourcesRoot()}/Installed Sources`);
+	}
+
+	transcriptionsFolder(): string {
+		return normalizePath(`${this.sourcesRoot()}/Transcriptions`);
+	}
+
+	translationsFolder(): string {
+		return normalizePath(`${this.sourcesRoot()}/Translations`);
+	}
+
+	canonicalQuranFolder(): string {
+		return normalizePath((this.settings.canonicalQuranFolder || "").trim() || `${this.installedSourcesRoot()}/Quran`);
+	}
+
 	/**
 	 * Write the bundled templates and Python scripts into the plugin folder when
 	 * they differ. They are compiled into main.js (gen-assets.mjs), so a release
@@ -1055,6 +1083,65 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		return !!(process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY);
 	}
 
+	async ensureSourceLayout(): Promise<void> {
+		if (this.settings.sourceLayoutMigrated) return;
+		const legacy = this.sourceLayoutLegacy;
+		if (!legacy) {
+			this.settings.sourceLayoutMigrated = true;
+			await this.saveSettings();
+			return;
+		}
+		const args = [
+			"--source-root", this.sourcesRoot(),
+			"--old-installed-root", legacy.installedRoot,
+			"--old-annotation-notes", legacy.annotationNotes,
+		];
+		const { code, lines } = await this.runScript("migrate-source-layout.py", args, () => {});
+		if (code === 0) {
+			this.settings.sourceImportRoot = normalizePath(`${this.sourcesRoot()}/Installed Sources`);
+			this.settings.annotationNoteFolder = normalizePath(`${this.sourcesRoot()}/Annotation Notes`);
+			this.settings.canonicalQuranFolder = normalizePath(`${this.settings.sourceImportRoot}/Quran`);
+			this.settings.sourceLayoutMigrated = true;
+			this.sourceLayoutLegacy = null;
+			await this.saveSettings();
+			new Notice("Midad Arabic Sources: source folders reorganized.");
+		} else {
+			console.error("[midad-arabic-sources] source-layout migration", lines);
+			new Notice("Midad Arabic Sources could not reorganize its folders — see the developer console.");
+		}
+	}
+
+	/** Move every plugin-owned folder to a new source root. */
+	async moveSourceRoot(newRoot: string): Promise<void> {
+		const root = normalizePath(newRoot.trim() || "Midad Arabic Sources");
+		if (root === this.sourcesRoot()) {
+			this.settings.sourceRoot = root;
+			await this.saveSettings();
+			return;
+		}
+		const args = [
+			"--source-root", root,
+			"--old-source-root", this.sourcesRoot(),
+			"--old-installed-root", this.installedSourcesRoot(),
+			"--old-transcriptions", this.transcriptionsFolder(),
+			"--old-translations", this.translationsFolder(),
+			"--old-annotation-notes", this.settings.annotationNoteFolder,
+		];
+		const { code, lines } = await this.runScript("migrate-source-layout.py", args, () => {});
+		if (code !== 0) {
+			console.error("[midad-arabic-sources] source-root move", lines);
+			new Notice("Midad Arabic Sources could not move its folders — see the developer console.");
+			return;
+		}
+		this.settings.sourceRoot = root;
+		this.settings.sourceImportRoot = normalizePath(`${root}/Installed Sources`);
+		this.settings.annotationNoteFolder = normalizePath(`${root}/Annotation Notes`);
+		this.settings.canonicalQuranFolder = normalizePath(`${root}/Installed Sources/Quran`);
+		this.settings.sourceLayoutMigrated = true;
+		await this.saveSettings();
+		new Notice(`Midad Arabic Sources: moved plugin folders to ${root}.`);
+	}
+
 	openSettings(): void {
 		const s = (this.app as unknown as AppInternals).setting;
 		if (s) {
@@ -1120,6 +1207,11 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 					...process.env,
 					OBSIDIAN_VAULT: vault,
 					PYTHONUNBUFFERED: "1",
+					MIDAD_SOURCES_ROOT: this.sourcesRoot(),
+					MIDAD_INSTALLED_ROOT: this.installedSourcesRoot(),
+					MIDAD_TRANSCRIPTIONS_DIR: this.transcriptionsFolder(),
+					MIDAD_TRANSLATIONS_DIR: this.translationsFolder(),
+					MIDAD_CANONICAL_QURAN_DIR: this.canonicalQuranFolder(),
 					...(taskKey ? { GEMINI_API_KEY: taskKey } : {}),
 				},
 			});
@@ -1717,7 +1809,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 
 	/** A work's hub note `updated` time (its last-render watermark), in ms. */
 	hubUpdatedMs(work: JsonObject): number {
-		const outRoot = this.settings.sourceImportRoot.trim() || "_7 Sources";
+		const outRoot = this.installedSourcesRoot();
 		const file = this.app.vault.getAbstractFileByPath(normalizePath(`${outRoot}/${work.dir}.md`));
 		const fm = file instanceof TFile ? this.app.metadataCache.getFileCache(file)?.frontmatter : null;
 		return frontmatterTimeMs(fm?.["updated"]) ?? 0;
@@ -1886,7 +1978,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 
 	/** The installed work whose hub or folder contains `path`, if any. */
 	async workForPath(path: string): Promise<JsonObject | null> {
-		const outRoot = this.settings.sourceImportRoot.trim() || "_7 Sources";
+		const outRoot = this.installedSourcesRoot();
 		const manifest = await this.loadSourceManifest();
 		for (const w of manifest) {
 			const dir = String(w.dir ?? "");
@@ -2023,7 +2115,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 
 	/** Prepend `- "[[@citekey]]"` under the work note's `mas-up:` list, once. */
 	async addCitekeyUp(work: JsonObject, citekey: string): Promise<void> {
-		const outRoot = this.settings.sourceImportRoot.trim() || "_7 Sources";
+		const outRoot = this.installedSourcesRoot();
 		const hub = normalizePath(`${outRoot}/${work.dir}.md`);
 		try {
 			const text = await this.app.vault.adapter.read(hub);
@@ -2154,7 +2246,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 				note: it.extra || undefined,
 			};
 		});
-		const path = normalizePath("_7 Sources/zotero-export.csl.json");
+		const path = normalizePath(`${this.sourcesRoot()}/zotero-export.csl.json`);
 		await this.app.vault.adapter.write(path, JSON.stringify(csl, null, 2));
 		return path;
 	}
@@ -2382,7 +2474,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 	 * not silent.
 	 */
 	async removeSource(work: JsonObject, onProgress?: (done: number, total: number) => void): Promise<boolean> {
-		const outRoot = this.settings.sourceImportRoot.trim() || "_7 Sources";
+		const outRoot = this.installedSourcesRoot();
 		const dir = work.dir as string;
 		const adapter = this.app.vault.adapter;
 		const problems: string[] = [];
@@ -2476,7 +2568,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 
 	/** Remove a work's rendered notes, returning any per-file errors. */
 	async deleteRenderedNotes(work: JsonObject, model?: SourceModel): Promise<string[]> {
-		const outRoot = this.settings.sourceImportRoot.trim() || "_7 Sources";
+		const outRoot = this.installedSourcesRoot();
 		const dir = String(work.dir ?? "");
 		const adapter = this.app.vault.adapter;
 		const problems: string[] = [];
@@ -2605,7 +2697,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			return false;
 		}
 		await this.renderWithProgress([modelAbs], true, `Restoring ${work.title || work.dir}`);
-		const outRoot = this.settings.sourceImportRoot.trim() || "_7 Sources";
+		const outRoot = this.installedSourcesRoot();
 		const hub = normalizePath(`${outRoot}/${work.dir}.md`);
 		if (!this.app.vault.getAbstractFileByPath(hub)) {
 			new Notice("The archive was extracted, but its notes could not be rendered. It remains archived.");
@@ -2647,7 +2739,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 	 * the same as the repository size (a fetch, a model, and markdown all count).
 	 */
 	async onDiskBytes(work: JsonObject): Promise<number> {
-		const outRoot = this.settings.sourceImportRoot.trim() || "_7 Sources";
+		const outRoot = this.installedSourcesRoot();
 		const adapter = this.app.vault.adapter;
 		let total = Number(work.cache_bytes ?? 0);
 		// The cached model is plugin state, outside the vault index.
@@ -2673,7 +2765,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 	 * is never touched.
 	 */
 	async pruneRenamedFolder(work: JsonObject): Promise<void> {
-		const outRoot = this.settings.sourceImportRoot.trim() || "_7 Sources";
+		const outRoot = this.installedSourcesRoot();
 		const dir = String(work.dir ?? "");
 		const title = String(work.title ?? "");
 		const key = this.workKey(work);
@@ -2706,7 +2798,6 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		} catch {
 			return [];
 		}
-		const outRoot = this.settings.sourceImportRoot.trim() || "_7 Sources";
 		const manifest = await this.loadSourceManifest();
 		// Keep every entry — including ones still being removed — in the manifest
 		// (the status list), but only list live, non-deleting works in the index.
@@ -2730,7 +2821,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		// restored); a work being removed does not.
 		const installed = works.filter((w) => this.workStatus(w) === "installed");
 		const today = new Date().toISOString().slice(0, 10);
-		const written = await renderMocs(this.app, templates, installed, outRoot, today, this.settings.sourceMocParent.trim() || "Sources", true);
+		const written = await renderMocs(this.app, templates, installed, this.sourcesRoot(), today, this.settings.sourceMocParent.trim() || "Sources", true);
 		const mocNames = [...new Set(installed.flatMap((w) => (
 			Array.isArray(w.mocs) ? (w.mocs as string[]) : (typeof w.moc === "string" ? [w.moc] : [])
 		)))].filter(Boolean).sort();
@@ -2745,7 +2836,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 	/** Works whose notes are partially or wholly missing in the vault. */
 	/** Works whose notes or cached model are missing in the vault. */
 	async findIncompleteSources(): Promise<Array<{ work: JsonObject; missing: number; total: number; reason: string }>> {
-		const outRoot = this.settings.sourceImportRoot.trim() || "_7 Sources";
+		const outRoot = this.installedSourcesRoot();
 		const manifest = await this.loadSourceManifest();
 		const pending = await this.loadPendingDeletions();
 		const modelKeys = new Set(await this.listModelKeys());
@@ -2797,7 +2888,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 
 	/** How many notes a work currently has (its hub plus everything in its folder). */
 	countWorkFiles(work: JsonObject): number {
-		const outRoot = this.settings.sourceImportRoot.trim() || "_7 Sources";
+		const outRoot = this.installedSourcesRoot();
 		const hub = normalizePath(`${outRoot}/${work.dir}.md`);
 		const prefix = normalizePath(`${outRoot}/${work.dir}/`);
 		let n = 0;
@@ -2911,7 +3002,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 
 	/** A work is "installed" when its hub/work note exists in the vault. */
 	async isSourceDirInstalled(dir: string): Promise<boolean> {
-		const outRoot = this.settings.sourceImportRoot.trim() || "_7 Sources";
+		const outRoot = this.installedSourcesRoot();
 		try {
 			return await this.app.vault.adapter.exists(normalizePath(`${outRoot}/${dir}.md`));
 		} catch {
@@ -3040,7 +3131,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			new Notice(`Import templates could not be loaded: ${e instanceof Error ? e.message : e}`);
 			return [];
 		}
-		const outRoot = this.settings.sourceImportRoot.trim() || "_7 Sources";
+		const outRoot = this.installedSourcesRoot();
 		// Parse the batch models, resolve the canonical riwāya, and tag them.
 		const pending = await this.loadPendingDeletions();
 		const batch: SourceModel[] = [];
@@ -3174,8 +3265,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		let file = this.app.metadataCache.getFirstLinkpathDest(name, "");
 		if (!file) {
 			// Give a plugin-created parent a home beside the other source notes.
-			const outRoot = this.settings.sourceImportRoot.trim() || "_7 Sources";
-			const path = normalizePath(`${outRoot}/${name}.md`);
+			const path = normalizePath(`${this.sourcesRoot()}/${name}.md`);
 			const existing = this.app.vault.getAbstractFileByPath(path);
 			if (existing instanceof TFile) file = existing;
 			else {
@@ -3464,7 +3554,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		newDir: string,
 		canonicalId: string
 	): Promise<void> {
-		const outRoot = this.settings.sourceImportRoot.trim() || "_7 Sources";
+		const outRoot = this.installedSourcesRoot();
 		const adapter = this.app.vault.adapter;
 		const oldHub = normalizePath(`${outRoot}/${oldDir}.md`);
 		const newHub = normalizePath(`${outRoot}/${newDir}.md`);
@@ -3774,7 +3864,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			this.endSourceOperation(op);
 			return;
 		}
-		const outRoot = this.settings.sourceImportRoot.trim() || "_7 Sources";
+		const outRoot = this.installedSourcesRoot();
 		const canonicalId = this.resolveCanonicalQuran();
 		const canonicalRoot = this.settings.canonicalQuranFolder.trim() || `${outRoot}/Quran`;
 		const stats = await this.loadSourceStats();
@@ -4204,7 +4294,34 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 
 	async loadSettings() {
 		const data = (await this.loadData()) as Partial<MidadArabicSourcesSettings> | null;
+		const hadSourceRoot = typeof data?.sourceRoot === "string" && !!data.sourceRoot.trim();
 		this.settings = Object.assign({}, DEFAULT_SETTINGS, data ?? {});
+		if (!hadSourceRoot) {
+			if (data) {
+				const oldRoot = (data.sourceImportRoot || "_7 Sources").trim();
+				this.settings.sourceRoot = oldRoot;
+				this.settings.sourceImportRoot = normalizePath(`${oldRoot}/Installed Sources`);
+				this.settings.annotationNoteFolder = normalizePath(`${oldRoot}/Annotation Notes`);
+				this.settings.canonicalQuranFolder = normalizePath(`${oldRoot}/Installed Sources/Quran`);
+				this.settings.sourceLayoutMigrated = false;
+				this.sourceLayoutLegacy = {
+					installedRoot: oldRoot,
+					annotationNotes: (data.annotationNoteFolder || `${oldRoot}/Notes`).trim(),
+				};
+			} else {
+				this.settings.sourceRoot = "Midad Arabic Sources";
+				this.settings.sourceImportRoot = "Midad Arabic Sources/Installed Sources";
+				this.settings.annotationNoteFolder = "Midad Arabic Sources/Annotation Notes";
+				this.settings.canonicalQuranFolder = "Midad Arabic Sources/Installed Sources/Quran";
+				this.settings.sourceLayoutMigrated = true;
+				this.sourceLayoutLegacy = null;
+			}
+		} else {
+			this.settings.sourceRoot = (data?.sourceRoot || this.settings.sourceRoot).trim() || "Midad Arabic Sources";
+			this.settings.sourceImportRoot = (data?.sourceImportRoot || `${this.settings.sourceRoot}/Installed Sources`).trim();
+			this.settings.annotationNoteFolder = (data?.annotationNoteFolder || `${this.settings.sourceRoot}/Annotation Notes`).trim();
+			this.settings.canonicalQuranFolder = (data?.canonicalQuranFolder || `${this.settings.sourceImportRoot}/Quran`).trim();
+		}
 		await this.ensureLlmSettings();
 		// Pre-designation installs: Ḥafṣ was the first riwāya, so adopt it once and
 		// persist it, after which the designation is purely the setting.
@@ -4426,6 +4543,21 @@ class MidadArabicSourcesSettingTab extends PluginSettingTab {
 		if (key === "zoteroAutoCreate" && value === true) void this.plugin.autoSyncZotero();
 	}
 
+	/** The source root setting moves existing plugin folders when applied. */
+	renderSourceRoot(setting: Setting): void {
+		setting.controlEl.empty();
+		let value = this.plugin.settings.sourceRoot || "Midad Arabic Sources";
+		const text = new TextComponent(setting.controlEl);
+		text.setValue(value).onChange((v) => { value = v; });
+		text.inputEl.setCssStyles({ width: "18em" });
+		setting.addButton((button) =>
+			button.setButtonText("Move folders here").setCta().onClick(async () => {
+				await this.plugin.moveSourceRoot(value);
+				this.update();
+			})
+		);
+	}
+
 	/** Add a reusable LLM endpoint/key/model configuration. */
 	addLlmConfig(): void {
 		const configs = this.plugin.settings.llmConfigs ?? [];
@@ -4631,6 +4763,18 @@ class MidadArabicSourcesSettingTab extends PluginSettingTab {
 		const pages: SettingDefinitionItem[] = [
 			{
 				type: "page",
+				name: "General",
+				desc: "Where the plugin keeps its source folders.",
+				items: [
+					{
+						name: "Sources folder",
+						desc: "Root folder for Installed Sources, Transcriptions, Translations, and Annotation Notes. “Move folders here” moves the existing plugin-owned folders to the new root.",
+						render: (setting: Setting) => this.renderSourceRoot(setting),
+					},
+				],
+			},
+			{
+				type: "page",
 				name: "Transliteration",
 				desc: "Romanize Arabic: the resident server, the engine, and the naming options.",
 				items: [
@@ -4765,11 +4909,6 @@ class MidadArabicSourcesSettingTab extends PluginSettingTab {
 						control: { type: "text", key: "sourceImportScript" },
 					},
 					{
-						name: "Import destination",
-						desc: "Folder imported works are written under (one subfolder per work).",
-						control: { type: "text", key: "sourceImportRoot" },
-					},
-					{
 						name: "Template folder",
 						desc: "Vault folder holding your edited import templates (blank = bundled defaults). Use “Copy import templates to vault”.",
 						control: { type: "text", key: "sourceTemplateFolder", placeholder: "Templates" },
@@ -4778,11 +4917,6 @@ class MidadArabicSourcesSettingTab extends PluginSettingTab {
 						name: "Canonical Qurʾān riwāya",
 						desc: "Riwāya whose sūra notes are unprefixed (the main reference). Set once, to the first riwāya you install; edit here to switch. Qurʾān citation linking in source notes requires Ḥafṣ (hafs): almost all source texts quote the Ḥafṣ reading, so citations cannot be matched against another riwāya.",
 						control: { type: "text", key: "canonicalQuranRiwāya", placeholder: "Ḥafṣ" },
-					},
-					{
-						name: "Canonical Qurʾān folder",
-						desc: "Vault folder that holds the canonical riwāya’s sūra notes.",
-						control: { type: "text", key: "canonicalQuranFolder" },
 					},
 					{
 						name: "Sources parent note",
@@ -4816,11 +4950,6 @@ class MidadArabicSourcesSettingTab extends PluginSettingTab {
 						name: "Annotate on selection",
 						desc: "Open the annotation dialog when text is selected inside a source note, after a short pause. Copying or opening the context menu suppresses it.",
 						control: { type: "toggle", key: "annotateOnSelection" },
-					},
-					{
-						name: "Annotation note folder",
-						desc: "Folder for the generated per-work annotation notes. They are ordinary notes; the plugin only owns their annotations regions.",
-						control: { type: "text", key: "annotationNoteFolder", placeholder: "_7 Sources/Notes" },
 					},
 					{
 						name: "Default annotation colour",
@@ -5578,7 +5707,7 @@ class StandalonePdfModal extends Modal {
 		const { contentEl } = this;
 		contentEl.createEl("h3", { text: "Transcribe a PDF" });
 		contentEl.createEl("p", {
-			text: "Choose a PDF that is not attached to a Zotero item. The transcription goes into Arabic transcriptions; Gemini will guess the title and author from the title page so you can check them afterwards.",
+			text: `Choose a PDF that is not attached to a Zotero item. The transcription goes into ${this.plugin.transcriptionsFolder()}; Gemini will guess the title and author from the title page so you can check them afterwards.`,
 		});
 
 		const fileInput = contentEl.createEl("input");
@@ -5666,7 +5795,7 @@ class StandalonePdfModal extends Modal {
 		if (!citekey) { new Notice("Enter a citekey."); return; }
 		this.citekeyInput?.setValue(citekey);
 
-		const folder = "_2 Bibliographic notes/Arabic transcriptions";
+		const folder = this.plugin.transcriptionsFolder();
 		const notePrefix = normalizePath(`${folder}/@${citekey} - transcription`);
 		const existing = this.app.vault
 			.getFiles()

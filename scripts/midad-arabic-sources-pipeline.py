@@ -53,8 +53,8 @@ VAULT = _find_vault()
 # The plugin's scripts live together, wherever they are deployed.
 SCRIPTS = Path(__file__).resolve().parent
 BIB = VAULT / "_2 Bibliographic notes"
-TRANSC_DIR = BIB / "Arabic transcriptions"
-TRANS_DIR = BIB / "Arabic translations"
+TRANSC_DIR = VAULT / os.environ.get("MIDAD_TRANSCRIPTIONS_DIR", "_2 Bibliographic notes/Arabic transcriptions")
+TRANS_DIR = VAULT / os.environ.get("MIDAD_TRANSLATIONS_DIR", "_2 Bibliographic notes/Arabic translations")
 CACHE = VAULT / ".midad-arabic-sources"
 ARCHIVE_DIR = CACHE / "archive"
 OLD_ARCHIVE = VAULT / "AI OS/Arabic Transcriptions/Arabic OCR archive"

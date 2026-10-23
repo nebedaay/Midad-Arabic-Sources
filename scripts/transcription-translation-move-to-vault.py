@@ -14,18 +14,19 @@ Usage:
     python3 transcription-translation-move-to-vault.py <file.md> --citekey KEY \
         [--type translation] [--related "[[Topic]]" ...]
 """
+import os
 import re
 import sys
 from pathlib import Path
 from datetime import datetime
 
-VAULT = Path("/Users/josephhill/Documents/Obsidian Vault")
+VAULT = Path(os.environ.get("OBSIDIAN_VAULT", os.path.expanduser("~/Documents/Obsidian Vault")))
 BIB = VAULT / "_2 Bibliographic notes"
 
 # Destination folder for each document type.
 DEST_FOLDERS = {
-    "transcription": "Arabic transcriptions",
-    "translation": "Arabic translations",
+    "transcription": os.environ.get("MIDAD_TRANSCRIPTIONS_DIR", "_2 Bibliographic notes/Arabic transcriptions"),
+    "translation": os.environ.get("MIDAD_TRANSLATIONS_DIR", "_2 Bibliographic notes/Arabic translations"),
 }
 
 # A trailing "(transcription...)" / "(translation...)" or "- transcription".
@@ -87,7 +88,7 @@ def _strip_type_suffix(alias: str) -> str:
 
 
 def _transcription_note(citekey: str, volume: int | None) -> Path:
-    folder = BIB / DEST_FOLDERS["transcription"]
+    folder = VAULT / DEST_FOLDERS["transcription"]
     if volume:
         return folder / f"@{citekey} - transcription - vol. {volume}.md"
     return folder / f"@{citekey} - transcription.md"
@@ -213,7 +214,7 @@ def detect_volume(filename: str) -> int | None:
 
 def dest_path(citekey: str, doc_type: str, volume: int = None) -> Path:
     """Vault destination path for a note."""
-    dest_dir = BIB / DEST_FOLDERS[doc_type]
+    dest_dir = VAULT / DEST_FOLDERS[doc_type]
     dest_dir.mkdir(parents=True, exist_ok=True)
     if volume:
         return dest_dir / f"@{citekey} - {doc_type} - vol. {volume}.md"
@@ -250,7 +251,7 @@ def ensure_parent(citekey: str, doc_type: str, related: list[str], volume: int):
 
 def _collection_notes(citekey: str, doc_type: str):
     """(parent_name, [volume_names sorted numerically]) for a citekey."""
-    folder = BIB / DEST_FOLDERS[doc_type]
+    folder = VAULT / DEST_FOLDERS[doc_type]
     parent = f"@{citekey} - {doc_type}"
     vols = []
     if folder.exists():

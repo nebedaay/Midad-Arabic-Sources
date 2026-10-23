@@ -102,6 +102,7 @@ export interface ResolvedAnnotation extends SourceAnnotation {
 
 /** Settings the annotation layer reads; the plugin's settings are a superset. */
 export interface AnnotationSettings {
+	sourceRoot: string;
 	sourceImportRoot: string;
 	canonicalQuranFolder: string;
 	canonicalQuranRiwāya: string;

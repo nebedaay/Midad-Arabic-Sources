@@ -36,26 +36,33 @@ A plugin update therefore carries the new scripts and templates, which is what l
 
 ## First run
 
-1. **Open the settings** (Settings → Community plugins → Midad Arabic Sources) and skim the five sections: Transliteration, Transcription and translation, Document import, Zotero, and Documentation. Each points to its guide here.
+1. **Open the settings** (Settings → Community plugins → Midad Arabic Sources). The pages are **General**, **LLM**, **Transliteration**, **Transcription and translation**, **Source import from repository**, **Annotations**, **Zotero**, and **Documentation**. General sets the source folder; LLM holds the reusable model/API-key configurations.
 2. Start the transliteration server if you will romanize Arabic: run **Transliteration server…** from the command palette; it shows whether the service is running and gives one **Start** / **Stop** button. Restarting is only needed when the engine code changes — see [Transliteration](./transliteration.md).
 3. **Install some texts**: run **Manage text sources…** and pick works from a repository. See [Document import](./document-import.md).
-4. **Set your import destination** under **Document import** if `_7 Sources` is not where you want the corpus. Every work gets its own subfolder there.
+4. **Set the sources folder** under **General** if `Midad Arabic Sources` is not where you want the corpus. Every installed work goes into `<sources folder>/Installed Sources`.
 
 ## The folder layout
 
-Notes the plugin generates live under the **import destination** (`_7 Sources` by default), one folder per work:
+The plugin keeps everything under one **sources folder** (`Midad Arabic Sources` for a new install; existing vaults keep their current folder, e.g. `_7 Sources`):
 
 ```text
-_7 Sources/
-  Tafsīr al-Ṭabarī (tafsir_api)/
-    Tafsīr al-Ṭabarī (tafsir_api).md    ← the work hub (table of contents)
-    001 Al-Fatihah.md                   ← one note per sūra / chapter / root
-    002 Al-Baqarah.md
-    …
-  Tafsīr Sources.md                     ← a category MOC
+<sources folder>/
+  Installed Sources/
+    Tafsīr al-Ṭabarī (tafsir_api)/
+      Tafsīr al-Ṭabarī (tafsir_api).md  ← the work hub (table of contents)
+      001 Al-Fatihah.md                 ← one note per sūra / chapter / root
+      002 Al-Baqarah.md
+      …
+    Quran/                             ← the canonical Qur’ān notes
+  Transcriptions/                      ← PDF transcriptions
+  Translations/                        ← their translations
+  Annotation Notes/                    ← generated per-work annotation notes
+  Tafsīr Sources.md                    ← a category MOC
   Ḥadīth Sources.md
-  Sources.md                            ← the parent note the MOCs point up to
+  Sources.md                           ← the parent note the MOCs point up to
 ```
+
+Existing installations are moved once by **General → Sources folder → Move folders here**; the migration updates the adopted-annotation registry and leaves the MOCs and the parent note at the source root.
 
 - **A work hub** carries the bibliographic properties and links every note in the work.
 - **A content note** is one sūra, ḥadīth chapter, book chapter, or dictionary root.

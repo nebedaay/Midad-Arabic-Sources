@@ -223,7 +223,7 @@ export class AnnotationService {
 		const meta = await this.resolver.metaForWork(workKey, notePath);
 		if (!meta) return null;
 		const folder = this.settings.annotationNoteFolder.trim() ||
-			`${this.settings.sourceImportRoot.trim() || "_7 Sources"}/Notes`;
+			`${this.settings.sourceRoot.trim() || this.settings.sourceImportRoot.trim() || "_7 Sources"}/Annotation Notes`;
 		const note = normalizePath(`${folder}/${meta.dir.replace(/[\\/:*?"<>|#^]/g, "-").trim() || "Annotations"} - Annotations.md`);
 		return { ...meta, note };
 	}
@@ -1580,7 +1580,7 @@ export class AnnotationService {
 			);
 		}
 		const folder = this.settings.annotationNoteFolder.trim() ||
-			`${outRoot}/Notes`;
+			`${this.settings.sourceRoot.trim() || outRoot}/Annotation Notes`;
 		const newNote = normalizePath(`${folder}/${newDir.replace(/[\\/:*?"<>|#^]/g, "-").trim() || "Annotations"} - Annotations.md`);
 		const oldNote = work.note;
 		if (oldNote && oldNote !== newNote && await this.app.vault.adapter.exists(normalizePath(oldNote))) {

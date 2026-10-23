@@ -70,7 +70,7 @@ The importer rejects duplicate `(collection, id)` keys and any two ids that sani
 
 ## Where things go
 
-- **Notes**: under the **Import destination** (`_7 Sources` by default), one folder per work.
+- **Notes**: under `<Sources>/Installed Sources`, one folder per work.
 - **Cached source JSON**: `.midad-arabic-sources/cache/text-sources/`.
 - **Render models**: `.midad-arabic-sources/source-models/<collection>/<id>.json`. The collection folder is the namespace: `hadith/malik.json` is the model for `hadith:malik`, while another collection with the same leaf lives in its own folder. The embedded `work.key` is authoritative; a fetch refuses to overwrite a model that declares a different key. All 834 catalogue works currently map to 834 distinct model paths.
 - **Archived models**: `.midad-arabic-sources/source-archives/<collection>/<id>.json.gz`.

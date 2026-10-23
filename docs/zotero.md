@@ -10,7 +10,7 @@ Choose the method under **Zotero → Method**:
 
 - **Local API (this computer)** — writes to the Zotero running on `127.0.0.1:23119`. The default. No key needed.
 - **Web API (zotero.org)** — writes to your online library. Needs an API key (from [zotero.org/settings/keys](https://www.zotero.org/settings/keys), with write access) and your numeric user or group ID. **Detect local Zotero** fills the library ID from a running local Zotero when it can.
-- **CSL-JSON file (manual import)** — writes `_7 Sources/zotero-export.csl.json`, which you import by hand through Zotero’s **File → Import**.
+- **CSL-JSON file (manual import)** — writes `<Sources>/zotero-export.csl.json`, which you import by hand through Zotero’s **File → Import**.
 
 ## Commands
 

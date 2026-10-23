@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """Retrieve Quran verses with tashkīl. For tashkīl restoration and quote matching."""
 
+import os
 import re
 import unicodedata
 import sqlite3
 from pathlib import Path
 
-QURAN_DIR = Path("/Users/josephhill/Documents/Obsidian Vault/_7 Sources/Quran")
+VAULT = Path(os.environ.get("OBSIDIAN_VAULT", os.path.expanduser("~/Documents/Obsidian Vault")))
+QURAN_DIR = VAULT / os.environ.get("MIDAD_CANONICAL_QURAN_DIR", "_7 Sources/Quran")
 SQLITE_DB = QURAN_DIR / ".quran.sqlite"
 
 def load_verse(surah_num: int, verse: int) -> str | None:

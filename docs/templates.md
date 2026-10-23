@@ -126,7 +126,7 @@ Languages are derived from the source catalogue: each work gets a code and its E
 | Field | Example |
 | --- | --- |
 | `id` | `2` |
-| `base` | `002 Al-Baqarah` (matches the `_7 Sources/Quran` note name) |
+| `base` | `002 Al-Baqarah` (matches the `<Sources>/Installed Sources/Quran` note name) |
 | `translit` | `Al-Baqarah` |
 | `arabic` | `البقرة` |
 | `blocks[]` | one per āya: `{ number, ref, body }` |

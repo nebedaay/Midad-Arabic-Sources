@@ -15,7 +15,7 @@ For each PDF the pipeline:
 
 The intermediates live under `.midad-arabic-sources/work/` and are removed once the vault note is written; the batch archive under `.midad-arabic-sources/archive/` is kept, and it is what **Reprocess from archive…** re-runs without resubmitting.
 
-The finished note is written to `_2 Bibliographic notes/Arabic transcriptions/` as `@<citekey> - transcription.md`, with one `#### p. N` heading per page. Transcriptions and translations are automatically made annotatable; multi-volume series share one annotation note. A multi-volume item gets `@<citekey> - transcription - vol. N.md`, and the volume number is inferred from the PDF filename when the dialog does not supply one.
+The finished note is written to `<Sources>/Transcriptions/` as `@<citekey> - transcription.md`, with one `#### p. N` heading per page. Transcriptions and translations are automatically made annotatable; multi-volume series share one annotation note. A multi-volume item gets `@<citekey> - transcription - vol. N.md`, and the volume number is inferred from the PDF filename when the dialog does not supply one.
 
 ## Standalone PDFs (no Zotero item)
 

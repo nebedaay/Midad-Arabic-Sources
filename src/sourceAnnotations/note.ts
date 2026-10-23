@@ -41,7 +41,8 @@ async function ensureFolder(app: App, path: string): Promise<void> {
 }
 
 export function annotationNotePath(work: AnnotationWorkFile, settings: AnnotationSettings): string {
-	const folder = settings.annotationNoteFolder.trim() || `${settings.sourceImportRoot.trim() || "_7 Sources"}/Notes`;
+	const folder = settings.annotationNoteFolder.trim() ||
+		`${settings.sourceRoot.trim() || settings.sourceImportRoot.trim() || "_7 Sources"}/Annotation Notes`;
 	const adopted = work.key.startsWith("adopted:") || work.key.startsWith("note:");
 	const stem = adopted ? `Adopted - ${work.title}` : work.dir;
 	return normalizePath(`${folder}/${safeFileStem(stem)} - Annotations.md`);
@@ -154,8 +155,8 @@ export async function renderAnnotationNote(
 }
 
 export function annotationMocPath(settings: AnnotationSettings): string {
-	const outRoot = settings.sourceImportRoot.trim() || "_7 Sources";
-	return normalizePath(`${outRoot}/source-annotation.md`);
+	const root = settings.sourceRoot.trim() || settings.sourceImportRoot.trim() || "_7 Sources";
+	return normalizePath(`${root}/source-annotation.md`);
 }
 
 async function mocEntry(

@@ -67,7 +67,7 @@ MODEL_DIR = VAULT / ".midad-arabic-sources" / "source-models"
 # Canonical, schema-bearing source data (the FODT dictionary keeps its homonym
 # and diptote fields here; the model is only the render cache).
 SOURCE_DATA_DIR = VAULT / ".midad-arabic-sources" / "source-data"
-QURAN_DIR = VAULT / "_7 Sources" / "Quran"
+QURAN_DIR = VAULT / os.environ.get("MIDAD_CANONICAL_QURAN_DIR", "_7 Sources/Quran")
 
 # Optional per-work title/author/dir overrides, keyed by "<collection>:<id>".
 OVERRIDES_FILE = VAULT / ".midad-arabic-sources" / "text-source-titles.json"
