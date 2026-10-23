@@ -139,6 +139,51 @@ def update_annotation_store(source_root: str, old_annotation: str, old_transcrip
         print(f"  annotation store: {changed} JSON file(s) updated")
 
 
+def update_markdown_links(source_root: str, old_source_root: str, old_installed: str,
+                          old_annotation: str, old_transcriptions: str,
+                          old_translations: str, work_names: list[str],
+                          moc_names: set[str], dry: bool) -> None:
+    """Rewrite explicit vault links after a move, without touching prose."""
+    if not old_source_root:
+        old_source_root = old_installed
+    new_installed = f"{source_root}/Installed Sources"
+    new_annotation = f"{source_root}/Annotation Notes"
+    new_transcriptions = f"{source_root}/Transcriptions"
+    new_translations = f"{source_root}/Translations"
+    pairs = [
+        (old_transcriptions, new_transcriptions),
+        (old_translations, new_translations),
+        (old_annotation, new_annotation),
+    ]
+    for name in work_names:
+        pairs.append((f"{old_installed}/{name}", f"{new_installed}/{name}"))
+    for name in moc_names:
+        pairs.append((f"{old_source_root}/{name}.md", f"{source_root}/{name}.md"))
+    pairs = [(norm(old), norm(new)) for old, new in pairs if norm(old) != norm(new)]
+    if not pairs:
+        return
+    changed = 0
+    for path in VAULT.rglob("*.md"):
+        rel = path.relative_to(VAULT).as_posix()
+        if rel.startswith((".obsidian/", ".midad-arabic-sources/", "tmp/", "src/", "AI OS/")):
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+        except Exception:
+            continue
+        updated = text
+        for old, new in pairs:
+            old_key = f"[[{old}"
+            if old_key in updated:
+                updated = updated.replace(old_key, f"[[{new}")
+        if updated != text:
+            changed += 1
+            if not dry:
+                path.write_text(updated, encoding="utf-8")
+    if changed:
+        print(f"  links updated in {changed} Markdown file(s)")
+
+
 def update_settings(data_path: str, source_root: str, dry: bool) -> None:
     if not data_path:
         return
@@ -193,6 +238,17 @@ def main() -> int:
         except Exception as e:
             print(f"  WARNING: could not read manifest: {e}")
 
+    work_names = [str(w.get("dir")) for w in works if w.get("dir")]
+    work_names.append("Quran")
+    moc_names = set()
+    for work in works:
+        raw = work.get("mocs")
+        if isinstance(raw, list):
+            moc_names.update(str(x) for x in raw if x)
+        elif work.get("moc"):
+            moc_names.add(str(work["moc"]))
+    moc_names.update({"source-annotation", "Sources"})
+
     canonical_root = VAULT / source_root / "Installed Sources" / "Quran"
     for work in works:
         move_work(work, old_root, new_root, dry)
@@ -203,17 +259,8 @@ def main() -> int:
 
     old_source_root = VAULT / norm(args.old_source_root) if args.old_source_root else None
     if old_source_root and old_source_root.resolve() != (VAULT / source_root).resolve():
-        moc_names = set()
-        for work in works:
-            raw = work.get("mocs")
-            if isinstance(raw, list):
-                moc_names.update(str(x) for x in raw if x)
-            elif work.get("moc"):
-                moc_names.add(str(work["moc"]))
-        moc_names.update({"source-annotation"})
         for name in sorted(moc_names):
             move_path(old_source_root / f"{name}.md", VAULT / source_root / f"{name}.md", dry)
-        move_path(old_source_root / "Sources.md", VAULT / source_root / "Sources.md", dry)
         move_path(old_source_root / "zotero-export.csl.json", VAULT / source_root / "zotero-export.csl.json", dry)
 
     print(f"  transcriptions: {VAULT / args.old_transcriptions} -> {new_transcriptions}")
@@ -226,6 +273,9 @@ def main() -> int:
     update_adopted(source_root, args.old_transcriptions, args.old_translations, dry)
     update_annotation_store(source_root, args.old_annotation_notes,
                             args.old_transcriptions, args.old_translations, dry)
+    update_markdown_links(source_root, args.old_source_root, args.old_installed_root,
+                          args.old_annotation_notes, args.old_transcriptions,
+                          args.old_translations, work_names, moc_names, dry)
     update_settings(args.update_settings, source_root, dry)
 
     print("Done." if not dry else "Dry run complete.")

@@ -4543,19 +4543,41 @@ class MidadArabicSourcesSettingTab extends PluginSettingTab {
 		if (key === "zoteroAutoCreate" && value === true) void this.plugin.autoSyncZotero();
 	}
 
-	/** The source root setting moves existing plugin folders when applied. */
+	/** Changing the root moves the plugin folders, after confirmation when needed. */
 	renderSourceRoot(setting: Setting): void {
 		setting.controlEl.empty();
-		let value = this.plugin.settings.sourceRoot || "Midad Arabic Sources";
+		const current = this.plugin.settings.sourceRoot || "Midad Arabic Sources";
+		let value = current;
 		const text = new TextComponent(setting.controlEl);
 		text.setValue(value).onChange((v) => { value = v; });
 		text.inputEl.setCssStyles({ width: "18em" });
-		setting.addButton((button) =>
-			button.setButtonText("Move folders here").setCta().onClick(async () => {
-				await this.plugin.moveSourceRoot(value);
+		text.inputEl.addEventListener("change", () => {
+			const next = value.trim() || "Midad Arabic Sources";
+			if (next === this.plugin.settings.sourceRoot) return;
+			void (async () => {
+				const sourceAbs = `${this.plugin.vaultPath()}/${this.plugin.sourcesRoot()}`;
+				const targetAbs = `${this.plugin.vaultPath()}/${next}`;
+				let sourceHasFiles = false;
+				let targetHasFiles = false;
+				try { sourceHasFiles = fs.existsSync(sourceAbs) && fs.readdirSync(sourceAbs).length > 0; } catch { /* ignore */ }
+				try { targetHasFiles = fs.existsSync(targetAbs) && fs.readdirSync(targetAbs).length > 0; } catch { /* ignore */ }
+				if (sourceHasFiles || targetHasFiles) {
+					const ok = await new Promise<boolean>((resolve) => {
+						new SourceRootMoveModal(this.app, next, sourceHasFiles, targetHasFiles, resolve).open();
+					});
+					if (!ok) {
+						text.setValue(current);
+						value = current;
+						return;
+					}
+				}
+				await this.plugin.moveSourceRoot(next);
 				this.update();
-			})
-		);
+			})().catch((e) => {
+				console.error("[midad-arabic-sources] move source root", e);
+				new Notice("Could not move the source folders — see the developer console.");
+			});
+		});
 	}
 
 	/** Add a reusable LLM endpoint/key/model configuration. */
@@ -6045,6 +6067,53 @@ class TranslateModal extends Modal {
 
 	onClose(): void {
 		this.contentEl.empty();
+	}
+}
+
+class SourceRootMoveModal extends Modal {
+	root: string;
+	sourceHasFiles: boolean;
+	targetHasFiles: boolean;
+	onChoose: (ok: boolean) => void;
+	settled = false;
+
+	constructor(app: App, root: string, sourceHasFiles: boolean, targetHasFiles: boolean, onChoose: (ok: boolean) => void) {
+		super(app);
+		this.root = root;
+		this.sourceHasFiles = sourceHasFiles;
+		this.targetHasFiles = targetHasFiles;
+		this.onChoose = onChoose;
+	}
+
+	choose(ok: boolean): void {
+		if (this.settled) return;
+		this.settled = true;
+		this.onChoose(ok);
+		this.close();
+	}
+
+	onOpen(): void {
+		const { contentEl } = this;
+		contentEl.createEl("h3", { text: "Move Midad source folders?" });
+		contentEl.createEl("p", {
+			text: `Move Installed Sources, Transcriptions, Translations, and Annotation Notes to “${this.root}”?`,
+		});
+		if (this.targetHasFiles) {
+			contentEl.createEl("p", {
+				text: "The destination already contains files. Existing folders will be merged; files with the same name are left untouched.",
+			});
+		}
+		new Setting(contentEl)
+			.addButton((b) => b.setButtonText("Cancel").onClick(() => this.choose(false)))
+			.addButton((b) => b.setButtonText("Move folders").setCta().onClick(() => this.choose(true)));
+	}
+
+	onClose(): void {
+		this.contentEl.empty();
+		if (!this.settled) {
+			this.settled = true;
+			this.onChoose(false);
+		}
 	}
 }
 
