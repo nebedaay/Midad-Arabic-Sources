@@ -1241,8 +1241,15 @@ async function renderMocs(app, templates, works, outRoot, generated, parent, for
   }
   return written;
 }
-function renderSourcesNote(templates, mocs, generated) {
-  return renderTemplate(makeEngine(), templates.sources, { mocs, generated });
+function renderSourcesNote(templates, groups, generated) {
+  return renderTemplate(makeEngine(), templates.sources, { groups, generated });
+}
+async function renderMocIndex(app, templates, name, sections, outRoot, parent, generated, force = false) {
+  const engine = makeEngine();
+  const out = renderTemplate(engine, templates.moc, { moc: { name }, sections, parent, generated });
+  const path2 = `${outRoot}/${name}.md`;
+  await writeMerged(app, path2, out, force);
+  return path2;
 }
 
 // src/sourceImport/history.ts
@@ -1305,15 +1312,15 @@ function templateChangedAt(store, key) {
 
 // src/assets.generated.ts
 var BUNDLED_ASSETS = [
-  { path: "midad-arabic-sources-import-templates/book-note.eta.md", content: "<% start_YAML(); -%>\n<% add_property('document-type', '[[text-source]]'); -%>\n<% add_property('created', generated); -%>\n<% add_property('updated', updated()); -%>\n<% add_property('mas-up', [unit.section_page ? wikilink(unit.section_page) : null, wikilink(work.dir), '[[Midad Arabic Sources]]'].filter(Boolean)); -%>\n<% add_property('related', [], { force: true, merge: 'keep' }); -%>\n<% add_property('title', unit.title || unit.base); -%>\n<% if (work.short) { add_property('shorttitle', work.short); } -%>\n<% if (work.authors && work.authors.length) { add_property('authors', work.authors.map(a => wikilink(a))); } -%>\n<% if (work.translators && work.translators.length) { add_property('translators', work.translators.map(a => wikilink(a))); } -%>\n<% if (work.language_links.length > 1) { add_property('language', work.language_links.map(l => wikilink(l))); } else { add_property('language', wikilink(work.language_links[0])); } -%>\n<% add_property('aliases', work.aliases.map(a => `${a} - ${unit.base}`)); -%>\n<% add_property('cssclasses', [work.cssclass], { quote: 'never' }); -%>\n<%~ end_YAML() %>\n<span class=\"mas-managed\">mas-managed</span>\n\n<% const multi = (work.volumes || 1) > 1; -%>\n<% for (const p of unit.pages) { -%>\n#### p. <%= multi ? `${p.vol}:${p.page}` : p.page %>\n\n<%~ p.body %>\n\n<% } -%>\n<% if (!unit.pages || !unit.pages.length) { -%>\n> [!missing-data] No text was found for this section in the source.\n\n<% } -%>\n<span class=\"mas-managed\">/mas-managed</span>\n" },
-  { path: "midad-arabic-sources-import-templates/book-volume.eta.md", content: "<% start_YAML(); -%>\n<% add_property('document-type', '[[text-source]]'); -%>\n<% add_property('created', generated); -%>\n<% add_property('updated', updated()); -%>\n<% add_property('mas-up', [wikilink(work.dir), '[[Midad Arabic Sources]]']); -%>\n<% add_property('related', [], { force: true, merge: 'keep' }); -%>\n<% add_property('title', unit.title || unit.base); -%>\n<% if (work.authors && work.authors.length) { add_property('authors', work.authors.map(a => wikilink(a))); } -%>\n<% if (work.language_links.length > 1) { add_property('language', work.language_links.map(l => wikilink(l))); } else { add_property('language', wikilink(work.language_links[0])); } -%>\n<% add_property('aliases', work.aliases.map(a => `${a} - ${unit.base}`)); -%>\n<% add_property('cssclasses', [work.cssclass], { quote: 'never' }); -%>\n<%~ end_YAML() %>\n<span class=\"mas-managed\">mas-managed</span>\n\n# <%= unit.title %>\n\n<% for (const c of (unit.chapters || [])) { -%>\n- <%= wikilink(c.note_stem || `${work.dir} - ${c.base}`, c.title) %><% if (c.span) { %> \u2014 <%= c.span %><% } %>\n<% } -%>\n<span class=\"mas-managed\">/mas-managed</span>\n" },
-  { path: "midad-arabic-sources-import-templates/dictionary-index.eta.md", content: "<% start_YAML(); -%>\n<% add_property('document-type', '[[text-source]]'); -%>\n<% add_property('created', generated); -%>\n<% add_property('updated', updated()); -%>\n<% add_property('mas-up', [wikilink(work.dir), '[[Midad Arabic Sources]]']); -%>\n<% add_property('related', [], { force: true, merge: 'keep' }); -%>\n<% add_property('title', unit.title || unit.base); -%>\n<% add_property('language', wikilink('Arabic')); -%>\n<% add_property('aliases', []); -%>\n<% add_property('cssclasses', [work.cssclass], { quote: 'never' }); -%>\n<%~ end_YAML() %>\n<span class=\"mas-managed\">mas-managed</span>\n\n# <%= unit.base %>\n\n<% for (const r of unit.roots) { -%>\n- <%= wikilink(r.base, r.title || `${r.arabic} ${r.roman}`) %>\n<% } -%>\n\n<span class=\"mas-managed\">/mas-managed</span>\n" },
-  { path: "midad-arabic-sources-import-templates/dictionary-note.eta.md", content: "<% const isProse = work.body === 'prose'; -%>\n<% start_YAML(); -%>\n<% add_property('document-type', '[[text-source]]'); -%>\n<% add_property('created', generated); -%>\n<% add_property('updated', updated()); -%>\n<% add_property('mas-up', [unit.section_page ? wikilink(unit.section_page) : null, wikilink(work.dir), '[[Midad Arabic Sources]]'].filter(Boolean)); -%>\n<% add_property('related', [], { force: true, merge: 'keep' }); -%>\n<% add_property('title', unit.title || `${unit.root.arabic} ${unit.root.roman}`); -%>\n<% add_property('term-ar', unit.root.arabic); -%>\n<% add_property('term', unit.root.roman); -%>\n<% add_property(`${(work.note_prefix || 'HW').toLowerCase()}-id`, unit.id); -%>\n<% add_property('language', wikilink('Arabic')); -%>\n<% add_property('aliases', [`${work.note_prefix || 'HW'} ${unit.root.arabic}`, `${work.note_prefix || 'HW'} ${unit.root.roman}`]); -%>\n<% add_property('cssclasses', [work.cssclass, isProse ? 'mas-prose' : null].filter(Boolean), { quote: 'never' }); -%>\n<%~ end_YAML() %>\n<span class=\"mas-managed\">mas-managed</span>\n\n<% const rowsOf = (e) => (e.bullets || e.lines || []); -%>\n<% const isBullets = (e) => Array.isArray(e.bullets); -%>\n<% const defBlock = (e) => ['> [!mas-dictionary-definition]', ...rowsOf(e).map((b, i) => `> - ${i === 0 && isBullets(e) ? `<span class=\"mas-hw\">${b}</span>` : b}`)].join('\\n'); -%>\n<% const bodyOf = (e) => isProse ? (e.paragraphs || []).join('\\n\\n') : defBlock(e); -%>\n<% const headingOf = (e, level) => `${'#'.repeat(level)} ${e.roman ? `*${e.roman}* ` : ''}(${e.arabic}) ^${e.id}`; -%>\n<% const blocks = [headingOf(unit.root, 1)]; -%>\n<% if (bodyOf(unit.root)) blocks.push(bodyOf(unit.root)); -%>\n<% if (unit.root.supplement) blocks.push('# Supplement'); -%>\n<% let suppShown = !!unit.root.supplement; -%>\n<% for (const e of unit.entries) { -%>\n<% if (e.supplement && !suppShown) { blocks.push('# Supplement'); suppShown = true; } -%>\n<% blocks.push(headingOf(e, 2)); -%>\n<% if (bodyOf(e)) blocks.push(bodyOf(e)); -%>\n<% } -%>\n<%~ blocks.join('\\n\\n') %>\n\n<span class=\"mas-managed\">/mas-managed</span>\n" },
-  { path: "midad-arabic-sources-import-templates/hadith-note.eta.md", content: "<% start_YAML(); -%>\n<% add_property('document-type', '[[text-source]]'); -%>\n<% add_property('created', generated); -%>\n<% add_property('updated', updated()); -%>\n<% add_property('mas-up', [unit.section_page ? wikilink(unit.section_page) : null, wikilink(work.dir), '[[Midad Arabic Sources]]'].filter(Boolean)); -%>\n<% add_property('related', [], { force: true, merge: 'keep' }); -%>\n<% add_property('title', unit.title || unit.base); -%>\n<% if (work.authors && work.authors.length) { add_property('authors', work.authors.map(a => wikilink(a))); } -%>\n<% if (work.translators && work.translators.length) { add_property('translators', work.translators.map(a => wikilink(a))); } -%>\n<% if (work.language_links.length > 1) { add_property('language', work.language_links.map(l => wikilink(l))); } else { add_property('language', wikilink(work.language_links[0])); } -%>\n<% add_property('aliases', work.aliases.map(a => `${a} - ${unit.base}`)); -%>\n<% add_property('cssclasses', [work.cssclass], { quote: 'never' }); -%>\n<%~ end_YAML() %>\n<span class=\"mas-managed\">mas-managed</span>\n\n<% for (const h of unit.hadiths) { -%>\n# <%= h.number %>\n\n<% if (bilingual === 'table') { -%>\n| \u0627\u0644\u0639\u0631\u0628\u064A\u0629 | English |\n| --- | --- |\n| <%~ h.arabic.replace(/\\n+/g, '<br>') %> | <%~ h.english.replace(/\\n+/g, '<br>') %> |\n\n<% } else { -%>\n<% if (h.narrator) { -%>\n**<%~ h.narrator %>**\n\n<% } -%>\n<%~ h.english %>\n\n<%~ h.arabic %>\n\n<% } -%>\n<% } -%>\n<% if (!unit.hadiths || !unit.hadiths.length) { -%>\n> [!missing-data] No hadiths were found for this chapter in the source.\n\n<% } -%>\n<span class=\"mas-managed\">/mas-managed</span>\n" },
+  { path: "midad-arabic-sources-import-templates/book-note.eta.md", content: "<% start_YAML(); -%>\n<% add_property('document-type', '[[text-source]]'); -%>\n<% add_property('created', generated); -%>\n<% add_property('updated', updated()); -%>\n<% add_property('mas-up', [unit.section_page ? wikilink(unit.section_page) : null, wikilink(work.dir)].filter(Boolean)); -%>\n<% add_property('related', [], { force: true, merge: 'keep' }); -%>\n<% add_property('title', unit.title || unit.base); -%>\n<% if (work.short) { add_property('shorttitle', work.short); } -%>\n<% if (work.authors && work.authors.length) { add_property('authors', work.authors.map(a => wikilink(a))); } -%>\n<% if (work.translators && work.translators.length) { add_property('translators', work.translators.map(a => wikilink(a))); } -%>\n<% if (work.language_links.length > 1) { add_property('language', work.language_links.map(l => wikilink(l))); } else { add_property('language', wikilink(work.language_links[0])); } -%>\n<% add_property('aliases', work.aliases.map(a => `${a} - ${unit.base}`)); -%>\n<% add_property('cssclasses', [work.cssclass], { quote: 'never' }); -%>\n<%~ end_YAML() %>\n<span class=\"mas-managed\">mas-managed</span>\n\n<% const multi = (work.volumes || 1) > 1; -%>\n<% for (const p of unit.pages) { -%>\n#### p. <%= multi ? `${p.vol}:${p.page}` : p.page %>\n\n<%~ p.body %>\n\n<% } -%>\n<% if (!unit.pages || !unit.pages.length) { -%>\n> [!missing-data] No text was found for this section in the source.\n\n<% } -%>\n<span class=\"mas-managed\">/mas-managed</span>\n" },
+  { path: "midad-arabic-sources-import-templates/book-volume.eta.md", content: "<% start_YAML(); -%>\n<% add_property('document-type', '[[text-source]]'); -%>\n<% add_property('created', generated); -%>\n<% add_property('updated', updated()); -%>\n<% add_property('mas-up', [wikilink(work.dir)]); -%>\n<% add_property('related', [], { force: true, merge: 'keep' }); -%>\n<% add_property('title', unit.title || unit.base); -%>\n<% if (work.authors && work.authors.length) { add_property('authors', work.authors.map(a => wikilink(a))); } -%>\n<% if (work.language_links.length > 1) { add_property('language', work.language_links.map(l => wikilink(l))); } else { add_property('language', wikilink(work.language_links[0])); } -%>\n<% add_property('aliases', work.aliases.map(a => `${a} - ${unit.base}`)); -%>\n<% add_property('cssclasses', [work.cssclass], { quote: 'never' }); -%>\n<%~ end_YAML() %>\n<span class=\"mas-managed\">mas-managed</span>\n\n# <%= unit.title %>\n\n<% for (const c of (unit.chapters || [])) { -%>\n- <%= wikilink(c.note_stem || `${work.dir} - ${c.base}`, c.title) %><% if (c.span) { %> \u2014 <%= c.span %><% } %>\n<% } -%>\n<span class=\"mas-managed\">/mas-managed</span>\n" },
+  { path: "midad-arabic-sources-import-templates/dictionary-index.eta.md", content: "<% start_YAML(); -%>\n<% add_property('document-type', '[[text-source]]'); -%>\n<% add_property('created', generated); -%>\n<% add_property('updated', updated()); -%>\n<% add_property('mas-up', [wikilink(work.dir)]); -%>\n<% add_property('related', [], { force: true, merge: 'keep' }); -%>\n<% add_property('title', unit.title || unit.base); -%>\n<% add_property('language', wikilink('Arabic')); -%>\n<% add_property('aliases', []); -%>\n<% add_property('cssclasses', [work.cssclass], { quote: 'never' }); -%>\n<%~ end_YAML() %>\n<span class=\"mas-managed\">mas-managed</span>\n\n# <%= unit.base %>\n\n<% for (const r of unit.roots) { -%>\n- <%= wikilink(r.base, r.title || `${r.arabic} ${r.roman}`) %>\n<% } -%>\n\n<span class=\"mas-managed\">/mas-managed</span>\n" },
+  { path: "midad-arabic-sources-import-templates/dictionary-note.eta.md", content: "<% const isProse = work.body === 'prose'; -%>\n<% start_YAML(); -%>\n<% add_property('document-type', '[[text-source]]'); -%>\n<% add_property('created', generated); -%>\n<% add_property('updated', updated()); -%>\n<% add_property('mas-up', [unit.section_page ? wikilink(unit.section_page) : null, wikilink(work.dir)].filter(Boolean)); -%>\n<% add_property('related', [], { force: true, merge: 'keep' }); -%>\n<% add_property('title', unit.title || `${unit.root.arabic} ${unit.root.roman}`); -%>\n<% add_property('term-ar', unit.root.arabic); -%>\n<% add_property('term', unit.root.roman); -%>\n<% add_property(`${(work.note_prefix || 'HW').toLowerCase()}-id`, unit.id); -%>\n<% add_property('language', wikilink('Arabic')); -%>\n<% add_property('aliases', [`${work.note_prefix || 'HW'} ${unit.root.arabic}`, `${work.note_prefix || 'HW'} ${unit.root.roman}`]); -%>\n<% add_property('cssclasses', [work.cssclass, isProse ? 'mas-prose' : null].filter(Boolean), { quote: 'never' }); -%>\n<%~ end_YAML() %>\n<span class=\"mas-managed\">mas-managed</span>\n\n<% const rowsOf = (e) => (e.bullets || e.lines || []); -%>\n<% const isBullets = (e) => Array.isArray(e.bullets); -%>\n<% const defBlock = (e) => ['> [!mas-dictionary-definition]', ...rowsOf(e).map((b, i) => `> - ${i === 0 && isBullets(e) ? `<span class=\"mas-hw\">${b}</span>` : b}`)].join('\\n'); -%>\n<% const bodyOf = (e) => isProse ? (e.paragraphs || []).join('\\n\\n') : defBlock(e); -%>\n<% const headingOf = (e, level) => `${'#'.repeat(level)} ${e.roman ? `*${e.roman}* ` : ''}(${e.arabic}) ^${e.id}`; -%>\n<% const blocks = [headingOf(unit.root, 1)]; -%>\n<% if (bodyOf(unit.root)) blocks.push(bodyOf(unit.root)); -%>\n<% if (unit.root.supplement) blocks.push('# Supplement'); -%>\n<% let suppShown = !!unit.root.supplement; -%>\n<% for (const e of unit.entries) { -%>\n<% if (e.supplement && !suppShown) { blocks.push('# Supplement'); suppShown = true; } -%>\n<% blocks.push(headingOf(e, 2)); -%>\n<% if (bodyOf(e)) blocks.push(bodyOf(e)); -%>\n<% } -%>\n<%~ blocks.join('\\n\\n') %>\n\n<span class=\"mas-managed\">/mas-managed</span>\n" },
+  { path: "midad-arabic-sources-import-templates/hadith-note.eta.md", content: "<% start_YAML(); -%>\n<% add_property('document-type', '[[text-source]]'); -%>\n<% add_property('created', generated); -%>\n<% add_property('updated', updated()); -%>\n<% add_property('mas-up', [unit.section_page ? wikilink(unit.section_page) : null, wikilink(work.dir)].filter(Boolean)); -%>\n<% add_property('related', [], { force: true, merge: 'keep' }); -%>\n<% add_property('title', unit.title || unit.base); -%>\n<% if (work.authors && work.authors.length) { add_property('authors', work.authors.map(a => wikilink(a))); } -%>\n<% if (work.translators && work.translators.length) { add_property('translators', work.translators.map(a => wikilink(a))); } -%>\n<% if (work.language_links.length > 1) { add_property('language', work.language_links.map(l => wikilink(l))); } else { add_property('language', wikilink(work.language_links[0])); } -%>\n<% add_property('aliases', work.aliases.map(a => `${a} - ${unit.base}`)); -%>\n<% add_property('cssclasses', [work.cssclass], { quote: 'never' }); -%>\n<%~ end_YAML() %>\n<span class=\"mas-managed\">mas-managed</span>\n\n<% for (const h of unit.hadiths) { -%>\n# <%= h.number %>\n\n<% if (bilingual === 'table') { -%>\n| \u0627\u0644\u0639\u0631\u0628\u064A\u0629 | English |\n| --- | --- |\n| <%~ h.arabic.replace(/\\n+/g, '<br>') %> | <%~ h.english.replace(/\\n+/g, '<br>') %> |\n\n<% } else { -%>\n<% if (h.narrator) { -%>\n**<%~ h.narrator %>**\n\n<% } -%>\n<%~ h.english %>\n\n<%~ h.arabic %>\n\n<% } -%>\n<% } -%>\n<% if (!unit.hadiths || !unit.hadiths.length) { -%>\n> [!missing-data] No hadiths were found for this chapter in the source.\n\n<% } -%>\n<span class=\"mas-managed\">/mas-managed</span>\n" },
   { path: "midad-arabic-sources-import-templates/hub.eta.md", content: "<% start_YAML(); -%>\n<% add_property('document-type', '[[text-source]]'); -%>\n<% add_property('created', generated); -%>\n<% add_property('updated', updated()); -%>\n<% add_property('mas-up', [...work.up, '[[Midad Arabic Sources]]']); -%>\n<% add_property('mas-id', 'repo:' + work.key); -%>\n<% add_property('mas-kind', 'repo-work'); -%>\n<% add_property('mas-source', 'repo:' + work.key); -%>\n<% add_property('related', [], { force: true, merge: 'keep' }); -%>\n<% add_property('title', work.title); -%>\n<% const pub = work.publication || {}; -%>\n<% const person = (a) => (typeof a === 'string' ? a : (a.name || [a.first, a.last].filter(Boolean).join(' '))); -%>\n<% const pubAuthors = (pub.authors && pub.authors.length) ? pub.authors : (work.authors || []); -%>\n<% const pubTranslators = (pub.translators && pub.translators.length) ? pub.translators : (work.translators || []); -%>\n<% const pubEditors = pub.editors || []; -%>\n<% add_property('item-type', 'book'); -%>\n<% if (pubAuthors.length) { add_property('authors', pubAuthors.map(a => wikilink(person(a)))); } -%>\n<% if (pubTranslators.length) { add_property('translators', pubTranslators.map(a => wikilink(person(a)))); } -%>\n<% if (pubEditors.length) { add_property('editors', pubEditors.map(a => wikilink(person(a)))); } -%>\n<% if (pub.publisher) { add_property('publisher', wikilink(pub.publisher)); } -%>\n<% if (pub.place) { add_property('place', pub.place); } -%>\n<% if (pub.date) { add_property('year', wikilink(String(pub.date).slice(0, 4))); } -%>\n<% if (pub.edition) { add_property('edition', pub.edition); } -%>\n<% if (pub.mas_note) { add_property('mas-note', pub.mas_note); } -%>\n<% add_property('mas-key', work.key); -%>\n<% if (work.language_links.length > 1) { add_property('language', work.language_links.map(l => wikilink(l))); } else { add_property('language', wikilink(work.language_links[0])); } -%>\n<% if (work.repo) { add_property('repository', `[${work.repo_name || work.repo}](${work.repo})`); } -%>\n<% if (work.source) { add_property('source', `[${work.source_name || work.source}](${work.source})`); } -%>\n<% if (work.license_attribution) { add_property('license-attribution', work.license_attribution); } -%>\n<% if (work.repository_updated) { add_property('repository-updated', work.repository_updated); } -%>\n<% add_property('aliases', work.aliases); -%>\n<% add_property('cssclasses', [], { merge: 'replace' }); -%>\n<%~ end_YAML() %>\n<span class=\"mas-managed\">mas-managed</span>\n\n<% if (!unit) { -%>\n# <%= work.title %>\n\n<% } -%>\n<% if (work.author) { -%>\n*<%~ work.author %>*\n\n<% } -%>\n<% if (unit) { -%>\n<% if (unit.kind === 'hadith') { -%>\n<% for (const h of unit.hadiths) { -%>\n# <%= h.number %>\n\n<% if (bilingual === 'table') { -%>\n| \u0627\u0644\u0639\u0631\u0628\u064A\u0629 | English |\n| --- | --- |\n| <%~ h.arabic.replace(/\\n+/g, '<br>') %> | <%~ h.english.replace(/\\n+/g, '<br>') %> |\n\n<% } else { -%>\n<% if (h.narrator) { -%>\n**<%~ h.narrator %>**\n\n<% } -%>\n<%~ h.english %>\n\n<%~ h.arabic %>\n\n<% } -%>\n<% } -%>\n<% } else if (unit.kind === 'book') { -%>\n<% const multi = (work.volumes || 1) > 1; -%>\n<% for (const p of unit.pages) { -%>\n#### p. <%= multi ? `${p.vol}:${p.page}` : p.page %>\n\n<%~ p.body %>\n\n<% } -%>\n<% } else { -%>\n<% for (const b of unit.blocks) { -%>\n# <%= b.number %>\n\n## <%= b.ref %>\n\n<%~ b.body %>\n\n<% } -%>\n<% } -%>\n<% } else if (work.kind === 'dict') { -%>\n## Roots\n\n<% const letters = units.filter(u => u.kind === 'dict-index'); -%>\nA dictionary has too many roots to list here, so they are indexed by first letter. Each note also carries `term-ar`, `term`, and a `<%= work.note_prefix || 'HW' %> \u2026` alias, so search works too.\n\n<% for (const u of letters) { -%>\n- <%= wikilink(u.note_stem, u.title || u.base) %> \u2014 <%= u.roots.length %>\n<% } -%>\n\n<% } else if (work.kind === 'book') { -%>\n<% if ((work.volumes || 1) > 1) { -%>\n<% for (const u of units.filter(u => u.kind === 'book-volume')) { -%>\n- <%= wikilink(u.note_stem || `${work.dir} - ${u.base}`, u.title || u.base) %><% if (u.chapters && u.chapters.length) { %> \u2014 <%= u.chapters.length %> chapter<%= u.chapters.length === 1 ? '' : 's' %><% } %>\n<% } -%>\n\n<% } else { -%>\n<% for (const u of units.filter(u => u.kind === 'book')) { -%>\n- <%= wikilink(u.note_stem || `${work.dir} - ${u.base}`, u.title || u.base) %><% if (u.span) { %> \u2014 <%= u.span %><% } %>\n<% } -%>\n\n<% } -%>\n<% } else { -%>\n## <%= work.unit_label %>\n\n<% for (const u of units) { -%>\n- <%= wikilink(u.note_stem || (work.unit_prefix ? `${work.unit_prefix} - ${u.base}` : u.base), u.title || u.base) %>\n<% } -%>\n\n<% } -%>\n<span class=\"mas-managed\">/mas-managed</span>\n" },
   { path: "midad-arabic-sources-import-templates/moc.eta.md", content: `<% start_YAML(); -%>
 <% add_property('created', generated, { merge: 'keep' }); -%>
-<% add_property('mas-up', [wikilink(parent), '[[Midad Arabic Sources]]']); -%>
+<% add_property('mas-up', parent === 'Midad Arabic Sources' ? ['[[Midad Arabic Sources]]'] : [wikilink(parent), '[[Midad Arabic Sources]]']); -%>
 <% add_property('cssclasses', [], { merge: 'replace' }); -%>
 <%~ end_YAML() %>
 <span class="mas-managed">mas-managed</span>
@@ -1439,8 +1446,8 @@ var BUNDLED_ASSETS = [
   }
 }
 ` },
-  { path: "midad-arabic-sources-import-templates/quran-note.eta.md", content: "<% start_YAML(); -%>\n<% add_property('document-type', '[[text-source]]'); -%>\n<% add_property('tags', ['quran'], { quote: 'never' }); -%>\n<% add_property('total_verses', unit.blocks.length); -%>\n<% add_property('created', generated); -%>\n<% add_property('updated', updated()); -%>\n<% add_property('mas-up', [unit.section_page ? wikilink(unit.section_page) : null, wikilink(work.dir), '[[Midad Arabic Sources]]'].filter(Boolean)); -%>\n<% add_property('related', [], { force: true, merge: 'keep' }); -%>\n<% add_property('title', unit.title || unit.base); -%>\n<% if (work.authors && work.authors.length) { add_property('authors', work.authors.map(a => wikilink(a))); } -%>\n<% if (work.translators && work.translators.length) { add_property('translators', work.translators.map(a => wikilink(a))); } -%>\n<% if (work.language_links.length > 1) { add_property('language', work.language_links.map(l => wikilink(l))); } else { add_property('language', wikilink(work.language_links[0])); } -%>\n<% const aliasList = work.aliases.map(a => `${a} - ${unit.base}`); -%>\n<% if (work.canonical) { aliasList.push(unit.translit, unit.arabic); } -%>\n<% add_property('aliases', aliasList); -%>\n<% add_property('cssclasses', [work.cssclass], { quote: 'never' }); -%>\n<%~ end_YAML() %>\n<span class=\"mas-managed\">mas-managed</span>\n\n<% let prevHafs = []; -%>\n<% for (const b of unit.blocks) { -%>\n# <%= b.number %>\n\n<% const match = (b.hafs || []).find((n) => !prevHafs.includes(n)); -%>\n<% if (match != null) { -%>\n## [[<%= unit.base %>#<%= match %>|\u1E24af\u1E63 <%= match %>]]\n\n<% } -%>\n<%~ b.body %>\n\n<% prevHafs = b.hafs || []; -%>\n<% } -%>\n<% if (!unit.blocks || !unit.blocks.length) { -%>\n> [!missing-data] No text was found for this s\u016Brah in the source.\n\n<% } -%>\n<span class=\"mas-managed\">/mas-managed</span>\n" },
-  { path: "midad-arabic-sources-import-templates/source-note.eta.md", content: "<% start_YAML(); -%>\n<% add_property('document-type', '[[text-source]]'); -%>\n<% add_property('created', generated); -%>\n<% add_property('updated', updated()); -%>\n<% add_property('mas-up', [unit.section_page ? wikilink(unit.section_page) : null, wikilink(work.dir), '[[Midad Arabic Sources]]'].filter(Boolean)); -%>\n<% add_property('related', [], { force: true, merge: 'keep' }); -%>\n<% add_property('title', unit.title || unit.base); -%>\n<% if (work.short) { add_property('shorttitle', work.short); } -%>\n<% if (work.authors && work.authors.length) { add_property('authors', work.authors.map(a => wikilink(a))); } -%>\n<% if (work.translators && work.translators.length) { add_property('translators', work.translators.map(a => wikilink(a))); } -%>\n<% if (work.language_links.length > 1) { add_property('language', work.language_links.map(l => wikilink(l))); } else { add_property('language', wikilink(work.language_links[0])); } -%>\n<% add_property('aliases', work.aliases.map(a => `${a} - ${unit.base}`)); -%>\n<% add_property('cssclasses', [work.cssclass], { quote: 'never' }); -%>\n<%~ end_YAML() %>\n<span class=\"mas-managed\">mas-managed</span>\n\n<% for (const b of unit.blocks) { -%>\n# <%= b.number %>\n\n## <%= b.ref %>\n\n<%~ b.body %>\n\n<% } -%>\n<% if (!unit.blocks || !unit.blocks.length) { -%>\n> [!missing-data] No commentary was found for this s\u016Brah in the source.\n\n<% } -%>\n<span class=\"mas-managed\">/mas-managed</span>\n" },
+  { path: "midad-arabic-sources-import-templates/quran-note.eta.md", content: "<% start_YAML(); -%>\n<% add_property('document-type', '[[text-source]]'); -%>\n<% add_property('tags', ['quran'], { quote: 'never' }); -%>\n<% add_property('total_verses', unit.blocks.length); -%>\n<% add_property('created', generated); -%>\n<% add_property('updated', updated()); -%>\n<% add_property('mas-up', [unit.section_page ? wikilink(unit.section_page) : null, wikilink(work.dir)].filter(Boolean)); -%>\n<% add_property('related', [], { force: true, merge: 'keep' }); -%>\n<% add_property('title', unit.title || unit.base); -%>\n<% if (work.authors && work.authors.length) { add_property('authors', work.authors.map(a => wikilink(a))); } -%>\n<% if (work.translators && work.translators.length) { add_property('translators', work.translators.map(a => wikilink(a))); } -%>\n<% if (work.language_links.length > 1) { add_property('language', work.language_links.map(l => wikilink(l))); } else { add_property('language', wikilink(work.language_links[0])); } -%>\n<% const aliasList = work.aliases.map(a => `${a} - ${unit.base}`); -%>\n<% if (work.canonical) { aliasList.push(unit.translit, unit.arabic); } -%>\n<% add_property('aliases', aliasList); -%>\n<% add_property('cssclasses', [work.cssclass], { quote: 'never' }); -%>\n<%~ end_YAML() %>\n<span class=\"mas-managed\">mas-managed</span>\n\n<% let prevHafs = []; -%>\n<% for (const b of unit.blocks) { -%>\n# <%= b.number %>\n\n<% const match = (b.hafs || []).find((n) => !prevHafs.includes(n)); -%>\n<% if (match != null) { -%>\n## [[<%= unit.base %>#<%= match %>|\u1E24af\u1E63 <%= match %>]]\n\n<% } -%>\n<%~ b.body %>\n\n<% prevHafs = b.hafs || []; -%>\n<% } -%>\n<% if (!unit.blocks || !unit.blocks.length) { -%>\n> [!missing-data] No text was found for this s\u016Brah in the source.\n\n<% } -%>\n<span class=\"mas-managed\">/mas-managed</span>\n" },
+  { path: "midad-arabic-sources-import-templates/source-note.eta.md", content: "<% start_YAML(); -%>\n<% add_property('document-type', '[[text-source]]'); -%>\n<% add_property('created', generated); -%>\n<% add_property('updated', updated()); -%>\n<% add_property('mas-up', [unit.section_page ? wikilink(unit.section_page) : null, wikilink(work.dir)].filter(Boolean)); -%>\n<% add_property('related', [], { force: true, merge: 'keep' }); -%>\n<% add_property('title', unit.title || unit.base); -%>\n<% if (work.short) { add_property('shorttitle', work.short); } -%>\n<% if (work.authors && work.authors.length) { add_property('authors', work.authors.map(a => wikilink(a))); } -%>\n<% if (work.translators && work.translators.length) { add_property('translators', work.translators.map(a => wikilink(a))); } -%>\n<% if (work.language_links.length > 1) { add_property('language', work.language_links.map(l => wikilink(l))); } else { add_property('language', wikilink(work.language_links[0])); } -%>\n<% add_property('aliases', work.aliases.map(a => `${a} - ${unit.base}`)); -%>\n<% add_property('cssclasses', [work.cssclass], { quote: 'never' }); -%>\n<%~ end_YAML() %>\n<span class=\"mas-managed\">mas-managed</span>\n\n<% for (const b of unit.blocks) { -%>\n# <%= b.number %>\n\n## <%= b.ref %>\n\n<%~ b.body %>\n\n<% } -%>\n<% if (!unit.blocks || !unit.blocks.length) { -%>\n> [!missing-data] No commentary was found for this s\u016Brah in the source.\n\n<% } -%>\n<span class=\"mas-managed\">/mas-managed</span>\n" },
   { path: "midad-arabic-sources-import-templates/sources.eta.md", content: `<% start_YAML(); -%>
 <% add_property('created', generated, { merge: 'keep' }); -%>
 <% add_property('up', ['[[Home]]'], { merge: 'keep' }); -%>
@@ -1448,8 +1455,11 @@ var BUNDLED_ASSETS = [
 <span class="mas-managed">mas-managed</span>
 
 >[!mas-sources-list]
-<% for (const m of mocs) { -%>
->- <%= wikilink(m) %>
+<% for (const g of groups) { -%>
+>- <%= wikilink(g.name, g.label) %>
+<% for (const item of g.items) { -%>
+>	- <%= wikilink(item.name, item.label) %>
+<% } -%>
 <% } -%>
 
 <span class="mas-managed">/mas-managed</span>
@@ -8003,6 +8013,8 @@ def build_yaml(citekey: str, doc_type: str, related: list[str], volume: int = No
         f'  - "[[{up_category}]]"',
         f'  - "[[AI gen]]"',
     ]
+    if not volume:
+        up_items.append('  - "[[Midad Arabic Sources]]"')
     if not standalone:
         up_items.append(f'  - "[[@{citekey}]]"')
         if volume:
@@ -11974,7 +11986,8 @@ function mocFrontmatter(settings) {
   yaml.add("updated", nowStamp());
   yaml.add("title", "Source Annotations");
   yaml.add("aliases", ["Source Annotations"]);
-  yaml.add("mas-up", [`[[${settings.sourceMocParent.trim() || "Sources"}]]`, "[[Midad Arabic Sources]]"]);
+  const parent = settings.sourceMocParent.trim() || "Midad Arabic Sources";
+  yaml.add("mas-up", parent === "Midad Arabic Sources" ? ["[[Midad Arabic Sources]]"] : [`[[${parent}]]`, "[[Midad Arabic Sources]]"]);
   const frontmatter = yaml.end();
   return { frontmatter, specs: yaml.fieldSpecs() };
 }
@@ -15244,7 +15257,7 @@ var DEFAULT_SETTINGS = {
   sourceTemplateFolder: "",
   canonicalQuranRiw\u0101ya: "",
   canonicalQuranFolder: "Midad Arabic Sources/Installed Sources/Quran",
-  sourceMocParent: "Sources",
+  sourceMocParent: "Midad Arabic Sources",
   annotationNoteFolder: "Midad Arabic Sources/Annotation Notes",
   annotationDefaultColor: "yellow",
   annotationTrashDays: 30,
@@ -15276,6 +15289,8 @@ var MidadArabicSourcesPlugin = class extends import_obsidian15.Plugin {
     this.archivingSources = new Set();
     this.annotations = null;
     this.sourceLayoutLegacy = null;
+    this.repositoryMocNames = [];
+    this.repositoryMocLabels = {};
     this.pythonPromise = null;
     this.serverPythonPromise = null;
     this.promptDefaults = null;
@@ -15306,6 +15321,7 @@ var MidadArabicSourcesPlugin = class extends import_obsidian15.Plugin {
       new import_obsidian15.Notice("The annotation layer could not start. See the developer console for details.");
     }
     await this.refreshSourceRegistry();
+    await this.refreshSourcesIndex();
     this.addCommand({
       id: "transliterate-selection-to-clipboard",
       name: "Transliterate selection to clipboard",
@@ -17343,6 +17359,32 @@ var MidadArabicSourcesPlugin = class extends import_obsidian15.Plugin {
     const installed = works.filter((w) => this.workStatus(w) === "installed");
     const today = new Date().toISOString().slice(0, 10);
     const written = await renderMocs(this.app, templates, installed, this.sourcesRoot(), today, this.settings.sourceMocParent.trim() || "Sources", true);
+    const repositoryGroups = new Map();
+    const repositoryNames = new Map();
+    for (const work of installed) {
+      const repo = this.repositoryMoc(work);
+      if (!repo)
+        continue;
+      let name = repo.name;
+      const existing = repositoryNames.get(name);
+      if (existing && existing !== repo.label) {
+        name = `${repo.name} (${repo.label})`;
+      }
+      repositoryNames.set(name, repo.label);
+      let group = repositoryGroups.get(name);
+      if (!group) {
+        group = { label: repo.label, works: [] };
+        repositoryGroups.set(name, group);
+      }
+      group.works.push(work);
+    }
+    this.repositoryMocNames = [...repositoryGroups.keys()];
+    this.repositoryMocLabels = {};
+    for (const [name, group] of repositoryGroups) {
+      this.repositoryMocLabels[name] = group.label;
+      const sections = buildMocSections(group.works);
+      written.push(await renderMocIndex(this.app, templates, name, sections.length ? sections : [{ name: "Works", works: group.works }], this.sourcesRoot(), "Midad Sources", today, true));
+    }
     const mocNames = [...new Set(installed.flatMap((w) => Array.isArray(w.mocs) ? w.mocs : typeof w.moc === "string" ? [w.moc] : []))].filter(Boolean).sort();
     if (((_a = this.annotations) == null ? void 0 : _a.hasAnnotatedWorks()) || ((_b = this.annotations) == null ? void 0 : _b.mocExists())) {
       if (!mocNames.includes("source-annotation"))
@@ -17733,13 +17775,140 @@ var MidadArabicSourcesPlugin = class extends import_obsidian15.Plugin {
       console.error("[midad-arabic-sources] annotation parent", error);
     }
   }
+  repositoryMoc(work) {
+    var _a, _b, _c;
+    const repo = String((_c = (_b = (_a = work.repository_name) != null ? _a : work.repo_name) != null ? _b : work.repo) != null ? _c : "").trim();
+    if (!repo)
+      return null;
+    const known = {
+      "app.turath.io": ["Turath", "Turath"],
+      "github.com/spa5k/tafsir_api": ["Tafsir API", "Tafs\u012Br API"],
+      "qul.tarteel.ai": ["QUL", "QUL"],
+      "altafsir.com": ["Altafsir", "Altafsir"],
+      "github.com/AhmedBaset/hadith-json": ["Hadith JSON", "\u1E24ad\u012Bth JSON"],
+      "github.com/fawazahmed0/quran-api": ["Quran API", "Qur\u02BE\u0101n API"],
+      "quran-json.risanb.com": ["Quran JSON", "Qur\u02BE\u0101n JSON"],
+      "tanzil.net": ["Tanzil", "Tanzil"],
+      "github.com/GibreelAbdullah/HansWehrDictionary": ["Hans Wehr", "Hans Wehr"],
+      "github.com/GibreelAbdullah/LaneLexicon": ["Lane", "Lane"],
+      "github.com/muhammad-abdurrahman/hans-wehr-fodt-parser": ["Hans Wehr FODT", "Hans Wehr FODT"]
+    };
+    const mapped = known[repo];
+    if (mapped)
+      return { name: mapped[0], label: mapped[1] };
+    const fallback = repo.replace(/^https?:\/\//, "").replace(/^github\.com\//, "").replace(/[\\/:*?"<>|#^]+/g, " - ").replace(/\s+/g, " ").trim();
+    return fallback ? { name: fallback, label: fallback } : null;
+  }
+  async refreshTranscriptionMocs() {
+    const written = [];
+    const indexPath = async (name) => {
+      const canonical = (0, import_obsidian15.normalizePath)(`${this.sourcesRoot()}/${name}.md`);
+      const existing = this.app.vault.getAbstractFileByPath(canonical);
+      if (existing instanceof import_obsidian15.TFile)
+        return existing.path;
+      const first = this.app.metadataCache.getFirstLinkpathDest(name, "");
+      if (first instanceof import_obsidian15.TFile && first.path !== canonical) {
+        try {
+          await this.app.fileManager.renameFile(first, canonical);
+          const moved = this.app.vault.getAbstractFileByPath(canonical);
+          if (moved instanceof import_obsidian15.TFile)
+            return moved.path;
+        } catch (e) {
+        }
+      }
+      try {
+        await this.app.vault.create(canonical, "");
+        return canonical;
+      } catch (e) {
+        return canonical;
+      }
+    };
+    const family = async (folder, docType) => {
+      var _a;
+      const files = this.app.vault.getMarkdownFiles().filter((f) => f.path.startsWith(`${folder}/`));
+      const groups = new Map();
+      for (const file of files) {
+        const fm = (_a = this.app.metadataCache.getFileCache(file)) == null ? void 0 : _a.frontmatter;
+        const source = typeof (fm == null ? void 0 : fm["mas-source"]) === "string" ? String(fm["mas-source"]) : "";
+        const kind = source.startsWith("zotero:") ? "lit" : "pdf";
+        const match = /^(.*?) -(?: transcription| translation)(?: - vol\.\s*(\d+))?(?:[,–—-]\s*(.+))?$/i.exec(file.basename);
+        if (!match)
+          continue;
+        const base = match[1].trim();
+        const volume = match[2] ? Number(match[2]) : null;
+        let group = groups.get(base);
+        if (!group) {
+          group = { kind, title: base, stem: `${base} - ${docType}`, volumes: [], hasParent: false };
+          groups.set(base, group);
+        }
+        group.kind = group.kind === "lit" || kind === "lit" ? "lit" : "pdf";
+        const rawTitle = typeof (fm == null ? void 0 : fm["title"]) === "string" ? String(fm["title"]) : "";
+        const cleanTitle = rawTitle.replace(/\s*\((?:transcription|translation)(?:,\s*vol\.\s*\d+)?\)\s*$/i, "").trim();
+        if (!volume) {
+          group.hasParent = true;
+          group.stem = file.basename;
+          if (cleanTitle)
+            group.title = cleanTitle;
+        } else {
+          const suffix = match[3] ? ` ${match[3].trim()}` : "";
+          group.volumes.push({ stem: `${base} - ${docType} - vol. ${volume}`, label: `vol. ${volume}${suffix}` });
+        }
+      }
+      return [...groups.values()].filter((g) => g.hasParent || g.volumes.length).map((g) => ({
+        kind: g.kind,
+        title: g.title,
+        stem: g.stem,
+        volumes: g.volumes.sort((a, b) => a.label.localeCompare(b.label, void 0, { numeric: true }))
+      }));
+    };
+    const render2 = async (name, docType) => {
+      const path2 = await indexPath(name);
+      const items = await family(docType === "transcription" ? this.transcriptionsFolder() : this.translationsFolder(), docType);
+      const lines = [
+        '<span class="mas-managed">mas-managed</span>',
+        "",
+        `# ${docType === "transcription" ? "Transcriptions" : "Translations"} from literature notes`,
+        ""
+      ];
+      for (const item of items.filter((i) => i.kind === "lit")) {
+        lines.push(`- [[${item.stem}|${item.title}]]`);
+        for (const volume of item.volumes)
+          lines.push(`	- [[${volume.stem}|${volume.label}]]`);
+      }
+      lines.push("", `# ${docType === "transcription" ? "Transcriptions" : "Translations"} directly from PDFs`, "");
+      for (const item of items.filter((i) => i.kind === "pdf")) {
+        lines.push(`- [[${item.stem}|${item.title}]]`);
+        for (const volume of item.volumes)
+          lines.push(`	- [[${volume.stem}|${volume.label}]]`);
+      }
+      lines.push("", '<span class="mas-managed">/mas-managed</span>', "");
+      const content = `---
+mas-up:
+  - "[[Midad Sources]]"
+  - "[[Midad Arabic Sources]]"
+---
+
+${lines.join("\n")}`;
+      await writeMerged(this.app, path2, { content, specs: [] }, false, false);
+      written.push(path2);
+    };
+    await render2("Arabic transcriptions", "transcription");
+    await render2("Arabic translations", "translation");
+    return written;
+  }
   async updateSourceParent(templates, mocs, generated) {
     const name = (this.settings.sourceMocParent || "").trim() || "Sources";
     if (!mocs.length)
       return null;
+    const isMidadParent = name === "Midad Arabic Sources";
     const canonicalPath = (0, import_obsidian15.normalizePath)(`${this.sourcesRoot()}/${name}.md`);
     const existingCanonical = this.app.vault.getAbstractFileByPath(canonicalPath);
     let file = existingCanonical instanceof import_obsidian15.TFile ? existingCanonical : null;
+    if (!file && isMidadParent) {
+      const existing = this.app.metadataCache.getFirstLinkpathDest(name, "");
+      if (existing instanceof import_obsidian15.TFile)
+        file = existing;
+    }
     if (!file) {
       const first = this.app.metadataCache.getFirstLinkpathDest(name, "");
       if (first instanceof import_obsidian15.TFile && first.path !== canonicalPath) {
@@ -17768,7 +17937,27 @@ var MidadArabicSourcesPlugin = class extends import_obsidian15.Plugin {
         return null;
       }
     }
-    const out = renderSourcesNote(templates, mocs, generated);
+    const repositoryMocs = this.repositoryMocNames.filter(Boolean);
+    const sourceMocs = new Set([...repositoryMocs, "Arabic transcriptions", "Arabic translations"]);
+    const topicMocs = mocs.filter((m) => m !== "source-annotation" && !sourceMocs.has(m));
+    const sourceList = [...new Set([...repositoryMocs, "Arabic transcriptions", "Arabic translations"])].filter((m) => m === "Turath" || m === "Arabic transcriptions" || m === "Arabic translations" || mocs.includes(m) || repositoryMocs.includes(m));
+    const label = (name2) => {
+      var _a;
+      return (_a = this.repositoryMocLabels[name2]) != null ? _a : name2 === "Tafs\u012Br Sources" ? "Tafs\u012Br" : name2 === "\u1E24ad\u012Bth Sources" ? "\u1E24ad\u012Bth" : name2 === "Language Sources" ? "Language" : name2 === "Arabic transcriptions" ? "My transcriptions" : name2 === "Arabic translations" ? "My translations" : name2;
+    };
+    await renderMocIndex(this.app, templates, "Midad Arabic Sources - Topics", [{ name: "Topics", works: topicMocs.map((m) => ({ dir: m, title: label(m) })) }], this.sourcesRoot(), "Midad Arabic Sources", generated);
+    const repoItems = repositoryMocs.map((m) => ({ dir: m, title: label(m) }));
+    await renderMocIndex(this.app, templates, "Midad Sources", [
+      { name: "Repositories", works: repoItems },
+      { name: "Transcriptions", works: [{ dir: "Arabic transcriptions", title: "My transcriptions" }] },
+      { name: "Translations", works: [{ dir: "Arabic translations", title: "My translations" }] }
+    ].filter((section) => section.works.length > 0), this.sourcesRoot(), "Midad Arabic Sources", generated);
+    const groups = [
+      { name: "Midad Arabic Sources - Topics", label: "By Topic", items: topicMocs.map((m) => ({ name: m, label: label(m) })) },
+      { name: "Midad Sources", label: "By Source", items: sourceList.map((m) => ({ name: m, label: label(m) })) },
+      { name: "source-annotation", label: "Annotations", items: [] }
+    ];
+    const out = renderSourcesNote(templates, groups, generated);
     await writeMerged(this.app, file.path, out, false, false);
     return file.path;
   }
@@ -19212,8 +19401,8 @@ var MidadArabicSourcesSettingTab = class extends import_obsidian15.PluginSetting
           },
           {
             name: "Sources parent note",
-            desc: "Top-level note every category MOC points up to. It lives at the root of the sources folder; an existing note with this name elsewhere is moved there.",
-            control: { type: "text", key: "sourceMocParent", placeholder: "Sources" }
+            desc: "Top-level note every category MOC points up to. The default is the existing Midad Arabic Sources note; other names are kept in the sources folder.",
+            control: { type: "text", key: "sourceMocParent", placeholder: "Midad Arabic Sources" }
           },
           {
             name: "Update notes when templates change",

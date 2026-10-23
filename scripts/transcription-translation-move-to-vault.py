@@ -168,6 +168,8 @@ def build_yaml(citekey: str, doc_type: str, related: list[str], volume: int = No
         f'  - "[[{up_category}]]"',
         f'  - "[[AI gen]]"',
     ]
+    if not volume:
+        up_items.append('  - "[[Midad Arabic Sources]]"')
     if not standalone:
         up_items.append(f'  - "[[@{citekey}]]"')
         if volume:

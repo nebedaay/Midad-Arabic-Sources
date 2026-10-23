@@ -227,22 +227,34 @@
             grid-template-columns: repeat(4, 1fr);
             grid-gap: 2px;
             gap: 5px;
-            padding: 0!important;
-            margin: 0!important;
-            li {
-            list-style:none;
-            background-color: #666;
-            color: #edc;
-            text-align: center;
-            padding:8px !important;
-            margin: 0px !important;
-            border-radius: 3px;
-            a:link {
-                color: #ff4;
-                }
-            }
+            padding: 0;
+            margin: 0;
             .list-bullet::before, .list-bullet::after {
                 display: none !important;
+            }
+            li {
+                grid-column: span 4;
+                color: #edc;
+                text-align: center;
+                margin:0px;
+                a:link {
+                    margin: 5px;
+                    background-color: #6a6;
+                    color: #ff4;
+                    padding:8px !important;
+                    border-radius: 3px;
+                    display:block;
+                    vertical-align: middle;
+                    width: 100%;
+                }
+                li {
+                    grid-column: span 1;
+                    list-style:none;
+                    a:link {
+                        background-color: #666;
+                        height:100%;
+                    }
+                }
             }
         }
     }

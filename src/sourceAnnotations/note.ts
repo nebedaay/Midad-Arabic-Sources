@@ -214,7 +214,8 @@ function mocFrontmatter(settings: AnnotationSettings): { frontmatter: string; sp
 	yaml.add("updated", nowStamp());
 	yaml.add("title", "Source Annotations");
 	yaml.add("aliases", ["Source Annotations"]);
-	yaml.add("mas-up", [`[[${settings.sourceMocParent.trim() || "Sources"}]]`, "[[Midad Arabic Sources]]"]);
+	const parent = settings.sourceMocParent.trim() || "Midad Arabic Sources";
+	yaml.add("mas-up", parent === "Midad Arabic Sources" ? ["[[Midad Arabic Sources]]"] : [`[[${parent}]]`, "[[Midad Arabic Sources]]"]);
 	const frontmatter = yaml.end();
 	return { frontmatter, specs: yaml.fieldSpecs() };
 }

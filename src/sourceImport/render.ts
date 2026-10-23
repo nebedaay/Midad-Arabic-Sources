@@ -505,11 +505,40 @@ export async function renderMocs(
 	return written;
 }
 
-/** Render the managed region of the top-level Sources note. */
+export interface SourcesMocItem {
+	name: string;
+	label: string;
+}
+
+export interface SourcesMocGroup {
+	name: string;
+	label: string;
+	items: SourcesMocItem[];
+}
+
+/** Render the managed region of the top-level Sources/Midad note. */
 export function renderSourcesNote(
 	templates: TemplateSet,
-	mocs: string[],
+	groups: SourcesMocGroup[],
 	generated: string
 ): RenderOutput {
-	return renderTemplate(makeEngine(), templates.sources, { mocs, generated });
+	return renderTemplate(makeEngine(), templates.sources, { groups, generated });
+}
+
+/** Render a generated MOC note whose entries are themselves MOCs or notes. */
+export async function renderMocIndex(
+	app: App,
+	templates: TemplateSet,
+	name: string,
+	sections: Array<{ name: string; works: JsonObject[] }>,
+	outRoot: string,
+	parent: string,
+	generated: string,
+	force = false
+): Promise<string> {
+	const engine = makeEngine();
+	const out = renderTemplate(engine, templates.moc, { moc: { name }, sections, parent, generated });
+	const path = `${outRoot}/${name}.md`;
+	await writeMerged(app, path, out, force);
+	return path;
 }
