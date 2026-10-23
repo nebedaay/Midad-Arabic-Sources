@@ -62,7 +62,7 @@ The plugin keeps everything under one **sources folder** (`Midad Arabic Sources`
   Sources.md                           ← the parent note the MOCs point up to
 ```
 
-Existing installations are migrated once automatically on the first launch after the update. **General → Sources folder → Move folders here** can move the folders again if you choose a different source root; the migration updates the adopted-annotation registry and leaves the MOCs and the parent note at the source root.
+Existing installations are migrated once automatically on the first launch after the update. Changing **General → Sources folder** asks for confirmation when files exist, then moves the folders and rewrites explicit links in Markdown notes as well as the adopted-annotation registry. The MOCs and the parent note stay at the source root.
 
 - **A work hub** carries the bibliographic properties and links every note in the work.
 - **A content note** is one sūra, ḥadīth chapter, book chapter, or dictionary root.
