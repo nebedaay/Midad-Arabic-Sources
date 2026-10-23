@@ -49,6 +49,7 @@ import {
 import { BUNDLED_ASSETS } from "./assets.generated";
 import { openDocs, getDocs } from "./docs";
 import { registerAnnotations, AnnotationService } from "./sourceAnnotations/service";
+import { buildSourceRegistry, writeSourceRegistry } from "./sourceRegistry/registry";
 import { ConfirmModal } from "./sourceAnnotations/modal";
 import { AnnotationTrashModal } from "./sourceAnnotations/trashModal";
 import type { AnnotationColor } from "./sourceAnnotations/types";
@@ -250,7 +251,7 @@ interface ArchivedBatchInfo {
 
 function archivedNoteInfo(path: string): ArchivedNoteInfo | null {
 	const stem = basenameJS(path).replace(/\.md$/i, "");
-	const typed = stem.match(/^@(.+?) - (transcription|translation)(?: - (?:vol|v)\.\s*(\d+))?$/i);
+	const typed = stem.match(/^(?:@|mas-)(.+?) - (transcription|translation)(?: - (?:vol|v)\.\s*(\d+))?$/i);
 	if (typed) {
 		return {
 			citekey: typed[1],
@@ -583,12 +584,14 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 				plugin: this,
 				settings: this.settings,
 				refreshParent: () => this.refreshAnnotationParent(),
+				refreshRegistry: () => this.refreshSourceRegistry(),
 			});
 			await this.refreshAnnotationParent();
 		} catch (error) {
 			console.error("[midad-arabic-sources] annotations failed to start", error);
 			new Notice("The annotation layer could not start. See the developer console for details.");
 		}
+		await this.refreshSourceRegistry();
 
 		this.addCommand({
 			id: "transliterate-selection-to-clipboard",
@@ -1142,6 +1145,21 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		new Notice(`Midad Arabic Sources: moved plugin folders to ${root}.`);
 	}
 
+	async refreshSourceRegistry(): Promise<void> {
+		try {
+			const registry = await buildSourceRegistry(this.app, {
+				installedRoot: this.installedSourcesRoot(),
+				transcriptions: this.transcriptionsFolder(),
+				translations: this.translationsFolder(),
+				manifest: ".midad-arabic-sources/source-imports.json",
+				adopted: ".midad-arabic-sources/annotations/adopted.json",
+			});
+			await writeSourceRegistry(this.app, registry);
+		} catch (error) {
+			console.error("[midad-arabic-sources] source registry", error);
+		}
+	}
+
 	openSettings(): void {
 		const s = (this.app as unknown as AppInternals).setting;
 		if (s) {
@@ -1169,8 +1187,8 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		const view = this.app.workspace.getActiveViewOfType(MarkdownView);
 		if (!view?.file) return null;
 		const base = view.file.basename;
-		if (!base.startsWith("@")) return null;
-		const citekey = base.slice(1).split(" - ")[0];
+		if (!base.startsWith("@") && !base.startsWith("mas-")) return null;
+		const citekey = base.replace(/^(?:@|mas-)/, "").split(" - ")[0];
 		return { citekey, path: view.file.path };
 	}
 
@@ -2830,6 +2848,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		}
 		const parentPath = await this.updateSourceParent(templates, mocNames, today);
 		if (parentPath) written.push(parentPath);
+		void this.refreshSourceRegistry();
 		return written;
 	}
 
@@ -4793,6 +4812,18 @@ class MidadArabicSourcesSettingTab extends PluginSettingTab {
 						desc: "Root folder for Installed Sources, Transcriptions, Translations, and Annotation Notes. “Move folders here” moves the existing plugin-owned folders to the new root.",
 						render: (setting: Setting) => this.renderSourceRoot(setting),
 					},
+					{
+						name: "Source registry",
+						desc: "Rebuild .midad-arabic-sources/sources.json, the unified index of repository works, Zotero items, transcriptions, translations, and adopted notes.",
+						render: (setting: Setting) => {
+							setting.addButton((button) => button
+								.setButtonText("Rebuild registry")
+								.onClick(async () => {
+									await this.plugin.refreshSourceRegistry();
+									new Notice("Source registry rebuilt.");
+								}));
+						},
+					},
 				],
 			},
 			{
@@ -5818,7 +5849,7 @@ class StandalonePdfModal extends Modal {
 		this.citekeyInput?.setValue(citekey);
 
 		const folder = this.plugin.transcriptionsFolder();
-		const notePrefix = normalizePath(`${folder}/@${citekey} - transcription`);
+		const notePrefix = normalizePath(`${folder}/mas-${citekey} - transcription`);
 		const existing = this.app.vault
 			.getFiles()
 			.find((f) => f.extension === "md" && f.path.startsWith(notePrefix));
@@ -5828,7 +5859,7 @@ class StandalonePdfModal extends Modal {
 				const folderAbs = `${this.plugin.vaultPath()}/${folder}`;
 				existingName = fs
 					.readdirSync(folderAbs)
-					.find((name) => name.startsWith(`@${citekey} - transcription`) && name.endsWith(".md")) ?? "";
+					.find((name) => name.startsWith(`mas-${citekey} - transcription`) && name.endsWith(".md")) ?? "";
 			} catch {
 				/* folder does not exist yet */
 			}

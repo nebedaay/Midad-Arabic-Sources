@@ -63,6 +63,7 @@ export interface AnnotationHost {
 	plugin: Plugin;
 	settings: AnnotationSettings;
 	refreshParent: () => Promise<void>;
+	refreshRegistry?: () => Promise<void>;
 }
 
 function cmOf(view: MarkdownView): EditorView | null {
@@ -258,6 +259,9 @@ export class AnnotationService {
 		}
 		const key = newAdoptedNoteKey();
 		await this.app.fileManager.processFrontMatter(file, (fm: Record<string, unknown>) => {
+			if (!fm["mas-id"]) fm["mas-id"] = key;
+			fm["mas-kind"] = "adopted";
+			fm["mas-source"] = "adopted";
 			fm["mas-work"] = key;
 			if (!fm["mas-unit"]) fm["mas-unit"] = "note";
 			if (!fm["title"]) fm["title"] = file.basename;
@@ -277,6 +281,7 @@ export class AnnotationService {
 			);
 		}
 		this.resolver.invalidate();
+		void this.host.refreshRegistry?.();
 		new Notice("Note adopted. Select text to annotate it.");
 		window.setTimeout(() => {
 			void this.refreshViews();

@@ -90,8 +90,8 @@ def _strip_type_suffix(alias: str) -> str:
 def _transcription_note(citekey: str, volume: int | None) -> Path:
     folder = VAULT / DEST_FOLDERS["transcription"]
     if volume:
-        return folder / f"@{citekey} - transcription - vol. {volume}.md"
-    return folder / f"@{citekey} - transcription.md"
+        return folder / f"mas-{citekey} - transcription - vol. {volume}.md"
+    return folder / f"mas-{citekey} - transcription.md"
 
 
 def compute_aliases(citekey: str, doc_type: str, volume: int = None) -> list[str]:
@@ -125,6 +125,15 @@ def compute_aliases(citekey: str, doc_type: str, volume: int = None) -> list[str
 def _yaml_quote(value: str) -> str:
     """Escape a value for a double-quoted YAML scalar."""
     return str(value).replace("\\", "\\\\").replace('"', '\\"')
+
+
+def _source_id(citekey: str, ref: Path | None) -> str:
+    """Stable source identity: the Zotero item id when available, else the PDF key."""
+    if ref:
+        text = ref.read_text(encoding="utf-8")
+        zid = extract_zotero_field(text, "sw-zotero-id")
+        return f"zotero:{zid.strip()}" if zid else f"zotero:@{citekey}"
+    return f"pdf:{citekey}"
 
 
 def build_yaml(citekey: str, doc_type: str, related: list[str], volume: int = None,
@@ -162,7 +171,7 @@ def build_yaml(citekey: str, doc_type: str, related: list[str], volume: int = No
     if not standalone:
         up_items.append(f'  - "[[@{citekey}]]"')
         if volume:
-            up_items.append(f'  - "[[@{citekey} - {doc_type}]]"')
+            up_items.append(f'  - "[[mas-{citekey} - {doc_type}]]"')
 
     yaml = f"""---
 created: {datetime.now().strftime('%Y-%m-%d %H:%M')}
@@ -174,6 +183,14 @@ title: "{_yaml_quote(title)}"
         yaml += f'shorttitle: "{_yaml_quote(shorttitle)}"\n'
     if volume:
         yaml += f'volume: {volume}\n'
+    source_id = _source_id(citekey, ref)
+    mas_work = f"{source_id}:{doc_type}"
+    mas_id = f"{mas_work}:vol.{volume}" if volume else mas_work
+    yaml += f'mas-id: "{_yaml_quote(mas_id)}"\n'
+    yaml += f'mas-kind: "{doc_type}"\n'
+    yaml += f'mas-source: "{_yaml_quote(source_id)}"\n'
+    yaml += f'mas-work: "{_yaml_quote(mas_work)}"\n'
+    yaml += f'mas-unit: "{("vol." + str(volume)) if volume else "note"}"\n'
     if author_list:
         yaml += "authors:\n"
         for a in author_list:
@@ -217,8 +234,8 @@ def dest_path(citekey: str, doc_type: str, volume: int = None) -> Path:
     dest_dir = VAULT / DEST_FOLDERS[doc_type]
     dest_dir.mkdir(parents=True, exist_ok=True)
     if volume:
-        return dest_dir / f"@{citekey} - {doc_type} - vol. {volume}.md"
-    return dest_dir / f"@{citekey} - {doc_type}.md"
+        return dest_dir / f"mas-{citekey} - {doc_type} - vol. {volume}.md"
+    return dest_dir / f"mas-{citekey} - {doc_type}.md"
 
 
 def ensure_parent(citekey: str, doc_type: str, related: list[str], volume: int):
@@ -231,7 +248,7 @@ def ensure_parent(citekey: str, doc_type: str, related: list[str], volume: int):
         print(f"Created parent: {parent.name}")
 
     content = parent.read_text(encoding="utf-8")
-    entry = f"[[@{citekey} - {doc_type} - vol. {volume}]]"
+    entry = f"[[mas-{citekey} - {doc_type} - vol. {volume}]]"
     if entry not in content:
         new_lines = []
         inserted = False
@@ -252,10 +269,10 @@ def ensure_parent(citekey: str, doc_type: str, related: list[str], volume: int):
 def _collection_notes(citekey: str, doc_type: str):
     """(parent_name, [volume_names sorted numerically]) for a citekey."""
     folder = VAULT / DEST_FOLDERS[doc_type]
-    parent = f"@{citekey} - {doc_type}"
+    parent = f"mas-{citekey} - {doc_type}"
     vols = []
     if folder.exists():
-        for p in folder.glob(f"@{citekey} - {doc_type} - vol. *.md"):
+        for p in folder.glob(f"mas-{citekey} - {doc_type} - vol. *.md"):
             if "modified" in p.stem:
                 continue
             m = re.search(r'vol\.\s*(\d+)', p.stem)

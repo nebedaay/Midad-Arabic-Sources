@@ -53,9 +53,9 @@ function parseKnownNote(path: string, title?: string): {
 	hasTitle: boolean;
 } | null {
 	const name = baseName(path);
-	const match = /^(@[^ ]+)\s+-\s+(transcription|translation)(?:\s+-\s+(?:v(?:ol)?\.?|volume)\s*(\d+))?(?:\s+-\s+(.+))?$/i.exec(name);
+	const match = /^(@[^ ]+|mas-[^ ]+)\s+-\s+(transcription|translation)(?:\s+-\s+(?:v(?:ol)?\.?|volume)\s*(\d+))?(?:\s+-\s+(.+))?$/i.exec(name);
 	if (!match) return null;
-	const cite = match[1];
+	const cite = match[1].replace(/^mas-/, '@');
 	const kind = match[2].toLowerCase() as "transcription" | "translation";
 	const volume = match[3] ? Number(match[3]) : 0;
 	const variant = (match[4] ?? "").trim();

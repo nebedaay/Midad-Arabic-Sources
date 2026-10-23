@@ -3,6 +3,9 @@
 <% add_property('created', generated); -%>
 <% add_property('updated', updated()); -%>
 <% add_property('mas-up', [...work.up, '[[Midad Arabic Sources]]']); -%>
+<% add_property('mas-id', 'repo:' + work.key); -%>
+<% add_property('mas-kind', 'repo-work'); -%>
+<% add_property('mas-source', 'repo:' + work.key); -%>
 <% add_property('related', [], { force: true, merge: 'keep' }); -%>
 <% add_property('title', work.title); -%>
 <% const pub = work.publication || {}; -%>

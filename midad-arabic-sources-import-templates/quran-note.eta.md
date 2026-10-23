@@ -5,6 +5,10 @@
 <% add_property('created', generated); -%>
 <% add_property('updated', updated()); -%>
 <% add_property('mas-up', [unit.section_page ? wikilink(unit.section_page) : null, wikilink(work.dir), '[[Midad Arabic Sources]]'].filter(Boolean)); -%>
+<% add_property('mas-id', 'repo:' + work.key + ':' + unit.kind + ':' + unit.base); -%>
+<% add_property('mas-kind', 'repo-unit'); -%>
+<% add_property('mas-work', 'repo:' + work.key); -%>
+<% add_property('mas-unit', unit.base); -%>
 <% add_property('related', [], { force: true, merge: 'keep' }); -%>
 <% add_property('title', unit.title || unit.base); -%>
 <% if (work.authors && work.authors.length) { add_property('authors', work.authors.map(a => wikilink(a))); } -%>

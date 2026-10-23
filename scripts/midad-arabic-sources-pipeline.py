@@ -346,10 +346,15 @@ def list_vault_notes(citekey: str):
     for folder, typ in ((TRANSC_DIR, "transcription"), (TRANS_DIR, "translation")):
         if not folder.exists():
             continue
-        for p in sorted(folder.glob(f"@{citekey}* - {typ}*.md")) or sorted(folder.glob(f"@{citekey} - {typ}*.md")):
-            vm = re.search(r'vol\.\s*(\d+)', p.stem)
-            out.append({"path": str(p), "name": p.stem, "type": typ,
-                        "volume": int(vm.group(1)) if vm else None})
+        seen = set()
+        for pattern in (f"mas-{citekey}* - {typ}*.md", f"@{citekey}* - {typ}*.md"):
+            for p in sorted(folder.glob(pattern)):
+                if p in seen:
+                    continue
+                seen.add(p)
+                vm = re.search(r'vol\.\s*(\d+)', p.stem)
+                out.append({"path": str(p), "name": p.stem, "type": typ,
+                            "volume": int(vm.group(1)) if vm else None})
     return out
 
 
@@ -374,7 +379,7 @@ def cmd_list_transcriptions(args) -> int:
     if not note.exists():
         fail(f"Note not found: {note}")
         return 1
-    citekey = note.stem.lstrip("@")
+    citekey = re.sub(r"^(?:@|mas-)", "", note.stem).split(" - ")[0]
     emit("result", result={"citekey": citekey, "notes": list_vault_notes(citekey)})
     return 0
 
