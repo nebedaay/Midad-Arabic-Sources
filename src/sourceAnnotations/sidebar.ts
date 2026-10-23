@@ -108,7 +108,7 @@ export class AnnotationSidebarView extends ItemView {
 		link("Source annotations", () => { void this.service.openMoc(); });
 		link("Transcriptions", () => { void this.service.openNamedNote(["Transcriptions", "Arabic transcriptions"]); });
 		link("Translations", () => { void this.service.openNamedNote(["Translations", "Arabic translations"]); });
-		link("Sources", () => { void this.service.openNamedNote(["Sources"]); });
+		link("Midad Arabic Sources", () => { void this.service.openNamedNote(["Midad Arabic Sources"]); });
 		const manage = nav.createEl("button", { cls: "mas-ann-sidebar__moc is-manage", text: "Manage sources" });
 		manage.onclick = () => { this.service.openManageSources(); };
 	}

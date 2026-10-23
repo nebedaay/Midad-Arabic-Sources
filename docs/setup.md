@@ -59,10 +59,11 @@ The plugin keeps everything under one **sources folder** (`Midad Arabic Sources`
   Annotation Notes/                    ← generated per-work annotation notes
   Tafsīr Sources.md                    ← a category MOC
   Ḥadīth Sources.md
-  Sources.md                           ← the parent note the MOCs point up to
+  Midad Arabic Sources - Topics.md     ← the topic index
+  Midad Sources.md                     ← the repository/transcription/translation index
 ```
 
-Existing installations are migrated once automatically on the first launch after the update. Changing **General → Sources folder** asks for confirmation when files exist, then moves the folders and rewrites explicit links in Markdown notes as well as the adopted-annotation registry. The MOCs and the parent note stay at the source root.
+Existing installations are migrated once automatically on the first launch after the update. Changing **General → Sources folder** asks for confirmation when files exist, then moves the folders and rewrites explicit links in Markdown notes as well as the adopted-annotation registry. The MOCs stay at the source root. The parent **Midad Arabic Sources** note is the existing top-level note (or is created in the source root if missing).
 
 **Source MOCs.** **Midad Arabic Sources** is the parent note and the distinctive index for everything MAS manages. Its managed block groups the source hierarchy into **By Topic** (`Midad Arabic Sources - Topics`, which lists the genre/type MOCs) and **By Source** (`Midad Sources`, which lists repository MOCs plus the transcription and translation MOCs), with **Annotations** alongside them. Repository MOCs list their works; the transcription/translation MOCs are split into works from literature notes and works transcribed/translated directly from PDFs.
 
@@ -71,7 +72,7 @@ Existing installations are migrated once automatically on the first launch after
 - **A work hub** carries the bibliographic properties and links every note in the work.
 - **A content note** is one sūra, ḥadīth chapter, book chapter, or dictionary root.
 - **A category MOC** lists every installed work of one kind (Tafsīr Sources, Ḥadīth Sources, …). The plugin rebuilds the list inside a managed region, so entries never duplicate.
-- **The parent note** (setting **Sources parent note**) is reused if a note with that name already exists anywhere in the vault; the plugin writes only its own managed region. Every generated page carries `[[Midad Arabic Sources]]` in its `up`.
+- **The parent note** (setting **Sources parent note**) is reused if a note with that name already exists anywhere in the vault; the plugin writes only its own managed region. Top-level source notes carry `[[Midad Arabic Sources]]` in their `up`; individual unit notes link to their hub or MOC instead, so the parent backlink list stays useful.
 
 File names are unique across the whole vault, so a work note carries its work name (`Tafsīr al-Ṭabarī (tafsir_api) - 002 Al-Baqarah`) while its `title:` and the hub’s link text stay clean (`2 Al-Baqarah`). A work whose folder name would collide can carry a **repository qualifier** in parentheses so two editions of the same work sit side by side. See [Document import](./document-import.md).
 

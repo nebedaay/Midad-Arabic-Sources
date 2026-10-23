@@ -22,16 +22,16 @@ Because the model is cached, editing a template and running **“Re-render impor
    - `book-volume.eta.md` — one volume index per volume of a multi-volume book
    - `hub.eta.md` — the per-work hub note that lists all units
    - `moc.eta.md` — the skeleton for a category MOC (e.g. `Tafsīr Sources`)
-   - `sources.eta.md` — the managed region of the top-level parent note (e.g. `Sources`)
+   - `sources.eta.md` — the managed region of the top-level parent note (`Midad Arabic Sources`)
 3. Edit the copies, then run **“Re-render imported sources”**.
 
 The plugin reads your copies first and falls back to the bundled defaults.
 
 Each work’s entry in its category MOC is just `- [[Work]]` — the work hub note, which carries the `repository:` property for provenance. A Turath work appears in **two** category MOCs — the repository MOC `Turath` and its work-type MOC (e.g. `Fiqh Sources`) — and carries both in the hub’s `up:`. The category MOC’s generated region is also a managed region: it is rebuilt from the full set of imported works on every render, so entries never duplicate, and a language heading (`# Arabic Texts`, `# English Texts`) appears only when it has content.
 
-Every category MOC points up to one **parent note** (the setting **“Sources parent note”**, default `Sources`). The plugin reuses whatever note already has that name — wherever it lives in the vault — or creates one. It writes only its own managed region there (an `>[!mas-sources-list]` callout listing the category MOCs that have content) and its `merge: keep` properties, so your hand-written content above and below the region is never touched. The callout type and its styling are the plugin’s own (`mas-sources-list` in `styles.css`), so nothing depends on a callout defined elsewhere in your vault.
+Every category MOC points up to one **parent note** (the setting **“Sources parent note”**, default `Midad Arabic Sources`). The plugin reuses an existing `Midad Arabic Sources` note wherever it lives in the vault, or creates one in the sources folder. It writes only its own managed region there: a `>[!mas-sources-list]` callout listing **By Topic**, **By Source**, and **Annotations**. The generated **Midad Arabic Sources - Topics** and **Midad Sources** notes are themselves managed MOCs, as are the category, repository, transcription, and translation MOCs they link. The callout type and its styling are the plugin’s own (`mas-sources-list` in `styles.css`), so nothing depends on a callout defined elsewhere in your vault.
 
-Every plugin-generated page carries `[[Midad Arabic Sources]]` as an `up` link, so the whole imported corpus is traceable back to the plugin that made it.
+Top-level source notes (work hubs, MOCs, and transcription/translation parents) carry `[[Midad Arabic Sources]]` as an `up` link, so the corpus is traceable without giving every individual sūra, chapter, root, or volume note a backlink to the parent.
 
 A work with a single unit — for example a one-chapter ḥadīth book such as al-Arbaʿūn al-Nawawiyya — keeps its content in the work note itself rather than a hub that links to one child note.
 
