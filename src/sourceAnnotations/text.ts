@@ -137,13 +137,19 @@ export function occurrencesBefore(text: string, offset: number, needle: string):
 	}
 }
 
-/** Markdown link to a note and, when known, a heading inside it. */
+/** Markdown link to a note and, when known, a heading inside it.
+ *
+ * The generated note names (work hubs, chapters, transcriptions, annotation
+ * notes) are unique across the vault, so a basename link is sufficient. It is
+ * also the form that survives a folder move without rewriting: Obsidian only
+ * needs an explicit path when two files share the same basename.
+ */
 export function noteHeadingLink(notePath: string, heading: string, label?: string): string {
 	const target = notePath.replace(/\.md$/i, "");
-	const base = notePath.split("/").pop()?.replace(/\.md$/i, "") ?? notePath;
-	if (!heading) return `[[${target}|${label || base}]]`;
+	const base = notePath.split("/").pop()?.replace(/\.md$/i, "") || target;
+	if (!heading) return `[[${base}|${label || base}]]`;
 	const display = label || heading;
-	return `[[${target}#${heading}|${display}]]`;
+	return `[[${base}#${heading}|${display}]]`;
 }
 
 export type SelectionExclusion = "fenced-code" | "inline-code" | "table" | null;

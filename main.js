@@ -11428,13 +11428,13 @@ function occurrencesBefore(text, offset, needle) {
   }
 }
 function noteHeadingLink(notePath, heading, label) {
-  var _a, _b;
+  var _a;
   const target = notePath.replace(/\.md$/i, "");
-  const base = (_b = (_a = notePath.split("/").pop()) == null ? void 0 : _a.replace(/\.md$/i, "")) != null ? _b : notePath;
+  const base = ((_a = notePath.split("/").pop()) == null ? void 0 : _a.replace(/\.md$/i, "")) || target;
   if (!heading)
-    return `[[${target}|${label || base}]]`;
+    return `[[${base}|${label || base}]]`;
   const display = label || heading;
-  return `[[${target}#${heading}|${display}]]`;
+  return `[[${base}#${heading}|${display}]]`;
 }
 function noteLines(text) {
   const out = [];
