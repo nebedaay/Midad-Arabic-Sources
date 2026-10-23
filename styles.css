@@ -1361,3 +1361,37 @@ body.theme-dark {
     color: var(--text-muted);
     font-size: var(--font-ui-smaller);
 }
+
+/* LLM settings: reusable configurations */
+.mas-llm-configs-setting {
+    display: block;
+}
+
+.mas-llm-configs-setting > .setting-item-info,
+.mas-llm-configs-setting > .setting-item-control {
+    display: inline-flex;
+    vertical-align: top;
+}
+
+.mas-llm-config-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-top: 10px;
+}
+
+.mas-llm-config-card {
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 8px;
+    padding: 2px 12px;
+    background: var(--background-secondary);
+}
+
+.mas-llm-config-card > .setting-item {
+    border-top: 0;
+    padding: 8px 0;
+}
+
+.mas-llm-config-card > .setting-item + .setting-item {
+    border-top: 1px solid var(--background-modifier-border);
+}

@@ -460,6 +460,7 @@ def _read_note_metadata(processed: Path) -> tuple[str | None, list[str] | None]:
 def cmd_transcribe(args) -> int:
     citekey = args.citekey
     standalone = bool(getattr(args, "standalone", False))
+    model = getattr(args, "model", None) or ""
     specs = [_parse_pdf_arg(v) for v in (args.pdf or [])]
 
     if not specs:
@@ -498,7 +499,7 @@ def cmd_transcribe(args) -> int:
 
         save_state(stage="submitting", status="running", doc_type="transcription",
                    pid=os.getpid(), citekey=citekey, pdf=str(pdf), volume=volume,
-                   standalone=standalone,
+                   standalone=standalone, model=model,
                    work_dir=str(work), log=str(_LOG_PATH) if _LOG_PATH else "",
                    prompt_file=str(args.prompt_file) if getattr(args, "prompt_file", None) else "")
         step("transcribe", "start", f"{pdf.name}" + (f" (vol. {volume})" if volume else ""))
@@ -507,6 +508,8 @@ def cmd_transcribe(args) -> int:
             submit_args += ["--prompt-file", str(args.prompt_file)]
         if standalone:
             submit_args.append("--metadata")
+        if model:
+            submit_args += ["--model", model]
         if run_script("transcription-batch-submit.py", submit_args):
             save_state(stage="error", status="error")
             step("transcribe", "error", pdf.name); continue
@@ -520,6 +523,8 @@ def cmd_transcribe(args) -> int:
                 fix_args += ["--prompt-file", str(args.prompt_file)]
             if standalone:
                 fix_args.append("--metadata")
+            if model:
+                fix_args += ["--model", model]
             run_script("transcription-process-raw.py", fix_args)
 
         if not processed.exists() or processed.stat().st_mtime < raw.stat().st_mtime:
@@ -549,12 +554,13 @@ def _resume_transcription(st: dict) -> int:
     pdf = st.get("pdf")
     volume = st.get("volume")
     standalone = bool(st.get("standalone"))
+    model = st.get("model") or ""
     stem = Path(pdf).stem
     work = Path(st.get("work_dir") or Path(pdf).parent)
     batch_txt = work / f"{stem}.batch.txt"
     if not batch_txt.exists():
         return cmd_transcribe(argparse.Namespace(citekey=citekey, pdf=[pdf], volume=volume,
-                                                pages=None, standalone=standalone,
+                                                pages=None, standalone=standalone, model=model,
                                                 prompt_file=st.get("prompt_file") or None))
 
     mv = load_module("transcription-translation-move-to-vault.py")
@@ -568,6 +574,8 @@ def _resume_transcription(st: dict) -> int:
             fix_args += ["--prompt-file", str(st["prompt_file"])]
         if standalone:
             fix_args.append("--metadata")
+        if model:
+            fix_args += ["--model", model]
         run_script("transcription-process-raw.py", fix_args)
     if not processed.exists() or processed.stat().st_mtime < raw.stat().st_mtime:
         post_args = [str(raw), str(processed)]
@@ -625,6 +633,8 @@ def cmd_translate(args) -> int:
         submit_args = [str(src)]
         if getattr(args, "prompt_file", None):
             submit_args += ["--prompt-file", str(args.prompt_file)]
+        if getattr(args, "model", None):
+            submit_args += ["--model", str(args.model)]
         if run_script("translate-batch-submit.py", submit_args):
             step("translate", "error", src.name); continue
         txt = src.parent / f"{src.stem}.translate.txt"
@@ -664,6 +674,7 @@ def main() -> int:
     p.add_argument("--volume", type=int)
     p.add_argument("--pages", type=int)
     p.add_argument("--standalone", action="store_true")
+    p.add_argument("--model")
     p.add_argument("--prompt-file")
     p.add_argument("--log")
     p.add_argument("--state")
@@ -673,6 +684,7 @@ def main() -> int:
     p.add_argument("--citekey", required=True)
     p.add_argument("--source", action="append")
     p.add_argument("--volume", type=int)
+    p.add_argument("--model")
     p.add_argument("--prompt-file")
     p.set_defaults(func=cmd_translate)
 

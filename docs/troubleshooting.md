@@ -28,9 +28,9 @@ Add it to the user lexicon: after a note transliteration, a dialog lists the ter
 
 ## Transcription and translation
 
-### “Gemini API key required”
+### “LLM configuration required”
 
-Set a key under **Transcription and translation → Gemini API key**, or launch Obsidian from a shell that exports `GEMINI_API_KEY` (or `GOOGLE_API_KEY`).
+Add a Gemini configuration under **LLM → Configurations**, assign it to transcription or translation, and enter its API key; or launch Obsidian from a shell that exports `GEMINI_API_KEY` (or `GOOGLE_API_KEY`).
 
 ### “No PDF attachments found for this item”
 

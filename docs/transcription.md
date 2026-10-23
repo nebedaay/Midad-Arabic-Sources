@@ -4,10 +4,12 @@
 
 ## What happens
 
+The OCR and translation models are chosen on the plugin's **LLM** settings page. Add one or more configurations there, then assign one to **Transcription** and one to **Translation**. Each configuration carries its own provider, model, and API key, so the same model can use a free key for transliteration and a paid key for the PDF pipeline. The pipeline currently requires a Gemini configuration for transcription and translation. The default is Gemini 3.5 Flash Lite.
+
 For each PDF the pipeline:
 
 1. **Bursts** the PDF into one PDF per page.
-2. **Submits** a Gemini 2.5 Flash batch job over the pages (batch mode is cheaper and handles a whole book at once).
+2. **Submits** a Gemini batch job over the pages using the model assigned to transcription (batch mode is cheaper and handles a whole book at once).
 3. **Collects** the raw OCR output and re-OCRs any page the model flagged as a hallucination.
 4. **Post-processes** locally.
 
@@ -65,7 +67,7 @@ Each job writes a log and a state file under `.midad-arabic-sources/jobs/`. The 
 
 ## Requirements
 
-- A **Gemini API key** (setting or `GEMINI_API_KEY`/`GOOGLE_API_KEY`).
+- A **Gemini API key** in the LLM configuration assigned to transcription and translation (or `GEMINI_API_KEY`/`GOOGLE_API_KEY` in the pipeline's environment).
 - Python 3 with `pymupdf`, `requests`, and `google-genai`.
 - The PDFs themselves: resolved from the item’s Zotero attachments (the local Zotero API, the ScholarWeft `zlinks` cache, or the Zotero storage folder, in that order) for **Transcribe this item’s PDF file(s)**, or chosen directly from disk for **Transcribe a PDF…**.
 

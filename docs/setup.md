@@ -8,7 +8,7 @@ The plugin is **desktop only**: it runs local Python scripts and reads files out
 
 - **Obsidian 1.13 or later.** The settings use Obsidian’s declarative settings API.
 - **Python 3** and a few packages, for transcription, translation, and the transliteration engine — see [Dependencies](./dependencies.md).
-- A **Gemini API key**, if you want to transcribe or translate scanned PDFs.
+- A **Gemini API key** in an LLM configuration assigned to transcription and translation, if you want to transcribe or translate scanned PDFs.
 - **Zotero** (optional), if you want to send imported works to your library — see [Zotero export](./zotero.md).
 
 ## Install

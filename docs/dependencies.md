@@ -12,7 +12,7 @@ If auto-detection picks the wrong one, set the full path in **Python executable*
 
 ## Translations and transcription: Gemini
 
-Scanned-PDF transcription and all translation call the **Gemini API**. You need an API key, from [Google AI Studio](https://aistudio.google.com/apikey), set in **Transcription and translation → Gemini API key**. It is passed to the pipeline as `GEMINI_API_KEY`; if you would rather not store it in the vault, launch Obsidian from a shell that already exports `GEMINI_API_KEY` (or `GOOGLE_API_KEY`) instead.
+Scanned-PDF transcription and all translation call the **Gemini API**. You need an API key, from [Google AI Studio](https://aistudio.google.com/apikey), stored in an LLM configuration under **LLM → Configurations** and assigned to transcription and translation there. It is passed to the pipeline as `GEMINI_API_KEY`; if you would rather not store it in the vault, launch Obsidian from a shell that already exports `GEMINI_API_KEY` (or `GOOGLE_API_KEY`) instead.
 
 Packages:
 
@@ -70,7 +70,7 @@ It loads `bert` at startup by default; do not pass `--preload mle` unless you ha
 
 ## LLM romanization (optional)
 
-If you prefer an LLM over the rule engine for individual calls, the transliteration service can call **Gemini** or **DeepSeek**. Set the provider, model, and (optionally) an API key under **Transliteration → LLM romanization**, or export `GEMINI_API_KEY` / `GOOGLE_API_KEY` / `DEEPSEEK_API_KEY` for the server process. The provider SDKs are imported lazily, so a missing one only matters when you choose that provider.
+If you prefer an LLM over the rule engine for individual calls, the transliteration service can call **Gemini**, **DeepSeek**, or an OpenAI-compatible endpoint. Add the endpoint under **LLM → Configurations**, then choose it for **LLM → Transliteration**, or export `GEMINI_API_KEY` / `GOOGLE_API_KEY` / `DEEPSEEK_API_KEY` for the server process. The provider SDKs are imported lazily, so a missing one only matters when you choose that provider.
 
 ## Zotero (optional)
 

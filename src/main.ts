@@ -120,6 +120,23 @@ function inferVolumeJS(name: string): number | null {
 type Engine = "bert" | "mle" | "none";
 type DotlessYa = "maqsura" | "ya";
 type LlmProvider = "gemini" | "deepseek" | "openai";
+type LlmTask = "transliteration" | "transcription" | "translation";
+
+/** One reusable LLM endpoint/key/model configuration. */
+interface LlmConfig {
+	id: string;
+	name: string;
+	provider: LlmProvider;
+	model: string;
+	apiKey: string;
+	baseUrl: string;
+}
+
+interface LlmAssignments {
+	transliteration: string;
+	transcription: string;
+	translation: string;
+}
 
 interface MidadArabicSourcesSettings {
 	serverUrl: string;
@@ -132,11 +149,13 @@ interface MidadArabicSourcesSettings {
 	// remembered choices from the transliterate modal
 	useLlm: boolean;
 	fullVocalization: boolean;
-	// LLM configuration
+	// LLM configuration (legacy fields kept for migration)
 	llmProvider: LlmProvider;
 	llmModel: string;
 	llmApiKey: string;
 	llmBaseUrl: string;
+	llmConfigs?: LlmConfig[];
+	llmAssignments?: LlmAssignments;
 	// Gemini transcription/translation pipeline
 	pythonPath: string;
 	pipelineScript: string;
@@ -495,6 +514,8 @@ const DEFAULT_SETTINGS: MidadArabicSourcesSettings = {
 	llmModel: "gemini-3.5-flash-lite",
 	llmApiKey: "",
 	llmBaseUrl: "",
+	llmConfigs: [],
+	llmAssignments: { transliteration: "", transcription: "", translation: "" },
 	pythonPath: "",
 	pipelineScript: "scripts/midad-arabic-sources-pipeline.py",
 	geminiApiKey: "",
@@ -912,9 +933,126 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		}
 	}
 
-	/** True when a Gemini key is available (plugin setting or inherited env). */
-	apiKeyAvailable(): boolean {
-		return !!(this.settings.geminiApiKey || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY);
+	/** The configuration selected for a task, falling back to a sensible first. */
+	llmConfigForTask(task: LlmTask): LlmConfig | null {
+		const configs = this.settings.llmConfigs ?? [];
+		const assigned = this.settings.llmAssignments?.[task] ?? "";
+		const selected = configs.find((c) =>
+			c.id === assigned && (task === "transliteration" || c.provider === "gemini")
+		);
+		if (selected) return selected;
+		const eligible = task === "transliteration"
+			? configs
+			: configs.filter((c) => c.provider === "gemini");
+		return eligible[0] ?? null;
+	}
+
+	llmModelForTask(task: LlmTask): string {
+		return this.llmConfigForTask(task)?.model ?? "";
+	}
+
+	llmApiKeyForTask(task: LlmTask): string {
+		const config = this.llmConfigForTask(task);
+		return config?.provider === "gemini" ? config.apiKey : "";
+	}
+
+	/** Create/replace assignments and migrate the old single-configuration fields. */
+	async ensureLlmSettings(): Promise<void> {
+		const providerName = (provider: LlmProvider) =>
+			provider === "deepseek" ? "DeepSeek" : provider === "openai" ? "OpenAI-compatible" : "Gemini";
+		const configs: LlmConfig[] = [];
+		const seen = new Set<string>();
+		for (const raw of Array.isArray(this.settings.llmConfigs) ? this.settings.llmConfigs : []) {
+			if (!raw || typeof raw !== "object") continue;
+			const provider: LlmProvider =
+				raw.provider === "deepseek" || raw.provider === "openai" ? raw.provider : "gemini";
+			let id = String(raw.id ?? "").trim() || `llm-${configs.length + 1}`;
+			while (seen.has(id)) id = `${id}-2`;
+			seen.add(id);
+			const fallbackModel = provider === "deepseek" ? "deepseek-chat" : provider === "openai" ? "gpt-4o-mini" : "gemini-3.5-flash-lite";
+			configs.push({
+				id,
+				name: String(raw.name ?? "").trim() || `${providerName(provider)} configuration ${configs.length + 1}`,
+				provider,
+				model: String(raw.model ?? "").trim() || fallbackModel,
+				apiKey: String(raw.apiKey ?? "").trim(),
+				baseUrl: String(raw.baseUrl ?? "").trim(),
+			});
+		}
+
+		let changed = configs.length === 0;
+		if (!configs.length) {
+			const legacyProvider: LlmProvider =
+				this.settings.llmProvider === "deepseek" || this.settings.llmProvider === "openai"
+					? this.settings.llmProvider
+					: "gemini";
+			const legacyModel = (this.settings.llmModel || "gemini-3.5-flash-lite").trim();
+			const mainKey = (this.settings.geminiApiKey || "").trim();
+			const legacyKey = (this.settings.llmApiKey || "").trim();
+			const mainId = "llm-gemini";
+			const main: LlmConfig = {
+				id: mainId,
+				name: "Gemini 3.5 Flash Lite",
+				provider: "gemini",
+				model: "gemini-3.5-flash-lite",
+				apiKey: mainKey || (legacyProvider === "gemini" ? legacyKey : ""),
+				baseUrl: "",
+			};
+			configs.push(main);
+			let transliteration = mainId;
+			if (
+				legacyProvider !== "gemini"
+				|| (legacyKey && legacyKey !== main.apiKey)
+				|| legacyModel !== "gemini-3.5-flash-lite"
+				|| (this.settings.llmBaseUrl || "").trim()
+			) {
+				transliteration = "llm-transliteration";
+				configs.push({
+					id: transliteration,
+					name: legacyProvider === "gemini" && legacyModel === "gemini-3.5-flash-lite"
+						? "Gemini 3.5 Flash Lite (transliteration)"
+						: `${providerName(legacyProvider)} ${legacyModel}`,
+					provider: legacyProvider,
+					model: legacyModel,
+					apiKey: legacyKey,
+					baseUrl: (this.settings.llmBaseUrl || "").trim(),
+				});
+			}
+			this.settings.llmAssignments = {
+				transliteration,
+				transcription: mainId,
+				translation: mainId,
+			};
+		}
+
+		const assignments = {
+			...(this.settings.llmAssignments ?? {
+				transliteration: "",
+				transcription: "",
+				translation: "",
+			}),
+		};
+		for (const task of ["transliteration", "transcription", "translation"] as LlmTask[]) {
+			const eligible = task === "transliteration"
+				? configs
+				: configs.filter((c) => c.provider === "gemini");
+			const current = assignments[task];
+			if (!eligible.some((c) => c.id === current)) {
+				assignments[task] = eligible[0]?.id ?? "";
+				changed = true;
+			}
+		}
+
+		this.settings.llmConfigs = configs;
+		this.settings.llmAssignments = assignments;
+		if (changed) await this.saveSettings();
+	}
+
+	/** True when a Gemini key is available for a task (plugin config or inherited env). */
+	apiKeyAvailable(task: LlmTask = "transcription"): boolean {
+		const config = this.llmConfigForTask(task);
+		if (config?.provider === "gemini" && config.apiKey) return true;
+		return !!(process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY);
 	}
 
 	openSettings(): void {
@@ -928,9 +1066,14 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 	}
 
 	/** Block the Gemini commands with a clear prompt when no key is configured. */
-	ensureApiKey(): boolean {
-		if (this.apiKeyAvailable()) return true;
-		new ApiKeyModal(this.app, this).open();
+	ensureApiKey(task: LlmTask = "transcription"): boolean {
+		const config = this.llmConfigForTask(task);
+		if (config && config.provider !== "gemini") {
+			new Notice(`Choose a Gemini configuration for ${task} in Settings → Midad Arabic Sources → LLM.`);
+			return false;
+		}
+		if (this.apiKeyAvailable(task)) return true;
+		new ApiKeyModal(this.app, this, task).open();
 		return false;
 	}
 
@@ -965,13 +1108,19 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 				return;
 			}
 			const script = this.resolveScript(scriptRel);
+			const task: LlmTask | null = args[0] === "transcribe"
+				? "transcription"
+				: args[0] === "translate"
+					? "translation"
+					: args[0] === "resume" ? "transcription" : null;
+			const taskKey = task ? this.llmApiKeyForTask(task) : "";
 			const proc = spawn(python, [script, ...args], {
 				cwd: vault,
 				env: {
 					...process.env,
 					OBSIDIAN_VAULT: vault,
 					PYTHONUNBUFFERED: "1",
-					...(this.settings.geminiApiKey ? { GEMINI_API_KEY: this.settings.geminiApiKey } : {}),
+					...(taskKey ? { GEMINI_API_KEY: taskKey } : {}),
 				},
 			});
 			// Only the source importer is a cancellable source operation; a
@@ -1085,7 +1234,15 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 
 		const logPath = this.jobPath(title, "log");
 		const statePath = this.jobPath(title, "json");
-		const fullArgs = args[0] === "transcribe" ? [...args, "--log", logPath, "--state", statePath] : args;
+		const task: LlmTask | null = args[0] === "transcribe"
+			? "transcription"
+			: args[0] === "translate" ? "translation" : null;
+		const config = task ? this.llmConfigForTask(task) : null;
+		const fullArgs = [...args];
+		if (task && config?.provider === "gemini" && config.model) {
+			fullArgs.push("--model", config.model);
+		}
+		if (args[0] === "transcribe") fullArgs.push("--log", logPath, "--state", statePath);
 
 		let result: PipelineResult | null = null;
 		const { code } = await this.runScript(scriptRel ?? this.settings.pipelineScript, fullArgs, (ev) => {
@@ -1254,7 +1411,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 	async openTranscribe() {
 		const item = this.activeItem();
 		if (!item) { new Notice("Open a literature note (@citekey) first."); return; }
-		if (!this.ensureApiKey()) return;
+		if (!this.ensureApiKey("transcription")) return;
 		let pdfs = (await this.pipelineResult(["list-pdfs", item.path]))?.pdfs ?? [];
 		// If Python could not reach Zotero, use ScholarWeft's already-resolved paths.
 		if (!pdfs.some((p) => p.exists)) {
@@ -1280,7 +1437,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 
 	/** Transcribe any PDF the user chooses, without a Zotero/literature note. */
 	async openStandalonePdf() {
-		if (!this.ensureApiKey()) return;
+		if (!this.ensureApiKey("transcription")) return;
 		let prompts: PromptEntry[];
 		try {
 			prompts = await this.loadPromptSet("transcription");
@@ -1295,7 +1452,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 	async openTranslate() {
 		const item = this.activeItem();
 		if (!item) { new Notice("Open a literature note (@citekey) first."); return; }
-		if (!this.ensureApiKey()) return;
+		if (!this.ensureApiKey("translation")) return;
 		const notes = ((await this.pipelineResult(["list-transcriptions", item.path]))?.notes ?? []) as unknown as PipelineNote[];
 		const pdfs = (await this.pipelineResult(["list-pdfs", item.path]))?.pdfs ?? [];
 		let prompts: PromptEntry[];
@@ -3825,13 +3982,18 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			const body: Record<string, unknown> = { text };
 			let path = "/transliterate";
 			if (opts.useLlm) {
+				const config = this.llmConfigForTask("transliteration");
+				if (!config) {
+					new Notice("Add an LLM configuration in Settings → Midad Arabic Sources → LLM.");
+					return null;
+				}
 				path = "/romanize";
-				body.provider = this.settings.llmProvider;
-				body.model = this.settings.llmModel;
+				body.provider = config.provider;
+				body.model = config.model;
 				body.keep_case = opts.fullVocalization;
 				body.name = this.settings.nameMode;
-				if (this.settings.llmBaseUrl) body.base_url = this.settings.llmBaseUrl;
-				if (this.settings.llmApiKey) body.api_key = this.settings.llmApiKey;
+				if (config.baseUrl) body.base_url = config.baseUrl;
+				if (config.apiKey) body.api_key = config.apiKey;
 			} else {
 				body.engine = this.settings.engine;
 				body.sun_letters = this.settings.sunLetters;
@@ -4043,6 +4205,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 	async loadSettings() {
 		const data = (await this.loadData()) as Partial<MidadArabicSourcesSettings> | null;
 		this.settings = Object.assign({}, DEFAULT_SETTINGS, data ?? {});
+		await this.ensureLlmSettings();
 		// Pre-designation installs: Ḥafṣ was the first riwāya, so adopt it once and
 		// persist it, after which the designation is purely the setting.
 		if (!this.settings.canonicalQuranRiwāya.trim()) {
@@ -4263,6 +4426,143 @@ class MidadArabicSourcesSettingTab extends PluginSettingTab {
 		if (key === "zoteroAutoCreate" && value === true) void this.plugin.autoSyncZotero();
 	}
 
+	/** Add a reusable LLM endpoint/key/model configuration. */
+	addLlmConfig(): void {
+		const configs = this.plugin.settings.llmConfigs ?? [];
+		const id = `llm-${Date.now().toString(36)}`;
+		configs.push({
+			id,
+			name: `Configuration ${configs.length + 1}`,
+			provider: "gemini",
+			model: "gemini-3.5-flash-lite",
+			apiKey: "",
+			baseUrl: "",
+		});
+		this.plugin.settings.llmConfigs = configs;
+		void this.plugin.saveSettings();
+	}
+
+	renderLlmConfigCard(container: HTMLElement, config: LlmConfig, configs: LlmConfig[]): void {
+		const card = container.createDiv({ cls: "mas-llm-config-card" });
+		new Setting(card)
+			.setName("Name")
+			.addText((text) => {
+				text.setValue(config.name).onChange(async (value) => {
+					config.name = value.trim() || "Untitled configuration";
+					await this.plugin.saveSettings();
+				});
+				text.inputEl.setCssStyles({ width: "100%" });
+			});
+		new Setting(card)
+			.setName("Provider")
+			.setDesc("Gemini for transcription/translation; all three providers are available for transliteration.")
+			.addDropdown((dropdown) => {
+				for (const [value, label] of [
+					["gemini", "Gemini"],
+					["deepseek", "DeepSeek"],
+					["openai", "OpenAI-compatible"],
+				] as const) {
+					dropdown.addOption(value, label);
+				}
+				dropdown.setValue(config.provider);
+				dropdown.onChange(async (value) => {
+					config.provider = value as LlmProvider;
+					await this.plugin.saveSettings();
+					await this.plugin.ensureLlmSettings();
+					this.update();
+				});
+			});
+		new Setting(card)
+			.setName("Model")
+			.setDesc("The model identifier for the selected provider.")
+			.addText((text) => {
+				text.setValue(config.model).onChange(async (value) => {
+					config.model = value.trim();
+					await this.plugin.saveSettings();
+				});
+				text.inputEl.setCssStyles({ width: "100%" });
+			});
+		new Setting(card)
+			.setName("API key")
+			.addText((text) => {
+				text.setValue(config.apiKey).onChange(async (value) => {
+					config.apiKey = value.trim();
+					await this.plugin.saveSettings();
+				});
+				text.inputEl.type = "password";
+				text.inputEl.setCssStyles({ width: "100%" });
+			});
+		new Setting(card)
+			.setName("Base URL")
+			.setDesc("The endpoint for an OpenAI-compatible provider; leave blank to use its environment default.")
+			.addText((text) => {
+				text.setValue(config.baseUrl).onChange(async (value) => {
+					config.baseUrl = value.trim();
+					await this.plugin.saveSettings();
+				});
+				text.inputEl.setCssStyles({ width: "100%" });
+			});
+		new Setting(card).addButton((button) =>
+			button
+				.setButtonText("Delete configuration")
+				.setDisabled(configs.length <= 1)
+				.onClick(async () => {
+					this.plugin.settings.llmConfigs = configs.filter((c) => c.id !== config.id);
+					await this.plugin.saveSettings();
+					await this.plugin.ensureLlmSettings();
+					this.update();
+				})
+		);
+	}
+
+	renderLlmConfigs(setting: Setting): void {
+		setting.settingEl.addClass("mas-llm-configs-setting");
+		setting.addButton((button) =>
+			button.setButtonText("Add LLM configuration").setCta().onClick(() => {
+				this.addLlmConfig();
+				this.update();
+			})
+		);
+		const configs = this.plugin.settings.llmConfigs ?? [];
+		const list = setting.settingEl.createDiv({ cls: "mas-llm-config-list" });
+		if (!configs.length) {
+			list.createEl("p", { text: "No LLM configurations yet." });
+			return;
+		}
+		for (const config of configs) this.renderLlmConfigCard(list, config, configs);
+	}
+
+	renderLlmTask(setting: Setting, task: LlmTask): void {
+		const configs = this.plugin.settings.llmConfigs ?? [];
+		const eligible = task === "transliteration"
+			? configs
+			: configs.filter((config) => config.provider === "gemini");
+		setting.addDropdown((dropdown) => {
+			if (!eligible.length) {
+				dropdown.addOption("", "No eligible configuration");
+				dropdown.setDisabled(true);
+				return;
+			}
+			for (const config of eligible) {
+				dropdown.addOption(config.id, `${config.name || "Untitled configuration"} — ${config.model}`);
+			}
+			const assignments = this.plugin.settings.llmAssignments;
+			const current = assignments?.[task] ?? "";
+			const selected = eligible.some((config) => config.id === current) ? current : eligible[0].id;
+			dropdown.setValue(selected);
+			if (selected !== current && assignments) {
+				assignments[task] = selected;
+				void this.plugin.saveSettings();
+			}
+			dropdown.onChange(async (value) => {
+				if (this.plugin.settings.llmAssignments) {
+					this.plugin.settings.llmAssignments[task] = value;
+					await this.plugin.saveSettings();
+				}
+			});
+		});
+	}
+
 	/** Fill the library ID from a running local Zotero, then refresh the rows. */
 	async detectZotero(): Promise<void> {
 		const found = await this.plugin.detectZoteroLocal();
@@ -4387,41 +4687,34 @@ class MidadArabicSourcesSettingTab extends PluginSettingTab {
 							options: { maqsura: "alif maqṣūra (ā)", ya: "let the analysis choose" },
 						},
 					},
-					{
-						type: "page",
-						name: "LLM romanization",
-						desc: "Used when “Use LLM” is checked in the transliterate dialog.",
-						items: [
-							{
-								name: "Provider",
-								desc: "The API to call for LLM romanization. OpenAI-compatible covers OpenAI, OpenRouter, Groq, and local servers.",
-								control: {
-									type: "dropdown",
-									key: "llmProvider",
-									options: { gemini: "Gemini", deepseek: "DeepSeek", openai: "OpenAI-compatible" },
-								},
-							},
-							{
-								name: "Model",
-								desc: "Model name for the selected provider (for OpenAI-compatible: e.g. gpt-4o-mini, or your local model name).",
-								control: { type: "text", key: "llmModel" },
-							},
-							{
-								name: "Base URL",
-								desc: "OpenAI-compatible only: the API endpoint, e.g. https://api.openai.com/v1 or http://localhost:11434/v1. Empty uses the server's OPENAI_BASE_URL.",
-								control: { type: "text", key: "llmBaseUrl" },
-							},
-							{
-								name: "API key",
-								desc: "Optional. Used only if the server process has no key in its environment.",
-								render: password(
-									() => this.plugin.settings.llmApiKey,
-									(v) => { this.plugin.settings.llmApiKey = v; }
-								),
-							},
-						],
-					},
 					doc("Transliteration guide", "transliteration.md", "Commands, engines, the server, the lexicon, and LLM romanization."),
+				],
+			},
+			{
+				type: "page",
+				name: "LLM",
+				desc: "Reusable model and API-key configurations, and which configuration each feature uses.",
+				items: [
+					{
+						name: "Configurations",
+						desc: "Add one configuration per model or API key. A configuration can be shared by several tasks.",
+						render: (setting: Setting) => this.renderLlmConfigs(setting),
+					},
+					{
+						name: "Transliteration",
+						desc: "Configuration used when “Use LLM” is checked in the transliterate dialog. Any provider is allowed here.",
+						render: (setting: Setting) => this.renderLlmTask(setting, "transliteration"),
+					},
+					{
+						name: "Transcription",
+						desc: "Configuration used for PDF OCR. The pipeline currently requires a Gemini configuration.",
+						render: (setting: Setting) => this.renderLlmTask(setting, "transcription"),
+					},
+					{
+						name: "Translation",
+						desc: "Configuration used for translating transcriptions. The pipeline currently requires a Gemini configuration.",
+						render: (setting: Setting) => this.renderLlmTask(setting, "translation"),
+					},
 				],
 			},
 			{
@@ -4815,20 +5108,22 @@ class LogModal extends Modal {
 
 class ApiKeyModal extends Modal {
 	plugin: MidadArabicSourcesPlugin;
+	task: LlmTask;
 
-	constructor(app: App, plugin: MidadArabicSourcesPlugin) {
+	constructor(app: App, plugin: MidadArabicSourcesPlugin, task: LlmTask) {
 		super(app);
 		this.plugin = plugin;
+		this.task = task;
 	}
 
 	onOpen(): void {
 		const { contentEl } = this;
-		contentEl.createEl("h3", { text: "Gemini API key required" });
+		contentEl.createEl("h3", { text: "LLM configuration required" });
 		contentEl.createEl("p", {
-			text: "The transcription and translation pipeline calls Gemini, which needs an API key.",
+			text: `The ${this.task} feature has no usable API key in its selected configuration.`,
 		});
 		contentEl.createEl("p", {
-			text: "Set it in the Midad Arabic Sources plugin settings (recommended): it is passed to the pipeline automatically. Alternatively, provide GEMINI_API_KEY (or GOOGLE_API_KEY) in the environment Obsidian was launched from.",
+			text: "Add a configuration and assign it to this task under Settings → Midad Arabic Sources → LLM. A key can also come from GEMINI_API_KEY / GOOGLE_API_KEY in the environment Obsidian was launched from.",
 		});
 		new Setting(contentEl)
 			.addButton((b) =>

@@ -33,7 +33,7 @@ The rule-based/LLM romanizer talks to a resident Python service (CAMeL), so Obsi
 - **Check transliteration server** — report loaded engines and available LLM providers.
 - **Start transliteration server** / **Stop transliteration server** — launch or stop the service without a terminal.
 
-Settings cover the server URL and script, the engine (`bert` / `mle` / `none`), sun-letter assimilation, case endings, name mode, final dotless yāʾ, and an LLM provider (Gemini / DeepSeek) with an optional per-request key. See [Transliteration](./docs/transliteration.md).
+Settings cover the server URL and script, the engine (`bert` / `mle` / `none`), sun-letter assimilation, case endings, name mode, final dotless yāʾ, and the LLM configuration assigned to transliteration. See [Transliteration](./docs/transliteration.md).
 
 ### Transcription and translation (scanned PDFs)
 
@@ -74,7 +74,7 @@ Installed works can be sent to Zotero as `book` items, each tagged **Midad Arabi
 - **Obsidian 1.13** or later.
 - **Python 3** with `PyMuPDF` (`fitz`), `requests`, and `google-genai`. The plugin finds a usable interpreter automatically and lets you pin one in settings.
 - **CAMeL Tools** for the transliteration engine, with its model data.
-- A **Gemini API key** for transcription, translation, and optional LLM romanization.
+- A **Gemini API key** in the LLM configuration assigned to transcription and translation, plus optional LLM configurations for romanization.
 - **Zotero** (optional) for sending imported works to your library.
 
 See [Dependencies](./docs/dependencies.md) for the exact install lines.
@@ -100,7 +100,7 @@ Core importing and rendering use only the repositories you import from. The foll
 | Feature | Contacts | Why |
 | --- | --- | --- |
 | Text source import | The public repositories listed above (GitHub, `qul.tarteel.ai`, `turath.io`) | Downloads the source texts you choose to import. |
-| Transliteration | `transliterate-server.py` on `127.0.0.1` | Romanizes Arabic. Optionally calls Gemini or DeepSeek when LLM mode is on. |
+| Transliteration | `transliterate-server.py` on `127.0.0.1` | Romanizes Arabic. Optionally calls Gemini, DeepSeek, or an OpenAI-compatible endpoint when LLM mode is on. |
 | Transcription / translation | The Gemini API | OCRs and translates scanned PDFs you submit. |
 | Zotero export | Your local Zotero (`127.0.0.1:23119`) or `api.zotero.org` | Reads and writes the bibliographic items you export. |
 | Fonts | `cdn.jsdelivr.net` (Fontsource) | Loads the Arabic and Latin typefaces the generated notes expect. |

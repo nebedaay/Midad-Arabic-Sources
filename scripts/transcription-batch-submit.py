@@ -32,6 +32,16 @@ API_KEY = API_KEY.replace("\u2011", "-").encode("ascii", errors="replace").decod
 SYSTEM_PROMPT = build_transcription_prompt()
 
 
+def _model_name(value: str | None) -> str:
+    value = (value or "").strip()
+    if not value:
+        value = "gemini-3.5-flash-lite"
+    return value if value.startswith("models/") else f"models/{value}"
+
+
+MODEL = _model_name(os.environ.get("GEMINI_MODEL", "gemini-3.5-flash-lite"))
+
+
 def read_prompt(path: str | None) -> str | None:
     """The selected text-specific prompt, or None to use the built-in default."""
     if path:
@@ -123,7 +133,7 @@ def build_jsonl(uploaded: list, jsonl_path: Path, system_prompt: str = SYSTEM_PR
             payload = {
                 "key": item["local_name"],
                 "request": {
-                    "model": "models/gemini-2.5-flash",
+                    "model": MODEL,
                     "system_instruction": {"parts": [{"text": system_prompt}]},
                     "contents": [{
                         "role": "user",
@@ -154,7 +164,7 @@ def submit_batch(jsonl_path: Path, client: genai.Client, pdf_stem: str) -> str:
     )
     
     batch = client.batches.create(
-        model="models/gemini-2.5-flash",
+        model=MODEL,
         src=config_upload.name,
         config=types.CreateBatchJobConfig(display_name=f"{safe_stem}_batch")
     )
@@ -166,7 +176,7 @@ def submit_batch(jsonl_path: Path, client: genai.Client, pdf_stem: str) -> str:
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("Usage: python3 transcription-batch-submit.py input.pdf [--work-dir DIR] [--prompt-file PATH] [--metadata]")
+        print("Usage: python3 transcription-batch-submit.py input.pdf [--work-dir DIR] [--prompt-file PATH] [--metadata] [--model MODEL]")
         sys.exit(1)
     
     pdf_path = Path(sys.argv[1]).resolve()
@@ -186,6 +196,10 @@ if __name__ == "__main__":
         idx = sys.argv.index("--prompt-file")
         if idx + 1 < len(sys.argv):
             prompt_file = sys.argv[idx + 1]
+    if "--model" in sys.argv:
+        idx = sys.argv.index("--model")
+        if idx + 1 < len(sys.argv):
+            MODEL = _model_name(sys.argv[idx + 1])
     system_prompt = build_transcription_prompt(read_prompt(prompt_file), metadata="--metadata" in sys.argv)
 
     stem = pdf_path.stem

@@ -107,6 +107,13 @@ shorttitle: "{shorttitle}"
     return yaml
 API_KEY = os.environ.get("GEMINI_API_KEY", os.environ.get("GOOGLE_API_KEY", ""))
 API_KEY = API_KEY.replace("\u2011", "-").encode("ascii", errors="replace").decode("ascii")
+
+
+def _model_name(value: str | None) -> str:
+    value = (value or "").strip()
+    if not value:
+        value = "gemini-3.5-flash-lite"
+    return value if value.startswith("models/") else f"models/{value}"
 NBSP = '\u202f'
 LQ = '\uFD3F'
 
@@ -346,7 +353,12 @@ if __name__ == "__main__":
         sys.exit(1)
     
     batch_file = Path(sys.argv[1])
-    
+
+    if "--model" in sys.argv:
+        idx = sys.argv.index("--model")
+        if idx + 1 < len(sys.argv):
+            os.environ["GEMINI_MODEL"] = sys.argv[idx + 1]
+
     if "--rebuild" in sys.argv:
         stem = batch_file.stem.replace(".batch", "")
         parent = batch_file.parent
@@ -497,7 +509,7 @@ up:
                         "guess at text. Keep each paragraph on one line."
                     )
                     kwargs = {
-                        "model": "models/gemini-2.5-flash",
+                        "model": _model_name(os.environ.get("GEMINI_MODEL", "gemini-3.5-flash-lite")),
                         "contents": [sync_prompt, types.Part.from_uri(file_uri=file.uri, mime_type="application/pdf")],
                     }
                     if system_prompt:

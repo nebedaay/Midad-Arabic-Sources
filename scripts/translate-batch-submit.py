@@ -27,7 +27,14 @@ PAGES_PER_BATCH = 2
 # Single source of truth for the model. The Gemini Batch API runs the model
 # given to batches.create(); the per-request "model" field is ignored, so both
 # are set from here.
-MODEL = "models/gemini-2.5-flash"
+def _model_name(value: str | None) -> str:
+    value = (value or "").strip()
+    if not value:
+        value = "gemini-3.5-flash-lite"
+    return value if value.startswith("models/") else f"models/{value}"
+
+
+MODEL = _model_name(os.environ.get("GEMINI_MODEL", "gemini-3.5-flash-lite"))
 
 # ornate brackets used for Qur'an quotes: U+FD3E open, U+FD3F close
 _QO = "\uFD3E"
@@ -66,7 +73,13 @@ def split_pages(content: str) -> list[str]:
     return pages
 
 def main():
+    global MODEL
     argv = list(sys.argv[1:])
+    if "--model" in argv:
+        idx = argv.index("--model")
+        if idx + 1 < len(argv):
+            MODEL = _model_name(argv[idx + 1])
+        del argv[idx:idx + 2]
     prompt_file = None
     if "--prompt-file" in argv:
         idx = argv.index("--prompt-file")

@@ -67,14 +67,16 @@ The lexicon is also the place to pin a term the engine misreads. It grows file b
 
 ## LLM romanization
 
-Under **Transliteration → LLM romanization** you can set:
+LLM configurations are managed on the plugin's **LLM** settings page. A configuration records a provider, model, optional base URL, and API key:
 
 - **Provider** — Gemini, DeepSeek, or **OpenAI-compatible**.
-- **Model** — e.g. `gemini-3.5-flash-lite` (the default); for OpenAI-compatible, e.g. `gpt-4o-mini` or your local model.
+- **Model** — e.g. `gemini-3.5-flash-lite`; for OpenAI-compatible, e.g. `gpt-4o-mini` or your local model.
 - **Base URL** — OpenAI-compatible only: the endpoint, e.g. `https://api.openai.com/v1`, `https://openrouter.ai/api/v1`, or `http://localhost:11434/v1`. Empty uses the server's `OPENAI_BASE_URL`.
 - **API key** — optional; used only when the server process has no `GEMINI_API_KEY` / `GOOGLE_API_KEY` / `DEEPSEEK_API_KEY` / `OPENAI_API_KEY` in its environment.
 
-**OpenAI-compatible** is any endpoint that speaks the OpenAI chat-completions API: OpenAI itself, OpenRouter, Groq, or a local llama.cpp / Ollama / vLLM server. Set the base URL, model, and key in settings (or the server's `OPENAI_BASE_URL` / `OPENAI_MODEL` / `OPENAI_API_KEY`); the CLI takes `--provider openai --base-url … --model …`.
+Add as many configurations as you need with **Add LLM configuration**; then choose one for **Transliteration**, one for **Transcription**, and one for **Translation**. Configurations can share a model and differ only by API key. Transcription and translation currently require a Gemini configuration; transliteration accepts all three providers.
+
+**OpenAI-compatible** is any endpoint that speaks the OpenAI chat-completions API: OpenAI itself, OpenRouter, Groq, or a local llama.cpp / Ollama / vLLM server. Set the base URL, model, and key in the configuration (or the server's `OPENAI_BASE_URL` / `OPENAI_MODEL` / `OPENAI_API_KEY`); the CLI takes `--provider openai --base-url … --model …`.
 
 Turn it on per call with **Use LLM** in the transliteration dialog. The LLM path lives in the server (`POST /romanize`), so it can also translate in the same call.
 

@@ -17,4 +17,4 @@ The editor holds only the **text-specific** part. The pipeline appends it to the
 
 There is no separate “re-translate selected pages” command yet; re-running **Translate this item’s transcription(s)** on a transcription replaces its translation. Page-level re-translation is on the roadmap.
 
-Translation needs the same prerequisites as transcription: a **Gemini API key** and Python 3 with `google-genai`, `requests`, and `pymupdf` — see [Dependencies](./dependencies.md).
+Translation needs the same prerequisites as transcription: a **Gemini configuration assigned to translation** on the LLM settings page, and Python 3 with `google-genai`, `requests`, and `pymupdf` — see [Dependencies](./dependencies.md).
