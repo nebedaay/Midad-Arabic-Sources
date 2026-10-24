@@ -1056,7 +1056,15 @@ function buildMocSections(works) {
       arr.push(w);
     }
   }
-  return order.map((name) => {
+  const rank = (name) => {
+    const lower = name.toLocaleLowerCase();
+    if (lower.includes("arabic"))
+      return 0;
+    if (lower.includes("english"))
+      return 2;
+    return 1;
+  };
+  return order.slice().sort((a, b) => rank(a) - rank(b) || a.localeCompare(b)).map((name) => {
     var _a2;
     return {
       name,
@@ -1155,7 +1163,8 @@ async function renderModelToVault(app, templates, model, outRoot, force = false,
   if (singleUnit && !isQuranText) {
     await deleteNote(app, `${folder}/${dir} - ${singleUnit.base}.md`);
   } else {
-    await ensureFolder(app, folder);
+    if (!(isCanonical && canonicalRoot))
+      await ensureFolder(app, folder);
     if (isCanonical && canonicalRoot)
       await ensureFolder(app, canonicalRoot);
     for (const unit of todo) {

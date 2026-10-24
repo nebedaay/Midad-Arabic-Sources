@@ -228,10 +228,19 @@ export function buildMocSections(works: Array<JsonObject>): MocSection[] {
 			arr.push(w);
 		}
 	}
-	return order.map((name) => ({
-		name,
-		works: (map.get(name) ?? []).slice().sort((a, b) => String(a.title).localeCompare(String(b.title))),
-	}));
+	const rank = (name: string): number => {
+		const lower = name.toLocaleLowerCase();
+		if (lower.includes("arabic")) return 0;
+		if (lower.includes("english")) return 2;
+		return 1;
+	};
+	return order
+		.slice()
+		.sort((a, b) => rank(a) - rank(b) || a.localeCompare(b))
+		.map((name) => ({
+			name,
+			works: (map.get(name) ?? []).slice().sort((a, b) => String(a.title).localeCompare(String(b.title))),
+		}));
 }
 
 export async function ensureFolder(app: App, folder: string): Promise<void> {
@@ -368,7 +377,7 @@ export async function renderModelToVault(
 		// A one-unit non-Qur'ān work keeps its content in the work note.
 		await deleteNote(app, `${folder}/${dir} - ${singleUnit.base}.md`);
 	} else {
-		await ensureFolder(app, folder);
+		if (!(isCanonical && canonicalRoot)) await ensureFolder(app, folder);
 		if (isCanonical && canonicalRoot) await ensureFolder(app, canonicalRoot);
 		for (const unit of todo) {
 			if (shouldCancel?.()) throw new Error("Source render cancelled");
