@@ -33,6 +33,8 @@ Every category MOC points up to one **parent note** (the setting **“Sources pa
 
 Top-level source notes (work hubs, MOCs, and transcription/translation parents) carry `[[Midad Arabic Sources]]` as an `up` link, so the corpus is traceable without giving every individual sūra, chapter, root, or volume note a backlink to the parent.
 
+Language sections in every category and repository MOC use one shared order: **Arabic Texts** first, then any other languages alphabetically, then **English Texts**. This keeps bilingual works and the consolidated Qurʾān MOC consistent.
+
 A work with a single unit — for example a one-chapter ḥadīth book such as al-Arbaʿūn al-Nawawiyya — keeps its content in the work note itself rather than a hub that links to one child note.
 
 ## Heading convention
