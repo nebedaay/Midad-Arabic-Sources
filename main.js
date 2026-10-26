@@ -9964,8 +9964,340 @@ var ANNOTATION_EVENTS = {
   leave: "mas-annotation-leave"
 };
 
+// src/sourceAnnotations/text.ts
+function managedBounds(content) {
+  const prior = splitNote(content);
+  const bodyStart = content.length - prior.body.length;
+  const region = findManagedRegion(prior.body);
+  if (!region)
+    return null;
+  let open = 0;
+  let close = 0;
+  for (const [o, c] of [
+    [MANAGED_OPEN, MANAGED_CLOSE],
+    [LEGACY_MANAGED_OPEN, LEGACY_MANAGED_CLOSE]
+  ]) {
+    if (prior.body.startsWith(o, region.start)) {
+      open = o.length;
+      close = c.length;
+      break;
+    }
+  }
+  if (!open)
+    return null;
+  return {
+    bodyStart,
+    contentStart: bodyStart + region.start + open,
+    contentEnd: bodyStart + region.end - close
+  };
+}
+function bodyBounds(content) {
+  const prior = splitNote(content);
+  const bodyStart = content.length - prior.body.length;
+  if (!prior.body.trim())
+    return null;
+  return { bodyStart, contentStart: bodyStart, contentEnd: bodyStart + prior.body.length };
+}
+function cleanQuoteMarkdown(markdown) {
+  return markdown.replace(/\r\n?/g, "\n").split("\n").map((line) => line.replace(/^(?:>\s?)+/, "").replace(/\s+$/, "")).join("\n").replace(/^\n+|\n+$/g, "");
+}
+function markdownToText(markdown) {
+  let text = cleanQuoteMarkdown(markdown);
+  text = text.replace(/\[\[([^\]|]+)\|([^\]]+)\]\]/g, "$2").replace(/\[\[([^\]]+)\]\]/g, "$1").replace(/\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/<[^>]+>/g, "").replace(/^\s*(?:[-*+]|\d+\.)\s+/gm, "").replace(/^\s*\[[ xX]\]\s*/gm, "").replace(/^\s*#{1,6}\s+/gm, "").replace(/(\*\*|__|\*|_|`|~~)/g, "").replace(/[ \t]+$/gm, "").replace(/^\n+|\n+$/g, "");
+  return text;
+}
+function lineStarts(text) {
+  const starts = [0];
+  for (let i = 0; i < text.length; i++) {
+    if (text.charAt(i) === "\n")
+      starts.push(i + 1);
+  }
+  return starts;
+}
+var HEADING_RE = /^(#{1,6})\s+(.*)$/;
+function sectionAt(text, offset) {
+  let section = "";
+  for (const start of lineStarts(text)) {
+    if (start >= offset)
+      break;
+    const end = text.indexOf("\n", start);
+    const line = text.slice(start, end === -1 ? text.length : end);
+    const match = HEADING_RE.exec(line);
+    if (match)
+      section = match[2].trim();
+  }
+  return section;
+}
+function crossesHeading(text, start, end) {
+  for (const lineStart of lineStarts(text)) {
+    if (lineStart < start)
+      continue;
+    if (lineStart >= end)
+      break;
+    const lineEnd = text.indexOf("\n", lineStart);
+    const line = text.slice(lineStart, lineEnd === -1 ? text.length : lineEnd);
+    if (HEADING_RE.test(line))
+      return true;
+  }
+  const startLine = text.lastIndexOf("\n", Math.max(0, start - 1)) + 1;
+  const startEnd = text.indexOf("\n", startLine);
+  if (HEADING_RE.test(text.slice(startLine, startEnd === -1 ? text.length : startEnd)))
+    return true;
+  return false;
+}
+function occurrencesBefore(text, offset, needle) {
+  const trimmed = needle.trim();
+  if (!trimmed)
+    return 0;
+  const haystack = normalizeWhitespaceWithMap(text.slice(0, offset));
+  const target = normalizeWhitespaceWithMap(trimmed);
+  if (!target.text)
+    return 0;
+  let count = 0;
+  let at = 0;
+  while (true) {
+    const found = haystack.text.indexOf(target.text, at);
+    if (found < 0)
+      return count;
+    count += 1;
+    at = found + target.text.length;
+  }
+}
+function noteHeadingLink(notePath, heading, label) {
+  var _a;
+  const target = notePath.replace(/\.md$/i, "");
+  const base = ((_a = notePath.split("/").pop()) == null ? void 0 : _a.replace(/\.md$/i, "")) || target;
+  if (!heading)
+    return `[[${base}|${label || base}]]`;
+  const display = label || heading;
+  return `[[${base}#${heading}|${display}]]`;
+}
+function noteLines(text) {
+  const out = [];
+  let start = 0;
+  for (let i = 0; i <= text.length; i++) {
+    if (i === text.length || text.charAt(i) === "\n") {
+      out.push({ start, end: i });
+      start = i + 1;
+    }
+  }
+  return out;
+}
+function intersects(aStart, aEnd, bStart, bEnd) {
+  return aStart < bEnd && aEnd > bStart;
+}
+function fencedCodeRanges(text, lines) {
+  const ranges = [];
+  for (let i = 0; i < lines.length; i++) {
+    const line = text.slice(lines[i].start, lines[i].end);
+    const open = /^ {0,3}(`{3,}|~{3,})/.exec(line);
+    if (!open)
+      continue;
+    const start = lines[i].start;
+    const marker = open[1];
+    const close = new RegExp(`^ {0,3}${marker[0] === "`" ? "`" : "~"}{${marker.length},}[ \\t]*$`);
+    let end = text.length;
+    let closed = false;
+    for (let j = i + 1; j < lines.length; j++) {
+      if (close.test(text.slice(lines[j].start, lines[j].end))) {
+        end = lines[j].end;
+        i = j;
+        closed = true;
+        break;
+      }
+    }
+    if (!closed)
+      i = lines.length;
+    ranges.push([start, end]);
+  }
+  return ranges;
+}
+function inlineCodeRanges(text, fenced) {
+  const ranges = [];
+  const inFence = (offset) => fenced.some(([start, end]) => offset >= start && offset < end);
+  for (let i = 0; i < text.length; i++) {
+    if (text.charAt(i) !== "`" || inFence(i))
+      continue;
+    let run = 1;
+    while (text.charAt(i + run) === "`")
+      run++;
+    let close = -1;
+    for (let j = i + run; j < text.length; j++) {
+      if (text.charAt(j) !== "`" || inFence(j))
+        continue;
+      let length = 1;
+      while (text.charAt(j + length) === "`")
+        length++;
+      if (length === run) {
+        close = j;
+        break;
+      }
+      j += length - 1;
+    }
+    if (close === -1) {
+      i += run - 1;
+      continue;
+    }
+    ranges.push([i, close + run]);
+    i = close + run - 1;
+  }
+  return ranges;
+}
+var TABLE_DELIMITER = /^ {0,3}\|?[ \t]*:?-{3,}:?[ \t]*(?:\|[ \t]*:?-{3,}:?[ \t]*)+\|?[ \t]*$/;
+function tableRanges(text, lines, fenced) {
+  const ranges = [];
+  const inFence = (offset) => fenced.some(([start, end]) => offset >= start && offset < end);
+  for (let i = 0; i + 1 < lines.length; i++) {
+    if (inFence(lines[i].start))
+      continue;
+    const header2 = text.slice(lines[i].start, lines[i].end);
+    const delimiter = text.slice(lines[i + 1].start, lines[i + 1].end);
+    if (!header2.includes("|") || !TABLE_DELIMITER.test(delimiter))
+      continue;
+    let last = i + 1;
+    while (last + 1 < lines.length && !inFence(lines[last + 1].start) && text.slice(lines[last + 1].start, lines[last + 1].end).includes("|")) {
+      last++;
+    }
+    ranges.push([lines[i].start, lines[last].end]);
+    i = last;
+  }
+  return ranges;
+}
+function selectionExclusion(text, start, end) {
+  if (end <= start)
+    return null;
+  const lines = noteLines(text);
+  const fenced = fencedCodeRanges(text, lines);
+  if (fenced.some(([a, b]) => intersects(start, end, a, b)))
+    return "fenced-code";
+  if (tableRanges(text, lines, fenced).some(([a, b]) => intersects(start, end, a, b)))
+    return "table";
+  if (inlineCodeRanges(text, fenced).some(([a, b]) => intersects(start, end, a, b)))
+    return "inline-code";
+  return null;
+}
+function expandLinkListSelection(text, from, to) {
+  const lineStart = (offset) => text.lastIndexOf("\n", Math.max(0, offset - 1)) + 1;
+  const lineEnd = (offset) => {
+    const nl = text.indexOf("\n", offset);
+    return nl === -1 ? text.length : nl;
+  };
+  const start = lineStart(from);
+  const end = lineEnd(to);
+  const lines = text.slice(start, end).split("\n");
+  if (!lines.length || !lines.every((line) => !line.trim() || /^\s*[-*+]\s+\[\[/.test(line))) {
+    return { from, to };
+  }
+  return { from: start, to: end };
+}
+function expandWikilinkSelection(text, from, to) {
+  let start = from;
+  let end = to;
+  for (const match of text.matchAll(/!?\[\[[^\]\n]*\]\]/g)) {
+    const matchStart = match.index;
+    const matchEnd = matchStart + match[0].length;
+    if (start > matchStart && start < matchEnd)
+      start = matchStart;
+    if (end > matchStart && end < matchEnd)
+      end = matchEnd;
+  }
+  return { from: start, to: end };
+}
+function renderedTextProjection(markdown) {
+  const visible = [];
+  let lineStart = true;
+  let i = 0;
+  const push = (char, index) => {
+    visible.push({ char, index });
+  };
+  while (i < markdown.length) {
+    if (lineStart) {
+      const end = markdown.indexOf("\n", i);
+      const line = markdown.slice(i, end === -1 ? markdown.length : end);
+      const prefix = /^\s*(?:>\s*)*(?:(?:[-*+]|\d+\.)\s+)?(?:\[[ xX]\]\s*)?(?:#{1,6}\s+)?/.exec(line);
+      if (prefix)
+        i += prefix[0].length;
+      lineStart = false;
+    }
+    const char = markdown.charAt(i);
+    if (char === "\n") {
+      push(" ", i);
+      lineStart = true;
+      i++;
+      continue;
+    }
+    if (char === "[" && markdown.startsWith("[[", i)) {
+      const close = markdown.indexOf("]]", i + 2);
+      if (close !== -1) {
+        const inner = markdown.slice(i + 2, close);
+        const bar = inner.lastIndexOf("|");
+        const label = bar >= 0 ? inner.slice(bar + 1) : inner;
+        const labelStart = i + 2 + (bar >= 0 ? bar + 1 : 0);
+        for (let j = 0; j < label.length; j++)
+          push(label.charAt(j), labelStart + j);
+        i = close + 2;
+        continue;
+      }
+    }
+    if (char === "[") {
+      const link = /^\[([^\]]*)\]\([^)]*\)/.exec(markdown.slice(i));
+      if (link) {
+        for (let j = 0; j < link[1].length; j++)
+          push(link[1].charAt(j), i + 1 + j);
+        i += link[0].length;
+        continue;
+      }
+    }
+    if (char === "<") {
+      const tag = /^<[^>]+>/.exec(markdown.slice(i));
+      if (tag) {
+        i += tag[0].length;
+        continue;
+      }
+    }
+    if ("*_~`".includes(char)) {
+      i++;
+      continue;
+    }
+    push(char, i);
+    i++;
+  }
+  const out = [];
+  const map = [];
+  let lastSpace = false;
+  for (const item of visible) {
+    if (/\s/.test(item.char)) {
+      if (lastSpace)
+        continue;
+      out.push(" ");
+      map.push(item.index);
+      lastSpace = true;
+    } else {
+      out.push(item.char);
+      map.push(item.index);
+      lastSpace = false;
+    }
+  }
+  return { text: out.join(""), map };
+}
+function findRenderedText(markdown, rendered) {
+  const needle = normalizeWhitespaceWithMap(rendered).text.trim();
+  if (!needle)
+    return null;
+  const projection = renderedTextProjection(markdown);
+  const at = projection.text.indexOf(needle);
+  if (at < 0)
+    return null;
+  const start = projection.map[at];
+  const end = projection.map[at + needle.length - 1];
+  if (start === void 0 || end === void 0)
+    return null;
+  return { start, end: end + 1 };
+}
+
 // src/sourceAnnotations/editor.ts
 var setEditorAnnotations = import_state.StateEffect.define();
+var setActiveEditorAnnotation = import_state.StateEffect.define();
 function buildDecorations(annotations, docLength) {
   const planned = [];
   const boundaries = new Set();
@@ -10038,6 +10370,19 @@ var editorAnnotationsField = import_state.StateField.define({
     return value;
   }
 });
+var activeAnnotationField = import_state.StateField.define({
+  create: () => null,
+  update(value, transaction) {
+    for (const effect of transaction.effects) {
+      if (effect.is(setActiveEditorAnnotation))
+        return effect.value;
+    }
+    return value;
+  }
+});
+function pinEditorAnnotation(view, id) {
+  view.dispatch({ effects: setActiveEditorAnnotation.of(id) });
+}
 function fire(el, type, ids) {
   el.dispatchEvent(new CustomEvent(type, {
     bubbles: true,
@@ -10045,16 +10390,23 @@ function fire(el, type, ids) {
   }));
 }
 var AnnotationRail = class {
-  constructor(view) {
+  constructor(view, hooks) {
     this.rail = null;
     this.destroyed = false;
     this.scheduled = false;
     this.timer = 0;
+    this.drag = null;
+    this.moveHandler = null;
+    this.endHandler = null;
+    this.cancelHandler = null;
+    this.onScroll = () => this.schedule();
     this.view = view;
+    this.hooks = hooks;
+    this.view.scrollDOM.addEventListener("scroll", this.onScroll, { passive: true });
     this.schedule();
   }
   update(update) {
-    if (update.docChanged || update.viewportChanged || update.geometryChanged || update.transactions.some((tr) => tr.effects.some((effect) => effect.is(setEditorAnnotations)))) {
+    if (update.docChanged || update.viewportChanged || update.geometryChanged || update.selectionSet || update.transactions.some((tr) => tr.effects.some((effect) => effect.is(setEditorAnnotations) || effect.is(setActiveEditorAnnotation)))) {
       this.schedule();
     }
   }
@@ -10064,6 +10416,8 @@ var AnnotationRail = class {
     if (this.timer)
       window.clearTimeout(this.timer);
     this.timer = 0;
+    this.cancelDrag(false);
+    this.view.scrollDOM.removeEventListener("scroll", this.onScroll);
     (_a = this.rail) == null ? void 0 : _a.remove();
     this.rail = null;
     this.view.scrollDOM.classList.remove("mas-ann-scroller");
@@ -10079,6 +10433,171 @@ var AnnotationRail = class {
       if (!this.destroyed)
         this.rebuild();
     }, 0);
+  }
+  activeAnnotation(annotations) {
+    var _a;
+    if (this.drag) {
+      const dragged = annotations.find((annotation) => {
+        var _a2;
+        return annotation.id === ((_a2 = this.drag) == null ? void 0 : _a2.id);
+      });
+      if (dragged)
+        return dragged;
+    }
+    const pinned = this.view.state.field(activeAnnotationField, false);
+    if (pinned) {
+      const found = annotations.find((annotation) => annotation.id === pinned);
+      if (found)
+        return found;
+    }
+    const selection = this.view.state.selection.main;
+    if (!selection.empty)
+      return null;
+    return (_a = annotations.filter((annotation) => annotation.ranges.some((range) => selection.head >= range.start && selection.head < range.end)).sort((a, b) => a.end - a.start - (b.end - b.start))[0]) != null ? _a : null;
+  }
+  edges(annotation) {
+    var _a, _b;
+    const first = annotation.ranges[0];
+    const last = annotation.ranges[annotation.ranges.length - 1];
+    return {
+      start: (_a = first == null ? void 0 : first.start) != null ? _a : annotation.start,
+      end: (_b = last == null ? void 0 : last.end) != null ? _b : annotation.end
+    };
+  }
+  addHandles(rail, annotation) {
+    const { start, end } = this.edges(annotation);
+    if (end <= start)
+      return;
+    const scroller = this.view.scrollDOM;
+    const scrollerRect = scroller.getBoundingClientRect();
+    for (const edge of ["start", "end"]) {
+      const coords = edge === "start" ? this.view.coordsAtPos(start) : this.view.coordsAtPos(Math.max(start, end - 1));
+      if (!coords)
+        continue;
+      const handle = rail.createDiv({
+        cls: "mas-ann-handle",
+        attr: {
+          role: "presentation",
+          "aria-label": edge === "start" ? "Drag annotation start" : "Drag annotation end"
+        }
+      });
+      const height = Math.max(10, Math.min(18, coords.bottom - coords.top));
+      handle.dataset.annId = annotation.id;
+      handle.dataset.edge = edge;
+      handle.setCssStyles({
+        left: `${(edge === "start" ? coords.left : coords.right) - scrollerRect.left + scroller.scrollLeft}px`,
+        top: `${(coords.top + coords.bottom) / 2 - scrollerRect.top + scroller.scrollTop}px`,
+        height: `${height}px`,
+        background: annotationTint(annotation.color, 56, 0.94)
+      });
+      handle.addEventListener("pointerdown", (event) => {
+        this.beginDrag(event, annotation.id, edge);
+      });
+      rail.appendChild(handle);
+    }
+  }
+  beginDrag(event, id, edge) {
+    if (event.button !== 0 || this.drag)
+      return;
+    event.preventDefault();
+    event.stopPropagation();
+    const base = [...this.view.state.field(editorAnnotationsField)];
+    const annotation = base.find((candidate) => candidate.id === id);
+    if (!annotation)
+      return;
+    const { start, end } = this.edges(annotation);
+    this.drag = { id, edge, base, from: start, to: end, moved: false };
+    this.view.dom.classList.add("mas-ann-resizing");
+    document.body.classList.add("mas-ann-resizing");
+    pinEditorAnnotation(this.view, id);
+    const move = (moveEvent) => this.moveDrag(moveEvent);
+    const up = (upEvent) => this.finishDrag(upEvent);
+    const cancel = () => this.cancelDrag();
+    this.moveHandler = move;
+    this.endHandler = up;
+    this.cancelHandler = cancel;
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", cancel);
+  }
+  dragRange(drag, position) {
+    var _a;
+    const doc = this.view.state.doc.toString();
+    const bounds = (_a = managedBounds(doc)) != null ? _a : bodyBounds(doc);
+    if (!bounds)
+      return null;
+    const at = Math.max(bounds.contentStart, Math.min(bounds.contentEnd, position));
+    let from = drag.edge === "start" ? at : drag.from;
+    let to = drag.edge === "end" ? at : drag.to;
+    if (from >= to)
+      return null;
+    const widened = expandWikilinkSelection(doc, from, to);
+    from = widened.from;
+    to = widened.to;
+    if (from < bounds.contentStart || to > bounds.contentEnd || from >= to)
+      return null;
+    if (crossesHeading(doc, from, to) || selectionExclusion(doc, from, to))
+      return null;
+    return { from, to };
+  }
+  moveDrag(event) {
+    const drag = this.drag;
+    if (!drag)
+      return;
+    const position = this.view.posAtCoords({ x: event.clientX, y: event.clientY });
+    if (position === null)
+      return;
+    const range = this.dragRange(drag, position);
+    if (!range || range.from === drag.from && range.to === drag.to)
+      return;
+    const doc = this.view.state.doc.toString();
+    const ranges = visibleSegments(doc, range.from, range.to);
+    if (!ranges.length)
+      return;
+    drag.from = range.from;
+    drag.to = range.to;
+    drag.moved = true;
+    const next = drag.base.map((annotation) => annotation.id === drag.id ? { ...annotation, start: range.from, end: range.to, ranges } : annotation);
+    this.view.dispatch({ effects: setEditorAnnotations.of(next) });
+  }
+  finishDrag(_event) {
+    const drag = this.drag;
+    this.clearDragListeners();
+    if (!drag)
+      return;
+    this.drag = null;
+    this.view.dom.classList.remove("mas-ann-resizing");
+    document.body.classList.remove("mas-ann-resizing");
+    if (!drag.moved || drag.from >= drag.to) {
+      this.view.dispatch({ effects: setEditorAnnotations.of(drag.base) });
+      return;
+    }
+    if (this.hooks.onResize)
+      this.hooks.onResize(this.view, drag.id, drag.from, drag.to);
+    else
+      this.view.dispatch({ effects: setEditorAnnotations.of(drag.base) });
+    this.schedule();
+  }
+  cancelDrag(restore = true) {
+    const drag = this.drag;
+    this.clearDragListeners();
+    this.drag = null;
+    this.view.dom.classList.remove("mas-ann-resizing");
+    document.body.classList.remove("mas-ann-resizing");
+    if (restore && (drag == null ? void 0 : drag.moved) && !this.destroyed) {
+      this.view.dispatch({ effects: setEditorAnnotations.of(drag.base) });
+    }
+  }
+  clearDragListeners() {
+    if (this.moveHandler)
+      window.removeEventListener("pointermove", this.moveHandler);
+    if (this.endHandler)
+      window.removeEventListener("pointerup", this.endHandler);
+    if (this.cancelHandler)
+      window.removeEventListener("pointercancel", this.cancelHandler);
+    this.moveHandler = null;
+    this.endHandler = null;
+    this.cancelHandler = null;
   }
   rebuild() {
     var _a;
@@ -10165,14 +10684,32 @@ var AnnotationRail = class {
         rail.appendChild(icon);
       });
     }
+    const active = this.activeAnnotation(annotations);
+    if (active)
+      this.addHandles(rail, active);
   }
 };
-var annotationRailPlugin = import_view.ViewPlugin.fromClass(AnnotationRail);
-var annotationEditorExtension = [
-  annotationField,
-  editorAnnotationsField,
-  annotationRailPlugin
-];
+function annotationRailPlugin(hooks) {
+  return import_view.ViewPlugin.fromClass(class {
+    constructor(view) {
+      this.rail = new AnnotationRail(view, hooks);
+    }
+    update(update) {
+      this.rail.update(update);
+    }
+    destroy() {
+      this.rail.destroy();
+    }
+  });
+}
+function annotationEditorExtension(hooks = {}) {
+  return [
+    annotationField,
+    editorAnnotationsField,
+    activeAnnotationField,
+    annotationRailPlugin(hooks)
+  ];
+}
 function selectionWatcher(onSelection, onPointerDown, onDomSelection) {
   return [
     import_view.EditorView.updateListener.of((update) => {
@@ -11448,337 +11985,6 @@ var AnnotationStore = class {
     await this.app.vault.adapter.write(normalized2, content);
   }
 };
-
-// src/sourceAnnotations/text.ts
-function managedBounds(content) {
-  const prior = splitNote(content);
-  const bodyStart = content.length - prior.body.length;
-  const region = findManagedRegion(prior.body);
-  if (!region)
-    return null;
-  let open = 0;
-  let close = 0;
-  for (const [o, c] of [
-    [MANAGED_OPEN, MANAGED_CLOSE],
-    [LEGACY_MANAGED_OPEN, LEGACY_MANAGED_CLOSE]
-  ]) {
-    if (prior.body.startsWith(o, region.start)) {
-      open = o.length;
-      close = c.length;
-      break;
-    }
-  }
-  if (!open)
-    return null;
-  return {
-    bodyStart,
-    contentStart: bodyStart + region.start + open,
-    contentEnd: bodyStart + region.end - close
-  };
-}
-function bodyBounds(content) {
-  const prior = splitNote(content);
-  const bodyStart = content.length - prior.body.length;
-  if (!prior.body.trim())
-    return null;
-  return { bodyStart, contentStart: bodyStart, contentEnd: bodyStart + prior.body.length };
-}
-function cleanQuoteMarkdown(markdown) {
-  return markdown.replace(/\r\n?/g, "\n").split("\n").map((line) => line.replace(/^(?:>\s?)+/, "").replace(/\s+$/, "")).join("\n").replace(/^\n+|\n+$/g, "");
-}
-function markdownToText(markdown) {
-  let text = cleanQuoteMarkdown(markdown);
-  text = text.replace(/\[\[([^\]|]+)\|([^\]]+)\]\]/g, "$2").replace(/\[\[([^\]]+)\]\]/g, "$1").replace(/\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/<[^>]+>/g, "").replace(/^\s*(?:[-*+]|\d+\.)\s+/gm, "").replace(/^\s*\[[ xX]\]\s*/gm, "").replace(/^\s*#{1,6}\s+/gm, "").replace(/(\*\*|__|\*|_|`|~~)/g, "").replace(/[ \t]+$/gm, "").replace(/^\n+|\n+$/g, "");
-  return text;
-}
-function lineStarts(text) {
-  const starts = [0];
-  for (let i = 0; i < text.length; i++) {
-    if (text.charAt(i) === "\n")
-      starts.push(i + 1);
-  }
-  return starts;
-}
-var HEADING_RE = /^(#{1,6})\s+(.*)$/;
-function sectionAt(text, offset) {
-  let section = "";
-  for (const start of lineStarts(text)) {
-    if (start >= offset)
-      break;
-    const end = text.indexOf("\n", start);
-    const line = text.slice(start, end === -1 ? text.length : end);
-    const match = HEADING_RE.exec(line);
-    if (match)
-      section = match[2].trim();
-  }
-  return section;
-}
-function crossesHeading(text, start, end) {
-  for (const lineStart of lineStarts(text)) {
-    if (lineStart < start)
-      continue;
-    if (lineStart >= end)
-      break;
-    const lineEnd = text.indexOf("\n", lineStart);
-    const line = text.slice(lineStart, lineEnd === -1 ? text.length : lineEnd);
-    if (HEADING_RE.test(line))
-      return true;
-  }
-  const startLine = text.lastIndexOf("\n", Math.max(0, start - 1)) + 1;
-  const startEnd = text.indexOf("\n", startLine);
-  if (HEADING_RE.test(text.slice(startLine, startEnd === -1 ? text.length : startEnd)))
-    return true;
-  return false;
-}
-function occurrencesBefore(text, offset, needle) {
-  const trimmed = needle.trim();
-  if (!trimmed)
-    return 0;
-  const haystack = normalizeWhitespaceWithMap(text.slice(0, offset));
-  const target = normalizeWhitespaceWithMap(trimmed);
-  if (!target.text)
-    return 0;
-  let count = 0;
-  let at = 0;
-  while (true) {
-    const found = haystack.text.indexOf(target.text, at);
-    if (found < 0)
-      return count;
-    count += 1;
-    at = found + target.text.length;
-  }
-}
-function noteHeadingLink(notePath, heading, label) {
-  var _a;
-  const target = notePath.replace(/\.md$/i, "");
-  const base = ((_a = notePath.split("/").pop()) == null ? void 0 : _a.replace(/\.md$/i, "")) || target;
-  if (!heading)
-    return `[[${base}|${label || base}]]`;
-  const display = label || heading;
-  return `[[${base}#${heading}|${display}]]`;
-}
-function noteLines(text) {
-  const out = [];
-  let start = 0;
-  for (let i = 0; i <= text.length; i++) {
-    if (i === text.length || text.charAt(i) === "\n") {
-      out.push({ start, end: i });
-      start = i + 1;
-    }
-  }
-  return out;
-}
-function intersects(aStart, aEnd, bStart, bEnd) {
-  return aStart < bEnd && aEnd > bStart;
-}
-function fencedCodeRanges(text, lines) {
-  const ranges = [];
-  for (let i = 0; i < lines.length; i++) {
-    const line = text.slice(lines[i].start, lines[i].end);
-    const open = /^ {0,3}(`{3,}|~{3,})/.exec(line);
-    if (!open)
-      continue;
-    const start = lines[i].start;
-    const marker = open[1];
-    const close = new RegExp(`^ {0,3}${marker[0] === "`" ? "`" : "~"}{${marker.length},}[ \\t]*$`);
-    let end = text.length;
-    let closed = false;
-    for (let j = i + 1; j < lines.length; j++) {
-      if (close.test(text.slice(lines[j].start, lines[j].end))) {
-        end = lines[j].end;
-        i = j;
-        closed = true;
-        break;
-      }
-    }
-    if (!closed)
-      i = lines.length;
-    ranges.push([start, end]);
-  }
-  return ranges;
-}
-function inlineCodeRanges(text, fenced) {
-  const ranges = [];
-  const inFence = (offset) => fenced.some(([start, end]) => offset >= start && offset < end);
-  for (let i = 0; i < text.length; i++) {
-    if (text.charAt(i) !== "`" || inFence(i))
-      continue;
-    let run = 1;
-    while (text.charAt(i + run) === "`")
-      run++;
-    let close = -1;
-    for (let j = i + run; j < text.length; j++) {
-      if (text.charAt(j) !== "`" || inFence(j))
-        continue;
-      let length = 1;
-      while (text.charAt(j + length) === "`")
-        length++;
-      if (length === run) {
-        close = j;
-        break;
-      }
-      j += length - 1;
-    }
-    if (close === -1) {
-      i += run - 1;
-      continue;
-    }
-    ranges.push([i, close + run]);
-    i = close + run - 1;
-  }
-  return ranges;
-}
-var TABLE_DELIMITER = /^ {0,3}\|?[ \t]*:?-{3,}:?[ \t]*(?:\|[ \t]*:?-{3,}:?[ \t]*)+\|?[ \t]*$/;
-function tableRanges(text, lines, fenced) {
-  const ranges = [];
-  const inFence = (offset) => fenced.some(([start, end]) => offset >= start && offset < end);
-  for (let i = 0; i + 1 < lines.length; i++) {
-    if (inFence(lines[i].start))
-      continue;
-    const header2 = text.slice(lines[i].start, lines[i].end);
-    const delimiter = text.slice(lines[i + 1].start, lines[i + 1].end);
-    if (!header2.includes("|") || !TABLE_DELIMITER.test(delimiter))
-      continue;
-    let last = i + 1;
-    while (last + 1 < lines.length && !inFence(lines[last + 1].start) && text.slice(lines[last + 1].start, lines[last + 1].end).includes("|")) {
-      last++;
-    }
-    ranges.push([lines[i].start, lines[last].end]);
-    i = last;
-  }
-  return ranges;
-}
-function selectionExclusion(text, start, end) {
-  if (end <= start)
-    return null;
-  const lines = noteLines(text);
-  const fenced = fencedCodeRanges(text, lines);
-  if (fenced.some(([a, b]) => intersects(start, end, a, b)))
-    return "fenced-code";
-  if (tableRanges(text, lines, fenced).some(([a, b]) => intersects(start, end, a, b)))
-    return "table";
-  if (inlineCodeRanges(text, fenced).some(([a, b]) => intersects(start, end, a, b)))
-    return "inline-code";
-  return null;
-}
-function expandLinkListSelection(text, from, to) {
-  const lineStart = (offset) => text.lastIndexOf("\n", Math.max(0, offset - 1)) + 1;
-  const lineEnd = (offset) => {
-    const nl = text.indexOf("\n", offset);
-    return nl === -1 ? text.length : nl;
-  };
-  const start = lineStart(from);
-  const end = lineEnd(to);
-  const lines = text.slice(start, end).split("\n");
-  if (!lines.length || !lines.every((line) => !line.trim() || /^\s*[-*+]\s+\[\[/.test(line))) {
-    return { from, to };
-  }
-  return { from: start, to: end };
-}
-function expandWikilinkSelection(text, from, to) {
-  let start = from;
-  let end = to;
-  for (const match of text.matchAll(/!?\[\[[^\]\n]*\]\]/g)) {
-    const matchStart = match.index;
-    const matchEnd = matchStart + match[0].length;
-    if (start > matchStart && start < matchEnd)
-      start = matchStart;
-    if (end > matchStart && end < matchEnd)
-      end = matchEnd;
-  }
-  return { from: start, to: end };
-}
-function renderedTextProjection(markdown) {
-  const visible = [];
-  let lineStart = true;
-  let i = 0;
-  const push = (char, index) => {
-    visible.push({ char, index });
-  };
-  while (i < markdown.length) {
-    if (lineStart) {
-      const end = markdown.indexOf("\n", i);
-      const line = markdown.slice(i, end === -1 ? markdown.length : end);
-      const prefix = /^\s*(?:>\s*)*(?:(?:[-*+]|\d+\.)\s+)?(?:\[[ xX]\]\s*)?(?:#{1,6}\s+)?/.exec(line);
-      if (prefix)
-        i += prefix[0].length;
-      lineStart = false;
-    }
-    const char = markdown.charAt(i);
-    if (char === "\n") {
-      push(" ", i);
-      lineStart = true;
-      i++;
-      continue;
-    }
-    if (char === "[" && markdown.startsWith("[[", i)) {
-      const close = markdown.indexOf("]]", i + 2);
-      if (close !== -1) {
-        const inner = markdown.slice(i + 2, close);
-        const bar = inner.lastIndexOf("|");
-        const label = bar >= 0 ? inner.slice(bar + 1) : inner;
-        const labelStart = i + 2 + (bar >= 0 ? bar + 1 : 0);
-        for (let j = 0; j < label.length; j++)
-          push(label.charAt(j), labelStart + j);
-        i = close + 2;
-        continue;
-      }
-    }
-    if (char === "[") {
-      const link = /^\[([^\]]*)\]\([^)]*\)/.exec(markdown.slice(i));
-      if (link) {
-        for (let j = 0; j < link[1].length; j++)
-          push(link[1].charAt(j), i + 1 + j);
-        i += link[0].length;
-        continue;
-      }
-    }
-    if (char === "<") {
-      const tag = /^<[^>]+>/.exec(markdown.slice(i));
-      if (tag) {
-        i += tag[0].length;
-        continue;
-      }
-    }
-    if ("*_~`".includes(char)) {
-      i++;
-      continue;
-    }
-    push(char, i);
-    i++;
-  }
-  const out = [];
-  const map = [];
-  let lastSpace = false;
-  for (const item of visible) {
-    if (/\s/.test(item.char)) {
-      if (lastSpace)
-        continue;
-      out.push(" ");
-      map.push(item.index);
-      lastSpace = true;
-    } else {
-      out.push(item.char);
-      map.push(item.index);
-      lastSpace = false;
-    }
-  }
-  return { text: out.join(""), map };
-}
-function findRenderedText(markdown, rendered) {
-  const needle = normalizeWhitespaceWithMap(rendered).text.trim();
-  if (!needle)
-    return null;
-  const projection = renderedTextProjection(markdown);
-  const at = projection.text.indexOf(needle);
-  if (at < 0)
-    return null;
-  const start = projection.map[at];
-  const end = projection.map[at + needle.length - 1];
-  if (start === void 0 || end === void 0)
-    return null;
-  return { start, end: end + 1 };
-}
 
 // src/sourceAnnotations/note.ts
 function annotationNotePathForDir(settings, dir) {
@@ -13297,8 +13503,13 @@ var AnnotationService = class {
       console.error("[midad-arabic-sources] annotation startup", error);
     }
     this.plugin.registerEditorExtension([
-      annotationEditorExtension,
-      selectionWatcher((view) => this.onEditorSelection(view), () => {
+      annotationEditorExtension({
+        onResize: (view, id, from, to) => {
+          void this.resizeAnnotationRange(view, id, from, to);
+        }
+      }),
+      selectionWatcher((view) => this.onEditorSelection(view), (view) => {
+        pinEditorAnnotation(view, null);
         this.lastSelection = null;
         window.clearTimeout(this.lastSelectionClearTimer);
         window.clearTimeout(this.readingSelectionTimer);
@@ -14075,6 +14286,10 @@ ${MANAGED_CLOSE}
     const ids = (_b = (_a = event.detail) == null ? void 0 : _a.ids) != null ? _b : [];
     if (!anchor || !ids.length)
       return;
+    const active = activeMarkdownView(this.app);
+    const cm = active && active.getMode() !== "preview" ? cmOf(active) : null;
+    if (cm)
+      pinEditorAnnotation(cm, ids[0]);
     this.cancelTooltipTimers();
     void this.showTooltip(anchor, ids);
   }
@@ -14480,6 +14695,88 @@ ${MANAGED_CLOSE}
       return;
     }
     await this.openEditAnnotation(target, hit, this.anchorForEditor(editor));
+  }
+  draftForRange(value, bounds, start, end) {
+    const quote = value.slice(start, end);
+    return {
+      quote,
+      quoteText: markdownToText(quote),
+      quoteMarkdown: cleanQuoteMarkdown(quote),
+      prefix: value.slice(Math.max(bounds.contentStart, start - 80), start),
+      suffix: value.slice(end, Math.min(bounds.contentEnd, end + 80)),
+      section: sectionAt(value, start),
+      ordinal: occurrencesBefore(value, start, quote),
+      position: { start: start - bounds.bodyStart, end: end - bounds.bodyStart },
+      segments: visibleSegments(value, start, end).map((range) => [range.start - bounds.bodyStart, range.end - bounds.bodyStart])
+    };
+  }
+  async resizeAnnotationRange(view, id, from, to) {
+    var _a, _b;
+    const markdown = markdownViews(this.app).find((candidate) => cmOf(candidate) === view);
+    if (!(markdown == null ? void 0 : markdown.file)) {
+      await this.refreshViews();
+      return;
+    }
+    const target = await this.targetForPath(markdown.file.path);
+    if (!target) {
+      await this.refreshViews();
+      return;
+    }
+    const value = view.state.doc.toString();
+    const bounds = (_a = managedBounds(value)) != null ? _a : target.sourceStatus === "adopted" ? bodyBounds(value) : null;
+    if (!bounds) {
+      await this.refreshViews();
+      return;
+    }
+    const widened = expandWikilinkSelection(value, from, to);
+    const start = widened.from;
+    const end = widened.to;
+    if (start < bounds.contentStart || end > bounds.contentEnd || start >= end) {
+      await this.refreshViews();
+      return;
+    }
+    if (crossesHeading(value, start, end) || selectionExclusion(value, start, end)) {
+      new import_obsidian14.Notice("That span cannot be annotated.");
+      await this.refreshViews();
+      return;
+    }
+    const annotations = await this.annotationsFor(target);
+    const current = annotations.find((annotation) => annotation.id === id);
+    if (!current) {
+      await this.refreshViews();
+      return;
+    }
+    const position = { start: start - bounds.bodyStart, end: end - bounds.bodyStart };
+    if (((_b = current.position) == null ? void 0 : _b.start) === position.start && current.position.end === position.end)
+      return;
+    const draft = this.draftForRange(value, bounds, start, end);
+    const now = annotationNow();
+    const quoteChanged = draft.quote !== current.quote;
+    const updated = annotations.map((annotation) => {
+      var _a2, _b2;
+      return annotation.id === id ? {
+        ...annotation,
+        quote: draft.quote,
+        quoteText: draft.quoteText,
+        quoteMarkdown: draft.quoteMarkdown,
+        prefix: draft.prefix,
+        suffix: draft.suffix,
+        section: draft.section,
+        ordinal: draft.ordinal,
+        position: draft.position,
+        segments: draft.segments,
+        modified: now,
+        anchored: now,
+        anchorStatus: "ok",
+        quoteChanged,
+        previousQuotes: quoteChanged ? [...(_a2 = annotation.previousQuotes) != null ? _a2 : [], annotation.quote].filter(Boolean).slice(-5) : (_b2 = annotation.previousQuotes) != null ? _b2 : []
+      } : annotation;
+    });
+    await this.store.saveUnit(target, updated);
+    this.pathAnnotations.set((0, import_obsidian14.normalizePath)(target.notePath), updated);
+    await this.syncArtifacts(target.workKey);
+    await this.refreshViews();
+    new import_obsidian14.Notice("Highlight resized.");
   }
   async resizeAnnotationToSelection(editor, file) {
     var _a, _b;
@@ -15083,6 +15380,7 @@ ${MANAGED_CLOSE}
       effects: import_view2.EditorView.scrollIntoView(at, { y: "center" })
     });
     cm.focus();
+    pinEditorAnnotation(cm, annotation.id);
     this.flashMarks(view.containerEl, annotation.id, 100);
   }
   flashMarks(container, id, delay = 0) {

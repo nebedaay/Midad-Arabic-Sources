@@ -929,6 +929,33 @@ body.theme-dark {
     box-shadow: none !important;
 }
 
+/* Resize handles: soft ovals that follow the rounded highlight edges. */
+.mas-ann-handle {
+    position: absolute;
+    width: 0.42rem;
+    padding: 0;
+    border: 0;
+    border-radius: 999px;
+    transform: translate(-50%, -50%);
+    cursor: ew-resize;
+    pointer-events: auto;
+    touch-action: none;
+    opacity: 0.92;
+    z-index: 6;
+}
+
+.mas-ann-handle:hover,
+.mas-ann-handle:active {
+    width: 0.5rem;
+    opacity: 1;
+}
+
+body.mas-ann-resizing .cm-content,
+body.mas-ann-resizing .cm-content * {
+    user-select: none;
+    cursor: ew-resize;
+}
+
 .mas-ann-margin:hover,
 .mas-ann-margin:focus-visible {
     background: transparent !important;

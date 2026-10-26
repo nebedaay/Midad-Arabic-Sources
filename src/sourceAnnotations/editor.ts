@@ -9,11 +9,21 @@ import { Extension, Range, StateEffect, StateField } from "@codemirror/state";
 import { annotationTint } from "./colors";
 import { annotationClass, bandClass, resolveAnnotations, visibleSegments } from "./resolve";
 import { ANNOTATION_EVENTS, type AnnotationEventDetail } from "./events";
+import {
+	bodyBounds,
+	crossesHeading,
+	expandWikilinkSelection,
+	managedBounds,
+	selectionExclusion,
+} from "./text";
 import type { ResolvedAnnotation, SourceAnnotation } from "./types";
 import { splitNote } from "../sourceImport/merge";
 
 /** Annotations resolved against the current editor document. */
 export const setEditorAnnotations = StateEffect.define<ResolvedAnnotation[]>();
+
+/** Pin an annotation so its resize handles remain visible outside the cursor. */
+export const setActiveEditorAnnotation = StateEffect.define<string | null>();
 
 interface PlannedDecoration {
 	from: number;
@@ -97,6 +107,34 @@ const editorAnnotationsField = StateField.define<ResolvedAnnotation[]>({
 	},
 });
 
+const activeAnnotationField = StateField.define<string | null>({
+	create: () => null,
+	update(value, transaction) {
+		for (const effect of transaction.effects) {
+			if (effect.is(setActiveEditorAnnotation)) return effect.value;
+		}
+		return value;
+	},
+});
+
+/** Show, or clear, the resize handles for an annotation in this editor. */
+export function pinEditorAnnotation(view: EditorView, id: string | null): void {
+	view.dispatch({ effects: setActiveEditorAnnotation.of(id) });
+}
+
+interface ResizeHooks {
+	onResize?: (view: EditorView, id: string, from: number, to: number) => void;
+}
+
+interface DragState {
+	id: string;
+	edge: "start" | "end";
+	base: ResolvedAnnotation[];
+	from: number;
+	to: number;
+	moved: boolean;
+}
+
 function fire(el: HTMLElement, type: string, ids: string[]): void {
 	el.dispatchEvent(new CustomEvent<AnnotationEventDetail>(type, {
 		bubbles: true,
@@ -106,13 +144,21 @@ function fire(el: HTMLElement, type: string, ids: string[]): void {
 
 class AnnotationRail {
 	private readonly view: EditorView;
+	private readonly hooks: ResizeHooks;
 	private rail: HTMLElement | null = null;
 	private destroyed = false;
 	private scheduled = false;
 	private timer = 0;
+	private drag: DragState | null = null;
+	private moveHandler: ((event: PointerEvent) => void) | null = null;
+	private endHandler: ((event: PointerEvent) => void) | null = null;
+	private cancelHandler: (() => void) | null = null;
+	private readonly onScroll = (): void => this.schedule();
 
-	constructor(view: EditorView) {
+	constructor(view: EditorView, hooks: ResizeHooks) {
 		this.view = view;
+		this.hooks = hooks;
+		this.view.scrollDOM.addEventListener("scroll", this.onScroll, { passive: true });
 		this.schedule();
 	}
 
@@ -121,7 +167,10 @@ class AnnotationRail {
 			update.docChanged ||
 			update.viewportChanged ||
 			update.geometryChanged ||
-			update.transactions.some((tr) => tr.effects.some((effect) => effect.is(setEditorAnnotations)))
+			update.selectionSet ||
+			update.transactions.some((tr) => tr.effects.some((effect) =>
+				effect.is(setEditorAnnotations) || effect.is(setActiveEditorAnnotation)
+			))
 		) {
 			this.schedule();
 		}
@@ -131,6 +180,8 @@ class AnnotationRail {
 		this.destroyed = true;
 		if (this.timer) window.clearTimeout(this.timer);
 		this.timer = 0;
+		this.cancelDrag(false);
+		this.view.scrollDOM.removeEventListener("scroll", this.onScroll);
 		this.rail?.remove();
 		this.rail = null;
 		this.view.scrollDOM.classList.remove("mas-ann-scroller");
@@ -146,6 +197,161 @@ class AnnotationRail {
 			this.timer = 0;
 			if (!this.destroyed) this.rebuild();
 		}, 0);
+	}
+
+	private activeAnnotation(annotations: ResolvedAnnotation[]): ResolvedAnnotation | null {
+		if (this.drag) {
+			const dragged = annotations.find((annotation) => annotation.id === this.drag?.id);
+			if (dragged) return dragged;
+		}
+		const pinned = this.view.state.field(activeAnnotationField, false);
+		if (pinned) {
+			const found = annotations.find((annotation) => annotation.id === pinned);
+			if (found) return found;
+		}
+		const selection = this.view.state.selection.main;
+		if (!selection.empty) return null;
+		return annotations
+			.filter((annotation) =>
+				annotation.ranges.some((range) => selection.head >= range.start && selection.head < range.end)
+			)
+			.sort((a, b) => (a.end - a.start) - (b.end - b.start))[0] ?? null;
+	}
+
+	private edges(annotation: ResolvedAnnotation): { start: number; end: number } {
+		const first = annotation.ranges[0];
+		const last = annotation.ranges[annotation.ranges.length - 1];
+		return {
+			start: first?.start ?? annotation.start,
+			end: last?.end ?? annotation.end,
+		};
+	}
+
+	private addHandles(rail: HTMLElement, annotation: ResolvedAnnotation): void {
+		const { start, end } = this.edges(annotation);
+		if (end <= start) return;
+		const scroller = this.view.scrollDOM;
+		const scrollerRect = scroller.getBoundingClientRect();
+		for (const edge of ["start", "end"] as const) {
+			const coords = edge === "start"
+				? this.view.coordsAtPos(start)
+				: this.view.coordsAtPos(Math.max(start, end - 1));
+			if (!coords) continue;
+			const handle = rail.createDiv({
+				cls: "mas-ann-handle",
+				attr: {
+					role: "presentation",
+					"aria-label": edge === "start" ? "Drag annotation start" : "Drag annotation end",
+				},
+			});
+			const height = Math.max(10, Math.min(18, coords.bottom - coords.top));
+			handle.dataset.annId = annotation.id;
+			handle.dataset.edge = edge;
+			handle.setCssStyles({
+				left: `${(edge === "start" ? coords.left : coords.right) - scrollerRect.left + scroller.scrollLeft}px`,
+				top: `${(coords.top + coords.bottom) / 2 - scrollerRect.top + scroller.scrollTop}px`,
+				height: `${height}px`,
+				background: annotationTint(annotation.color, 56, 0.94),
+			});
+			handle.addEventListener("pointerdown", (event) => {
+				this.beginDrag(event, annotation.id, edge);
+			});
+			rail.appendChild(handle);
+		}
+	}
+
+	private beginDrag(event: PointerEvent, id: string, edge: "start" | "end"): void {
+		if (event.button !== 0 || this.drag) return;
+		event.preventDefault();
+		event.stopPropagation();
+		const base = [...this.view.state.field(editorAnnotationsField)];
+		const annotation = base.find((candidate) => candidate.id === id);
+		if (!annotation) return;
+		const { start, end } = this.edges(annotation);
+		this.drag = { id, edge, base, from: start, to: end, moved: false };
+		this.view.dom.classList.add("mas-ann-resizing");
+		document.body.classList.add("mas-ann-resizing");
+		pinEditorAnnotation(this.view, id);
+		const move = (moveEvent: PointerEvent): void => this.moveDrag(moveEvent);
+		const up = (upEvent: PointerEvent): void => this.finishDrag(upEvent);
+		const cancel = (): void => this.cancelDrag();
+		this.moveHandler = move;
+		this.endHandler = up;
+		this.cancelHandler = cancel;
+		window.addEventListener("pointermove", move);
+		window.addEventListener("pointerup", up);
+		window.addEventListener("pointercancel", cancel);
+	}
+
+	private dragRange(drag: DragState, position: number): { from: number; to: number } | null {
+		const doc = this.view.state.doc.toString();
+		const bounds = managedBounds(doc) ?? bodyBounds(doc);
+		if (!bounds) return null;
+		const at = Math.max(bounds.contentStart, Math.min(bounds.contentEnd, position));
+		let from = drag.edge === "start" ? at : drag.from;
+		let to = drag.edge === "end" ? at : drag.to;
+		if (from >= to) return null;
+		const widened = expandWikilinkSelection(doc, from, to);
+		from = widened.from;
+		to = widened.to;
+		if (from < bounds.contentStart || to > bounds.contentEnd || from >= to) return null;
+		if (crossesHeading(doc, from, to) || selectionExclusion(doc, from, to)) return null;
+		return { from, to };
+	}
+
+	private moveDrag(event: PointerEvent): void {
+		const drag = this.drag;
+		if (!drag) return;
+		const position = this.view.posAtCoords({ x: event.clientX, y: event.clientY });
+		if (position === null) return;
+		const range = this.dragRange(drag, position);
+		if (!range || (range.from === drag.from && range.to === drag.to)) return;
+		const doc = this.view.state.doc.toString();
+		const ranges = visibleSegments(doc, range.from, range.to);
+		if (!ranges.length) return;
+		drag.from = range.from;
+		drag.to = range.to;
+		drag.moved = true;
+		const next = drag.base.map((annotation) => annotation.id === drag.id
+			? { ...annotation, start: range.from, end: range.to, ranges }
+			: annotation);
+		this.view.dispatch({ effects: setEditorAnnotations.of(next) });
+	}
+
+	private finishDrag(_event: PointerEvent): void {
+		const drag = this.drag;
+		this.clearDragListeners();
+		if (!drag) return;
+		this.drag = null;
+		this.view.dom.classList.remove("mas-ann-resizing");
+		document.body.classList.remove("mas-ann-resizing");
+		if (!drag.moved || drag.from >= drag.to) {
+			this.view.dispatch({ effects: setEditorAnnotations.of(drag.base) });
+			return;
+		}
+		if (this.hooks.onResize) this.hooks.onResize(this.view, drag.id, drag.from, drag.to);
+		else this.view.dispatch({ effects: setEditorAnnotations.of(drag.base) });
+		this.schedule();
+	}
+
+	private cancelDrag(restore = true): void {
+		const drag = this.drag;
+		this.clearDragListeners();
+		this.drag = null;
+		this.view.dom.classList.remove("mas-ann-resizing");
+		document.body.classList.remove("mas-ann-resizing");
+		if (restore && drag?.moved && !this.destroyed) {
+			this.view.dispatch({ effects: setEditorAnnotations.of(drag.base) });
+		}
+	}
+
+	private clearDragListeners(): void {
+		if (this.moveHandler) window.removeEventListener("pointermove", this.moveHandler);
+		if (this.endHandler) window.removeEventListener("pointerup", this.endHandler);
+		if (this.cancelHandler) window.removeEventListener("pointercancel", this.cancelHandler);
+		this.moveHandler = null;
+		this.endHandler = null;
+		this.cancelHandler = null;
 	}
 
 	private rebuild(): void {
@@ -231,16 +437,37 @@ class AnnotationRail {
 				rail.appendChild(icon);
 			});
 		}
+		const active = this.activeAnnotation(annotations);
+		if (active) this.addHandles(rail, active);
 	}
 }
 
-const annotationRailPlugin = ViewPlugin.fromClass(AnnotationRail);
+function annotationRailPlugin(hooks: ResizeHooks): Extension {
+	return ViewPlugin.fromClass(class {
+		private readonly rail: AnnotationRail;
 
-export const annotationEditorExtension: Extension = [
-	annotationField,
-	editorAnnotationsField,
-	annotationRailPlugin,
-];
+		constructor(view: EditorView) {
+			this.rail = new AnnotationRail(view, hooks);
+		}
+
+		update(update: ViewUpdate): void {
+			this.rail.update(update);
+		}
+
+		destroy(): void {
+			this.rail.destroy();
+		}
+	});
+}
+
+export function annotationEditorExtension(hooks: ResizeHooks = {}): Extension {
+	return [
+		annotationField,
+		editorAnnotationsField,
+		activeAnnotationField,
+		annotationRailPlugin(hooks),
+	];
+}
 
 /** Report selection changes so the service can offer the creation dialog. */
 export function selectionWatcher(

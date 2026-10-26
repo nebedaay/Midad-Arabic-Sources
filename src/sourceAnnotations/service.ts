@@ -14,6 +14,7 @@ import {
 	annotationEditorExtension,
 	applyEditorAnnotations,
 	clearEditorAnnotations,
+	pinEditorAnnotation,
 	resolveForEditor,
 	selectionWatcher,
 } from "./editor";
@@ -179,13 +180,18 @@ export class AnnotationService {
 			console.error("[midad-arabic-sources] annotation startup", error);
 		}
 		this.plugin.registerEditorExtension([
-			annotationEditorExtension,
+			annotationEditorExtension({
+				onResize: (view, id, from, to) => {
+					void this.resizeAnnotationRange(view, id, from, to);
+				},
+			}),
 			selectionWatcher(
 				(view) => this.onEditorSelection(view),
-				() => {
+				(view) => {
+					pinEditorAnnotation(view, null);
 					this.lastSelection = null;
 					window.clearTimeout(this.lastSelectionClearTimer);
-		window.clearTimeout(this.readingSelectionTimer);
+					window.clearTimeout(this.readingSelectionTimer);
 				},
 				(view) => this.captureDomSelection(view)
 			),
@@ -962,6 +968,9 @@ export class AnnotationService {
 		const anchor = event.target as HTMLElement | null;
 		const ids = event.detail?.ids ?? [];
 		if (!anchor || !ids.length) return;
+		const active = activeMarkdownView(this.app);
+		const cm = active && active.getMode() !== "preview" ? cmOf(active) : null;
+		if (cm) pinEditorAnnotation(cm, ids[0]);
 		this.cancelTooltipTimers();
 		void this.showTooltip(anchor, ids);
 	}
@@ -1386,6 +1395,96 @@ export class AnnotationService {
 			return;
 		}
 		await this.openEditAnnotation(target, hit, this.anchorForEditor(editor));
+	}
+
+	private draftForRange(
+		value: string,
+		bounds: { bodyStart: number; contentStart: number; contentEnd: number },
+		start: number,
+		end: number
+	): AnnotationDraft {
+		const quote = value.slice(start, end);
+		return {
+			quote,
+			quoteText: markdownToText(quote),
+			quoteMarkdown: cleanQuoteMarkdown(quote),
+			prefix: value.slice(Math.max(bounds.contentStart, start - 80), start),
+			suffix: value.slice(end, Math.min(bounds.contentEnd, end + 80)),
+			section: sectionAt(value, start),
+			ordinal: occurrencesBefore(value, start, quote),
+			position: { start: start - bounds.bodyStart, end: end - bounds.bodyStart },
+			segments: visibleSegments(value, start, end)
+				.map((range) => [range.start - bounds.bodyStart, range.end - bounds.bodyStart] as [number, number]),
+		};
+	}
+
+	/** Commit a handle drag from Live Preview. */
+	private async resizeAnnotationRange(view: EditorView, id: string, from: number, to: number): Promise<void> {
+		const markdown = markdownViews(this.app).find((candidate) => cmOf(candidate) === view);
+		if (!markdown?.file) {
+			await this.refreshViews();
+			return;
+		}
+		const target = await this.targetForPath(markdown.file.path);
+		if (!target) {
+			await this.refreshViews();
+			return;
+		}
+		const value = view.state.doc.toString();
+		const bounds = managedBounds(value) ?? (target.sourceStatus === "adopted" ? bodyBounds(value) : null);
+		if (!bounds) {
+			await this.refreshViews();
+			return;
+		}
+		const widened = expandWikilinkSelection(value, from, to);
+		const start = widened.from;
+		const end = widened.to;
+		if (start < bounds.contentStart || end > bounds.contentEnd || start >= end) {
+			await this.refreshViews();
+			return;
+		}
+		if (crossesHeading(value, start, end) || selectionExclusion(value, start, end)) {
+			new Notice("That span cannot be annotated.");
+			await this.refreshViews();
+			return;
+		}
+		const annotations = await this.annotationsFor(target);
+		const current = annotations.find((annotation) => annotation.id === id);
+		if (!current) {
+			await this.refreshViews();
+			return;
+		}
+		const position = { start: start - bounds.bodyStart, end: end - bounds.bodyStart };
+		if (current.position?.start === position.start && current.position.end === position.end) return;
+		const draft = this.draftForRange(value, bounds, start, end);
+		const now = annotationNow();
+		const quoteChanged = draft.quote !== current.quote;
+		const updated = annotations.map((annotation) => annotation.id === id
+			? {
+				...annotation,
+				quote: draft.quote,
+				quoteText: draft.quoteText,
+				quoteMarkdown: draft.quoteMarkdown,
+				prefix: draft.prefix,
+				suffix: draft.suffix,
+				section: draft.section,
+				ordinal: draft.ordinal,
+				position: draft.position,
+				segments: draft.segments,
+				modified: now,
+				anchored: now,
+				anchorStatus: "ok" as const,
+				quoteChanged,
+				previousQuotes: quoteChanged
+					? [...(annotation.previousQuotes ?? []), annotation.quote].filter(Boolean).slice(-5)
+					: annotation.previousQuotes ?? [],
+			}
+			: annotation);
+		await this.store.saveUnit(target, updated);
+		this.pathAnnotations.set(normalizePath(target.notePath), updated);
+		await this.syncArtifacts(target.workKey);
+		await this.refreshViews();
+		new Notice("Highlight resized.");
 	}
 
 	/** Replace an existing highlight's span with the current selection. */
@@ -2022,6 +2121,7 @@ export class AnnotationService {
 			effects: EditorView.scrollIntoView(at, { y: "center" }),
 		});
 		cm.focus();
+		pinEditorAnnotation(cm, annotation.id);
 		this.flashMarks(view.containerEl, annotation.id, 100);
 	}
 
