@@ -3,11 +3,12 @@
 <% add_property('created', generated); -%>
 <% add_property('updated', updated()); -%>
 <% const pub = work.publication || {}; -%>
+<% const yamlId = (value) => String(value).replace(/:/g, '/'); -%>
 <% add_property('midad-up', [...work.up, '[[Midad Arabic Sources]]']); -%>
-<% add_property('midad-id', 'repo:' + work.key); -%>
+<% add_property('midad-id', yamlId('repo:' + work.key)); -%>
 <% add_property('midad-kind', 'repo-work'); -%>
-<% add_property('midad-source', 'repo:' + work.key); -%>
-<% add_property('midad-key', work.key); -%>
+<% add_property('midad-source', yamlId('repo:' + work.key)); -%>
+<% add_property('midad-key', yamlId(work.key)); -%>
 <% if (pub.mas_note) { add_property('midad-note', pub.mas_note); } -%>
 <% add_property('related', [], { force: true, merge: 'keep' }); -%>
 <% add_property('title', work.title); -%>

@@ -3,6 +3,7 @@ import type { SourceModel } from "../sourceImport/render";
 import type { AdoptedNotesRegistry } from "./adopted";
 import type { AnnotationTarget, AnnotationSettings, SourceStatus } from "./types";
 import { canonicalQuranFolder, installedSourcesRoot } from "../sourcePaths";
+import { sourceIdFromYaml } from "../sourceIds";
 
 interface ManifestWork {
 	key?: string;
@@ -156,7 +157,7 @@ export class AnnotationTargetResolver {
 		const file = this.app.vault.getAbstractFileByPath(normalized);
 		if (!(file instanceof TFile)) return null;
 		const frontmatter = this.app.metadataCache.getFileCache(file)?.frontmatter as Record<string, unknown> | undefined;
-		const masWork = typeof frontmatter?.["midad-work"] === "string" ? String(frontmatter["midad-work"]) : "";
+		const masWork = typeof frontmatter?.["midad-work"] === "string" ? sourceIdFromYaml(frontmatter["midad-work"]) : "";
 		const masUnit = typeof frontmatter?.["midad-unit"] === "string" ? String(frontmatter["midad-unit"]) : "";
 
 		// Known transcriptions/translations are registered without touching their

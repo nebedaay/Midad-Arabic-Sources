@@ -53,6 +53,7 @@ import {
 } from "./sourceImport/history";
 import { BUNDLED_ASSETS } from "./assets.generated";
 import { localDate } from "./time";
+import { sourceIdFromYaml, sourceIdToYaml } from "./sourceIds";
 import { sourceRoot as resolveSourceRoot, installedSourcesRoot as resolveInstalledSourcesRoot, transcriptionsFolder as resolveTranscriptionsFolder, translationsFolder as resolveTranslationsFolder, canonicalQuranFolder as resolveCanonicalQuranFolder, sourceNotePath as resolveSourceNotePath } from "./sourcePaths";
 import { openDocs, getDocs } from "./docs";
 import { registerAnnotations, AnnotationService } from "./sourceAnnotations/service";
@@ -2823,7 +2824,8 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			if (!content.includes("text-source")) return;
 			// Only prune a folder this work used to own. Two editions can share a
 			// `title`, so a same-named hub may belong to another work.
-			if (!content.includes(`midad-key: ${key}`) && !content.includes(`midad-key: "${key}"`)) return;
+			const yamlKey = sourceIdToYaml(key);
+			if (!content.includes(`midad-key: ${yamlKey}`) && !content.includes(`midad-key: "${yamlKey}"`) && !content.includes(`midad-key: ${key}`) && !content.includes(`midad-key: "${key}"`)) return;
 			await adapter.remove(hub);
 			const folder = normalizePath(`${outRoot}/${title}`);
 			if (await adapter.exists(folder)) await adapter.rmdir(folder, true);
@@ -3462,7 +3464,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			if (!inFolder(path) && !entry && !(match && /^(?:@|mas-)/.test(file.basename))) continue;
 			const fm = (this.app.metadataCache.getFileCache(file)?.frontmatter ?? {}) as Record<string, unknown>;
 			const entryString = (key: string): string => typeof entry?.[key] === "string" ? String(entry[key]) : "";
-			const source = typeof fm["midad-source"] === "string" ? String(fm["midad-source"]) : "";
+			const source = sourceIdFromYaml(fm["midad-source"]);
 			const kind = typeof fm["midad-kind"] === "string" ? String(fm["midad-kind"]) : "";
 			const rawBase = (match?.[1] ?? "").trim();
 			const baseVolume = /^(.*?)\s+(?:vol\.?|v\.?|volume)\s*(\d+)$/i.exec(rawBase);

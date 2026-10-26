@@ -1,4 +1,5 @@
 import { App, normalizePath, TFile } from "obsidian";
+import { sourceIdFromYaml } from "../sourceIds";
 
 export const SOURCE_REGISTRY = ".midad-arabic-sources/sources.json";
 
@@ -84,15 +85,15 @@ export async function buildSourceRegistry(app: App, paths: RegistryPaths): Promi
 	// translations, adopted notes, and any user note adopted into the system).
 	for (const file of app.vault.getMarkdownFiles().filter((f) => indexed(f.path))) {
 		const frontmatter = app.metadataCache.getFileCache(file)?.frontmatter as Record<string, unknown> | undefined;
-		const masId = stringField(frontmatter, "midad-id");
+		const masId = sourceIdFromYaml(stringField(frontmatter, "midad-id"));
 		if (!masId) continue;
 		add({
 			masId,
 			kind: sourceKind(stringField(frontmatter, "midad-kind")),
 			title: stringField(frontmatter, "title") || file.basename,
 			path: file.path,
-			source: stringField(frontmatter, "midad-source"),
-			workKey: stringField(frontmatter, "midad-work") || undefined,
+			source: sourceIdFromYaml(stringField(frontmatter, "midad-source")),
+			workKey: sourceIdFromYaml(stringField(frontmatter, "midad-work")) || undefined,
 			unitKey: stringField(frontmatter, "midad-unit") || undefined,
 			status: stringField(frontmatter, "status") || undefined,
 		});
@@ -144,7 +145,7 @@ export async function buildSourceRegistry(app: App, paths: RegistryPaths): Promi
 			const file = app.vault.getAbstractFileByPath(normalizePath(path));
 			if (!(file instanceof TFile)) continue;
 			const frontmatter = app.metadataCache.getFileCache(file)?.frontmatter as Record<string, unknown> | undefined;
-			const masId = stringField(frontmatter, "midad-id") || `note:${entry.workKey || path}`;
+			const masId = sourceIdFromYaml(stringField(frontmatter, "midad-id")) || `note:${entry.workKey || path}`;
 			add({
 				masId,
 				kind: sourceKind(stringField(frontmatter, "midad-kind") || String(entry.kind ?? "adopted")),

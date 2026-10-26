@@ -133,6 +133,11 @@ def _yaml_quote(value: str) -> str:
     return str(value).replace("\\", "\\\\").replace('"', '\\"')
 
 
+def _yaml_id(value: str) -> str:
+    """YAML-facing IDs avoid `scheme:` so Obsidian does not treat them as URLs."""
+    return str(value).replace(":", "/")
+
+
 def _source_id(citekey: str, ref: Path | None) -> str:
     """Stable source identity: the Zotero item id when available, else the PDF key."""
     if ref:

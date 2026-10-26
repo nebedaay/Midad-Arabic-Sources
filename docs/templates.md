@@ -74,7 +74,7 @@ Every template receives a data object. The engine destructures it for you, so yo
 
 | Field | Example | Notes |
 | --- | --- | --- |
-| `key` | `tafsir:ar-tafsir-al-jalalayn` | `<collection>:<id>` — also written to the hub as `midad-key` |
+| `key` | `tafsir:ar-tafsir-al-jalalayn` | internal `<collection>:<id>`; written to YAML as `midad-key: tafsir/ar-tafsir-al-jalalayn` |
 | `collection` | `tafsir` | `tafsir`, `tafsir-qul`, `quran`, `hadith`, `quran-text`, `dictionary`, `turath` |
 | `collection_label` | `Qurʾān commentaries (tafsīr)` | for the import modal |
 | `id` | `ar-tafsir-al-jalalayn` | source id/slug |
