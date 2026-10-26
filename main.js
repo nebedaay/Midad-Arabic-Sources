@@ -12530,7 +12530,8 @@ function openLink(event, app, sourcePath) {
   }
   return true;
 }
-async function completeTrailingWikilink(app, sourcePath, text) {
+async function completeTrailingWikilink(app, target, text, annotation) {
+  var _a;
   const start = text.lastIndexOf("[[");
   if (start < 0)
     return text;
@@ -12545,22 +12546,43 @@ async function completeTrailingWikilink(app, sourcePath, text) {
     return text;
   const visible = pipe >= 0 ? line.slice(pipe + 1).trim() : targetPrefix;
   const suffix = lineEnd >= 0 ? fragment.slice(lineEnd) : "";
+  const prefix = text.slice(0, start);
+  let source = "";
   try {
-    const source = await app.vault.adapter.read(sourcePath);
-    const links = /\[\[([^\]\n|]+)(?:\|([^\]\n]*))?\]\]/g;
-    for (const match of source.matchAll(links)) {
-      const target = match[1].trim();
-      if (target.startsWith(targetPrefix) || targetPrefix.startsWith(target)) {
-        return text.slice(0, start) + `[[${target}|${visible}]]` + suffix;
-      }
-    }
+    source = await app.vault.adapter.read(target.notePath);
   } catch (e) {
   }
-  return text.slice(0, start) + visible + suffix;
+  const rawQuote = annotation.quote || "";
+  const rawStart = rawQuote.lastIndexOf("[[");
+  if (source && annotation.position && rawStart >= 0) {
+    const bounds = (_a = managedBounds(source)) != null ? _a : target.sourceStatus === "adopted" ? bodyBounds(source) : null;
+    const absolute = bounds ? bounds.bodyStart + annotation.position.start + rawStart : -1;
+    if (absolute >= 0 && source.startsWith("[[", absolute)) {
+      const close = source.indexOf("]]", absolute + 2);
+      if (close >= 0) {
+        const full = source.slice(absolute + 2, close).split("|")[0].trim();
+        if (full.startsWith(targetPrefix) || targetPrefix.startsWith(full)) {
+          return `${prefix}[[${full}|${visible}]]${suffix}`;
+        }
+      }
+    }
+  }
+  if (source) {
+    const candidates = [];
+    for (const match of source.matchAll(/\[\[([^\]\n|]+)(?:\|[^\]\n]*)?\]\]/g)) {
+      const candidate = match[1].trim();
+      if (candidate.startsWith(targetPrefix) || targetPrefix.startsWith(candidate))
+        candidates.push(candidate);
+    }
+    candidates.sort((a, b) => b.length - a.length);
+    if (candidates.length)
+      return `${prefix}[[${candidates[0]}|${visible}]]${suffix}`;
+  }
+  return `${prefix}${visible}${suffix}`;
 }
 async function quoteMarkdown(app, target, annotation) {
   let text = (annotation.quoteMarkdown || annotation.quote || annotation.quoteText || "").replace(/\r\n?/g, "\n").replace(/^(?:>\s?)+/gm, "");
-  text = await completeTrailingWikilink(app, target.notePath, text);
+  text = await completeTrailingWikilink(app, target, text, annotation);
   return text.trim() || "Empty quote";
 }
 function action(parent, icon, label, run) {

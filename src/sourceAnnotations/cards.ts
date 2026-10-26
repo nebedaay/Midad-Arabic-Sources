@@ -1,5 +1,6 @@
 import { App, Component, MarkdownRenderer, setIcon } from "obsidian";
 import { annotationTint } from "./colors";
+import { bodyBounds, managedBounds } from "./text";
 
 import type { AnnotationTarget, SourceAnnotation } from "./types";
 
@@ -40,8 +41,9 @@ function openLink(event: MouseEvent, app: App, sourcePath: string): boolean {
  */
 async function completeTrailingWikilink(
 	app: App,
-	sourcePath: string,
-	text: string
+	target: AnnotationTarget,
+	text: string,
+	annotation: SourceAnnotation
 ): Promise<string> {
 	const start = text.lastIndexOf("[[");
 	if (start < 0) return text;
@@ -54,19 +56,46 @@ async function completeTrailingWikilink(
 	if (!targetPrefix) return text;
 	const visible = pipe >= 0 ? line.slice(pipe + 1).trim() : targetPrefix;
 	const suffix = lineEnd >= 0 ? fragment.slice(lineEnd) : "";
+	const prefix = text.slice(0, start);
+
+	let source = "";
 	try {
-		const source = await app.vault.adapter.read(sourcePath);
-		const links = /\[\[([^\]\n|]+)(?:\|([^\]\n]*))?\]\]/g;
-		for (const match of source.matchAll(links)) {
-			const target = match[1].trim();
-			if (target.startsWith(targetPrefix) || targetPrefix.startsWith(target)) {
-				return text.slice(0, start) + `[[${target}|${visible}]]` + suffix;
+		source = await app.vault.adapter.read(target.notePath);
+	} catch {
+		/* source unavailable: use the visible fragment below */
+	}
+
+	// The most reliable resolution is the link at the annotation's actual source
+	// offset. This distinguishes [[Arabic translations]] from the shorter
+	// [[Arabic]] when the selection only contains `[[Arabic`.
+	const rawQuote = annotation.quote || "";
+	const rawStart = rawQuote.lastIndexOf("[[");
+	if (source && annotation.position && rawStart >= 0) {
+		const bounds = managedBounds(source) ?? (target.sourceStatus === "adopted" ? bodyBounds(source) : null);
+		const absolute = bounds ? bounds.bodyStart + annotation.position.start + rawStart : -1;
+		if (absolute >= 0 && source.startsWith("[[", absolute)) {
+			const close = source.indexOf("]]", absolute + 2);
+			if (close >= 0) {
+				const full = source.slice(absolute + 2, close).split("|")[0].trim();
+				if (full.startsWith(targetPrefix) || targetPrefix.startsWith(full)) {
+					return `${prefix}[[${full}|${visible}]]${suffix}`;
+				}
 			}
 		}
-	} catch {
-		/* source unavailable: fall through to the visible fragment */
 	}
-	return text.slice(0, start) + visible + suffix;
+
+	// Fallback for older annotations without a position: prefer the longest
+	// matching target, so a generic `Arabic` does not win over `Arabic translations`.
+	if (source) {
+		const candidates: string[] = [];
+		for (const match of source.matchAll(/\[\[([^\]\n|]+)(?:\|[^\]\n]*)?\]\]/g)) {
+			const candidate = match[1].trim();
+			if (candidate.startsWith(targetPrefix) || targetPrefix.startsWith(candidate)) candidates.push(candidate);
+		}
+		candidates.sort((a, b) => b.length - a.length);
+		if (candidates.length) return `${prefix}[[${candidates[0]}|${visible}]]${suffix}`;
+	}
+	return `${prefix}${visible}${suffix}`;
 }
 
 /**
@@ -82,7 +111,7 @@ async function quoteMarkdown(
 	let text = (annotation.quoteMarkdown || annotation.quote || annotation.quoteText || "")
 		.replace(/\r\n?/g, "\n")
 		.replace(/^(?:>\s?)+/gm, "");
-	text = await completeTrailingWikilink(app, target.notePath, text);
+	text = await completeTrailingWikilink(app, target, text, annotation);
 	return text.trim() || "Empty quote";
 }
 

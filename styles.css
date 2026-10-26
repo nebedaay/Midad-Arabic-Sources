@@ -841,6 +841,8 @@ body.theme-dark {
    Reading-view sanitising without inline styles. */
 .mas-annotation.mas-band {
     background-color: transparent !important;
+    outline: 1px solid var(--mas-band-color);
+    outline-offset: -1px;
     --mas-band-color: hsla(var(--mas-hue), var(--mas-annot-sat), var(--mas-annot-lt), var(--mas-annot-band-opac));
 }
 
