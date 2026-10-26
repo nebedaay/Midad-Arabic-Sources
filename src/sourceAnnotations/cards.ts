@@ -1,5 +1,6 @@
 import { App, Component, MarkdownRenderer, setIcon } from "obsidian";
 import { annotationTint } from "./colors";
+import { markdownToText } from "./text";
 import type { AnnotationTarget, SourceAnnotation } from "./types";
 
 export type AnnotationCardVariant = "compact" | "sidebar";
@@ -31,6 +32,16 @@ function openLink(event: MouseEvent, app: App, sourcePath: string): boolean {
 		window.open(href, "_blank");
 	}
 	return true;
+}
+
+function plainQuote(annotation: SourceAnnotation): string {
+	const raw = annotation.quoteMarkdown || annotation.quote || annotation.quoteText || "";
+	const text = markdownToText(raw)
+		.replace(/\[\[[^\]]*$/gm, "")
+		.replace(/\[[^\]]*$/gm, "")
+		.replace(/[ \t]+$/gm, "")
+		.trim();
+	return text || "Empty quote";
 }
 
 function action(
@@ -82,7 +93,7 @@ export async function renderAnnotationCard(
 		comment.setCssStyles({ background: annotationTint(annotation.color, 96, 0.32) });
 		// The comment leads; the highlighted excerpt sits directly beneath it.
 		const quote = body.createDiv({ cls: "mas-ann-card-quote" });
-		quote.setText(annotation.quoteText || annotation.quote || "Empty quote");
+		quote.setText(plainQuote(annotation));
 		quote.setCssStyles({ background: annotationTint(annotation.color, 84, 0.65) });
 	}
 

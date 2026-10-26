@@ -12530,6 +12530,11 @@ function openLink(event, app, sourcePath) {
   }
   return true;
 }
+function plainQuote(annotation) {
+  const raw = annotation.quoteMarkdown || annotation.quote || annotation.quoteText || "";
+  const text = markdownToText(raw).replace(/\[\[[^\]]*$/gm, "").replace(/\[[^\]]*$/gm, "").replace(/[ \t]+$/gm, "").trim();
+  return text || "Empty quote";
+}
 function action(parent, icon, label, run) {
   const button = parent.createEl("button", {
     cls: "clickable-icon mas-ann-card-action",
@@ -12568,7 +12573,7 @@ async function renderAnnotationCard(parent, options) {
   if (variant === "sidebar") {
     comment.setCssStyles({ background: annotationTint(annotation.color, 96, 0.32) });
     const quote = body.createDiv({ cls: "mas-ann-card-quote" });
-    quote.setText(annotation.quoteText || annotation.quote || "Empty quote");
+    quote.setText(plainQuote(annotation));
     quote.setCssStyles({ background: annotationTint(annotation.color, 84, 0.65) });
   }
   if (options.onEdit || options.onDelete || options.onOpenNote) {

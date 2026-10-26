@@ -840,26 +840,27 @@ body.theme-dark {
    band, so no annotation covers another and the bands survive themes and
    Reading-view sanitising without inline styles. */
 .mas-annotation.mas-band {
+    background-color: transparent !important;
     --mas-band-color: hsla(var(--mas-hue), var(--mas-annot-sat), var(--mas-annot-lt), var(--mas-annot-band-opac));
 }
 
-.mas-annotation.mas-band-2-0 { background-image: linear-gradient(180deg, var(--mas-band-color) 0 50%, transparent 50% 100%); }
-.mas-annotation.mas-band-2-1 { background-image: linear-gradient(180deg, transparent 0 50%, var(--mas-band-color) 50% 100%); }
+.mas-annotation.mas-band-2-0 { background-image: linear-gradient(180deg, var(--mas-band-color) 0 50%, transparent 50% 100%) !important; box-shadow: inset 0 2px 0 var(--mas-band-color); }
+.mas-annotation.mas-band-2-1 { background-image: linear-gradient(180deg, transparent 0 50%, var(--mas-band-color) 50% 100%) !important; box-shadow: inset 0 -2px 0 var(--mas-band-color); }
 
-.mas-annotation.mas-band-3-0 { background-image: linear-gradient(180deg, var(--mas-band-color) 0 33.333%, transparent 33.333% 100%); }
-.mas-annotation.mas-band-3-1 { background-image: linear-gradient(180deg, transparent 0 33.333%, var(--mas-band-color) 33.333% 66.666%, transparent 66.666% 100%); }
-.mas-annotation.mas-band-3-2 { background-image: linear-gradient(180deg, transparent 0 66.666%, var(--mas-band-color) 66.666% 100%); }
+.mas-annotation.mas-band-3-0 { background-image: linear-gradient(180deg, var(--mas-band-color) 0 33.333%, transparent 33.333% 100%) !important; }
+.mas-annotation.mas-band-3-1 { background-image: linear-gradient(180deg, transparent 0 33.333%, var(--mas-band-color) 33.333% 66.666%, transparent 66.666% 100%) !important; }
+.mas-annotation.mas-band-3-2 { background-image: linear-gradient(180deg, transparent 0 66.666%, var(--mas-band-color) 66.666% 100%) !important; }
 
-.mas-annotation.mas-band-4-0 { background-image: linear-gradient(180deg, var(--mas-band-color) 0 25%, transparent 25% 100%); }
-.mas-annotation.mas-band-4-1 { background-image: linear-gradient(180deg, transparent 0 25%, var(--mas-band-color) 25% 50%, transparent 50% 100%); }
-.mas-annotation.mas-band-4-2 { background-image: linear-gradient(180deg, transparent 0 50%, var(--mas-band-color) 50% 75%, transparent 75% 100%); }
-.mas-annotation.mas-band-4-3 { background-image: linear-gradient(180deg, transparent 0 75%, var(--mas-band-color) 75% 100%); }
+.mas-annotation.mas-band-4-0 { background-image: linear-gradient(180deg, var(--mas-band-color) 0 25%, transparent 25% 100%) !important; }
+.mas-annotation.mas-band-4-1 { background-image: linear-gradient(180deg, transparent 0 25%, var(--mas-band-color) 25% 50%, transparent 50% 100%) !important; }
+.mas-annotation.mas-band-4-2 { background-image: linear-gradient(180deg, transparent 0 50%, var(--mas-band-color) 50% 75%, transparent 75% 100%) !important; }
+.mas-annotation.mas-band-4-3 { background-image: linear-gradient(180deg, transparent 0 75%, var(--mas-band-color) 75% 100%) !important; }
 
-.mas-annotation.mas-band-5-0 { background-image: linear-gradient(180deg, var(--mas-band-color) 0 20%, transparent 20% 100%); }
-.mas-annotation.mas-band-5-1 { background-image: linear-gradient(180deg, transparent 0 20%, var(--mas-band-color) 20% 40%, transparent 40% 100%); }
-.mas-annotation.mas-band-5-2 { background-image: linear-gradient(180deg, transparent 0 40%, var(--mas-band-color) 40% 60%, transparent 60% 100%); }
-.mas-annotation.mas-band-5-3 { background-image: linear-gradient(180deg, transparent 0 60%, var(--mas-band-color) 60% 80%, transparent 80% 100%); }
-.mas-annotation.mas-band-5-4 { background-image: linear-gradient(180deg, transparent 0 80%, var(--mas-band-color) 80% 100%); }
+.mas-annotation.mas-band-5-0 { background-image: linear-gradient(180deg, var(--mas-band-color) 0 20%, transparent 20% 100%) !important; }
+.mas-annotation.mas-band-5-1 { background-image: linear-gradient(180deg, transparent 0 20%, var(--mas-band-color) 20% 40%, transparent 40% 100%) !important; }
+.mas-annotation.mas-band-5-2 { background-image: linear-gradient(180deg, transparent 0 40%, var(--mas-band-color) 40% 60%, transparent 60% 100%) !important; }
+.mas-annotation.mas-band-5-3 { background-image: linear-gradient(180deg, transparent 0 60%, var(--mas-band-color) 60% 80%, transparent 80% 100%) !important; }
+.mas-annotation.mas-band-5-4 { background-image: linear-gradient(180deg, transparent 0 80%, var(--mas-band-color) 80% 100%) !important; }
 
 .mas-ann-rail {
     position: absolute;
