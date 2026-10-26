@@ -19,7 +19,6 @@ export class AnnotationTooltip {
 	private readonly app: App;
 	private readonly options: AnnotationTooltipOptions;
 	private el: HTMLElement | null = null;
-	private anchor: HTMLElement | null = null;
 	private component: Component | null = null;
 	private outside: ((event: PointerEvent) => void) | null = null;
 	private scroll: ((event: Event) => void) | null = null;
@@ -38,7 +37,6 @@ export class AnnotationTooltip {
 		const win = doc.defaultView ?? window;
 		const el = doc.body.createDiv({ cls: "mas-ann-tooltip" });
 		this.el = el;
-		this.anchor = anchor;
 		const component = new Component();
 		component.load();
 		this.component = component;
@@ -120,7 +118,6 @@ export class AnnotationTooltip {
 		this.resize = null;
 		this.key = null;
 		this.el = null;
-		this.anchor = null;
 		this.component?.unload();
 		this.component = null;
 	}

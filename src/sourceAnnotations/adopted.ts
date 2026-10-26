@@ -2,7 +2,6 @@ import { App, TFile, normalizePath } from "obsidian";
 import { safeFileSegment } from "../sourcePaths";
 
 export const ADOPTED_REGISTRY = ".midad-arabic-sources/annotations/adopted.json";
-export const ADOPTED_BIBLIOGRAPHIC_ROOT = "_2 Bibliographic notes/";
 
 export type AdoptedKind = "transcription" | "translation" | "note";
 

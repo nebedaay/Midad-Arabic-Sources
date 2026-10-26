@@ -4000,7 +4000,6 @@ def build_translation_prompt(user_prompt: str | None = None) -> str:
         "TEXT-SPECIFIC INSTRUCTIONS\\n" + specific,
     ])
 ` },
-  { path: "scripts/migrate-mas-ids.py", content: '#!/usr/bin/env python3\n"""Migrate MAS source notes to the unified midad-id naming and registry identity.\n\n- Zotero literature notes (`_2 Bibliographic notes/@*.md`) get a stable\n  `midad-id: zotero:<sw-zotero-id>` (falling back to `zotero:@<citekey>`).\n- Transcriptions/translations get a `midad-id`, `midad-kind`, `midad-source`,\n  `midad-work`, and `midad-unit`. A Zotero-associated note keeps its\n  `@<citekey>` filename; only a standalone note with no Zotero reference\n  (a `pdf:` source) changes from `@<citekey>` to `mas-<citekey>`.\n- Repository hubs get `midad-id: repo:<collection>:<id>`.\n- Adopted arbitrary notes get a `midad-id` when they have a `midad-work`.\n- Explicit wikilinks, the adopted-annotation registry, the annotation store,\n  and the Source Annotations MOC are updated.\n\nUsage:\n    python3 scripts/migrate-mas-ids.py --dry-run\n    python3 scripts/migrate-mas-ids.py\n"""\nimport argparse\nimport json\nimport os\nimport re\nfrom pathlib import Path\n\nVAULT = Path(os.environ.get("OBSIDIAN_VAULT", os.path.expanduser("~/Documents/Obsidian Vault")))\nBIB = VAULT / "_2 Bibliographic notes"\nMANIFEST = VAULT / ".midad-arabic-sources/source-imports.json"\nADOPTED = VAULT / ".midad-arabic-sources/annotations/adopted.json"\nANNOTATIONS = VAULT / ".midad-arabic-sources/annotations"\nTRANS_RE = re.compile(r"^@(.+?) - (.+)$", re.I)\n\n\ndef yaml_value(value: str) -> str:\n    return \'"\' + str(value).replace("\\\\", "\\\\\\\\").replace(\'"\', \'\\\\"\') + \'"\'\n\n\ndef add_frontmatter_fields(text: str, fields: list[tuple[str, str]]) -> str:\n    if not text.startswith("---"):\n        return text\n    end = text.find("\\n---", 3)\n    if end < 0:\n        return text\n    fm = text[:end]\n    rest = text[end:]\n    for key, value in fields:\n        if re.search(rf\'^{re.escape(key)}:\', fm, re.M):\n            continue\n        fm = fm.replace("---\\n", f"---\\n{key}: {yaml_value(value)}\\n", 1)\n    return fm + rest\n\n\ndef zotero_source_id(citekey: str) -> tuple[str, str]:\n    ref = BIB / f"@{citekey}.md"\n    if ref.exists():\n        text = ref.read_text(encoding="utf-8")\n        m = re.search(r\'^sw-zotero-id:\\s*"?([^"\\n]+)"?\\s*$\', text, re.M)\n        if m:\n            sid = m.group(1).strip()\n            return f"zotero:{sid}", f"zotero:@{citekey}"\n        return f"zotero:@{citekey}", f"zotero:@{citekey}"\n    return f"pdf:{citekey}", f"pdf:{citekey}"\n\n\ndef update_json_paths(path: Path, replacements: dict[str, str], dry: bool) -> None:\n    if not path.exists():\n        return\n    try:\n        text = path.read_text(encoding="utf-8")\n        updated = text\n        for old, new in replacements.items():\n            updated = updated.replace(old, new)\n        if updated != text:\n            print(f"  update: {path.relative_to(VAULT)}")\n            if not dry:\n                path.write_text(updated, encoding="utf-8")\n    except Exception as e:\n        print(f"  WARNING: {path}: {e}")\n\n\ndef add_fields_to_note(path: Path, fields: list[tuple[str, str]], dry: bool) -> bool:\n    text = path.read_text(encoding="utf-8")\n    updated = add_frontmatter_fields(text, fields)\n    if updated == text:\n        return False\n    if not dry:\n        path.write_text(updated, encoding="utf-8")\n    return True\n\n\ndef main() -> int:\n    parser = argparse.ArgumentParser(description="Migrate MAS source notes to midad-id naming.")\n    parser.add_argument("--dry-run", action="store_true")\n    args = parser.parse_args()\n    dry = args.dry_run\n\n    data_path = VAULT / ".obsidian/plugins/midad-arabic-sources/data.json"\n    data = json.loads(data_path.read_text(encoding="utf-8")) if data_path.exists() else {}\n    root = Path(data.get("sourceRoot") or "_7 Sources")\n    trans_dir = VAULT / root / "Transcriptions"\n    transl_dir = VAULT / root / "Translations"\n    installed = VAULT / root / "Installed Sources"\n\n    # 1. Zotero literature notes are indexed by their stable sw-zotero-id;\n    # they are not rewritten, since ScholarWeft owns their frontmatter.\n\n    # 2. Transcriptions and translations: add fields and rename away from @.\n    renames: dict[str, str] = {}\n    for folder, doc_type in ((trans_dir, "transcription"), (transl_dir, "translation")):\n        if not folder.exists():\n            continue\n        for note in sorted(folder.glob("*.md")):\n            m = TRANS_RE.match(note.stem)\n            if not m:\n                continue\n            citekey = m.group(1)\n            suffix = m.group(2)\n            low = suffix.lower()\n            typ = "translation" if "translation" in low else "transcription" if "transcription" in low else ""\n            if not typ:\n                continue\n            vm = re.search(r\'\\b(?:vol|v)\\.\\s*(\\d+)\', suffix, re.I)\n            volume = int(vm.group(1)) if vm else None\n            variant = re.sub(r\'\\b(?:translation|transcription)\\b\', \'\', suffix, flags=re.I)\n            variant = re.sub(r\'\\b(?:vol|v)\\.\\s*\\d+\', \'\', variant, flags=re.I).strip(" ,-\u2013\u2014()")\n            variant = re.sub(r\'[^A-Za-z0-9]+\', \'-\', variant).strip(\'-\').lower()\n            source_id, _ = zotero_source_id(citekey)\n            work = f"{source_id}:{typ}"\n            unit = f"vol.{volume}" if volume else ""\n            if variant:\n                unit = f"{unit}:{variant}" if unit else variant\n            unit = unit or "note"\n            mas_id = f"{work}:{unit}"\n            fields = [\n                ("midad-id", mas_id),\n                ("midad-kind", typ),\n                ("midad-source", source_id),\n                ("midad-work", work),\n                ("midad-unit", unit),\n            ]\n            if add_fields_to_note(note, fields, dry):\n                print(f"  source fields: {note.name} -> {mas_id}")\n            if source_id.startswith("pdf:"):\n                new_name = f"mas-{note.stem[1:]}.md"\n                target = note.with_name(new_name)\n                if target.exists():\n                    print(f"  skip rename (exists): {target.name}")\n                    continue\n                renames[str(note)] = str(target)\n                print(f"  rename: {note.name} -> {target.name}")\n                if not dry:\n                    note.rename(target)\n            else:\n                print(f"  keep Zotero filename: {note.name}")\n\n    # 3. Repository hubs already in the manifest.\n    works = []\n    if MANIFEST.exists():\n        try:\n            works = json.loads(MANIFEST.read_text(encoding="utf-8")).get("works", [])\n        except Exception:\n            works = []\n    for work in works:\n        key = str(work.get("key") or "")\n        directory = str(work.get("dir") or "")\n        if not key or not directory:\n            continue\n        hub = installed / f"{directory}.md"\n        if hub.exists():\n            add_fields_to_note(hub, [\n                ("midad-id", f"repo:{key}"),\n                ("midad-kind", "repo-work"),\n                ("midad-source", f"repo:{key}"),\n            ], dry)\n\n    # 4. Adopted arbitrary notes.\n    if ADOPTED.exists():\n        try:\n            adopted = json.loads(ADOPTED.read_text(encoding="utf-8")).get("notes", {})\n        except Exception:\n            adopted = {}\n        for path, entry in adopted.items():\n            note = VAULT / path\n            if not note.exists():\n                continue\n            mas_work = entry.get("workKey") or ""\n            if mas_work:\n                add_fields_to_note(note, [\n                    ("midad-id", mas_work),\n                    ("midad-kind", "adopted"),\n                    ("midad-source", "adopted"),\n                ], dry)\n\n    # 5. Explicit links, adopted registry, annotation store and MOC.\n    replacements: dict[str, str] = {}\n    for old, new in renames.items():\n        old_path = Path(old)\n        new_path = Path(new)\n        old_stem = old_path.stem\n        new_stem = new_path.stem\n        old_rel = old_path.relative_to(VAULT).as_posix()\n        new_rel = new_path.relative_to(VAULT).as_posix()\n        replacements[f"[[{old_stem}"] = f"[[{new_stem}"\n        replacements[f"[[{old_rel}"] = f"[[{new_rel}"\n        replacements[f"{old_path.name}"] = new_path.name\n        replacements[old_rel] = new_rel\n        replacements[old_stem] = new_stem\n    for md in VAULT.rglob("*.md"):\n        rel = md.relative_to(VAULT).as_posix()\n        if rel.startswith((".obsidian/", ".midad-arabic-sources/", "tmp/", "src/", "AI OS/")):\n            continue\n        try:\n            text = md.read_text(encoding="utf-8")\n        except Exception:\n            continue\n        updated = text\n        for old, new in replacements.items():\n            updated = updated.replace(old, new)\n        if updated != text:\n            print(f"  links: {rel}")\n            if not dry:\n                md.write_text(updated, encoding="utf-8")\n    for path in [ADOPTED, *ANNOTATIONS.rglob("*.json")]:\n        update_json_paths(path, replacements, dry)\n\n    # A rename can make the running annotation service mark a work "removed"\n    # before it sees the new path. If its note exists, restore the status.\n    for work_file in ANNOTATIONS.rglob("work.json"):\n        try:\n            data = json.loads(work_file.read_text(encoding="utf-8"))\n        except Exception:\n            continue\n        note = data.get("note")\n        if data.get("sourceStatus") == "removed" and note and (VAULT / note).exists():\n            data["sourceStatus"] = "installed"\n            if not dry:\n                work_file.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\\n", encoding="utf-8")\n            print(f"  restore status: {work_file}")\n\n    print("Dry run complete." if dry else "Done.")\n    return 0\n\n\nif __name__ == "__main__":\n    raise SystemExit(main())\n' },
   { path: "scripts/migrate-source-layout.py", content: `#!/usr/bin/env python3
 """Move Midad's vault folders to the source-root layout.
 
@@ -4282,56 +4281,6 @@ def main() -> int:
     update_settings(args.update_settings, source_root, dry)
 
     print("Done." if not dry else "Dry run complete.")
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
-` },
-  { path: "scripts/remove-repo-unit-mas-ids.py", content: `#!/usr/bin/env python3
-"""Remove per-unit midad-id properties from repository notes.
-
-Repository works are tracked by their hub (\`repo:<collection>:<id>\`); the
-individual s\u016Bra/chapter/root notes do not need identities of their own. This
-cleans up the properties added during the initial midad-id rollout.
-"""
-import argparse
-import os
-import re
-from pathlib import Path
-
-VAULT = Path(os.environ.get("OBSIDIAN_VAULT", os.path.expanduser("~/Documents/Obsidian Vault")))
-PROPS = ("midad-id", "midad-kind", "midad-work", "midad-unit")
-
-
-def main() -> int:
-    parser = argparse.ArgumentParser(description="Remove per-unit midad-id properties from repository notes.")
-    parser.add_argument("--source-root", default="_7 Sources")
-    parser.add_argument("--dry-run", action="store_true")
-    args = parser.parse_args()
-    root = VAULT / args.source_root / "Installed Sources"
-    changed = 0
-    for note in root.rglob("*.md"):
-        try:
-            text = note.read_text(encoding="utf-8")
-        except Exception:
-            continue
-        if not text.startswith("---"):
-            continue
-        end = text.find("\\n---", 3)
-        if end < 0:
-            continue
-        fm = text[:end]
-        if not re.search(r'^midad-kind:\\s*"?repo-unit"?\\s*$', fm, re.M):
-            continue
-        lines = [line for line in fm.splitlines() if not any(re.match(rf'^{re.escape(p)}:', line) for p in PROPS)]
-        updated = "\\n".join(lines) + text[end:]
-        if updated != text:
-            changed += 1
-            print(f"  clean: {note.relative_to(VAULT)}")
-            if not args.dry_run:
-                note.write_text(updated, encoding="utf-8")
-    print(f"{'Would clean' if args.dry_run else 'Cleaned'} {changed} note(s).")
     return 0
 
 
@@ -12982,7 +12931,6 @@ var import_obsidian13 = __toModule(require("obsidian"));
 var AnnotationTooltip = class {
   constructor(app, options) {
     this.el = null;
-    this.anchor = null;
     this.component = null;
     this.outside = null;
     this.scroll = null;
@@ -13000,7 +12948,6 @@ var AnnotationTooltip = class {
     const win = (_a = doc.defaultView) != null ? _a : window;
     const el = doc.body.createDiv({ cls: "mas-ann-tooltip" });
     this.el = el;
-    this.anchor = anchor;
     const component = new import_obsidian13.Component();
     component.load();
     this.component = component;
@@ -13094,7 +13041,6 @@ var AnnotationTooltip = class {
     this.resize = null;
     this.key = null;
     this.el = null;
-    this.anchor = null;
     (_b = this.component) == null ? void 0 : _b.unload();
     this.component = null;
   }

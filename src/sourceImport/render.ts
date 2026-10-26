@@ -449,41 +449,6 @@ export async function renderModelToVault(
 }
 
 /**
- * Render just a work's hub note. Used when only the *hub* template changed: the
- * hub is one note per work, so re-rendering every unit note for a hub-only edit
- * would be wasted work (the dictionary has 7,000+ units).
- */
-export async function renderModelHub(
-	app: App,
-	templates: TemplateSet,
-	model: SourceModel,
-	outRoot: string,
-	force = false
-): Promise<string[]> {
-	const engine = makeEngine();
-	if (Array.isArray(model.work.up)) {
-		model.work.up = (model.work.up as string[]).map(canonicalMocLink);
-	}
-	const dir = model.work.dir as string;
-	const isQuranText = model.work.collection === "quran-text";
-	const isCanonical = isQuranText && model.work.canonical === true;
-	// The hub lists each unit by `note_stem`, so it must be set even though the
-	// unit notes are not written here.
-	for (const unit of model.units) {
-		const dictRoot = model.work.collection === "dictionary" && unit.kind === "dict";
-		const base = String(unit.base);
-		unit.note_stem = (isCanonical || dictRoot) ? base : `${dir} - ${base}`;
-		for (const ch of (unit.chapters as Array<JsonObject> | undefined) ?? []) {
-			ch.note_stem = `${dir} - ${String(ch.base)}`;
-		}
-	}
-	const singleUnit = model.units.length === 1 ? model.units[0] : undefined;
-	const hubPath = `${outRoot}/${dir}.md`;
-	await writeMerged(app, hubPath, renderHub(engine, templates, model, isQuranText ? undefined : singleUnit), force);
-	return [hubPath];
-}
-
-/**
  * Render every category MOC from the full set of imported works. The generated
  * region is rewritten wholesale each time, so it always reflects exactly what
  * the plugin has imported; content outside the region is preserved.
