@@ -50,7 +50,17 @@ function annotationBlock(annotation: SourceAnnotation, unitNote: string): string
 	return lines.join("\n");
 }
 
+function unitLabel(work: AnnotationWorkFile, entry: AnnotationUnitEntry): string {
+	const stem = entry.note.split("/").pop()?.replace(/\.md$/i, "") ?? entry.unitKey;
+	if (entry.unitKey.endsWith(":hub") || entry.unitKey === "hub" || stem === work.dir) {
+		return "the Table of Contents";
+	}
+	const prefix = `${work.dir} - `;
+	return stem.startsWith(prefix) ? stem.slice(prefix.length) : stem;
+}
+
 function buildNoteBody(
+	work: AnnotationWorkFile,
 	units: Array<{ entry: AnnotationUnitEntry; annotations: SourceAnnotation[] }>
 ): string {
 	const lines: string[] = [MANAGED_OPEN, "## Annotations", ""];
@@ -58,8 +68,7 @@ function buildNoteBody(
 	for (const unit of units) {
 		if (!unit.annotations.length) continue;
 		count += unit.annotations.length;
-		const noteName = unit.entry.note.split("/").pop()?.replace(/\.md$/i, "") ?? unit.entry.unitKey;
-		lines.push(`### ${noteHeadingLink(unit.entry.note, "", noteName)}`, "");
+		lines.push(`### On ${noteHeadingLink(unit.entry.note, "", unitLabel(work, unit.entry))}`, "");
 		for (const annotation of unit.annotations) {
 			if (annotation.anchorStatus === "orphaned") continue;
 			lines.push(annotationBlock(annotation, unit.entry.note), "");
@@ -117,6 +126,7 @@ export async function renderAnnotationNote(
 	const units = await store.allUnits(workKey);
 	const { frontmatter, specs } = buildNoteFrontmatter(work);
 	const content = `${frontmatter}${buildNoteBody(
+		work,
 		units.map((unit) => ({ entry: unit.entry, annotations: unit.unit.annotations }))
 	)}`;
 	const parent = notePath.split("/").slice(0, -1).join("/");
@@ -150,12 +160,12 @@ async function mocEntry(
 	if (units.length <= 1) {
 		const unit = units[0];
 		const sourceLink = unit
-			? ` · ${noteHeadingLink(unit.entry.note, "")}`
+			? ` · ${noteHeadingLink(unit.entry.note, "", unitLabel(work, unit.entry))}`
 			: "";
 		return [`- ${annotationLink} — ${entry.count} ${plural}${orphan}${sourceLink}`];
 	}
 	const lines = [`- ${annotationLink} — ${entry.count} ${plural}${orphan}`];
-	for (const unit of units) lines.push(`  - ${noteHeadingLink(unit.entry.note, "")}`);
+	for (const unit of units) lines.push(`  - ${noteHeadingLink(unit.entry.note, "", unitLabel(work, unit.entry))}`);
 	return lines;
 }
 

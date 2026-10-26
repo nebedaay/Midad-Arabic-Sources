@@ -11743,16 +11743,23 @@ function annotationBlock(annotation, unitNote) {
   lines.push(`> <sub>added ${annotation.created.slice(0, 10)}${modified} \xB7 ^${annotation.id}</sub>`);
   return lines.join("\n");
 }
-function buildNoteBody(units) {
+function unitLabel(work, entry) {
   var _a, _b;
+  const stem = (_b = (_a = entry.note.split("/").pop()) == null ? void 0 : _a.replace(/\.md$/i, "")) != null ? _b : entry.unitKey;
+  if (entry.unitKey.endsWith(":hub") || entry.unitKey === "hub" || stem === work.dir) {
+    return "the Table of Contents";
+  }
+  const prefix = `${work.dir} - `;
+  return stem.startsWith(prefix) ? stem.slice(prefix.length) : stem;
+}
+function buildNoteBody(work, units) {
   const lines = [MANAGED_OPEN, "## Annotations", ""];
   let count = 0;
   for (const unit of units) {
     if (!unit.annotations.length)
       continue;
     count += unit.annotations.length;
-    const noteName = (_b = (_a = unit.entry.note.split("/").pop()) == null ? void 0 : _a.replace(/\.md$/i, "")) != null ? _b : unit.entry.unitKey;
-    lines.push(`### ${noteHeadingLink(unit.entry.note, "", noteName)}`, "");
+    lines.push(`### On ${noteHeadingLink(unit.entry.note, "", unitLabel(work, unit.entry))}`, "");
     for (const annotation of unit.annotations) {
       if (annotation.anchorStatus === "orphaned")
         continue;
@@ -11797,7 +11804,7 @@ async function renderAnnotationNote(app, store, settings, workKey2) {
   const notePath = work.note || annotationNotePath(work, settings);
   const units = await store.allUnits(workKey2);
   const { frontmatter, specs } = buildNoteFrontmatter(work);
-  const content = `${frontmatter}${buildNoteBody(units.map((unit) => ({ entry: unit.entry, annotations: unit.unit.annotations })))}`;
+  const content = `${frontmatter}${buildNoteBody(work, units.map((unit) => ({ entry: unit.entry, annotations: unit.unit.annotations })))}`;
   const parent = notePath.split("/").slice(0, -1).join("/");
   if (parent)
     await ensureFolder(app, parent);
@@ -11822,12 +11829,12 @@ async function mocEntry(entry, store, settings) {
   const units = (await store.allUnits(entry.key)).filter((unit) => unit.unit.annotations.length > 0);
   if (units.length <= 1) {
     const unit = units[0];
-    const sourceLink = unit ? ` \xB7 ${noteHeadingLink(unit.entry.note, "")}` : "";
+    const sourceLink = unit ? ` \xB7 ${noteHeadingLink(unit.entry.note, "", unitLabel(work, unit.entry))}` : "";
     return [`- ${annotationLink} \u2014 ${entry.count} ${plural}${orphan}${sourceLink}`];
   }
   const lines = [`- ${annotationLink} \u2014 ${entry.count} ${plural}${orphan}`];
   for (const unit of units)
-    lines.push(`  - ${noteHeadingLink(unit.entry.note, "")}`);
+    lines.push(`  - ${noteHeadingLink(unit.entry.note, "", unitLabel(work, unit.entry))}`);
   return lines;
 }
 async function mocBody(store, settings) {
@@ -12750,6 +12757,11 @@ var AnnotationTargetResolver = class {
   canonicalId() {
     return this.settings.canonicalQuranRiw\u0101ya.trim() || "hafs";
   }
+  hubUnitKey(work) {
+    var _a;
+    const collection = String((_a = work.collection) != null ? _a : workKey(work).split(":")[0]);
+    return `${collection}:hub`;
+  }
   invalidate() {
     this.models.clear();
     this.manifestCache = null;
@@ -12882,7 +12894,7 @@ var AnnotationTargetResolver = class {
     const model = await this.model(work);
     if (model) {
       if (isHub) {
-        const unit2 = model.units.length === 1 ? unitKey(model.units[0]) : "hub";
+        const unit2 = model.units.length === 1 ? unitKey(model.units[0]) : this.hubUnitKey(work);
         return {
           workKey: workKey(work),
           unitKey: unit2,
@@ -12907,7 +12919,7 @@ var AnnotationTargetResolver = class {
     if (isHub) {
       return {
         workKey: workKey(work),
-        unitKey: "hub",
+        unitKey: this.hubUnitKey(work),
         notePath: normalized2,
         workTitle: String((_o = (_n = work.title) != null ? _n : dir) != null ? _o : workKey(work)),
         workDir: dir,
@@ -13135,9 +13147,9 @@ var AnnotationService = class {
     } catch (error) {
       console.error("[midad-arabic-sources] annotation path repair", error);
     }
-    const migrated = await this.store.migrateSpike((workKey2, notePath) => this.migrationMeta(workKey2, notePath));
+    await this.store.migrateSpike((workKey2, notePath) => this.migrationMeta(workKey2, notePath));
     try {
-      await this.syncStartup(migrated);
+      await this.syncStartup();
     } catch (error) {
       console.error("[midad-arabic-sources] annotation startup", error);
     }
@@ -13191,15 +13203,12 @@ var AnnotationService = class {
     const note = annotationNotePathForDir(this.settings, meta.dir);
     return { ...meta, note };
   }
-  async syncStartup(migrated) {
+  async syncStartup() {
     for (const key of Object.keys(this.store.getIndex().works)) {
       const work = await this.store.getWork(key);
       if (!work)
         continue;
-      const exists = work.note ? await this.app.vault.adapter.exists((0, import_obsidian14.normalizePath)(work.note)) : false;
-      if (migrated || !work.note || !exists) {
-        await renderAnnotationNote(this.app, this.store, this.settings, key);
-      }
+      await renderAnnotationNote(this.app, this.store, this.settings, key);
     }
     await renderAnnotationMoc(this.app, this.store, this.settings);
     await this.refreshParent();

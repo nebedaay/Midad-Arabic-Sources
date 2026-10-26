@@ -64,6 +64,12 @@ export class AnnotationTargetResolver {
 		return this.settings.canonicalQuranRiwāya.trim() || "hafs";
 	}
 
+	/** The annotation store's key for a multi-unit work's hub note. */
+	private hubUnitKey(work: ManifestWork): string {
+		const collection = String(work.collection ?? workKey(work).split(":")[0]);
+		return `${collection}:hub`;
+	}
+
 	invalidate(): void {
 		this.models.clear();
 		this.manifestCache = null;
@@ -205,7 +211,7 @@ export class AnnotationTargetResolver {
 		const model = await this.model(work);
 		if (model) {
 			if (isHub) {
-				const unit = model.units.length === 1 ? unitKey(model.units[0]) : "hub";
+				const unit = model.units.length === 1 ? unitKey(model.units[0]) : this.hubUnitKey(work);
 				return {
 					workKey: workKey(work),
 					unitKey: unit,
@@ -231,7 +237,7 @@ export class AnnotationTargetResolver {
 		if (isHub) {
 			return {
 				workKey: workKey(work),
-				unitKey: "hub",
+				unitKey: this.hubUnitKey(work),
 				notePath: normalized,
 				workTitle: String(work.title ?? dir ?? workKey(work)),
 				workDir: dir,

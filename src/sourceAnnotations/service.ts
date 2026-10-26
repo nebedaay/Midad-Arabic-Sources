@@ -171,9 +171,9 @@ export class AnnotationService {
 		} catch (error) {
 			console.error("[midad-arabic-sources] annotation path repair", error);
 		}
-		const migrated = await this.store.migrateSpike((workKey, notePath) => this.migrationMeta(workKey, notePath));
+		await this.store.migrateSpike((workKey, notePath) => this.migrationMeta(workKey, notePath));
 		try {
-			await this.syncStartup(migrated);
+			await this.syncStartup();
 		} catch (error) {
 			console.error("[midad-arabic-sources] annotation startup", error);
 		}
@@ -229,16 +229,14 @@ export class AnnotationService {
 		return { ...meta, note };
 	}
 
-	private async syncStartup(migrated: boolean): Promise<void> {
+	private async syncStartup(): Promise<void> {
 		for (const key of Object.keys(this.store.getIndex().works)) {
 			const work = await this.store.getWork(key);
 			if (!work) continue;
-			const exists = work.note
-				? await this.app.vault.adapter.exists(normalizePath(work.note))
-				: false;
-			if (migrated || !work.note || !exists) {
-				await renderAnnotationNote(this.app, this.store, this.settings, key);
-			}
+			// Re-render existing annotation notes too: their section headings and
+			// source links are presentation, and an older note may predate the
+			// current layout even when the file itself exists.
+			await renderAnnotationNote(this.app, this.store, this.settings, key);
 		}
 		await renderAnnotationMoc(this.app, this.store, this.settings);
 		await this.refreshParent();
