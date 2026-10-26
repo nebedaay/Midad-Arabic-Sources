@@ -50,10 +50,10 @@ function annotationBlock(annotation: SourceAnnotation, unitNote: string, section
 	return lines.join("\n");
 }
 
-function unitLabel(work: AnnotationWorkFile, entry: AnnotationUnitEntry): string {
+function unitLabel(work: AnnotationWorkFile, entry: AnnotationUnitEntry, article = false): string {
 	const stem = entry.note.split("/").pop()?.replace(/\.md$/i, "") ?? entry.unitKey;
 	if (entry.unitKey.endsWith(":hub") || entry.unitKey === "hub" || stem === work.dir) {
-		return "the Table of Contents";
+		return article ? "the Table of Contents" : "Table of Contents";
 	}
 	const prefix = `${work.dir} - `;
 	return stem.startsWith(prefix) ? stem.slice(prefix.length) : stem;
@@ -68,7 +68,7 @@ function buildNoteBody(
 	for (const unit of units) {
 		if (!unit.annotations.length) continue;
 		count += unit.annotations.length;
-		lines.push(`### On ${noteHeadingLink(unit.entry.note, "", unitLabel(work, unit.entry))}`, "");
+		lines.push(`### On ${noteHeadingLink(unit.entry.note, "", unitLabel(work, unit.entry, true))}`, "");
 		for (const annotation of unit.annotations) {
 			if (annotation.anchorStatus === "orphaned") continue;
 			lines.push(annotationBlock(

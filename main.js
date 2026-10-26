@@ -11743,11 +11743,11 @@ function annotationBlock(annotation, unitNote, sectionLabel) {
   lines.push(`> <sub>added ${annotation.created.slice(0, 10)}${modified} \xB7 ^${annotation.id}</sub>`);
   return lines.join("\n");
 }
-function unitLabel(work, entry) {
+function unitLabel(work, entry, article = false) {
   var _a, _b;
   const stem = (_b = (_a = entry.note.split("/").pop()) == null ? void 0 : _a.replace(/\.md$/i, "")) != null ? _b : entry.unitKey;
   if (entry.unitKey.endsWith(":hub") || entry.unitKey === "hub" || stem === work.dir) {
-    return "the Table of Contents";
+    return article ? "the Table of Contents" : "Table of Contents";
   }
   const prefix = `${work.dir} - `;
   return stem.startsWith(prefix) ? stem.slice(prefix.length) : stem;
@@ -11759,7 +11759,7 @@ function buildNoteBody(work, units) {
     if (!unit.annotations.length)
       continue;
     count += unit.annotations.length;
-    lines.push(`### On ${noteHeadingLink(unit.entry.note, "", unitLabel(work, unit.entry))}`, "");
+    lines.push(`### On ${noteHeadingLink(unit.entry.note, "", unitLabel(work, unit.entry, true))}`, "");
     for (const annotation of unit.annotations) {
       if (annotation.anchorStatus === "orphaned")
         continue;
