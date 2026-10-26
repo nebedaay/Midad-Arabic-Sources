@@ -1049,6 +1049,20 @@ body.theme-dark {
     -webkit-box-orient: vertical;
 }
 
+.mas-ann-card-quote ul,
+.mas-ann-card-quote ol {
+    padding-inline-start: 0.3cm !important;
+    margin-block: 0;
+}
+
+.mas-ann-card-quote li {
+    margin-block: 0;
+}
+
+.mas-ann-card-quote p {
+    margin-block: 0;
+}
+
 .mas-ann-card--sidebar .mas-ann-card-body {
     display: flex;
     flex-direction: column;
