@@ -10177,6 +10177,17 @@ function selectionWatcher(onSelection, onPointerDown, onDomSelection) {
     })
   ];
 }
+function expandLinkRange(text, start, end) {
+  const open = text.lastIndexOf("[[", Math.max(0, end - 1));
+  if (open < 0)
+    return { start, end };
+  const close = text.indexOf("]]", open + 2);
+  if (close < 0)
+    return { start, end };
+  if (start > close + 2 || end < open)
+    return { start, end };
+  return { start: Math.min(start, open), end: Math.max(end, close + 2) };
+}
 function resolveForEditor(doc, annotations) {
   const prior = splitNote(doc);
   const bodyStart = doc.length - prior.body.length;
@@ -10186,9 +10197,10 @@ function resolveForEditor(doc, annotations) {
       const start = bodyStart + annotation.position.start;
       const end = bodyStart + annotation.position.end;
       if (start >= bodyStart && end <= doc.length && end > start) {
-        const ranges = visibleSegments(doc, start, end);
+        const expanded = expandLinkRange(doc, start, end);
+        const ranges = visibleSegments(doc, expanded.start, expanded.end);
         if (ranges.length) {
-          out.push({ ...annotation, start, end, ranges });
+          out.push({ ...annotation, start: expanded.start, end: expanded.end, ranges });
           continue;
         }
       }
