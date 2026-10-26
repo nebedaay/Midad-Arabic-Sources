@@ -32,9 +32,9 @@ function calloutLines(markdown: string, prefix: string): string[] {
 		.map((line) => (line.trim() ? `${prefix} ${line}` : prefix.replace(/\s+$/, "")));
 }
 
-function annotationBlock(annotation: SourceAnnotation, unitNote: string): string {
+function annotationBlock(annotation: SourceAnnotation, unitNote: string, sectionLabel?: string): string {
 	const lines: string[] = [];
-	const link = noteHeadingLink(unitNote, annotation.section);
+	const link = noteHeadingLink(unitNote, annotation.section, sectionLabel);
 	lines.push(`> [!mas-annotation-${annotation.color}] ${annotationLabel(annotation.color)} · ${link}`);
 	const quote = calloutLines(annotation.quoteMarkdown || annotation.quote, "> >");
 	lines.push(...quote);
@@ -71,7 +71,11 @@ function buildNoteBody(
 		lines.push(`### On ${noteHeadingLink(unit.entry.note, "", unitLabel(work, unit.entry))}`, "");
 		for (const annotation of unit.annotations) {
 			if (annotation.anchorStatus === "orphaned") continue;
-			lines.push(annotationBlock(annotation, unit.entry.note), "");
+			lines.push(annotationBlock(
+				annotation,
+				unit.entry.note,
+				annotation.section === "Chapters" ? unitLabel(work, unit.entry) : undefined
+			), "");
 		}
 	}
 	const orphans = units.flatMap((unit) =>

@@ -11727,10 +11727,10 @@ function annotationNotePath(work, settings) {
 function calloutLines(markdown, prefix) {
   return markdown.replace(/\r\n?/g, "\n").split("\n").map((line) => line.trim() ? `${prefix} ${line}` : prefix.replace(/\s+$/, ""));
 }
-function annotationBlock(annotation, unitNote) {
+function annotationBlock(annotation, unitNote, sectionLabel) {
   var _a;
   const lines = [];
-  const link = noteHeadingLink(unitNote, annotation.section);
+  const link = noteHeadingLink(unitNote, annotation.section, sectionLabel);
   lines.push(`> [!mas-annotation-${annotation.color}] ${annotationLabel(annotation.color)} \xB7 ${link}`);
   const quote = calloutLines(annotation.quoteMarkdown || annotation.quote, "> >");
   lines.push(...quote);
@@ -11763,7 +11763,7 @@ function buildNoteBody(work, units) {
     for (const annotation of unit.annotations) {
       if (annotation.anchorStatus === "orphaned")
         continue;
-      lines.push(annotationBlock(annotation, unit.entry.note), "");
+      lines.push(annotationBlock(annotation, unit.entry.note, annotation.section === "Chapters" ? unitLabel(work, unit.entry) : void 0), "");
     }
   }
   const orphans = units.flatMap((unit) => unit.annotations.filter((annotation) => annotation.anchorStatus === "orphaned").map((annotation) => ({ annotation, note: unit.entry.note })));
