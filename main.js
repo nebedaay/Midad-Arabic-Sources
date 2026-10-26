@@ -12530,10 +12530,13 @@ function openLink(event, app, sourcePath) {
   }
   return true;
 }
-function plainQuote(annotation) {
-  const raw = annotation.quoteMarkdown || annotation.quote || annotation.quoteText || "";
-  const text = markdownToText(raw).replace(/\[\[[^\]]*$/gm, "").replace(/\[[^\]]*$/gm, "").replace(/[ \t]+$/gm, "").trim();
-  return text || "Empty quote";
+function quoteMarkdown(annotation) {
+  let text = (annotation.quoteMarkdown || annotation.quote || annotation.quoteText || "").replace(/\r\n?/g, "\n").replace(/^(?:>\s?)+/gm, "");
+  text = text.replace(/\[\[([^\]|\n]+)\|([^\]]+)\]\]/g, "$2").replace(/\[\[([^\]\n]+)\]\]/g, "$1").replace(/\[\[([^\]|\n]+)\|([^\n]*)$/gm, "$2").replace(/\[\[([^\n]*)$/gm, (_match, rest) => {
+    var _a;
+    return ((_a = rest.split("|").pop()) == null ? void 0 : _a.trim()) || rest.trim();
+  });
+  return text.trim() || "Empty quote";
 }
 function action(parent, icon, label, run) {
   const button = parent.createEl("button", {
@@ -12573,7 +12576,7 @@ async function renderAnnotationCard(parent, options) {
   if (variant === "sidebar") {
     comment.setCssStyles({ background: annotationTint(annotation.color, 96, 0.32) });
     const quote = body.createDiv({ cls: "mas-ann-card-quote" });
-    quote.setText(plainQuote(annotation));
+    await import_obsidian10.MarkdownRenderer.render(app, quoteMarkdown(annotation), quote, target.notePath, component);
     quote.setCssStyles({ background: annotationTint(annotation.color, 84, 0.65) });
   }
   if (options.onEdit || options.onDelete || options.onOpenNote) {
@@ -13751,7 +13754,7 @@ ${MANAGED_CLOSE}
       }
       const quote = text.slice(match.start, match.end);
       const quoteText = markdownToText(quote);
-      const quoteMarkdown = cleanQuoteMarkdown(quote);
+      const quoteMarkdown2 = cleanQuoteMarkdown(quote);
       const prefix = text.slice(Math.max(bounds.contentStart, match.start - 80), match.start);
       const suffix = text.slice(match.end, Math.min(bounds.contentEnd, match.end + 80));
       const section = sectionAt(text, match.start);
@@ -13767,7 +13770,7 @@ ${MANAGED_CLOSE}
         ...annotation,
         quote,
         quoteText,
-        quoteMarkdown,
+        quoteMarkdown: quoteMarkdown2,
         prefix,
         suffix,
         section,
@@ -13779,7 +13782,7 @@ ${MANAGED_CLOSE}
         quoteChanged,
         previousQuotes
       };
-      const artifactChangedNow = quoteChanged || section !== annotation.section || annotation.anchorStatus !== "ok" || quoteMarkdown !== annotation.quoteMarkdown;
+      const artifactChangedNow = quoteChanged || section !== annotation.section || annotation.anchorStatus !== "ok" || quoteMarkdown2 !== annotation.quoteMarkdown;
       if (artifactChangedNow)
         artifactChanged = true;
       if (artifactChangedNow || quote !== annotation.quote || quoteText !== annotation.quoteText || prefix !== annotation.prefix || suffix !== annotation.suffix || ordinal !== annotation.ordinal || !annotation.position || annotation.position.start !== position.start || annotation.position.end !== position.end || JSON.stringify(annotation.segments) !== JSON.stringify(segments) || annotation.quoteChanged !== quoteChanged) {

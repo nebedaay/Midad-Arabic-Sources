@@ -1,6 +1,6 @@
 import { App, Component, MarkdownRenderer, setIcon } from "obsidian";
 import { annotationTint } from "./colors";
-import { markdownToText } from "./text";
+
 import type { AnnotationTarget, SourceAnnotation } from "./types";
 
 export type AnnotationCardVariant = "compact" | "sidebar";
@@ -34,14 +34,22 @@ function openLink(event: MouseEvent, app: App, sourcePath: string): boolean {
 	return true;
 }
 
-function plainQuote(annotation: SourceAnnotation): string {
-	const raw = annotation.quoteMarkdown || annotation.quote || annotation.quoteText || "";
-	const text = markdownToText(raw)
-		.replace(/\[\[[^\]]*$/gm, "")
-		.replace(/\[[^\]]*$/gm, "")
-		.replace(/[ \t]+$/gm, "")
-		.trim();
-	return text || "Empty quote";
+/**
+ * The quote as displayable Markdown: links become their visible text, while
+ * emphasis and other Markdown are left for MarkdownRenderer. Selections that
+ * stop inside a wikilink leave an unterminated `[[target|visible` fragment;
+ * the visible half is retained rather than dropping the whole line.
+ */
+function quoteMarkdown(annotation: SourceAnnotation): string {
+	let text = (annotation.quoteMarkdown || annotation.quote || annotation.quoteText || "")
+		.replace(/\r\n?/g, "\n")
+		.replace(/^(?:>\s?)+/gm, "");
+	text = text
+		.replace(/\[\[([^\]|\n]+)\|([^\]]+)\]\]/g, "$2")
+		.replace(/\[\[([^\]\n]+)\]\]/g, "$1")
+		.replace(/\[\[([^\]|\n]+)\|([^\n]*)$/gm, "$2")
+		.replace(/\[\[([^\n]*)$/gm, (_match, rest: string) => rest.split("|").pop()?.trim() || rest.trim());
+	return text.trim() || "Empty quote";
 }
 
 function action(
@@ -93,7 +101,7 @@ export async function renderAnnotationCard(
 		comment.setCssStyles({ background: annotationTint(annotation.color, 96, 0.32) });
 		// The comment leads; the highlighted excerpt sits directly beneath it.
 		const quote = body.createDiv({ cls: "mas-ann-card-quote" });
-		quote.setText(plainQuote(annotation));
+		await MarkdownRenderer.render(app, quoteMarkdown(annotation), quote, target.notePath, component);
 		quote.setCssStyles({ background: annotationTint(annotation.color, 84, 0.65) });
 	}
 
