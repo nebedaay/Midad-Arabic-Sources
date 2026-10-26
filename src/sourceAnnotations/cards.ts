@@ -54,7 +54,8 @@ async function completeTrailingWikilink(
 	const pipe = line.indexOf("|");
 	const targetPrefix = (pipe >= 0 ? line.slice(0, pipe) : line).trim();
 	if (!targetPrefix) return text;
-	const visible = pipe >= 0 ? line.slice(pipe + 1).trim() : targetPrefix;
+	const selectedAlias = pipe >= 0 ? line.slice(pipe + 1).trim() : "";
+	const visible = selectedAlias || targetPrefix;
 	const suffix = lineEnd >= 0 ? fragment.slice(lineEnd) : "";
 	const prefix = text.slice(0, start);
 
@@ -76,9 +77,15 @@ async function completeTrailingWikilink(
 		if (absolute >= 0 && source.startsWith("[[", absolute)) {
 			const close = source.indexOf("]]", absolute + 2);
 			if (close >= 0) {
-				const full = source.slice(absolute + 2, close).split("|")[0].trim();
+				const inner = source.slice(absolute + 2, close);
+				const bar = inner.indexOf("|");
+				const full = (bar >= 0 ? inner.slice(0, bar) : inner).trim();
+				const alias = bar >= 0 ? inner.slice(bar + 1).trim() : "";
 				if (full.startsWith(targetPrefix) || targetPrefix.startsWith(full)) {
-					return `${prefix}[[${full}|${visible}]]${suffix}`;
+					// A link's alias is what the source note actually displays.
+					// When a selection covers only the target part, showing the
+					// target would replace the rendered link label with a path.
+					return `${prefix}[[${full}|${alias || visible}]]${suffix}`;
 				}
 			}
 		}

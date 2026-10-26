@@ -44,6 +44,7 @@ import {
 	occurrencesBefore,
 	sectionAt,
 	expandLinkListSelection,
+	expandWikilinkSelection,
 	findRenderedText,
 	selectionExclusion,
 	type SelectionExclusion,
@@ -703,6 +704,9 @@ export class AnnotationService {
 				end = last.end;
 			}
 		}
+		const widened = expandWikilinkSelection(raw, start, end);
+		start = widened.from;
+		end = widened.to;
 		const bounds = managedBounds(raw) ?? (target.sourceStatus === "adopted" ? bodyBounds(raw) : null);
 		if (!bounds || start < bounds.contentStart || end > bounds.contentEnd) return null;
 		if (crossesHeading(raw, start, end) || selectionExclusion(raw, start, end)) return null;
@@ -1014,8 +1018,9 @@ export class AnnotationService {
 		let to = range?.to ?? editor.posToOffset(editor.getCursor("to"));
 		if (from > to) [from, to] = [to, from];
 		const expanded = expandLinkListSelection(value, from, to);
-		from = expanded.from;
-		to = expanded.to;
+		const widened = expandWikilinkSelection(value, expanded.from, expanded.to);
+		from = widened.from;
+		to = widened.to;
 		if (from < bounds.contentStart || to > bounds.contentEnd) return null;
 		while (from < to && /\s/.test(value.charAt(from))) from++;
 		while (to > from && /\s/.test(value.charAt(to - 1))) to--;

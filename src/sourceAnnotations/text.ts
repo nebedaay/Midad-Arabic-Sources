@@ -287,6 +287,27 @@ export function expandLinkListSelection(
 	return { from: start, to: end };
 }
 
+/**
+ * Wikilinks are atomic in the rendered note. A raw selection that begins or ends
+ * inside one is widened to the entire link, so an annotation never stores a
+ * partial `[[target` fragment. Images (`![[...]]`) are widened as a unit too.
+ */
+export function expandWikilinkSelection(
+	text: string,
+	from: number,
+	to: number
+): { from: number; to: number } {
+	let start = from;
+	let end = to;
+	for (const match of text.matchAll(/!?\[\[[^\]\n]*\]\]/g)) {
+		const matchStart = match.index;
+		const matchEnd = matchStart + match[0].length;
+		if (start > matchStart && start < matchEnd) start = matchStart;
+		if (end > matchStart && end < matchEnd) end = matchEnd;
+	}
+	return { from: start, to: end };
+}
+
 interface VisibleChar {
 	char: string;
 	index: number;

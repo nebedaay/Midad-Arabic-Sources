@@ -2,7 +2,13 @@ import { TFile, type App } from "obsidian";
 import { AdoptedNotesRegistry } from "./adopted";
 import { findNormalized, resolveAnnotations, visibleSegments } from "./resolve";
 import { reanchorAnnotation } from "./reanchor";
-import { bodyBounds, expandLinkListSelection, findRenderedText, selectionExclusion } from "./text";
+import {
+	bodyBounds,
+	expandLinkListSelection,
+	expandWikilinkSelection,
+	findRenderedText,
+	selectionExclusion,
+} from "./text";
 
 export interface RegressionResult {
 	passed: number;
@@ -73,6 +79,26 @@ export async function runAnnotationRegressionTests(): Promise<RegressionResult> 
 	const expanded = expandLinkListSelection(listText, firstLink + 3, secondLink + 4);
 	check("link-list selection expands to complete lines",
 		expanded.from === firstLink && expanded.to === secondLink + "- [[B|2]]".length);
+
+	const linkText = "Text text [[Part of a link]] tail";
+	const linkStart = linkText.indexOf("[[");
+	const linkEnd = linkText.indexOf("]]") + 2;
+	const partAt = linkText.indexOf("Part");
+	const partialLink = expandWikilinkSelection(linkText, partAt, partAt + "Part of".length);
+	check("selection inside a wikilink expands to the whole link",
+		partialLink.from === linkStart && partialLink.to === linkEnd);
+	const spanningLink = expandWikilinkSelection(linkText, 0, partAt + 4);
+	check("selection ending inside a wikilink expands its end",
+		spanningLink.from === 0 && spanningLink.to === linkEnd);
+	const startingLink = expandWikilinkSelection(linkText, partAt, linkText.length);
+	check("selection starting inside a wikilink expands its start",
+		startingLink.from === linkStart && startingLink.to === linkText.length);
+	const imageText = "Before ![[image.png|alt]] after";
+	const imageStart = imageText.indexOf("![[");
+	const imageEnd = imageText.indexOf("]]") + 2;
+	const imagePart = expandWikilinkSelection(imageText, imageText.indexOf("image"), imageText.indexOf("image") + 3);
+	check("embedded image selection expands as one link",
+		imagePart.from === imageStart && imagePart.to === imageEnd);
 
 	const renderedRaw = "The **best** of [you](https://example.com) are [[chapter|here]].";
 	const rendered = findRenderedText(renderedRaw, "The best of you are here.");
