@@ -230,7 +230,78 @@ export class AnnotationService {
 		return { ...meta, note };
 	}
 
+	/**
+	 * Older versions could store only the selected fragment of a wikilink. Links
+	 * are atomic now, so widen those legacy ranges before rendering the notes.
+	 */
+	private async normalizeLegacyWikilinks(): Promise<void> {
+		for (const key of Object.keys(this.store.getIndex().works)) {
+			const work = await this.store.getWork(key);
+			if (!work) continue;
+			for (const entry of Object.values(work.units)) {
+				const notePath = entry.note ? normalizePath(entry.note) : "";
+				if (!notePath) continue;
+				let text = "";
+				try {
+					text = await this.app.vault.adapter.read(notePath);
+				} catch {
+					continue;
+				}
+				const bounds = managedBounds(text) ?? (work.sourceStatus === "adopted" ? bodyBounds(text) : null);
+				if (!bounds) continue;
+				const unit = await this.store.getUnit(key, entry.unitKey);
+				if (!unit) continue;
+				let changed = false;
+				const annotations = unit.annotations.map((annotation) => {
+					if (annotation.anchorStatus !== "ok") return annotation;
+					const match = reanchorAnnotation(text, annotation, {
+						bodyStart: bounds.bodyStart,
+						contentStart: bounds.contentStart,
+						contentEnd: bounds.contentEnd,
+					});
+					if (!match) return annotation;
+					const widened = expandWikilinkSelection(text, match.start, match.end);
+					if (widened.from === match.start && widened.to === match.end) return annotation;
+					const quote = text.slice(widened.from, widened.to);
+					const now = annotationNow();
+					changed = true;
+					return {
+						...annotation,
+						quote,
+						quoteText: markdownToText(quote),
+						quoteMarkdown: cleanQuoteMarkdown(quote),
+						prefix: text.slice(Math.max(bounds.contentStart, widened.from - 80), widened.from),
+						suffix: text.slice(widened.to, Math.min(bounds.contentEnd, widened.to + 80)),
+						section: sectionAt(text, widened.from),
+						ordinal: occurrencesBefore(text, widened.from, quote),
+						position: {
+							start: widened.from - bounds.bodyStart,
+							end: widened.to - bounds.bodyStart,
+						},
+						segments: visibleSegments(text, widened.from, widened.to)
+							.map((range) => [range.start - bounds.bodyStart, range.end - bounds.bodyStart] as [number, number]),
+						modified: now,
+						anchored: now,
+						anchorStatus: "ok" as const,
+						quoteChanged: true,
+						previousQuotes: [...(annotation.previousQuotes ?? []), annotation.quote].filter(Boolean).slice(-5),
+					};
+				});
+				if (!changed) continue;
+				await this.store.saveUnit({
+					workKey: key,
+					unitKey: entry.unitKey,
+					notePath,
+					workTitle: work.title,
+					workDir: work.dir,
+					sourceStatus: work.sourceStatus,
+				}, annotations);
+			}
+		}
+	}
+
 	private async syncStartup(): Promise<void> {
+		await this.normalizeLegacyWikilinks();
 		for (const key of Object.keys(this.store.getIndex().works)) {
 			const work = await this.store.getWork(key);
 			if (!work) continue;
@@ -779,18 +850,19 @@ export class AnnotationService {
 				}
 				return annotation;
 			}
-			const quote = text.slice(match.start, match.end);
+			const widened = expandWikilinkSelection(text, match.start, match.end);
+			const quote = text.slice(widened.from, widened.to);
 			const quoteText = markdownToText(quote);
 			const quoteMarkdown = cleanQuoteMarkdown(quote);
-			const prefix = text.slice(Math.max(bounds.contentStart, match.start - 80), match.start);
-			const suffix = text.slice(match.end, Math.min(bounds.contentEnd, match.end + 80));
-			const section = sectionAt(text, match.start);
-			const ordinal = occurrencesBefore(text, match.start, quote);
+			const prefix = text.slice(Math.max(bounds.contentStart, widened.from - 80), widened.from);
+			const suffix = text.slice(widened.to, Math.min(bounds.contentEnd, widened.to + 80));
+			const section = sectionAt(text, widened.from);
+			const ordinal = occurrencesBefore(text, widened.from, quote);
 			const position = {
-				start: match.start - bounds.bodyStart,
-				end: match.end - bounds.bodyStart,
+				start: widened.from - bounds.bodyStart,
+				end: widened.to - bounds.bodyStart,
 			};
-			const segments = visibleSegments(text, match.start, match.end)
+			const segments = visibleSegments(text, widened.from, widened.to)
 				.map((range) => [range.start - bounds.bodyStart, range.end - bounds.bodyStart] as [number, number]);
 			const quoteChanged = quote !== annotation.quote;
 			const previousQuotes = quoteChanged
