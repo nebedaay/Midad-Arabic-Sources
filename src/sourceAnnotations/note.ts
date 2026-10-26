@@ -2,6 +2,7 @@ import { App, normalizePath } from "obsidian";
 import { MANAGED_CLOSE, MANAGED_OPEN } from "../sourceImport/merge";
 import { writeMerged } from "../sourceImport/render";
 import { YamlBuilder } from "../sourceImport/yaml";
+import { annotationNotesFolder, ensureFolder, safeFileSegment, sourceRoot } from "../sourcePaths";
 import { annotationLabel } from "./resolve";
 import type { AnnotationStore } from "./store";
 import { annotationToday } from "./store";
@@ -20,32 +21,13 @@ function nowStamp(): string {
 	return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
 
-function safeFileStem(value: string): string {
-	return value.replace(/[\\/:*?"<>|#^]/g, "-").trim() || "Annotations";
-}
-
-async function ensureFolder(app: App, path: string): Promise<void> {
-	const normalized = normalizePath(path);
-	const parts = normalized.split("/");
-	let current = "";
-	for (const part of parts) {
-		current = current ? `${current}/${part}` : part;
-		if (!(await app.vault.adapter.exists(current))) {
-			try {
-				await app.vault.adapter.mkdir(current);
-			} catch {
-				/* another writer may have created it */
-			}
-		}
-	}
+export function annotationNotePathForDir(settings: AnnotationSettings, dir: string): string {
+	return normalizePath(`${annotationNotesFolder(settings)}/${safeFileSegment(dir, "Annotations")} - Annotations.md`);
 }
 
 export function annotationNotePath(work: AnnotationWorkFile, settings: AnnotationSettings): string {
-	const folder = settings.annotationNoteFolder.trim() ||
-		`${settings.sourceRoot.trim() || settings.sourceImportRoot.trim() || "_7 Sources"}/Annotation Notes`;
 	const adopted = work.key.startsWith("adopted:") || work.key.startsWith("note:");
-	const stem = adopted ? `Adopted - ${work.title}` : work.dir;
-	return normalizePath(`${folder}/${safeFileStem(stem)} - Annotations.md`);
+	return annotationNotePathForDir(settings, adopted ? `Adopted - ${work.title}` : work.dir);
 }
 
 function calloutLines(markdown: string, prefix: string): string[] {
@@ -155,8 +137,7 @@ export async function renderAnnotationNote(
 }
 
 export function annotationMocPath(settings: AnnotationSettings): string {
-	const root = settings.sourceRoot.trim() || settings.sourceImportRoot.trim() || "_7 Sources";
-	return normalizePath(`${root}/source-annotation.md`);
+	return normalizePath(`${sourceRoot(settings)}/source-annotation.md`);
 }
 
 async function mocEntry(

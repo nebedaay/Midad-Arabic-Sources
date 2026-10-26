@@ -1,4 +1,5 @@
 import { App, normalizePath } from "obsidian";
+import { ensureFolder as ensureVaultFolder, safeFileSegment } from "../sourcePaths";
 import type {
 	AnnotationIndexEntry,
 	AnnotationIndexFile,
@@ -26,11 +27,7 @@ export interface AnnotationTrashBatch {
 }
 
 function safeSegment(value: string): string {
-	return String(value)
-		.replace(/[\\/:*?"<>|#^]/g, "-")
-		.replace(/\s+/g, " ")
-		.trim()
-		.slice(0, 100) || "work";
+	return safeFileSegment(value, "work", 100);
 }
 
 function workFolder(key: string): string {
@@ -637,19 +634,7 @@ export class AnnotationStore {
 	}
 
 	private async ensureFolder(path: string): Promise<void> {
-		const normalized = normalizePath(path);
-		const parts = normalized.split("/");
-		let current = "";
-		for (const part of parts) {
-			current = current ? `${current}/${part}` : part;
-			if (!(await this.app.vault.adapter.exists(current))) {
-				try {
-					await this.app.vault.adapter.mkdir(current);
-				} catch {
-					/* another writer may have created it */
-				}
-			}
-		}
+		await ensureVaultFolder(this.app, path);
 	}
 
 	private async writeAtomic(path: string, content: string): Promise<void> {

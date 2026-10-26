@@ -2,6 +2,7 @@ import { App, TFile, normalizePath } from "obsidian";
 import { makeEngine, SourceTemplateEngine } from "./engine";
 import { YamlFieldSpec } from "./yaml";
 import { joinNote, mergeFrontmatter, mergeNote, splitNote, substantiveContentDiffers } from "./merge";
+import { ensureFolder } from "../sourcePaths";
 
 /** Loosely-typed JSON data: importer work/unit models (fields are template-driven). */
 export type JsonObject = Record<string, any>;
@@ -241,11 +242,6 @@ export function buildMocSections(works: Array<JsonObject>): MocSection[] {
 			name,
 			works: (map.get(name) ?? []).slice().sort((a, b) => String(a.title).localeCompare(String(b.title))),
 		}));
-}
-
-export async function ensureFolder(app: App, folder: string): Promise<void> {
-	const path = normalizePath(folder);
-	if (!(await app.vault.adapter.exists(path))) await app.vault.createFolder(path);
 }
 
 export async function writeNote(app: App, path: string, content: string): Promise<void> {

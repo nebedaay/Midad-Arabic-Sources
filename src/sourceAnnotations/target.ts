@@ -2,6 +2,7 @@ import { App, TFile, normalizePath } from "obsidian";
 import type { SourceModel } from "../sourceImport/render";
 import type { AdoptedNotesRegistry } from "./adopted";
 import type { AnnotationTarget, AnnotationSettings, SourceStatus } from "./types";
+import { canonicalQuranFolder, installedSourcesRoot } from "../sourcePaths";
 
 interface ManifestWork {
 	key?: string;
@@ -52,11 +53,11 @@ export class AnnotationTargetResolver {
 	}
 
 	private outRoot(): string {
-		return this.settings.sourceImportRoot.trim() || "_7 Sources";
+		return installedSourcesRoot(this.settings);
 	}
 
 	private canonicalRoot(): string {
-		return this.settings.canonicalQuranFolder.trim() || `${this.outRoot()}/Quran`;
+		return canonicalQuranFolder(this.settings);
 	}
 
 	private canonicalId(): string {

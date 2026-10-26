@@ -1,4 +1,5 @@
 import { App, TFile, normalizePath } from "obsidian";
+import { safeFileSegment } from "../sourcePaths";
 
 export const ADOPTED_REGISTRY = ".midad-arabic-sources/annotations/adopted.json";
 export const ADOPTED_BIBLIOGRAPHIC_ROOT = "_2 Bibliographic notes/";
@@ -24,7 +25,7 @@ interface AdoptedFile {
 }
 
 function safeSegment(value: string): string {
-	return value.replace(/[\\/:*?"<>|#^]/g, "-").replace(/\s+/g, " ").trim() || "note";
+	return safeFileSegment(value);
 }
 
 function uuid(): string {

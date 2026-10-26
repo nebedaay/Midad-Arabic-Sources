@@ -43,10 +43,10 @@ var http = __toModule(require("http"));
 var os = __toModule(require("os"));
 var import_util = __toModule(require("util"));
 var zlib = __toModule(require("zlib"));
-var import_obsidian15 = __toModule(require("obsidian"));
+var import_obsidian16 = __toModule(require("obsidian"));
 
 // src/sourceImport/render.ts
-var import_obsidian = __toModule(require("obsidian"));
+var import_obsidian2 = __toModule(require("obsidian"));
 
 // node_modules/eta/dist/index.mjs
 var fs = __toModule(require("node:fs"));
@@ -918,6 +918,58 @@ function substantiveContentDiffers(existing, rendered) {
   return existing.replace(UPDATED_LINE, "") !== rendered.replace(UPDATED_LINE, "");
 }
 
+// src/sourcePaths.ts
+var import_obsidian = __toModule(require("obsidian"));
+var DEFAULT_SOURCE_ROOT = "Midad Arabic Sources";
+function clean(value) {
+  return String(value != null ? value : "").trim();
+}
+function sourceRoot(settings) {
+  const explicit = clean(settings.sourceRoot);
+  if (explicit)
+    return (0, import_obsidian.normalizePath)(explicit);
+  const installed = clean(settings.sourceImportRoot);
+  if (installed) {
+    return (0, import_obsidian.normalizePath)(installed.replace(/\/Installed Sources\/?$/, ""));
+  }
+  return DEFAULT_SOURCE_ROOT;
+}
+function installedSourcesRoot(settings) {
+  return (0, import_obsidian.normalizePath)(clean(settings.sourceImportRoot) || `${sourceRoot(settings)}/Installed Sources`);
+}
+function transcriptionsFolder(settings) {
+  return (0, import_obsidian.normalizePath)(`${sourceRoot(settings)}/Transcriptions`);
+}
+function translationsFolder(settings) {
+  return (0, import_obsidian.normalizePath)(`${sourceRoot(settings)}/Translations`);
+}
+function annotationNotesFolder(settings) {
+  return (0, import_obsidian.normalizePath)(clean(settings.annotationNoteFolder) || `${sourceRoot(settings)}/Annotation Notes`);
+}
+function canonicalQuranFolder(settings) {
+  return (0, import_obsidian.normalizePath)(clean(settings.canonicalQuranFolder) || `${installedSourcesRoot(settings)}/Quran`);
+}
+function sourceNotePath(settings, name) {
+  return (0, import_obsidian.normalizePath)(`${sourceRoot(settings)}/${name}.md`);
+}
+function safeFileSegment(value, fallback = "note", max = 100) {
+  return String(value != null ? value : "").replace(/[\\/:*?"<>|#^]/g, "-").replace(/\s+/g, " ").trim().slice(0, max) || fallback;
+}
+async function ensureFolder(app, folder) {
+  const normalized2 = (0, import_obsidian.normalizePath)(folder);
+  const parts = normalized2.split("/");
+  let current = "";
+  for (const part of parts) {
+    current = current ? `${current}/${part}` : part;
+    if (!await app.vault.adapter.exists(current)) {
+      try {
+        await app.vault.adapter.mkdir(current);
+      } catch (e) {
+      }
+    }
+  }
+}
+
 // src/sourceImport/render.ts
 var TEMPLATE_FILES = {
   source: "source-note.eta.md",
@@ -934,13 +986,13 @@ var TEMPLATE_FILES = {
 var TEMPLATE_FOLDER = "midad-arabic-sources-import-templates";
 function vaultRelative(vaultPath, abs) {
   if (vaultPath && abs.startsWith(vaultPath)) {
-    return (0, import_obsidian.normalizePath)(abs.slice(vaultPath.length + 1));
+    return (0, import_obsidian2.normalizePath)(abs.slice(vaultPath.length + 1));
   }
-  return (0, import_obsidian.normalizePath)(abs);
+  return (0, import_obsidian2.normalizePath)(abs);
 }
 async function readVaultFile(app, path2) {
   try {
-    const p = (0, import_obsidian.normalizePath)(path2);
+    const p = (0, import_obsidian2.normalizePath)(path2);
     if (await app.vault.adapter.exists(p))
       return await app.vault.adapter.read(p);
   } catch (e) {
@@ -1072,15 +1124,10 @@ function buildMocSections(works) {
     };
   });
 }
-async function ensureFolder(app, folder) {
-  const path2 = (0, import_obsidian.normalizePath)(folder);
-  if (!await app.vault.adapter.exists(path2))
-    await app.vault.createFolder(path2);
-}
 async function writeNote(app, path2, content) {
-  const p = (0, import_obsidian.normalizePath)(path2);
+  const p = (0, import_obsidian2.normalizePath)(path2);
   const existing = app.vault.getAbstractFileByPath(p);
-  if (existing instanceof import_obsidian.TFile)
+  if (existing instanceof import_obsidian2.TFile)
     await app.vault.modify(existing, content);
   else
     await app.vault.create(p, content);
@@ -1088,16 +1135,16 @@ async function writeNote(app, path2, content) {
 async function listMarkdown(app, folder) {
   var _a;
   try {
-    const res = await app.vault.adapter.list((0, import_obsidian.normalizePath)(folder));
+    const res = await app.vault.adapter.list((0, import_obsidian2.normalizePath)(folder));
     return ((_a = res.files) != null ? _a : []).filter((f) => f.endsWith(".md"));
   } catch (e) {
     return [];
   }
 }
 async function deleteNote(app, path2) {
-  const p = (0, import_obsidian.normalizePath)(path2);
+  const p = (0, import_obsidian2.normalizePath)(path2);
   const file = app.vault.getAbstractFileByPath(p);
-  if (file instanceof import_obsidian.TFile)
+  if (file instanceof import_obsidian2.TFile)
     await app.fileManager.trashFile(file);
 }
 async function writeMerged(app, path2, out, force = false, replaceUnmanaged = true) {
@@ -9796,7 +9843,7 @@ if __name__ == '__main__':
 ];
 
 // src/docs.ts
-var import_obsidian2 = __toModule(require("obsidian"));
+var import_obsidian3 = __toModule(require("obsidian"));
 var GITHUB_DOCS_BASE = "https://github.com/nebedaay/Midad-Arabic-Sources/blob/main/docs/";
 var GITHUB_README_URL = "https://github.com/nebedaay/Midad-Arabic-Sources/blob/main/README.md";
 var DOC_ORDER = [
@@ -9844,12 +9891,12 @@ function getDocs() {
 function githubDocUrl(name) {
   return name === "README.md" ? GITHUB_README_URL : GITHUB_DOCS_BASE + name;
 }
-var DocsModal = class extends import_obsidian2.Modal {
+var DocsModal = class extends import_obsidian3.Modal {
   constructor(app, initial = "README.md") {
     super(app);
     this.initial = initial;
     this.navItems = new Map();
-    this.component = new import_obsidian2.Component();
+    this.component = new import_obsidian3.Component();
   }
   onOpen() {
     this.component.load();
@@ -9900,7 +9947,7 @@ var DocsModal = class extends import_obsidian2.Modal {
         this.show(m[1]);
       }
     });
-    void import_obsidian2.MarkdownRenderer.render(this.app, doc.markdown, content, "", this.component);
+    void import_obsidian3.MarkdownRenderer.render(this.app, doc.markdown, content, "", this.component);
     this.body.scrollTop = 0;
   }
   onClose() {
@@ -9913,7 +9960,7 @@ function openDocs(app, name = "README.md") {
 }
 
 // src/sourceAnnotations/service.ts
-var import_obsidian13 = __toModule(require("obsidian"));
+var import_obsidian14 = __toModule(require("obsidian"));
 var import_view2 = __toModule(require("@codemirror/view"));
 
 // src/sourceAnnotations/editor.ts
@@ -10310,10 +10357,10 @@ function clearEditorAnnotations(view) {
 }
 
 // src/sourceAnnotations/adopted.ts
-var import_obsidian3 = __toModule(require("obsidian"));
+var import_obsidian4 = __toModule(require("obsidian"));
 var ADOPTED_REGISTRY = ".midad-arabic-sources/annotations/adopted.json";
 function safeSegment(value) {
-  return value.replace(/[\\/:*?"<>|#^]/g, "-").replace(/\s+/g, " ").trim() || "note";
+  return safeFileSegment(value);
 }
 function uuid() {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
@@ -10362,13 +10409,13 @@ var AdoptedNotesRegistry = class {
     var _a;
     this.entries.clear();
     try {
-      const path2 = (0, import_obsidian3.normalizePath)(ADOPTED_REGISTRY);
+      const path2 = (0, import_obsidian4.normalizePath)(ADOPTED_REGISTRY);
       if (await this.app.vault.adapter.exists(path2)) {
         const parsed = JSON.parse(await this.app.vault.adapter.read(path2));
         for (const [key, entry] of Object.entries((_a = parsed.notes) != null ? _a : {})) {
           if (!entry || !entry.workKey || !entry.unitKey)
             continue;
-          this.entries.set((0, import_obsidian3.normalizePath)(key), { ...entry, path: (0, import_obsidian3.normalizePath)(key) });
+          this.entries.set((0, import_obsidian4.normalizePath)(key), { ...entry, path: (0, import_obsidian4.normalizePath)(key) });
         }
       }
     } catch (e) {
@@ -10376,7 +10423,7 @@ var AdoptedNotesRegistry = class {
     this.loaded = true;
   }
   async save() {
-    const path2 = (0, import_obsidian3.normalizePath)(ADOPTED_REGISTRY);
+    const path2 = (0, import_obsidian4.normalizePath)(ADOPTED_REGISTRY);
     const parent = path2.split("/").slice(0, -1).join("/");
     if (parent && !await this.app.vault.adapter.exists(parent)) {
       await this.app.vault.adapter.mkdir(parent);
@@ -10387,11 +10434,11 @@ var AdoptedNotesRegistry = class {
     await this.app.vault.adapter.write(path2, JSON.stringify({ schema: 1, notes }, null, 2) + "\n");
   }
   has(path2) {
-    return this.entries.has((0, import_obsidian3.normalizePath)(path2));
+    return this.entries.has((0, import_obsidian4.normalizePath)(path2));
   }
   get(path2) {
     var _a;
-    return (_a = this.entries.get((0, import_obsidian3.normalizePath)(path2))) != null ? _a : null;
+    return (_a = this.entries.get((0, import_obsidian4.normalizePath)(path2))) != null ? _a : null;
   }
   all() {
     return [...this.entries.values()];
@@ -10405,7 +10452,7 @@ var AdoptedNotesRegistry = class {
   }
   async registerFile(file) {
     var _a, _b;
-    const path2 = (0, import_obsidian3.normalizePath)(file.path);
+    const path2 = (0, import_obsidian4.normalizePath)(file.path);
     if (this.entries.has(path2))
       return false;
     const frontmatter = (_a = this.app.metadataCache.getFileCache(file)) == null ? void 0 : _a.frontmatter;
@@ -10454,7 +10501,7 @@ var AdoptedNotesRegistry = class {
   async restoreFromStore(workKey2, workTitle, workDir, units) {
     let changed = false;
     for (const unit of units) {
-      const path2 = (0, import_obsidian3.normalizePath)(unit.path);
+      const path2 = (0, import_obsidian4.normalizePath)(unit.path);
       if (!path2 || this.entries.has(path2))
         continue;
       this.entries.set(path2, {
@@ -10494,12 +10541,12 @@ var AdoptedNotesRegistry = class {
     return changed;
   }
   async rename(oldPath, newPath) {
-    const oldKey = (0, import_obsidian3.normalizePath)(oldPath);
+    const oldKey = (0, import_obsidian4.normalizePath)(oldPath);
     const entry = this.entries.get(oldKey);
     if (!entry)
       return false;
     this.entries.delete(oldKey);
-    const next = (0, import_obsidian3.normalizePath)(newPath);
+    const next = (0, import_obsidian4.normalizePath)(newPath);
     entry.path = next;
     if (entry.workDir === baseName(oldPath))
       entry.workDir = baseName(next);
@@ -10508,7 +10555,7 @@ var AdoptedNotesRegistry = class {
     return true;
   }
   async remove(path2) {
-    const key = (0, import_obsidian3.normalizePath)(path2);
+    const key = (0, import_obsidian4.normalizePath)(path2);
     if (!this.entries.has(key))
       return false;
     this.entries.delete(key);
@@ -10518,7 +10565,7 @@ var AdoptedNotesRegistry = class {
 };
 
 // src/sourceAnnotations/modal.ts
-var import_obsidian4 = __toModule(require("obsidian"));
+var import_obsidian5 = __toModule(require("obsidian"));
 var COLOR_LABEL = {
   yellow: "Yellow",
   orange: "Orange",
@@ -10529,7 +10576,7 @@ var COLOR_LABEL = {
   green: "Green",
   gray: "Gray"
 };
-var ConfirmModal = class extends import_obsidian4.Modal {
+var ConfirmModal = class extends import_obsidian5.Modal {
   constructor(app, options) {
     super(app);
     this.options = options;
@@ -10539,14 +10586,14 @@ var ConfirmModal = class extends import_obsidian4.Modal {
     this.titleEl.setText(this.options.title);
     this.contentEl.createEl("p", { text: this.options.message });
     const buttons = this.contentEl.createDiv({ cls: "modal-button-container" });
-    new import_obsidian4.ButtonComponent(buttons).setButtonText("Cancel").onClick(() => this.close());
-    new import_obsidian4.ButtonComponent(buttons).setButtonText((_a = this.options.confirmText) != null ? _a : "Confirm").setDestructive().onClick(async () => {
+    new import_obsidian5.ButtonComponent(buttons).setButtonText("Cancel").onClick(() => this.close());
+    new import_obsidian5.ButtonComponent(buttons).setButtonText((_a = this.options.confirmText) != null ? _a : "Confirm").setDestructive().onClick(async () => {
       try {
         await this.options.onConfirm();
         this.close();
       } catch (error) {
         console.error("[midad-arabic-sources] confirm action", error);
-        new import_obsidian4.Notice(`Action failed: ${error instanceof Error ? error.message : String(error)}`);
+        new import_obsidian5.Notice(`Action failed: ${error instanceof Error ? error.message : String(error)}`);
       }
     });
   }
@@ -10637,19 +10684,19 @@ var AnnotationPopup = class {
     hint.setText("\u2190/\u2192 colour \xB7 Tab comment \xB7 Esc \xB7 Cmd/Ctrl+Enter");
     const buttons = footer.createDiv({ cls: "mas-annotation-popup-buttons" });
     if (this.options.onDelete) {
-      this.deleteButton = new import_obsidian4.ButtonComponent(buttons).setButtonText("Delete").setClass("mod-warning").onClick(() => {
+      this.deleteButton = new import_obsidian5.ButtonComponent(buttons).setButtonText("Delete").setClass("mod-warning").onClick(() => {
         void this.delete();
       });
     }
     if (this.options.onReanchor) {
-      new import_obsidian4.ButtonComponent(buttons).setButtonText((_c = this.options.reanchorLabel) != null ? _c : "Re-anchor").onClick(() => {
+      new import_obsidian5.ButtonComponent(buttons).setButtonText((_c = this.options.reanchorLabel) != null ? _c : "Re-anchor").onClick(() => {
         var _a2, _b2;
         (_b2 = (_a2 = this.options).onReanchor) == null ? void 0 : _b2.call(_a2);
         this.close("reanchor");
       });
     }
-    new import_obsidian4.ButtonComponent(buttons).setButtonText("Cancel").onClick(() => this.close("button"));
-    new import_obsidian4.ButtonComponent(buttons).setButtonText("Save").setCta().onClick(() => {
+    new import_obsidian5.ButtonComponent(buttons).setButtonText("Cancel").onClick(() => this.close("button"));
+    new import_obsidian5.ButtonComponent(buttons).setButtonText("Save").setCta().onClick(() => {
       void this.save();
     });
     popup.addEventListener("keydown", (event) => {
@@ -10659,7 +10706,7 @@ var AnnotationPopup = class {
         this.close("escape");
       }
     });
-    this.scope = new import_obsidian4.Scope(this.app.scope);
+    this.scope = new import_obsidian5.Scope(this.app.scope);
     this.scope.register(["Mod"], "Enter", (event) => {
       event.preventDefault();
       void this.save();
@@ -10787,7 +10834,7 @@ var AnnotationPopup = class {
       this.close("button");
     } catch (error) {
       console.error("[midad-arabic-sources] save annotation", error);
-      new import_obsidian4.Notice(`Could not save annotation: ${error instanceof Error ? error.message : String(error)}`);
+      new import_obsidian5.Notice(`Could not save annotation: ${error instanceof Error ? error.message : String(error)}`);
     } finally {
       this.busy = false;
     }
@@ -10809,7 +10856,7 @@ var AnnotationPopup = class {
       this.close("button");
     } catch (error) {
       console.error("[midad-arabic-sources] delete annotation", error);
-      new import_obsidian4.Notice(`Could not delete annotation: ${error instanceof Error ? error.message : String(error)}`);
+      new import_obsidian5.Notice(`Could not delete annotation: ${error instanceof Error ? error.message : String(error)}`);
     } finally {
       this.busy = false;
     }
@@ -10841,8 +10888,8 @@ var AnnotationPopup = class {
 };
 
 // src/sourceAnnotations/trashModal.ts
-var import_obsidian5 = __toModule(require("obsidian"));
-var AnnotationTrashModal = class extends import_obsidian5.Modal {
+var import_obsidian6 = __toModule(require("obsidian"));
+var AnnotationTrashModal = class extends import_obsidian6.Modal {
   constructor(app, service) {
     super(app);
     this.service = service;
@@ -10878,15 +10925,15 @@ var AnnotationTrashModal = class extends import_obsidian5.Modal {
         text: `${batch.count} annotation(s) \xB7 ${batch.sourceStatus} \xB7 deleted ${batch.deletedAt.slice(0, 10)}`
       });
       const actions = row.createDiv({ cls: "mas-trash-actions" });
-      new import_obsidian5.ButtonComponent(actions).setButtonText("Restore").onClick(async () => {
+      new import_obsidian6.ButtonComponent(actions).setButtonText("Restore").onClick(async () => {
         try {
           await this.service.restoreTrashBatch(batch.path);
           await this.render();
         } catch (error) {
-          new import_obsidian5.Notice(`Could not restore: ${error instanceof Error ? error.message : String(error)}`);
+          new import_obsidian6.Notice(`Could not restore: ${error instanceof Error ? error.message : String(error)}`);
         }
       });
-      new import_obsidian5.ButtonComponent(actions).setButtonText("Delete permanently").setDestructive().onClick(() => {
+      new import_obsidian6.ButtonComponent(actions).setButtonText("Delete permanently").setDestructive().onClick(() => {
         new ConfirmModal(this.app, {
           title: "Delete annotation batch",
           message: "Permanently delete these annotations and the archived note? This cannot be undone.",
@@ -10899,7 +10946,7 @@ var AnnotationTrashModal = class extends import_obsidian5.Modal {
       });
     }
     const footer = contentEl.createDiv({ cls: "modal-button-container" });
-    new import_obsidian5.ButtonComponent(footer).setButtonText("Empty trash").setDestructive().onClick(() => {
+    new import_obsidian6.ButtonComponent(footer).setButtonText("Empty trash").setDestructive().onClick(() => {
       new ConfirmModal(this.app, {
         title: "Empty annotation trash",
         message: `Permanently delete all ${batches.length} batch(es)? This cannot be undone.`,
@@ -10910,7 +10957,7 @@ var AnnotationTrashModal = class extends import_obsidian5.Modal {
         }
       }).open();
     });
-    new import_obsidian5.ButtonComponent(footer).setButtonText("Close").onClick(() => this.close());
+    new import_obsidian6.ButtonComponent(footer).setButtonText("Close").onClick(() => this.close());
   }
   onClose() {
     this.contentEl.empty();
@@ -10918,21 +10965,21 @@ var AnnotationTrashModal = class extends import_obsidian5.Modal {
 };
 
 // src/sourceAnnotations/note.ts
-var import_obsidian7 = __toModule(require("obsidian"));
+var import_obsidian8 = __toModule(require("obsidian"));
 
 // src/sourceAnnotations/store.ts
-var import_obsidian6 = __toModule(require("obsidian"));
+var import_obsidian7 = __toModule(require("obsidian"));
 var ANNOTATION_ROOT = ".midad-arabic-sources/annotations";
 var ANNOTATION_INDEX = `${ANNOTATION_ROOT}/index.json`;
 var ANNOTATION_TRASH = ".midad-arabic-sources/trash/annotations";
 function safeSegment2(value) {
-  return String(value).replace(/[\\/:*?"<>|#^]/g, "-").replace(/\s+/g, " ").trim().slice(0, 100) || "work";
+  return safeFileSegment(value, "work", 100);
 }
 function workFolder(key) {
   const parts = key.split(":");
   const collection = safeSegment2(parts[0] || "work");
   const id = safeSegment2(parts.slice(1).join(":") || parts[0] || "work");
-  return (0, import_obsidian6.normalizePath)(`${ANNOTATION_ROOT}/${collection}/${id}`);
+  return (0, import_obsidian7.normalizePath)(`${ANNOTATION_ROOT}/${collection}/${id}`);
 }
 function unitFileName(unitKey2) {
   return `${safeSegment2(unitKey2.replace(":", "-"))}.json`;
@@ -11008,7 +11055,7 @@ var AnnotationStore = class {
     this.units.clear();
     this.paths.clear();
     try {
-      const path2 = (0, import_obsidian6.normalizePath)(ANNOTATION_INDEX);
+      const path2 = (0, import_obsidian7.normalizePath)(ANNOTATION_INDEX);
       if (await this.app.vault.adapter.exists(path2)) {
         const parsed = parseJson(await this.app.vault.adapter.read(path2));
         if (parsed && parsed.works && typeof parsed.works === "object")
@@ -11036,12 +11083,12 @@ var AnnotationStore = class {
   indexUnitPaths(work) {
     for (const [unitKey2, entry] of Object.entries(work.units)) {
       if (entry.note)
-        this.paths.set((0, import_obsidian6.normalizePath)(entry.note), { workKey: work.key, unitKey: unitKey2 });
+        this.paths.set((0, import_obsidian7.normalizePath)(entry.note), { workKey: work.key, unitKey: unitKey2 });
     }
   }
   async readWork(key) {
     try {
-      const path2 = (0, import_obsidian6.normalizePath)(`${workFolder(key)}/work.json`);
+      const path2 = (0, import_obsidian7.normalizePath)(`${workFolder(key)}/work.json`);
       if (!await this.app.vault.adapter.exists(path2))
         return null;
       const work = parseJson(await this.app.vault.adapter.read(path2));
@@ -11058,11 +11105,11 @@ var AnnotationStore = class {
     this.works.clear();
     this.paths.clear();
     try {
-      const roots = await this.app.vault.adapter.list((0, import_obsidian6.normalizePath)(ANNOTATION_ROOT));
+      const roots = await this.app.vault.adapter.list((0, import_obsidian7.normalizePath)(ANNOTATION_ROOT));
       for (const collectionFolder of roots.folders) {
         const collection = await this.app.vault.adapter.list(collectionFolder);
         for (const folder of collection.folders) {
-          const workPath = (0, import_obsidian6.normalizePath)(`${folder}/work.json`);
+          const workPath = (0, import_obsidian7.normalizePath)(`${folder}/work.json`);
           if (!await this.app.vault.adapter.exists(workPath))
             continue;
           const work = parseJson(await this.app.vault.adapter.read(workPath));
@@ -11091,7 +11138,7 @@ var AnnotationStore = class {
   async writeIndex() {
     if (!this.index)
       return;
-    await this.writeAtomic((0, import_obsidian6.normalizePath)(ANNOTATION_INDEX), JSON.stringify(this.index, null, 2) + "\n");
+    await this.writeAtomic((0, import_obsidian7.normalizePath)(ANNOTATION_INDEX), JSON.stringify(this.index, null, 2) + "\n");
   }
   async getWork(key) {
     const cached = this.works.get(key);
@@ -11137,23 +11184,23 @@ var AnnotationStore = class {
       const file = (existing == null ? void 0 : existing.file) || unitFileName(target.unitKey);
       const folder = workFolder(target.workKey);
       await this.ensureFolder(folder);
-      const unitPath = (0, import_obsidian6.normalizePath)(`${folder}/${file}`);
-      const clean = annotations.map((annotation) => normalizeAnnotation(annotation));
+      const unitPath = (0, import_obsidian7.normalizePath)(`${folder}/${file}`);
+      const clean2 = annotations.map((annotation) => normalizeAnnotation(annotation));
       if ((existing == null ? void 0 : existing.note) && existing.note !== target.notePath) {
-        this.paths.delete((0, import_obsidian6.normalizePath)(existing.note));
+        this.paths.delete((0, import_obsidian7.normalizePath)(existing.note));
       }
-      if (!clean.length) {
+      if (!clean2.length) {
         if (await this.app.vault.adapter.exists(unitPath))
           await this.app.vault.adapter.remove(unitPath);
         delete work.units[target.unitKey];
         this.units.delete(key);
-        this.paths.delete((0, import_obsidian6.normalizePath)(target.notePath));
+        this.paths.delete((0, import_obsidian7.normalizePath)(target.notePath));
       } else {
         const unit = {
           schema: 1,
           unitKey: target.unitKey,
           note: target.notePath,
-          annotations: clean
+          annotations: clean2
         };
         await this.writeAtomic(unitPath, JSON.stringify(unit, null, 2) + "\n");
         this.units.set(key, unit);
@@ -11161,17 +11208,17 @@ var AnnotationStore = class {
           unitKey: target.unitKey,
           note: target.notePath,
           file,
-          count: clean.length,
-          orphanCount: clean.filter((annotation) => annotation.anchorStatus !== "ok").length,
+          count: clean2.length,
+          orphanCount: clean2.filter((annotation) => annotation.anchorStatus !== "ok").length,
           ord: (_c = existing == null ? void 0 : existing.ord) != null ? _c : Object.keys(work.units).length
         };
-        this.paths.set((0, import_obsidian6.normalizePath)(target.notePath), {
+        this.paths.set((0, import_obsidian7.normalizePath)(target.notePath), {
           workKey: target.workKey,
           unitKey: target.unitKey
         });
       }
       work.updated = annotationNow();
-      await this.writeAtomic((0, import_obsidian6.normalizePath)(`${folder}/work.json`), JSON.stringify(work, null, 2) + "\n");
+      await this.writeAtomic((0, import_obsidian7.normalizePath)(`${folder}/work.json`), JSON.stringify(work, null, 2) + "\n");
       const counts = countAnnotations(work.units);
       if (!this.index)
         this.index = { schema: 1, works: {} };
@@ -11201,7 +11248,7 @@ var AnnotationStore = class {
     if (!work || !entry)
       return null;
     try {
-      const path2 = (0, import_obsidian6.normalizePath)(`${workFolder(workKey2)}/${entry.file}`);
+      const path2 = (0, import_obsidian7.normalizePath)(`${workFolder(workKey2)}/${entry.file}`);
       if (!await this.app.vault.adapter.exists(path2))
         return null;
       const unit = parseJson(await this.app.vault.adapter.read(path2));
@@ -11234,7 +11281,7 @@ var AnnotationStore = class {
     work.note = notePath;
     work.updated = annotationNow();
     await this.ensureFolder(workFolder(workKey2));
-    await this.writeAtomic((0, import_obsidian6.normalizePath)(`${workFolder(workKey2)}/work.json`), JSON.stringify(work, null, 2) + "\n");
+    await this.writeAtomic((0, import_obsidian7.normalizePath)(`${workFolder(workKey2)}/work.json`), JSON.stringify(work, null, 2) + "\n");
     if ((_a = this.index) == null ? void 0 : _a.works[workKey2]) {
       this.index.works[workKey2].note = notePath;
       this.index.works[workKey2].updated = work.updated;
@@ -11250,7 +11297,7 @@ var AnnotationStore = class {
       return;
     work.sourceStatus = status;
     work.updated = annotationNow();
-    await this.writeAtomic((0, import_obsidian6.normalizePath)(`${workFolder(workKey2)}/work.json`), JSON.stringify(work, null, 2) + "\n");
+    await this.writeAtomic((0, import_obsidian7.normalizePath)(`${workFolder(workKey2)}/work.json`), JSON.stringify(work, null, 2) + "\n");
     if ((_a = this.index) == null ? void 0 : _a.works[workKey2]) {
       this.index.works[workKey2].sourceStatus = status;
       this.index.works[workKey2].updated = work.updated;
@@ -11267,13 +11314,13 @@ var AnnotationStore = class {
       work.note = workNote;
     for (const [unitKey2, note] of unitNotes) {
       if (work.units[unitKey2]) {
-        this.paths.delete((0, import_obsidian6.normalizePath)(work.units[unitKey2].note));
+        this.paths.delete((0, import_obsidian7.normalizePath)(work.units[unitKey2].note));
         work.units[unitKey2].note = note;
-        this.paths.set((0, import_obsidian6.normalizePath)(note), { workKey: workKey2, unitKey: unitKey2 });
+        this.paths.set((0, import_obsidian7.normalizePath)(note), { workKey: workKey2, unitKey: unitKey2 });
       }
     }
     work.updated = annotationNow();
-    await this.writeAtomic((0, import_obsidian6.normalizePath)(`${workFolder(workKey2)}/work.json`), JSON.stringify(work, null, 2) + "\n");
+    await this.writeAtomic((0, import_obsidian7.normalizePath)(`${workFolder(workKey2)}/work.json`), JSON.stringify(work, null, 2) + "\n");
     if ((_a = this.index) == null ? void 0 : _a.works[workKey2]) {
       this.index.works[workKey2].dir = work.dir;
       this.index.works[workKey2].note = work.note;
@@ -11283,7 +11330,7 @@ var AnnotationStore = class {
   }
   findTarget(path2) {
     var _a;
-    return (_a = this.paths.get((0, import_obsidian6.normalizePath)(path2))) != null ? _a : null;
+    return (_a = this.paths.get((0, import_obsidian7.normalizePath)(path2))) != null ? _a : null;
   }
   getIndex() {
     var _a;
@@ -11298,10 +11345,10 @@ var AnnotationStore = class {
     if (!work)
       return null;
     const stamp = annotationNow().replace(/[:]/g, "-").replace(" ", "T");
-    const batch = (0, import_obsidian6.normalizePath)(`${ANNOTATION_TRASH}/${stamp}`);
+    const batch = (0, import_obsidian7.normalizePath)(`${ANNOTATION_TRASH}/${stamp}`);
     await this.ensureFolder(batch);
     const folder = workFolder(workKey2);
-    const trashedData = (0, import_obsidian6.normalizePath)(`${batch}/data`);
+    const trashedData = (0, import_obsidian7.normalizePath)(`${batch}/data`);
     try {
       if (await this.app.vault.adapter.exists(folder)) {
         await this.app.vault.adapter.rename(folder, trashedData);
@@ -11310,12 +11357,12 @@ var AnnotationStore = class {
     }
     let trashedNote = "";
     if (work.note) {
-      const notePath = (0, import_obsidian6.normalizePath)(work.note);
+      const notePath = (0, import_obsidian7.normalizePath)(work.note);
       if (await this.app.vault.adapter.exists(notePath)) {
-        const notesFolder = (0, import_obsidian6.normalizePath)(`${batch}/notes`);
+        const notesFolder = (0, import_obsidian7.normalizePath)(`${batch}/notes`);
         await this.ensureFolder(notesFolder);
         const name = (_a = notePath.split("/").pop()) != null ? _a : "Annotations.md";
-        trashedNote = (0, import_obsidian6.normalizePath)(`${notesFolder}/${name}`);
+        trashedNote = (0, import_obsidian7.normalizePath)(`${notesFolder}/${name}`);
         try {
           await this.app.vault.adapter.rename(notePath, trashedNote);
         } catch (e) {
@@ -11334,7 +11381,7 @@ var AnnotationStore = class {
       trashedNote,
       count: countAnnotations(work.units).count
     };
-    await this.writeAtomic((0, import_obsidian6.normalizePath)(`${batch}/manifest.json`), JSON.stringify(manifest, null, 2) + "\n");
+    await this.writeAtomic((0, import_obsidian7.normalizePath)(`${batch}/manifest.json`), JSON.stringify(manifest, null, 2) + "\n");
     if (this.index) {
       delete this.index.works[workKey2];
       await this.writeIndex();
@@ -11353,14 +11400,14 @@ var AnnotationStore = class {
   async listTrash() {
     var _a, _b, _c, _d, _e, _f;
     try {
-      const root = (0, import_obsidian6.normalizePath)(ANNOTATION_TRASH);
+      const root = (0, import_obsidian7.normalizePath)(ANNOTATION_TRASH);
       if (!await this.app.vault.adapter.exists(root))
         return [];
       const listed = await this.app.vault.adapter.list(root);
       const batches = [];
       for (const folder of listed.folders) {
         try {
-          const manifestPath = (0, import_obsidian6.normalizePath)(`${folder}/manifest.json`);
+          const manifestPath = (0, import_obsidian7.normalizePath)(`${folder}/manifest.json`);
           if (!await this.app.vault.adapter.exists(manifestPath))
             continue;
           const parsed = parseJson(await this.app.vault.adapter.read(manifestPath));
@@ -11386,12 +11433,12 @@ var AnnotationStore = class {
   }
   async restoreTrash(batchPath) {
     try {
-      const manifestPath = (0, import_obsidian6.normalizePath)(`${batchPath}/manifest.json`);
+      const manifestPath = (0, import_obsidian7.normalizePath)(`${batchPath}/manifest.json`);
       const parsed = parseJson(await this.app.vault.adapter.read(manifestPath));
       if (!(parsed == null ? void 0 : parsed.workKey))
         return null;
       const folder = workFolder(parsed.workKey);
-      const dataPath = (0, import_obsidian6.normalizePath)(`${batchPath}/data`);
+      const dataPath = (0, import_obsidian7.normalizePath)(`${batchPath}/data`);
       if (await this.app.vault.adapter.exists(folder)) {
         throw new Error("The annotation store for this work already exists.");
       }
@@ -11399,8 +11446,8 @@ var AnnotationStore = class {
         await this.app.vault.adapter.rename(dataPath, folder);
       }
       if (parsed.trashedNote && parsed.originalNote) {
-        const trashed = (0, import_obsidian6.normalizePath)(parsed.trashedNote);
-        const original = (0, import_obsidian6.normalizePath)(parsed.originalNote);
+        const trashed = (0, import_obsidian7.normalizePath)(parsed.trashedNote);
+        const original = (0, import_obsidian7.normalizePath)(parsed.originalNote);
         if (await this.app.vault.adapter.exists(trashed)) {
           if (await this.app.vault.adapter.exists(original)) {
             throw new Error("The original annotation note path is occupied.");
@@ -11428,8 +11475,8 @@ var AnnotationStore = class {
     let removed = 0;
     for (const target of targets) {
       try {
-        if (await this.app.vault.adapter.exists((0, import_obsidian6.normalizePath)(target))) {
-          await this.app.vault.adapter.rmdir((0, import_obsidian6.normalizePath)(target), true);
+        if (await this.app.vault.adapter.exists((0, import_obsidian7.normalizePath)(target))) {
+          await this.app.vault.adapter.rmdir((0, import_obsidian7.normalizePath)(target), true);
           removed += 1;
         }
       } catch (e) {
@@ -11445,8 +11492,8 @@ var AnnotationStore = class {
       if (!Number.isFinite(time) || time > cutoff)
         continue;
       try {
-        if (await this.app.vault.adapter.exists((0, import_obsidian6.normalizePath)(batch.path))) {
-          await this.app.vault.adapter.rmdir((0, import_obsidian6.normalizePath)(batch.path), true);
+        if (await this.app.vault.adapter.exists((0, import_obsidian7.normalizePath)(batch.path))) {
+          await this.app.vault.adapter.rmdir((0, import_obsidian7.normalizePath)(batch.path), true);
           removed += 1;
         }
       } catch (e) {
@@ -11456,7 +11503,7 @@ var AnnotationStore = class {
   }
   async migrateSpike(resolveMeta) {
     var _a, _b;
-    const spikePath = (0, import_obsidian6.normalizePath)(`${ANNOTATION_ROOT}/spike-index.json`);
+    const spikePath = (0, import_obsidian7.normalizePath)(`${ANNOTATION_ROOT}/spike-index.json`);
     if (!await this.app.vault.adapter.exists(spikePath))
       return false;
     try {
@@ -11467,7 +11514,7 @@ var AnnotationStore = class {
         const meta = await resolveMeta(entry.work, notePath);
         if (!meta)
           continue;
-        const oldPath = (0, import_obsidian6.normalizePath)(`${ANNOTATION_ROOT}/${entry.file}`);
+        const oldPath = (0, import_obsidian7.normalizePath)(`${ANNOTATION_ROOT}/${entry.file}`);
         const old = parseJson(await this.app.vault.adapter.read(oldPath));
         const annotations = Array.isArray(old == null ? void 0 : old.annotations) ? old.annotations.map((annotation) => normalizeAnnotation(annotation)) : [];
         if (!annotations.length)
@@ -11491,11 +11538,11 @@ var AnnotationStore = class {
           ord: Object.keys(work.units).length
         };
         await this.writeAtomic(oldPath, JSON.stringify({ schema: 1, unitKey: entry.unit, note: notePath, annotations }, null, 2) + "\n");
-        await this.writeAtomic((0, import_obsidian6.normalizePath)(`${workFolder(entry.work)}/work.json`), JSON.stringify(work, null, 2) + "\n");
+        await this.writeAtomic((0, import_obsidian7.normalizePath)(`${workFolder(entry.work)}/work.json`), JSON.stringify(work, null, 2) + "\n");
         this.works.set(entry.work, work);
         this.indexUnitPaths(work);
       }
-      const migrated = (0, import_obsidian6.normalizePath)(`${ANNOTATION_ROOT}/spike-index.migrated.json`);
+      const migrated = (0, import_obsidian7.normalizePath)(`${ANNOTATION_ROOT}/spike-index.migrated.json`);
       if (await this.app.vault.adapter.exists(migrated))
         await this.app.vault.adapter.remove(migrated);
       await this.app.vault.adapter.rename(spikePath, migrated);
@@ -11506,21 +11553,10 @@ var AnnotationStore = class {
     }
   }
   async ensureFolder(path2) {
-    const normalized2 = (0, import_obsidian6.normalizePath)(path2);
-    const parts = normalized2.split("/");
-    let current = "";
-    for (const part of parts) {
-      current = current ? `${current}/${part}` : part;
-      if (!await this.app.vault.adapter.exists(current)) {
-        try {
-          await this.app.vault.adapter.mkdir(current);
-        } catch (e) {
-        }
-      }
-    }
+    await ensureFolder(this.app, path2);
   }
   async writeAtomic(path2, content) {
-    const normalized2 = (0, import_obsidian6.normalizePath)(path2);
+    const normalized2 = (0, import_obsidian7.normalizePath)(path2);
     const parent = normalized2.split("/").slice(0, -1).join("/");
     if (parent)
       await this.ensureFolder(parent);
@@ -11859,28 +11895,12 @@ function nowStamp() {
   const pad = (n) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
-function safeFileStem(value) {
-  return value.replace(/[\\/:*?"<>|#^]/g, "-").trim() || "Annotations";
-}
-async function ensureFolder2(app, path2) {
-  const normalized2 = (0, import_obsidian7.normalizePath)(path2);
-  const parts = normalized2.split("/");
-  let current = "";
-  for (const part of parts) {
-    current = current ? `${current}/${part}` : part;
-    if (!await app.vault.adapter.exists(current)) {
-      try {
-        await app.vault.adapter.mkdir(current);
-      } catch (e) {
-      }
-    }
-  }
+function annotationNotePathForDir(settings, dir) {
+  return (0, import_obsidian8.normalizePath)(`${annotationNotesFolder(settings)}/${safeFileSegment(dir, "Annotations")} - Annotations.md`);
 }
 function annotationNotePath(work, settings) {
-  const folder = settings.annotationNoteFolder.trim() || `${settings.sourceRoot.trim() || settings.sourceImportRoot.trim() || "_7 Sources"}/Annotation Notes`;
   const adopted = work.key.startsWith("adopted:") || work.key.startsWith("note:");
-  const stem = adopted ? `Adopted - ${work.title}` : work.dir;
-  return (0, import_obsidian7.normalizePath)(`${folder}/${safeFileStem(stem)} - Annotations.md`);
+  return annotationNotePathForDir(settings, adopted ? `Adopted - ${work.title}` : work.dir);
 }
 function calloutLines(markdown, prefix) {
   return markdown.replace(/\r\n?/g, "\n").split("\n").map((line) => line.trim() ? `${prefix} ${line}` : prefix.replace(/\s+$/, ""));
@@ -11958,7 +11978,7 @@ async function renderAnnotationNote(app, store, settings, workKey2) {
   const content = `${frontmatter}${buildNoteBody(units.map((unit) => ({ entry: unit.entry, annotations: unit.unit.annotations })))}`;
   const parent = notePath.split("/").slice(0, -1).join("/");
   if (parent)
-    await ensureFolder2(app, parent);
+    await ensureFolder(app, parent);
   await writeMerged(app, notePath, { content, specs }, false, false);
   if (work.note !== notePath) {
     await store.setWorkNote(workKey2, notePath);
@@ -11967,8 +11987,7 @@ async function renderAnnotationNote(app, store, settings, workKey2) {
   return notePath;
 }
 function annotationMocPath(settings) {
-  const root = settings.sourceRoot.trim() || settings.sourceImportRoot.trim() || "_7 Sources";
-  return (0, import_obsidian7.normalizePath)(`${root}/source-annotation.md`);
+  return (0, import_obsidian8.normalizePath)(`${sourceRoot(settings)}/source-annotation.md`);
 }
 async function mocEntry(entry, store, settings) {
   const work = await store.getWork(entry.key);
@@ -12032,13 +12051,13 @@ async function renderAnnotationMoc(app, store, settings) {
   const content = `${frontmatter}${await mocBody(store, settings)}`;
   const parent = path2.split("/").slice(0, -1).join("/");
   if (parent)
-    await ensureFolder2(app, parent);
+    await ensureFolder(app, parent);
   await writeMerged(app, path2, { content, specs }, false, false);
   return path2;
 }
 
 // src/sourceAnnotations/reading.ts
-var import_obsidian8 = __toModule(require("obsidian"));
+var import_obsidian9 = __toModule(require("obsidian"));
 
 // src/sourceAnnotations/wrap.ts
 var obsidianDom = {
@@ -12409,7 +12428,7 @@ function refreshReadingViews(app) {
   var _a;
   for (const leaf of app.workspace.getLeavesOfType("markdown")) {
     const view = leaf.view;
-    if (!(view instanceof import_obsidian8.MarkdownView))
+    if (!(view instanceof import_obsidian9.MarkdownView))
       continue;
     const preview = view.previewMode;
     (_a = preview == null ? void 0 : preview.rerender) == null ? void 0 : _a.call(preview, true);
@@ -12660,10 +12679,10 @@ function reanchorAnnotation(text, annotation, options = {}) {
 }
 
 // src/sourceAnnotations/sidebar.ts
-var import_obsidian10 = __toModule(require("obsidian"));
+var import_obsidian11 = __toModule(require("obsidian"));
 
 // src/sourceAnnotations/cards.ts
-var import_obsidian9 = __toModule(require("obsidian"));
+var import_obsidian10 = __toModule(require("obsidian"));
 function openLink(event, app, sourcePath) {
   var _a;
   const node = event.target;
@@ -12687,7 +12706,7 @@ function action(parent, icon, label, run) {
     cls: "clickable-icon mas-ann-card-action",
     attr: { type: "button", "aria-label": label }
   });
-  (0, import_obsidian9.setIcon)(button, icon);
+  (0, import_obsidian10.setIcon)(button, icon);
   button.addEventListener("click", (event) => {
     event.preventDefault();
     event.stopPropagation();
@@ -12712,7 +12731,7 @@ async function renderAnnotationCard(parent, options) {
   const body = card.createDiv({ cls: "mas-ann-card-body" });
   const comment = body.createDiv({ cls: "mas-ann-card-comment" });
   if ((_a = annotation.comment) == null ? void 0 : _a.trim()) {
-    await import_obsidian9.MarkdownRenderer.render(app, annotation.comment, comment, target.notePath, component);
+    await import_obsidian10.MarkdownRenderer.render(app, annotation.comment, comment, target.notePath, component);
   } else {
     comment.addClass("is-empty");
     comment.setText("No comment");
@@ -12760,7 +12779,7 @@ async function renderAnnotationCard(parent, options) {
 
 // src/sourceAnnotations/sidebar.ts
 var ANNOTATION_SIDEBAR_VIEW = "midad-annotation-sidebar";
-var AnnotationSidebarView = class extends import_obsidian10.ItemView {
+var AnnotationSidebarView = class extends import_obsidian11.ItemView {
   constructor(leaf, service) {
     super(leaf);
     this.component = null;
@@ -12796,13 +12815,13 @@ var AnnotationSidebarView = class extends import_obsidian10.ItemView {
     if (token !== this.renderToken)
       return;
     (_a = this.component) == null ? void 0 : _a.unload();
-    const component = new import_obsidian10.Component();
+    const component = new import_obsidian11.Component();
     component.load();
     this.component = component;
     const root = this.contentEl;
     root.empty();
     const brand = root.createDiv({ cls: "mas-ann-sidebar__brand" });
-    (0, import_obsidian10.setIcon)(brand.createSpan({ cls: "mas-ann-sidebar__brand-icon" }), "midad");
+    (0, import_obsidian11.setIcon)(brand.createSpan({ cls: "mas-ann-sidebar__brand-icon" }), "midad");
     brand.createSpan({ text: "Midad" });
     const head = root.createDiv({ cls: "mas-ann-sidebar__head" });
     if (!data) {
@@ -12871,7 +12890,7 @@ var AnnotationSidebarView = class extends import_obsidian10.ItemView {
 };
 
 // src/sourceAnnotations/target.ts
-var import_obsidian11 = __toModule(require("obsidian"));
+var import_obsidian12 = __toModule(require("obsidian"));
 function workKey(work) {
   var _a, _b;
   if (work.key)
@@ -12901,10 +12920,10 @@ var AnnotationTargetResolver = class {
     this.adoption = adoption;
   }
   outRoot() {
-    return this.settings.sourceImportRoot.trim() || "_7 Sources";
+    return installedSourcesRoot(this.settings);
   }
   canonicalRoot() {
-    return this.settings.canonicalQuranFolder.trim() || `${this.outRoot()}/Quran`;
+    return canonicalQuranFolder(this.settings);
   }
   canonicalId() {
     return this.settings.canonicalQuranRiw\u0101ya.trim() || "hafs";
@@ -12915,7 +12934,7 @@ var AnnotationTargetResolver = class {
   }
   async manifest() {
     try {
-      const raw = await this.app.vault.adapter.read((0, import_obsidian11.normalizePath)(".midad-arabic-sources/source-imports.json"));
+      const raw = await this.app.vault.adapter.read((0, import_obsidian12.normalizePath)(".midad-arabic-sources/source-imports.json"));
       const parsed = JSON.parse(raw);
       const works = Array.isArray(parsed) ? parsed : parsed && typeof parsed === "object" && Array.isArray(parsed.works) ? parsed.works : [];
       this.manifestCache = works.filter((work) => !!work && typeof work === "object");
@@ -12930,7 +12949,7 @@ var AnnotationTargetResolver = class {
     if (cached)
       return cached;
     try {
-      const path2 = (0, import_obsidian11.normalizePath)(`.midad-arabic-sources/source-models/${work.collection}/${work.id}.json`);
+      const path2 = (0, import_obsidian12.normalizePath)(`.midad-arabic-sources/source-models/${work.collection}/${work.id}.json`);
       const parsed = JSON.parse(await this.app.vault.adapter.read(path2));
       if (!parsed || typeof parsed !== "object")
         return null;
@@ -12951,13 +12970,13 @@ var AnnotationTargetResolver = class {
     const dir = String((_a = model.work.dir) != null ? _a : "");
     const isQuranText = model.work.collection === "quran-text";
     const canonical = isQuranText && this.isCanonicalQuran(model);
-    const normalized2 = (0, import_obsidian11.normalizePath)(path2);
+    const normalized2 = (0, import_obsidian12.normalizePath)(path2);
     for (const unit of model.units) {
       const dictRoot = model.work.collection === "dictionary" && unit.kind === "dict";
       const base = String((_b = unit.base) != null ? _b : "");
       const stem = canonical || dictRoot ? base : `${dir} - ${base}`;
       const folder = canonical ? this.canonicalRoot() : `${this.outRoot()}/${dir}`;
-      if ((0, import_obsidian11.normalizePath)(`${folder}/${stem}.md`) === normalized2)
+      if ((0, import_obsidian12.normalizePath)(`${folder}/${stem}.md`) === normalized2)
         return unitKey(unit);
     }
     return null;
@@ -12981,15 +13000,15 @@ var AnnotationTargetResolver = class {
       const base = String((_b = unit.base) != null ? _b : "");
       const stem = canonical || dictRoot ? base : `${dir} - ${base}`;
       const folder = canonical ? this.canonicalRoot() : `${this.outRoot()}/${dir}`;
-      return (0, import_obsidian11.normalizePath)(`${folder}/${stem}.md`);
+      return (0, import_obsidian12.normalizePath)(`${folder}/${stem}.md`);
     }
     return null;
   }
   async resolve(path2) {
     var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m, _n, _o;
-    const normalized2 = (0, import_obsidian11.normalizePath)(path2);
+    const normalized2 = (0, import_obsidian12.normalizePath)(path2);
     const file = this.app.vault.getAbstractFileByPath(normalized2);
-    if (!(file instanceof import_obsidian11.TFile))
+    if (!(file instanceof import_obsidian12.TFile))
       return null;
     const frontmatter = (_a = this.app.metadataCache.getFileCache(file)) == null ? void 0 : _a.frontmatter;
     const masWork = typeof (frontmatter == null ? void 0 : frontmatter["mas-work"]) === "string" ? String(frontmatter["mas-work"]) : "";
@@ -13014,7 +13033,7 @@ var AnnotationTargetResolver = class {
         const dir2 = String((_a2 = candidate.dir) != null ? _a2 : "");
         if (!dir2)
           return false;
-        return normalized2 === (0, import_obsidian11.normalizePath)(`${outRoot}/${dir2}.md`) || normalized2.startsWith((0, import_obsidian11.normalizePath)(`${outRoot}/${dir2}/`));
+        return normalized2 === (0, import_obsidian12.normalizePath)(`${outRoot}/${dir2}.md`) || normalized2.startsWith((0, import_obsidian12.normalizePath)(`${outRoot}/${dir2}/`));
       })) != null ? _d : null;
     }
     if (!work && masWork) {
@@ -13025,7 +13044,7 @@ var AnnotationTargetResolver = class {
     if (!work)
       return null;
     const dir = String((_g = work.dir) != null ? _g : "");
-    const hubPath = (0, import_obsidian11.normalizePath)(`${outRoot}/${dir}.md`);
+    const hubPath = (0, import_obsidian12.normalizePath)(`${outRoot}/${dir}.md`);
     const isHub = normalized2 === hubPath;
     const resolvedUnit = masUnit || (masWork ? "note" : "");
     if (resolvedUnit) {
@@ -13086,7 +13105,7 @@ var AnnotationTargetResolver = class {
 };
 
 // src/sourceAnnotations/tooltip.ts
-var import_obsidian12 = __toModule(require("obsidian"));
+var import_obsidian13 = __toModule(require("obsidian"));
 var AnnotationTooltip = class {
   constructor(app, options) {
     this.el = null;
@@ -13109,7 +13128,7 @@ var AnnotationTooltip = class {
     const el = doc.body.createDiv({ cls: "mas-ann-tooltip" });
     this.el = el;
     this.anchor = anchor;
-    const component = new import_obsidian12.Component();
+    const component = new import_obsidian13.Component();
     component.load();
     this.component = component;
     for (const annotation of annotations) {
@@ -13219,15 +13238,15 @@ function cmOf(view) {
   return cm != null ? cm : null;
 }
 function markdownViews(app) {
-  return app.workspace.getLeavesOfType("markdown").map((leaf) => leaf.view).filter((view) => view instanceof import_obsidian13.MarkdownView);
+  return app.workspace.getLeavesOfType("markdown").map((leaf) => leaf.view).filter((view) => view instanceof import_obsidian14.MarkdownView);
 }
 function activeMarkdownView(app) {
   var _a;
-  const active = app.workspace.getActiveViewOfType(import_obsidian13.MarkdownView);
+  const active = app.workspace.getActiveViewOfType(import_obsidian14.MarkdownView);
   if (active)
     return active;
   const recent = app.workspace.getMostRecentLeaf();
-  if ((recent == null ? void 0 : recent.view) instanceof import_obsidian13.MarkdownView)
+  if ((recent == null ? void 0 : recent.view) instanceof import_obsidian14.MarkdownView)
     return recent.view;
   return (_a = markdownViews(app).find((view) => !!view.file)) != null ? _a : null;
 }
@@ -13313,9 +13332,9 @@ var AnnotationService = class {
     ]);
     registerReadingAnnotations(this.plugin, (path2) => {
       var _a;
-      return (_a = this.pathAnnotations.get((0, import_obsidian13.normalizePath)(path2))) != null ? _a : null;
+      return (_a = this.pathAnnotations.get((0, import_obsidian14.normalizePath)(path2))) != null ? _a : null;
     });
-    (0, import_obsidian13.addIcon)("midad", MIDAD_ICON);
+    (0, import_obsidian14.addIcon)("midad", MIDAD_ICON);
     this.plugin.registerView(ANNOTATION_SIDEBAR_VIEW, (leaf) => new AnnotationSidebarView(leaf, this));
     this.plugin.addRibbonIcon("midad", "Open Midad sidebar", () => {
       void this.openSidebar();
@@ -13350,8 +13369,7 @@ var AnnotationService = class {
     const meta = await this.resolver.metaForWork(workKey2, notePath);
     if (!meta)
       return null;
-    const folder = this.settings.annotationNoteFolder.trim() || `${this.settings.sourceRoot.trim() || this.settings.sourceImportRoot.trim() || "_7 Sources"}/Annotation Notes`;
-    const note = (0, import_obsidian13.normalizePath)(`${folder}/${meta.dir.replace(/[\\/:*?"<>|#^]/g, "-").trim() || "Annotations"} - Annotations.md`);
+    const note = annotationNotePathForDir(this.settings, meta.dir);
     return { ...meta, note };
   }
   async syncStartup(migrated) {
@@ -13359,7 +13377,7 @@ var AnnotationService = class {
       const work = await this.store.getWork(key);
       if (!work)
         continue;
-      const exists = work.note ? await this.app.vault.adapter.exists((0, import_obsidian13.normalizePath)(work.note)) : false;
+      const exists = work.note ? await this.app.vault.adapter.exists((0, import_obsidian14.normalizePath)(work.note)) : false;
       if (migrated || !work.note || !exists) {
         await renderAnnotationNote(this.app, this.store, this.settings, key);
       }
@@ -13372,14 +13390,14 @@ var AnnotationService = class {
     if (file.extension !== "md")
       return;
     if (this.adoption.has(file.path)) {
-      new import_obsidian13.Notice("This note is already in the annotation system.");
+      new import_obsidian14.Notice("This note is already in the annotation system.");
       return;
     }
     const frontmatter = (_a = this.app.metadataCache.getFileCache(file)) == null ? void 0 : _a.frontmatter;
     const rawType = frontmatter == null ? void 0 : frontmatter["document-type"];
     const type = typeof rawType === "string" ? rawType : "";
     if (type.includes("source-annotation") || isSourceFrontmatter(frontmatter)) {
-      new import_obsidian13.Notice("This note is already managed by Midad.");
+      new import_obsidian14.Notice("This note is already managed by Midad.");
       return;
     }
     const key = newAdoptedNoteKey();
@@ -13394,23 +13412,23 @@ var AnnotationService = class {
       if (!fm["title"])
         fm["title"] = file.basename;
     });
-    const text = await this.app.vault.adapter.read((0, import_obsidian13.normalizePath)(file.path));
+    const text = await this.app.vault.adapter.read((0, import_obsidian14.normalizePath)(file.path));
     if (!managedBounds(text)) {
       const prior = splitNote(text);
       const body = prior.body.replace(/^\n+|\n+$/g, "");
       if (!body.trim()) {
-        new import_obsidian13.Notice("This note has no body to adopt.");
+        new import_obsidian14.Notice("This note has no body to adopt.");
         return;
       }
       const wrapped = `${MANAGED_OPEN}
 ${body}
 ${MANAGED_CLOSE}
 `;
-      await this.app.vault.adapter.write((0, import_obsidian13.normalizePath)(file.path), joinNote((_b = prior.frontmatter) != null ? _b : "", wrapped));
+      await this.app.vault.adapter.write((0, import_obsidian14.normalizePath)(file.path), joinNote((_b = prior.frontmatter) != null ? _b : "", wrapped));
     }
     this.resolver.invalidate();
     void ((_d = (_c = this.host).refreshRegistry) == null ? void 0 : _d.call(_c));
-    new import_obsidian13.Notice("Note adopted. Select text to annotate it.");
+    new import_obsidian14.Notice("Note adopted. Select text to annotate it.");
     window.setTimeout(() => {
       void this.refreshViews();
       refreshReadingViews(this.app);
@@ -13425,7 +13443,7 @@ ${MANAGED_CLOSE}
       if ((work == null ? void 0 : work.sourceStatus) === "adopted") {
         const oldBase = (_b = (_a = oldPath.split("/").pop()) == null ? void 0 : _a.replace(/\.md$/i, "")) != null ? _b : work.dir;
         const nextDir = work.dir === oldBase ? file.basename : work.dir;
-        await this.store.updatePaths(stored.workKey, nextDir, work.note, new Map([[stored.unitKey, (0, import_obsidian13.normalizePath)(file.path)]]));
+        await this.store.updatePaths(stored.workKey, nextDir, work.note, new Map([[stored.unitKey, (0, import_obsidian14.normalizePath)(file.path)]]));
         await this.syncArtifacts(stored.workKey);
       }
     }
@@ -13468,7 +13486,7 @@ ${MANAGED_CLOSE}
       const updates = new Map();
       for (const [unitKey2, unit] of Object.entries(work.units)) {
         try {
-          if (await this.app.vault.adapter.exists((0, import_obsidian13.normalizePath)(unit.note)))
+          if (await this.app.vault.adapter.exists((0, import_obsidian14.normalizePath)(unit.note)))
             continue;
         } catch (e) {
           continue;
@@ -13477,8 +13495,8 @@ ${MANAGED_CLOSE}
         if (!actual)
           continue;
         try {
-          if (await this.app.vault.adapter.exists((0, import_obsidian13.normalizePath)(actual))) {
-            updates.set(unitKey2, (0, import_obsidian13.normalizePath)(actual));
+          if (await this.app.vault.adapter.exists((0, import_obsidian14.normalizePath)(actual))) {
+            updates.set(unitKey2, (0, import_obsidian14.normalizePath)(actual));
           }
         } catch (e) {
         }
@@ -13542,9 +13560,9 @@ ${MANAGED_CLOSE}
       id: "reanchor-source-orphans",
       name: "Re-anchor orphaned annotations in this source",
       callback: async () => {
-        const view = this.app.workspace.getActiveViewOfType(import_obsidian13.MarkdownView);
+        const view = this.app.workspace.getActiveViewOfType(import_obsidian14.MarkdownView);
         if (!(view == null ? void 0 : view.file)) {
-          new import_obsidian13.Notice("Open a source note first.");
+          new import_obsidian14.Notice("Open a source note first.");
           return;
         }
         await this.reanchorWork(view.file);
@@ -13554,9 +13572,9 @@ ${MANAGED_CLOSE}
       id: "delete-source-annotations",
       name: "Delete annotations for this source\u2026",
       callback: async () => {
-        const view = this.app.workspace.getActiveViewOfType(import_obsidian13.MarkdownView);
+        const view = this.app.workspace.getActiveViewOfType(import_obsidian14.MarkdownView);
         if (!(view == null ? void 0 : view.file)) {
-          new import_obsidian13.Notice("No active note.");
+          new import_obsidian14.Notice("No active note.");
           return;
         }
         await this.confirmTrashWork(view.file.path);
@@ -13566,12 +13584,12 @@ ${MANAGED_CLOSE}
       id: "open-source-annotation-note",
       name: "Open source annotations",
       callback: async () => {
-        const view = this.app.workspace.getActiveViewOfType(import_obsidian13.MarkdownView);
+        const view = this.app.workspace.getActiveViewOfType(import_obsidian14.MarkdownView);
         if (!(view == null ? void 0 : view.file))
           return;
         const target = await this.targetForPath(view.file.path);
         if (!target) {
-          new import_obsidian13.Notice("This note is not part of an imported source.");
+          new import_obsidian14.Notice("This note is not part of an imported source.");
           return;
         }
         await this.openAnnotationNoteForTarget(target);
@@ -13590,7 +13608,7 @@ ${MANAGED_CLOSE}
       callback: async () => {
         const path2 = await renderAnnotationMoc(this.app, this.store, this.settings);
         const file = this.app.vault.getAbstractFileByPath(path2);
-        if (file instanceof import_obsidian13.TFile)
+        if (file instanceof import_obsidian14.TFile)
           await this.app.workspace.getLeaf().openFile(file);
       }
     });
@@ -13612,11 +13630,11 @@ ${MANAGED_CLOSE}
       id: "adopt-note-for-annotations",
       name: "Adopt note for annotations",
       callback: async () => {
-        const view = this.app.workspace.getActiveViewOfType(import_obsidian13.MarkdownView);
+        const view = this.app.workspace.getActiveViewOfType(import_obsidian14.MarkdownView);
         if (view == null ? void 0 : view.file)
           await this.adoptNote(view.file);
         else
-          new import_obsidian13.Notice("Open a Markdown note first.");
+          new import_obsidian14.Notice("Open a Markdown note first.");
       }
     });
     this.plugin.addCommand({
@@ -13627,7 +13645,7 @@ ${MANAGED_CLOSE}
         await this.store.load();
         await this.refreshViews();
         refreshReadingViews(this.app);
-        new import_obsidian13.Notice("Annotations reloaded.");
+        new import_obsidian14.Notice("Annotations reloaded.");
       }
     });
     this.plugin.addCommand({
@@ -13636,14 +13654,14 @@ ${MANAGED_CLOSE}
       callback: () => {
         const works = Object.values(this.store.getIndex().works);
         const count = works.reduce((sum, work) => sum + work.count, 0);
-        new import_obsidian13.Notice(`${works.length} annotated source(s), ${count} annotation(s).`);
+        new import_obsidian14.Notice(`${works.length} annotated source(s), ${count} annotation(s).`);
       }
     });
   }
   registerEvents() {
     this.plugin.registerEvent(this.app.workspace.on("file-menu", (menu, file) => {
       var _a;
-      if (!(file instanceof import_obsidian13.TFile) || file.extension !== "md")
+      if (!(file instanceof import_obsidian14.TFile) || file.extension !== "md")
         return;
       if (this.adoption.has(file.path))
         return;
@@ -13657,7 +13675,7 @@ ${MANAGED_CLOSE}
       }));
     }));
     this.plugin.registerEvent(this.app.vault.on("create", (file) => {
-      if (!(file instanceof import_obsidian13.TFile))
+      if (!(file instanceof import_obsidian14.TFile))
         return;
       void this.adoption.registerNewFile(file).then((changed) => {
         if (changed)
@@ -13665,12 +13683,12 @@ ${MANAGED_CLOSE}
       });
     }));
     this.plugin.registerEvent(this.app.vault.on("rename", (file, oldPath) => {
-      if (!(file instanceof import_obsidian13.TFile))
+      if (!(file instanceof import_obsidian14.TFile))
         return;
       void this.onAdoptedNoteRenamed(file, oldPath);
     }));
     this.plugin.registerEvent(this.app.vault.on("delete", (file) => {
-      if (file instanceof import_obsidian13.TFile)
+      if (file instanceof import_obsidian14.TFile)
         void this.onAdoptedNoteDeleted(file.path);
     }));
     this.plugin.registerDomEvent(document, "keydown", (event) => {
@@ -13718,7 +13736,7 @@ ${MANAGED_CLOSE}
       }));
     }));
     this.plugin.registerEvent(this.app.vault.on("modify", (file) => {
-      if (!(file instanceof import_obsidian13.TFile))
+      if (!(file instanceof import_obsidian14.TFile))
         return;
       if (!this.store.findTarget(file.path))
         return;
@@ -13757,7 +13775,7 @@ ${MANAGED_CLOSE}
     if (!mapped || !mapped.text.trim())
       return;
     const selectedText = mapped.text.trim();
-    const path2 = (0, import_obsidian13.normalizePath)(view.file.path);
+    const path2 = (0, import_obsidian14.normalizePath)(view.file.path);
     const target = await this.targetForPath(path2);
     if (!target)
       return;
@@ -13864,7 +13882,7 @@ ${MANAGED_CLOSE}
     const target = {
       workKey: stored.workKey,
       unitKey: stored.unitKey,
-      notePath: (0, import_obsidian13.normalizePath)(path2),
+      notePath: (0, import_obsidian14.normalizePath)(path2),
       workTitle: work.title,
       workDir: work.dir,
       sourceStatus: work.sourceStatus
@@ -13874,7 +13892,7 @@ ${MANAGED_CLOSE}
       return;
     let text = "";
     try {
-      text = await this.app.vault.adapter.read((0, import_obsidian13.normalizePath)(path2));
+      text = await this.app.vault.adapter.read((0, import_obsidian14.normalizePath)(path2));
     } catch (e) {
       return;
     }
@@ -13998,7 +14016,7 @@ ${MANAGED_CLOSE}
   async showTooltip(anchor, ids) {
     if (this.dialogOpen || this.anyModalOpen())
       return;
-    const view = this.app.workspace.getActiveViewOfType(import_obsidian13.MarkdownView);
+    const view = this.app.workspace.getActiveViewOfType(import_obsidian14.MarkdownView);
     if (!(view == null ? void 0 : view.file))
       return;
     const target = await this.targetForPath(view.file.path);
@@ -14012,7 +14030,7 @@ ${MANAGED_CLOSE}
   onEditorSelection(view) {
     if (this.disposed)
       return;
-    const active = this.app.workspace.getActiveViewOfType(import_obsidian13.MarkdownView);
+    const active = this.app.workspace.getActiveViewOfType(import_obsidian14.MarkdownView);
     if (!(active == null ? void 0 : active.file) || cmOf(active) !== view)
       return;
     const existing = this.autoTimers.get(view);
@@ -14060,7 +14078,7 @@ ${MANAGED_CLOSE}
       const current = view.state.selection.main;
       if (current.from === current.to)
         return;
-      const activeNow = this.app.workspace.getActiveViewOfType(import_obsidian13.MarkdownView);
+      const activeNow = this.app.workspace.getActiveViewOfType(import_obsidian14.MarkdownView);
       if (!(activeNow == null ? void 0 : activeNow.file) || cmOf(activeNow) !== view)
         return;
       const range = this.effectiveSelection(view);
@@ -14187,15 +14205,15 @@ ${MANAGED_CLOSE}
     if (!draft) {
       if (!autoSignature && this.lastDraftIssue) {
         const label = this.lastDraftIssue === "fenced-code" ? "a code block" : this.lastDraftIssue === "inline-code" ? "inline code" : "a table";
-        new import_obsidian13.Notice(`Annotations cannot cover ${label}.`);
+        new import_obsidian14.Notice(`Annotations cannot cover ${label}.`);
       } else {
-        new import_obsidian13.Notice("Select text inside a source note\u2019s managed region.");
+        new import_obsidian14.Notice("Select text inside a source note\u2019s managed region.");
       }
       return;
     }
     const target = await this.targetForPath(file.path);
     if (!target) {
-      new import_obsidian13.Notice("Could not identify the source work. Re-render the source and try again.");
+      new import_obsidian14.Notice("Could not identify the source work. Re-render the source and try again.");
       return;
     }
     const value = editor.getValue();
@@ -14291,21 +14309,21 @@ ${MANAGED_CLOSE}
       tags: []
     });
     await this.store.saveUnit(target, annotations);
-    this.pathAnnotations.set((0, import_obsidian13.normalizePath)(target.notePath), annotations);
+    this.pathAnnotations.set((0, import_obsidian14.normalizePath)(target.notePath), annotations);
     await this.syncArtifacts(target.workKey);
     await this.refreshViews();
-    new import_obsidian13.Notice("Annotation added.");
+    new import_obsidian14.Notice("Annotation added.");
   }
   async reanchorOrphaned(file, draft) {
     const target = await this.targetForPath(file.path);
     if (!target) {
-      new import_obsidian13.Notice("Could not identify the source work.");
+      new import_obsidian14.Notice("Could not identify the source work.");
       return;
     }
     const annotations = await this.annotationsFor(target);
     const orphans = annotations.filter((annotation) => annotation.anchorStatus === "orphaned");
     if (!orphans.length) {
-      new import_obsidian13.Notice("There are no unanchored annotations for this source.");
+      new import_obsidian14.Notice("There are no unanchored annotations for this source.");
       return;
     }
     const apply = async (orphan) => {
@@ -14332,10 +14350,10 @@ ${MANAGED_CLOSE}
         } : annotation;
       });
       await this.store.saveUnit(target, updated);
-      this.pathAnnotations.set((0, import_obsidian13.normalizePath)(target.notePath), updated);
+      this.pathAnnotations.set((0, import_obsidian14.normalizePath)(target.notePath), updated);
       await this.syncArtifacts(target.workKey);
       await this.refreshViews();
-      new import_obsidian13.Notice("Annotation re-anchored.");
+      new import_obsidian14.Notice("Annotation re-anchored.");
     };
     if (orphans.length === 1) {
       await apply(orphans[0]);
@@ -14346,9 +14364,9 @@ ${MANAGED_CLOSE}
     }).open();
   }
   async reanchorActiveSource() {
-    const view = this.app.workspace.getActiveViewOfType(import_obsidian13.MarkdownView);
+    const view = this.app.workspace.getActiveViewOfType(import_obsidian14.MarkdownView);
     if (!(view == null ? void 0 : view.file)) {
-      new import_obsidian13.Notice("Open a source note first.");
+      new import_obsidian14.Notice("Open a source note first.");
       return;
     }
     await this.reanchorWork(view.file);
@@ -14356,18 +14374,18 @@ ${MANAGED_CLOSE}
   async reanchorWork(file) {
     const target = await this.targetForPath(file.path);
     if (!target) {
-      new import_obsidian13.Notice("This note is not part of an annotated source.");
+      new import_obsidian14.Notice("This note is not part of an annotated source.");
       return;
     }
     const work = await this.store.getWork(target.workKey);
     if (!work) {
-      new import_obsidian13.Notice("No annotations for this source.");
+      new import_obsidian14.Notice("No annotations for this source.");
       return;
     }
     const units = await this.store.allUnits(target.workKey);
     const before = units.reduce((sum, unit) => sum + unit.unit.annotations.filter((annotation) => annotation.anchorStatus === "orphaned").length, 0);
     if (!before) {
-      new import_obsidian13.Notice("There are no unanchored annotations in this source.");
+      new import_obsidian14.Notice("There are no unanchored annotations in this source.");
       return;
     }
     for (const unit of units) {
@@ -14377,7 +14395,7 @@ ${MANAGED_CLOSE}
     }
     const afterUnits = await this.store.allUnits(target.workKey);
     const after = afterUnits.reduce((sum, unit) => sum + unit.unit.annotations.filter((annotation) => annotation.anchorStatus === "orphaned").length, 0);
-    new import_obsidian13.Notice(before === after ? `No orphaned annotations could be re-anchored automatically; ${after} remain.` : `Re-anchored ${before - after} annotation(s); ${after} remain unanchored.`);
+    new import_obsidian14.Notice(before === after ? `No orphaned annotations could be re-anchored automatically; ${after} remain.` : `Re-anchored ${before - after} annotation(s); ${after} remain unanchored.`);
   }
   annotationAtOffset(text, annotations, offset) {
     var _a;
@@ -14392,15 +14410,15 @@ ${MANAGED_CLOSE}
     const offset = editor.posToOffset(editor.getCursor("from"));
     const hit = this.annotationAtOffset(value, annotations, offset);
     if (!hit) {
-      new import_obsidian13.Notice("No annotation here.");
+      new import_obsidian14.Notice("No annotation here.");
       return;
     }
     await this.openEditAnnotation(target, hit, this.anchorForEditor(editor));
   }
   viewForTarget(target) {
-    const targetPath = (0, import_obsidian13.normalizePath)(target.notePath);
-    const found = markdownViews(this.app).find((view) => view.file && (0, import_obsidian13.normalizePath)(view.file.path) === targetPath);
-    return found != null ? found : this.app.workspace.getActiveViewOfType(import_obsidian13.MarkdownView);
+    const targetPath = (0, import_obsidian14.normalizePath)(target.notePath);
+    const found = markdownViews(this.app).find((view) => view.file && (0, import_obsidian14.normalizePath)(view.file.path) === targetPath);
+    return found != null ? found : this.app.workspace.getActiveViewOfType(import_obsidian14.MarkdownView);
   }
   async editAnnotation(target, annotation) {
     await this.revealAnnotation(target, annotation);
@@ -14409,18 +14427,18 @@ ${MANAGED_CLOSE}
   async openEditAnnotation(target, annotation, anchor) {
     var _a, _b, _c, _d, _e;
     let view = this.viewForTarget(target);
-    if (!(view == null ? void 0 : view.file) || (0, import_obsidian13.normalizePath)(view.file.path) !== (0, import_obsidian13.normalizePath)(target.notePath)) {
-      const file = this.app.vault.getAbstractFileByPath((0, import_obsidian13.normalizePath)(target.notePath));
-      if (!(file instanceof import_obsidian13.TFile)) {
-        new import_obsidian13.Notice("The source note is not available.");
+    if (!(view == null ? void 0 : view.file) || (0, import_obsidian14.normalizePath)(view.file.path) !== (0, import_obsidian14.normalizePath)(target.notePath)) {
+      const file = this.app.vault.getAbstractFileByPath((0, import_obsidian14.normalizePath)(target.notePath));
+      if (!(file instanceof import_obsidian14.TFile)) {
+        new import_obsidian14.Notice("The source note is not available.");
         return;
       }
       const leaf = this.app.workspace.getLeaf(false);
       await leaf.openFile(file);
-      view = leaf.view instanceof import_obsidian13.MarkdownView ? leaf.view : null;
+      view = leaf.view instanceof import_obsidian14.MarkdownView ? leaf.view : null;
     }
     if (!(view == null ? void 0 : view.file)) {
-      new import_obsidian13.Notice("Open the source note first.");
+      new import_obsidian14.Notice("Open the source note first.");
       return;
     }
     const editor = view.editor;
@@ -14458,23 +14476,23 @@ ${MANAGED_CLOSE}
         const list = await this.annotationsFor(target);
         const updated = list.map((item) => item.id === current.id ? { ...item, color, comment: comment || void 0, modified: annotationNow() } : item);
         await this.store.saveUnit(target, updated);
-        this.pathAnnotations.set((0, import_obsidian13.normalizePath)(target.notePath), updated);
+        this.pathAnnotations.set((0, import_obsidian14.normalizePath)(target.notePath), updated);
         await this.syncArtifacts(target.workKey);
         await this.refreshViews();
         this.suppressAutoSignature = signature;
         restore();
-        new import_obsidian13.Notice("Annotation updated.");
+        new import_obsidian14.Notice("Annotation updated.");
       },
       onDelete: async () => {
         const list = await this.annotationsFor(target);
         const kept = list.filter((item) => item.id !== current.id);
         await this.store.saveUnit(target, kept);
-        this.pathAnnotations.set((0, import_obsidian13.normalizePath)(target.notePath), kept);
+        this.pathAnnotations.set((0, import_obsidian14.normalizePath)(target.notePath), kept);
         await this.syncArtifacts(target.workKey);
         await this.refreshViews();
         this.suppressAutoSignature = signature;
         restore();
-        new import_obsidian13.Notice("Annotation deleted.");
+        new import_obsidian14.Notice("Annotation deleted.");
       },
       onCancel: (reason) => {
         this.suppressAutoSignature = signature;
@@ -14495,7 +14513,7 @@ ${MANAGED_CLOSE}
     const offset = editor.posToOffset(editor.getCursor("from"));
     const hit = this.annotationAtOffset(value, annotations, offset);
     if (!hit) {
-      new import_obsidian13.Notice("No annotation here.");
+      new import_obsidian14.Notice("No annotation here.");
       return;
     }
     this.confirmDeleteAnnotation(target, hit);
@@ -14510,27 +14528,27 @@ ${MANAGED_CLOSE}
         const list = await this.annotationsFor(target);
         const kept = list.filter((item) => item.id !== annotation.id);
         await this.store.saveUnit(target, kept);
-        this.pathAnnotations.set((0, import_obsidian13.normalizePath)(target.notePath), kept);
+        this.pathAnnotations.set((0, import_obsidian14.normalizePath)(target.notePath), kept);
         await this.syncArtifacts(target.workKey);
         await this.refreshViews();
-        new import_obsidian13.Notice("Annotation deleted.");
+        new import_obsidian14.Notice("Annotation deleted.");
       }
     }).open();
   }
   async confirmTrashWork(path2) {
     const target = await this.targetForPath(path2);
     if (!target) {
-      new import_obsidian13.Notice("This note is not part of an imported source.");
+      new import_obsidian14.Notice("This note is not part of an imported source.");
       return;
     }
     const work = await this.store.getWork(target.workKey);
     if (!work) {
-      new import_obsidian13.Notice("No annotations for this source.");
+      new import_obsidian14.Notice("No annotations for this source.");
       return;
     }
     const count = Object.values(work.units).reduce((sum, unit) => sum + unit.count, 0);
     if (!count) {
-      new import_obsidian13.Notice("No annotations for this source.");
+      new import_obsidian14.Notice("No annotations for this source.");
       return;
     }
     new ConfirmModal(this.app, {
@@ -14539,12 +14557,12 @@ ${MANAGED_CLOSE}
       confirmText: "Move to trash",
       onConfirm: async () => {
         await this.store.trashWork(target.workKey);
-        this.pathAnnotations.delete((0, import_obsidian13.normalizePath)(target.notePath));
+        this.pathAnnotations.delete((0, import_obsidian14.normalizePath)(target.notePath));
         await renderAnnotationMoc(this.app, this.store, this.settings);
         await this.refreshParent();
         await this.refreshViews();
         refreshReadingViews(this.app);
-        new import_obsidian13.Notice("Annotations moved to the annotation trash.");
+        new import_obsidian14.Notice("Annotations moved to the annotation trash.");
       }
     }).open();
   }
@@ -14557,7 +14575,7 @@ ${MANAGED_CLOSE}
     if (!path2)
       return;
     const file = this.app.vault.getAbstractFileByPath(path2);
-    if (file instanceof import_obsidian13.TFile)
+    if (file instanceof import_obsidian14.TFile)
       await this.app.workspace.getLeaf().openFile(file);
   }
   async targetForPath(path2) {
@@ -14565,7 +14583,7 @@ ${MANAGED_CLOSE}
     if (stored) {
       const work2 = await this.store.getWork(stored.workKey);
       if (work2) {
-        if (work2.sourceStatus !== "installed" && work2.sourceStatus !== "adopted" && this.app.vault.getAbstractFileByPath((0, import_obsidian13.normalizePath)(path2))) {
+        if (work2.sourceStatus !== "installed" && work2.sourceStatus !== "adopted" && this.app.vault.getAbstractFileByPath((0, import_obsidian14.normalizePath)(path2))) {
           const restoredStatus = work2.key.startsWith("adopted:") || work2.key.startsWith("note:") ? "adopted" : "installed";
           await this.store.setSourceStatus(stored.workKey, restoredStatus);
           work2.sourceStatus = restoredStatus;
@@ -14576,7 +14594,7 @@ ${MANAGED_CLOSE}
         return {
           workKey: stored.workKey,
           unitKey: stored.unitKey,
-          notePath: (0, import_obsidian13.normalizePath)(path2),
+          notePath: (0, import_obsidian14.normalizePath)(path2),
           workTitle: work2.title,
           workDir: work2.dir,
           sourceStatus: work2.sourceStatus
@@ -14620,9 +14638,9 @@ ${MANAGED_CLOSE}
       const target = await this.targetForPath(path2);
       const annotations = target ? await this.annotationsFor(target) : [];
       if (target)
-        this.pathAnnotations.set((0, import_obsidian13.normalizePath)(path2), annotations);
+        this.pathAnnotations.set((0, import_obsidian14.normalizePath)(path2), annotations);
       else
-        this.pathAnnotations.delete((0, import_obsidian13.normalizePath)(path2));
+        this.pathAnnotations.delete((0, import_obsidian14.normalizePath)(path2));
       const cm = cmOf(view);
       if (cm) {
         if (annotations.length)
@@ -14659,23 +14677,21 @@ ${MANAGED_CLOSE}
     const work = await this.store.getWork(workKey2);
     if (!work)
       return;
-    const outRoot = this.settings.sourceImportRoot.trim() || "_7 Sources";
+    const outRoot = installedSourcesRoot(this.settings);
     const unitNotes = new Map();
     for (const [unitKey2, entry] of Object.entries(work.units)) {
-      const oldHub = (0, import_obsidian13.normalizePath)(`${outRoot}/${oldDir}.md`);
-      const oldPrefix = (0, import_obsidian13.normalizePath)(`${outRoot}/${oldDir}/`);
-      unitNotes.set(unitKey2, entry.note === oldHub ? (0, import_obsidian13.normalizePath)(`${outRoot}/${newDir}.md`) : entry.note.startsWith(oldPrefix) ? (0, import_obsidian13.normalizePath)(`${outRoot}/${newDir}/${entry.note.slice(oldPrefix.length)}`) : entry.note);
+      const oldHub = (0, import_obsidian14.normalizePath)(`${outRoot}/${oldDir}.md`);
+      const oldPrefix = (0, import_obsidian14.normalizePath)(`${outRoot}/${oldDir}/`);
+      unitNotes.set(unitKey2, entry.note === oldHub ? (0, import_obsidian14.normalizePath)(`${outRoot}/${newDir}.md`) : entry.note.startsWith(oldPrefix) ? (0, import_obsidian14.normalizePath)(`${outRoot}/${newDir}/${entry.note.slice(oldPrefix.length)}`) : entry.note);
     }
-    const folder = this.settings.annotationNoteFolder.trim() || `${this.settings.sourceRoot.trim() || outRoot}/Annotation Notes`;
-    const newNote = (0, import_obsidian13.normalizePath)(`${folder}/${newDir.replace(/[\\/:*?"<>|#^]/g, "-").trim() || "Annotations"} - Annotations.md`);
+    const newNote = annotationNotePathForDir(this.settings, newDir);
     const oldNote = work.note;
-    if (oldNote && oldNote !== newNote && await this.app.vault.adapter.exists((0, import_obsidian13.normalizePath)(oldNote))) {
+    if (oldNote && oldNote !== newNote && await this.app.vault.adapter.exists((0, import_obsidian14.normalizePath)(oldNote))) {
       const parent = newNote.split("/").slice(0, -1).join("/");
-      if (parent && !await this.app.vault.adapter.exists((0, import_obsidian13.normalizePath)(parent))) {
-        await this.app.vault.adapter.mkdir((0, import_obsidian13.normalizePath)(parent));
-      }
+      if (parent)
+        await ensureFolder(this.app, parent);
       try {
-        await this.app.vault.adapter.rename((0, import_obsidian13.normalizePath)(oldNote), newNote);
+        await this.app.vault.adapter.rename((0, import_obsidian14.normalizePath)(oldNote), newNote);
       } catch (e) {
       }
     }
@@ -14705,11 +14721,11 @@ ${MANAGED_CLOSE}
     await this.syncArtifacts(key);
     await this.refreshViews();
     refreshReadingViews(this.app);
-    new import_obsidian13.Notice("Annotations restored.");
+    new import_obsidian14.Notice("Annotations restored.");
   }
   async emptyTrash(batchPath) {
     const count = await this.store.emptyTrash(batchPath);
-    new import_obsidian13.Notice(count ? "Annotation trash emptied." : "Nothing to delete.");
+    new import_obsidian14.Notice(count ? "Annotation trash emptied." : "Nothing to delete.");
   }
   async purgeTrash() {
     try {
@@ -14732,7 +14748,7 @@ ${MANAGED_CLOSE}
       return;
     const count = Object.values(work.units).reduce((sum, unit) => sum + unit.count, 0);
     if (!count) {
-      new import_obsidian13.Notice("No annotations for this source.");
+      new import_obsidian14.Notice("No annotations for this source.");
       return;
     }
     new ConfirmModal(this.app, {
@@ -14741,7 +14757,7 @@ ${MANAGED_CLOSE}
       confirmText: "Move to trash",
       onConfirm: async () => {
         await this.trashAnnotationsForWork(workKey2);
-        new import_obsidian13.Notice("Annotations moved to the annotation trash.");
+        new import_obsidian14.Notice("Annotations moved to the annotation trash.");
       }
     }).open();
   }
@@ -14765,18 +14781,18 @@ ${MANAGED_CLOSE}
     if (!resolved) {
       const view = activeMarkdownView(this.app);
       if (!(view == null ? void 0 : view.file)) {
-        new import_obsidian13.Notice("Open a source note first.");
+        new import_obsidian14.Notice("Open a source note first.");
         return;
       }
       resolved = await this.targetForPath(view.file.path);
     }
     if (!resolved) {
-      new import_obsidian13.Notice("That note is not part of an imported source.");
+      new import_obsidian14.Notice("That note is not part of an imported source.");
       return;
     }
-    const file = this.app.vault.getAbstractFileByPath((0, import_obsidian13.normalizePath)(resolved.notePath));
-    if (!(file instanceof import_obsidian13.TFile)) {
-      new import_obsidian13.Notice("The source note is not available.");
+    const file = this.app.vault.getAbstractFileByPath((0, import_obsidian14.normalizePath)(resolved.notePath));
+    if (!(file instanceof import_obsidian14.TFile)) {
+      new import_obsidian14.Notice("The source note is not available.");
       return;
     }
     const text = await this.app.vault.adapter.read(file.path);
@@ -14800,17 +14816,17 @@ ${MANAGED_CLOSE}
     }
     try {
       await navigator.clipboard.writeText(lines.join("\n"));
-      new import_obsidian13.Notice(`Copied the source with ${annotations.length} annotation(s).`);
+      new import_obsidian14.Notice(`Copied the source with ${annotations.length} annotation(s).`);
     } catch (e) {
-      new import_obsidian13.Notice(`Could not copy: ${e instanceof Error ? e.message : e}`);
+      new import_obsidian14.Notice(`Could not copy: ${e instanceof Error ? e.message : e}`);
     }
   }
   async sidebarData() {
     const candidates = [];
-    const active = this.app.workspace.getActiveViewOfType(import_obsidian13.MarkdownView);
+    const active = this.app.workspace.getActiveViewOfType(import_obsidian14.MarkdownView);
     if (active)
       candidates.push(active);
-    const last = this.lastSidebarPath ? markdownViews(this.app).find((view) => view.file && (0, import_obsidian13.normalizePath)(view.file.path) === (0, import_obsidian13.normalizePath)(this.lastSidebarPath)) : null;
+    const last = this.lastSidebarPath ? markdownViews(this.app).find((view) => view.file && (0, import_obsidian14.normalizePath)(view.file.path) === (0, import_obsidian14.normalizePath)(this.lastSidebarPath)) : null;
     if (last)
       candidates.push(last);
     const fallback = activeMarkdownView(this.app);
@@ -14820,7 +14836,7 @@ ${MANAGED_CLOSE}
     for (const view of candidates) {
       if (!view.file)
         continue;
-      const path2 = (0, import_obsidian13.normalizePath)(view.file.path);
+      const path2 = (0, import_obsidian14.normalizePath)(view.file.path);
       if (seen.has(path2))
         continue;
       seen.add(path2);
@@ -14883,17 +14899,17 @@ ${MANAGED_CLOSE}
   }
   async revealAnnotation(target, annotation) {
     var _a, _b;
-    let view = markdownViews(this.app).find((candidate) => candidate.file && (0, import_obsidian13.normalizePath)(candidate.file.path) === (0, import_obsidian13.normalizePath)(target.notePath));
+    let view = markdownViews(this.app).find((candidate) => candidate.file && (0, import_obsidian14.normalizePath)(candidate.file.path) === (0, import_obsidian14.normalizePath)(target.notePath));
     if (!view) {
-      const file = this.app.vault.getAbstractFileByPath((0, import_obsidian13.normalizePath)(target.notePath));
-      if (!(file instanceof import_obsidian13.TFile)) {
-        new import_obsidian13.Notice("The source note is not available.");
+      const file = this.app.vault.getAbstractFileByPath((0, import_obsidian14.normalizePath)(target.notePath));
+      if (!(file instanceof import_obsidian14.TFile)) {
+        new import_obsidian14.Notice("The source note is not available.");
         return;
       }
       const leaf = this.app.workspace.getLeaf(false);
       await leaf.openFile(file);
       await new Promise((resolve) => window.setTimeout(resolve, 160));
-      view = leaf.view instanceof import_obsidian13.MarkdownView ? leaf.view : markdownViews(this.app).find((candidate) => candidate.file && (0, import_obsidian13.normalizePath)(candidate.file.path) === (0, import_obsidian13.normalizePath)(target.notePath));
+      view = leaf.view instanceof import_obsidian14.MarkdownView ? leaf.view : markdownViews(this.app).find((candidate) => candidate.file && (0, import_obsidian14.normalizePath)(candidate.file.path) === (0, import_obsidian14.normalizePath)(target.notePath));
     }
     if (!view)
       return;
@@ -14908,9 +14924,9 @@ ${MANAGED_CLOSE}
         mark.scrollIntoView({ block: "center", behavior: "smooth" });
         this.flashMarks(view.containerEl, annotation.id);
       } else if (annotation.anchorStatus === "orphaned") {
-        new import_obsidian13.Notice("This annotation is unanchored. Switch to editing, select the corrected passage, and use re-anchor in the annotation popup.");
+        new import_obsidian14.Notice("This annotation is unanchored. Switch to editing, select the corrected passage, and use re-anchor in the annotation popup.");
       } else {
-        new import_obsidian13.Notice("This annotation is not visible in the current reading view.");
+        new import_obsidian14.Notice("This annotation is not visible in the current reading view.");
       }
       return;
     }
@@ -14932,12 +14948,12 @@ ${MANAGED_CLOSE}
           view.editor.setCursor(view.editor.offsetToPos(fallback));
         }
       }
-      new import_obsidian13.Notice("This annotation is unanchored. Select the corrected passage; the annotation popup will offer re-anchor.");
+      new import_obsidian14.Notice("This annotation is unanchored. Select the corrected passage; the annotation popup will offer re-anchor.");
       return;
     }
     const offset = (_b = resolved == null ? void 0 : resolved.start) != null ? _b : fallback;
     if (offset === void 0) {
-      new import_obsidian13.Notice("This annotation could not be located in the source note.");
+      new import_obsidian14.Notice("This annotation could not be located in the source note.");
       return;
     }
     const cm = cmOf(view);
@@ -14968,12 +14984,12 @@ ${MANAGED_CLOSE}
   async openNamedNote(names) {
     for (const name of names) {
       const file = this.app.metadataCache.getFirstLinkpathDest(name, "");
-      if (file instanceof import_obsidian13.TFile) {
+      if (file instanceof import_obsidian14.TFile) {
         await this.app.workspace.getLeaf().openFile(file);
         return;
       }
     }
-    new import_obsidian13.Notice(`Could not find ${names[0]}.`);
+    new import_obsidian14.Notice(`Could not find ${names[0]}.`);
   }
   openManageSources() {
     var _a;
@@ -14983,7 +14999,7 @@ ${MANAGED_CLOSE}
   async openMoc() {
     const path2 = await renderAnnotationMoc(this.app, this.store, this.settings);
     const file = this.app.vault.getAbstractFileByPath(path2);
-    if (file instanceof import_obsidian13.TFile)
+    if (file instanceof import_obsidian14.TFile)
       await this.app.workspace.getLeaf().openFile(file);
   }
   openTrash() {
@@ -14999,7 +15015,7 @@ ${MANAGED_CLOSE}
     return !!this.app.vault.getAbstractFileByPath(this.mocPath());
   }
 };
-var OrphanPicker = class extends import_obsidian13.SuggestModal {
+var OrphanPicker = class extends import_obsidian14.SuggestModal {
   constructor(app, orphans, choose) {
     super(app);
     this.orphans = orphans;
@@ -15034,7 +15050,7 @@ async function registerAnnotations(host) {
 }
 
 // src/sourceRegistry/registry.ts
-var import_obsidian14 = __toModule(require("obsidian"));
+var import_obsidian15 = __toModule(require("obsidian"));
 var SOURCE_REGISTRY = ".midad-arabic-sources/sources.json";
 function stringField(frontmatter, key) {
   const value = frontmatter == null ? void 0 : frontmatter[key];
@@ -15071,7 +15087,7 @@ async function buildSourceRegistry(app, paths) {
     });
   }
   try {
-    const manifest = JSON.parse(await app.vault.adapter.read((0, import_obsidian14.normalizePath)(paths.manifest)));
+    const manifest = JSON.parse(await app.vault.adapter.read((0, import_obsidian15.normalizePath)(paths.manifest)));
     for (const work of (_b = manifest.works) != null ? _b : []) {
       const key = String((_c = work.key) != null ? _c : "").trim();
       const dir = String((_d = work.dir) != null ? _d : "").trim();
@@ -15081,7 +15097,7 @@ async function buildSourceRegistry(app, paths) {
         masId: `repo:${key}`,
         kind: "repo-work",
         title: String((_f = (_e = work.title) != null ? _e : work.name) != null ? _f : dir),
-        path: (0, import_obsidian14.normalizePath)(`${paths.installedRoot}/${dir}.md`),
+        path: (0, import_obsidian15.normalizePath)(`${paths.installedRoot}/${dir}.md`),
         source: `repo:${key}`,
         workKey: key,
         unitKey: "hub",
@@ -15108,10 +15124,10 @@ async function buildSourceRegistry(app, paths) {
     });
   }
   try {
-    const adopted = JSON.parse(await app.vault.adapter.read((0, import_obsidian14.normalizePath)(paths.adopted)));
+    const adopted = JSON.parse(await app.vault.adapter.read((0, import_obsidian15.normalizePath)(paths.adopted)));
     for (const [path2, entry] of Object.entries((_i = adopted.notes) != null ? _i : {})) {
-      const file = app.vault.getAbstractFileByPath((0, import_obsidian14.normalizePath)(path2));
-      if (!(file instanceof import_obsidian14.TFile))
+      const file = app.vault.getAbstractFileByPath((0, import_obsidian15.normalizePath)(path2));
+      if (!(file instanceof import_obsidian15.TFile))
         continue;
       const frontmatter = (_j = app.metadataCache.getFileCache(file)) == null ? void 0 : _j.frontmatter;
       const masId = stringField(frontmatter, "mas-id") || `note:${entry.workKey || path2}`;
@@ -15136,7 +15152,7 @@ async function buildSourceRegistry(app, paths) {
   return { schema: 1, sources };
 }
 async function writeSourceRegistry(app, registry) {
-  const path2 = (0, import_obsidian14.normalizePath)(SOURCE_REGISTRY);
+  const path2 = (0, import_obsidian15.normalizePath)(SOURCE_REGISTRY);
   const parent = path2.split("/").slice(0, -1).join("/");
   if (parent && !await app.vault.adapter.exists(parent))
     await app.vault.adapter.mkdir(parent);
@@ -15309,7 +15325,7 @@ var DEFAULT_SETTINGS = {
   zoteroAutoCreate: false,
   sourceUpdateCheckDays: 7
 };
-var MidadArabicSourcesPlugin = class extends import_obsidian15.Plugin {
+var MidadArabicSourcesPlugin = class extends import_obsidian16.Plugin {
   constructor() {
     super(...arguments);
     this.lastUnknown = [];
@@ -15355,7 +15371,7 @@ var MidadArabicSourcesPlugin = class extends import_obsidian15.Plugin {
       await this.refreshAnnotationParent();
     } catch (error) {
       console.error("[midad-arabic-sources] annotations failed to start", error);
-      new import_obsidian15.Notice("The annotation layer could not start. See the developer console for details.");
+      new import_obsidian16.Notice("The annotation layer could not start. See the developer console for details.");
     }
     await this.refreshSourceRegistry();
     await this.refreshSourcesIndex();
@@ -15365,12 +15381,12 @@ var MidadArabicSourcesPlugin = class extends import_obsidian15.Plugin {
       editorCallback: async (editor) => {
         const text = editor.getSelection() || editor.getLine(editor.getCursor().line);
         if (!text.trim()) {
-          new import_obsidian15.Notice("Nothing selected.");
+          new import_obsidian16.Notice("Nothing selected.");
           return;
         }
         new TransliterateModal(this.app, this, text, async (result) => {
           await navigator.clipboard.writeText(result);
-          new import_obsidian15.Notice("Romanized text copied to clipboard.");
+          new import_obsidian16.Notice("Romanized text copied to clipboard.");
         }).open();
       }
     });
@@ -15379,9 +15395,9 @@ var MidadArabicSourcesPlugin = class extends import_obsidian15.Plugin {
       name: "Transliterate note to new note",
       callback: async () => {
         var _a, _b;
-        const view = this.app.workspace.getActiveViewOfType(import_obsidian15.MarkdownView);
+        const view = this.app.workspace.getActiveViewOfType(import_obsidian16.MarkdownView);
         if (!view || !view.file) {
-          new import_obsidian15.Notice("No active note.");
+          new import_obsidian16.Notice("No active note.");
           return;
         }
         const editor = view.editor;
@@ -15396,7 +15412,7 @@ var MidadArabicSourcesPlugin = class extends import_obsidian15.Plugin {
         const folder = (_b = (_a = view.file.parent) == null ? void 0 : _a.path) != null ? _b : "";
         const path2 = this.uniquePath(folder, `${view.file.basename} (romanized)`);
         const file = await this.app.vault.create(path2, result);
-        new import_obsidian15.Notice(`Created ${path2}`);
+        new import_obsidian16.Notice(`Created ${path2}`);
         this.maybePromptUnknown(source, async (r) => {
           await this.app.vault.modify(file, r);
         }, opts);
@@ -15480,16 +15496,16 @@ var MidadArabicSourcesPlugin = class extends import_obsidian15.Plugin {
       callback: async () => {
         const file = this.app.workspace.getActiveFile();
         if (!file) {
-          new import_obsidian15.Notice("Open a source note first.");
+          new import_obsidian16.Notice("Open a source note first.");
           return;
         }
         const work = await this.workForPath(file.path);
         if (!work) {
-          new import_obsidian15.Notice("That note is not part of an imported source.");
+          new import_obsidian16.Notice("That note is not part of an imported source.");
           return;
         }
         if (this.workStatus(work) === "archived") {
-          new import_obsidian15.Notice("That source is already archived.");
+          new import_obsidian16.Notice("That source is already archived.");
           return;
         }
         new ConfirmModal(this.app, {
@@ -15541,7 +15557,7 @@ var MidadArabicSourcesPlugin = class extends import_obsidian15.Plugin {
       void (async () => {
         const work = await this.workForPath(file.path);
         const archived = work ? null : archivedNoteInfo(file.path);
-        if (!work && (!archived || !(file instanceof import_obsidian15.TFile) || file.extension !== "md"))
+        if (!work && (!archived || !(file instanceof import_obsidian16.TFile) || file.extension !== "md"))
           return;
         menu.addItem((item) => item.setTitle("Re-render this source").setIcon("refresh-cw").onClick(() => {
           void this.rerenderCurrentSource(file);
@@ -15553,7 +15569,7 @@ var MidadArabicSourcesPlugin = class extends import_obsidian15.Plugin {
       name: "Apply template changes to imported sources",
       callback: async () => {
         const n = await this.applyTemplateChanges();
-        new import_obsidian15.Notice(n ? `Re-rendered ${n} source(s) for template changes.` : "No template changes to apply.");
+        new import_obsidian16.Notice(n ? `Re-rendered ${n} source(s) for template changes.` : "No template changes to apply.");
       }
     });
     this.addCommand({
@@ -15576,7 +15592,7 @@ var MidadArabicSourcesPlugin = class extends import_obsidian15.Plugin {
       callback: async () => {
         const incomplete = await this.findIncompleteSources();
         if (!incomplete.length) {
-          new import_obsidian15.Notice("All imported sources are complete.");
+          new import_obsidian16.Notice("All imported sources are complete.");
           return;
         }
         new ReconcileSourcesModal(this.app, this, incomplete).open();
@@ -15633,7 +15649,7 @@ var MidadArabicSourcesPlugin = class extends import_obsidian15.Plugin {
       void this.pollTemplateChanges();
     }, 45e3));
     this.registerEvent(this.app.vault.on("modify", (file) => {
-      if (file instanceof import_obsidian15.TFile && this.isSourceTemplateFile(file.path)) {
+      if (file instanceof import_obsidian16.TFile && this.isSourceTemplateFile(file.path)) {
         void this.recordSourceTemplateAndCheck();
       }
     }));
@@ -15673,19 +15689,22 @@ var MidadArabicSourcesPlugin = class extends import_obsidian15.Plugin {
     return (_a = adapter == null ? void 0 : adapter.basePath) != null ? _a : "";
   }
   sourcesRoot() {
-    return (0, import_obsidian15.normalizePath)((this.settings.sourceRoot || "").trim() || "Midad Arabic Sources");
+    return sourceRoot(this.settings);
   }
   installedSourcesRoot() {
-    return (0, import_obsidian15.normalizePath)((this.settings.sourceImportRoot || "").trim() || `${this.sourcesRoot()}/Installed Sources`);
+    return installedSourcesRoot(this.settings);
   }
   transcriptionsFolder() {
-    return (0, import_obsidian15.normalizePath)(`${this.sourcesRoot()}/Transcriptions`);
+    return transcriptionsFolder(this.settings);
   }
   translationsFolder() {
-    return (0, import_obsidian15.normalizePath)(`${this.sourcesRoot()}/Translations`);
+    return translationsFolder(this.settings);
   }
   canonicalQuranFolder() {
-    return (0, import_obsidian15.normalizePath)((this.settings.canonicalQuranFolder || "").trim() || `${this.installedSourcesRoot()}/Quran`);
+    return canonicalQuranFolder(this.settings);
+  }
+  sourceNotePath(name) {
+    return sourceNotePath(this.settings, name);
   }
   extractBundledAssets() {
     var _a;
@@ -15858,20 +15877,20 @@ var MidadArabicSourcesPlugin = class extends import_obsidian15.Plugin {
     const { code, lines } = await this.runScript("migrate-source-layout.py", args, () => {
     });
     if (code === 0) {
-      this.settings.sourceImportRoot = (0, import_obsidian15.normalizePath)(`${this.sourcesRoot()}/Installed Sources`);
-      this.settings.annotationNoteFolder = (0, import_obsidian15.normalizePath)(`${this.sourcesRoot()}/Annotation Notes`);
-      this.settings.canonicalQuranFolder = (0, import_obsidian15.normalizePath)(`${this.settings.sourceImportRoot}/Quran`);
+      this.settings.sourceImportRoot = (0, import_obsidian16.normalizePath)(`${this.sourcesRoot()}/Installed Sources`);
+      this.settings.annotationNoteFolder = (0, import_obsidian16.normalizePath)(`${this.sourcesRoot()}/Annotation Notes`);
+      this.settings.canonicalQuranFolder = (0, import_obsidian16.normalizePath)(`${this.settings.sourceImportRoot}/Quran`);
       this.settings.sourceLayoutMigrated = true;
       this.sourceLayoutLegacy = null;
       await this.saveSettings();
-      new import_obsidian15.Notice("Midad Arabic Sources: source folders reorganized.");
+      new import_obsidian16.Notice("Midad Arabic Sources: source folders reorganized.");
     } else {
       console.error("[midad-arabic-sources] source-layout migration", lines);
-      new import_obsidian15.Notice("Midad Arabic Sources could not reorganize its folders \u2014 see the developer console.");
+      new import_obsidian16.Notice("Midad Arabic Sources could not reorganize its folders \u2014 see the developer console.");
     }
   }
   async moveSourceRoot(newRoot) {
-    const root = (0, import_obsidian15.normalizePath)(newRoot.trim() || "Midad Arabic Sources");
+    const root = (0, import_obsidian16.normalizePath)(newRoot.trim() || "Midad Arabic Sources");
     if (root === this.sourcesRoot()) {
       this.settings.sourceRoot = root;
       await this.saveSettings();
@@ -15895,16 +15914,16 @@ var MidadArabicSourcesPlugin = class extends import_obsidian15.Plugin {
     });
     if (code !== 0) {
       console.error("[midad-arabic-sources] source-root move", lines);
-      new import_obsidian15.Notice("Midad Arabic Sources could not move its folders \u2014 see the developer console.");
+      new import_obsidian16.Notice("Midad Arabic Sources could not move its folders \u2014 see the developer console.");
       return;
     }
     this.settings.sourceRoot = root;
-    this.settings.sourceImportRoot = (0, import_obsidian15.normalizePath)(`${root}/Installed Sources`);
-    this.settings.annotationNoteFolder = (0, import_obsidian15.normalizePath)(`${root}/Annotation Notes`);
-    this.settings.canonicalQuranFolder = (0, import_obsidian15.normalizePath)(`${root}/Installed Sources/Quran`);
+    this.settings.sourceImportRoot = (0, import_obsidian16.normalizePath)(`${root}/Installed Sources`);
+    this.settings.annotationNoteFolder = (0, import_obsidian16.normalizePath)(`${root}/Annotation Notes`);
+    this.settings.canonicalQuranFolder = (0, import_obsidian16.normalizePath)(`${root}/Installed Sources/Quran`);
     this.settings.sourceLayoutMigrated = true;
     await this.saveSettings();
-    new import_obsidian15.Notice(`Midad Arabic Sources: moved plugin folders to ${root}.`);
+    new import_obsidian16.Notice(`Midad Arabic Sources: moved plugin folders to ${root}.`);
   }
   async refreshSourceRegistry() {
     try {
@@ -15926,13 +15945,13 @@ var MidadArabicSourcesPlugin = class extends import_obsidian15.Plugin {
       s.open();
       s.openTabById("midad-arabic-sources");
     } else {
-      new import_obsidian15.Notice("Open Settings \u2192 Community plugins \u2192 Midad Arabic Sources.");
+      new import_obsidian16.Notice("Open Settings \u2192 Community plugins \u2192 Midad Arabic Sources.");
     }
   }
   ensureApiKey(task = "transcription") {
     const config = this.llmConfigForTask(task);
     if (config && config.provider !== "gemini") {
-      new import_obsidian15.Notice(`Choose a Gemini configuration for ${task} in Settings \u2192 Midad Arabic Sources \u2192 LLM.`);
+      new import_obsidian16.Notice(`Choose a Gemini configuration for ${task} in Settings \u2192 Midad Arabic Sources \u2192 LLM.`);
       return false;
     }
     if (this.apiKeyAvailable(task))
@@ -15941,7 +15960,7 @@ var MidadArabicSourcesPlugin = class extends import_obsidian15.Plugin {
     return false;
   }
   activeItem() {
-    const view = this.app.workspace.getActiveViewOfType(import_obsidian15.MarkdownView);
+    const view = this.app.workspace.getActiveViewOfType(import_obsidian16.MarkdownView);
     if (!(view == null ? void 0 : view.file))
       return null;
     const base = view.file.basename;
@@ -16036,7 +16055,7 @@ var MidadArabicSourcesPlugin = class extends import_obsidian15.Plugin {
     });
     if (!result) {
       const tail = lines.slice(-3).join("  |  ");
-      new import_obsidian15.Notice(`Midad Arabic Sources: no result (exit ${code}). ${lastError || tail || "no output"}`);
+      new import_obsidian16.Notice(`Midad Arabic Sources: no result (exit ${code}). ${lastError || tail || "no output"}`);
       console.error("[midad-arabic-sources] pipeline", args, { code, lines });
     }
     return result;
@@ -16072,7 +16091,7 @@ var MidadArabicSourcesPlugin = class extends import_obsidian15.Plugin {
       (_a = this.activeSourceProc) == null ? void 0 : _a.kill("SIGTERM");
     } catch (e) {
     }
-    new import_obsidian15.Notice("Stopping source operation\u2026");
+    new import_obsidian16.Notice("Stopping source operation\u2026");
   }
   async runWithProgress(title, args, scriptRel) {
     var _a, _b;
@@ -16100,9 +16119,9 @@ var MidadArabicSourcesPlugin = class extends import_obsidian15.Plugin {
     panel.finish(code === 0);
     panel.addResultLinks((_b = (_a = result == null ? void 0 : result.notes) != null ? _a : result == null ? void 0 : result.sources) != null ? _b : []);
     if (code === 0)
-      new import_obsidian15.Notice(`${title}: finished.`);
+      new import_obsidian16.Notice(`${title}: finished.`);
     else
-      new import_obsidian15.Notice(`${title}: failed \u2014 use \u201CShow pipeline status\u201D to see the log.`);
+      new import_obsidian16.Notice(`${title}: failed \u2014 use \u201CShow pipeline status\u201D to see the log.`);
     return result;
   }
   async runResume(statePath) {
@@ -16120,7 +16139,7 @@ var MidadArabicSourcesPlugin = class extends import_obsidian15.Plugin {
     });
     panel.finish(code === 0);
     panel.addResultLinks((_b = (_a = result == null ? void 0 : result.notes) != null ? _a : result == null ? void 0 : result.sources) != null ? _b : []);
-    new import_obsidian15.Notice(code === 0 ? "Resume: finished." : "Resume: failed \u2014 see the log.");
+    new import_obsidian16.Notice(code === 0 ? "Resume: finished." : "Resume: failed \u2014 see the log.");
     return result;
   }
   jobPath(title, ext) {
@@ -16152,18 +16171,18 @@ var MidadArabicSourcesPlugin = class extends import_obsidian15.Plugin {
     try {
       const dir = `${this.vaultPath()}/.midad-arabic-sources/jobs`;
       if (!fs2.existsSync(dir)) {
-        new import_obsidian15.Notice("No pipeline logs yet.");
+        new import_obsidian16.Notice("No pipeline logs yet.");
         return;
       }
       const files = fs2.readdirSync(dir).filter((f) => f.endsWith(".log")).sort();
       if (!files.length) {
-        new import_obsidian15.Notice("No pipeline logs yet.");
+        new import_obsidian16.Notice("No pipeline logs yet.");
         return;
       }
       const name = files[files.length - 1];
       new LogModal(this.app, name, fs2.readFileSync(`${dir}/${name}`, "utf8")).open();
     } catch (e) {
-      new import_obsidian15.Notice("Could not read the pipeline logs.");
+      new import_obsidian16.Notice("Could not read the pipeline logs.");
     }
   }
   async loadDefaultPrompts() {
@@ -16178,10 +16197,10 @@ var MidadArabicSourcesPlugin = class extends import_obsidian15.Plugin {
     return this.promptDefaults;
   }
   promptPath(kind) {
-    return (0, import_obsidian15.normalizePath)(PROMPT_FILES[kind]);
+    return (0, import_obsidian16.normalizePath)(PROMPT_FILES[kind]);
   }
   async savePromptSet(kind, prompts) {
-    const dir = (0, import_obsidian15.normalizePath)(".midad-arabic-sources");
+    const dir = (0, import_obsidian16.normalizePath)(".midad-arabic-sources");
     try {
       if (!await this.app.vault.adapter.exists(dir))
         await this.app.vault.adapter.mkdir(dir);
@@ -16205,7 +16224,7 @@ var MidadArabicSourcesPlugin = class extends import_obsidian15.Plugin {
       }
     } catch (e) {
       console.error("[midad-arabic-sources] prompt file", kind, e);
-      new import_obsidian15.Notice(`Could not read the ${PROMPT_KIND_LABEL[kind]} prompts file; it will be recreated.`);
+      new import_obsidian16.Notice(`Could not read the ${PROMPT_KIND_LABEL[kind]} prompts file; it will be recreated.`);
       prompts = [];
     }
     const seen = new Set();
@@ -16249,7 +16268,7 @@ var MidadArabicSourcesPlugin = class extends import_obsidian15.Plugin {
       return path2;
     } catch (e) {
       console.error("[midad-arabic-sources] prompt file", kind, e);
-      new import_obsidian15.Notice("Could not write the prompt file \u2014 see the developer console.");
+      new import_obsidian16.Notice("Could not write the prompt file \u2014 see the developer console.");
       return null;
     }
   }
@@ -16257,7 +16276,7 @@ var MidadArabicSourcesPlugin = class extends import_obsidian15.Plugin {
     var _a, _b;
     const item = this.activeItem();
     if (!item) {
-      new import_obsidian15.Notice("Open a literature note (@citekey) first.");
+      new import_obsidian16.Notice("Open a literature note (@citekey) first.");
       return;
     }
     if (!this.ensureApiKey("transcription"))
@@ -16273,7 +16292,7 @@ var MidadArabicSourcesPlugin = class extends import_obsidian15.Plugin {
       }
     }
     if (!pdfs.length) {
-      new import_obsidian15.Notice("No PDF attachments found for this item.");
+      new import_obsidian16.Notice("No PDF attachments found for this item.");
       return;
     }
     let prompts;
@@ -16281,7 +16300,7 @@ var MidadArabicSourcesPlugin = class extends import_obsidian15.Plugin {
       prompts = await this.loadPromptSet("transcription");
     } catch (e) {
       console.error("[midad-arabic-sources] transcription prompts", e);
-      new import_obsidian15.Notice("Could not load the transcription prompts \u2014 see the developer console.");
+      new import_obsidian16.Notice("Could not load the transcription prompts \u2014 see the developer console.");
       return;
     }
     new TranscribeModal(this.app, this, item.citekey, pdfs, prompts).open();
@@ -16294,7 +16313,7 @@ var MidadArabicSourcesPlugin = class extends import_obsidian15.Plugin {
       prompts = await this.loadPromptSet("transcription");
     } catch (e) {
       console.error("[midad-arabic-sources] transcription prompts", e);
-      new import_obsidian15.Notice("Could not load the transcription prompts \u2014 see the developer console.");
+      new import_obsidian16.Notice("Could not load the transcription prompts \u2014 see the developer console.");
       return;
     }
     new StandalonePdfModal(this.app, this, prompts).open();
@@ -16303,7 +16322,7 @@ var MidadArabicSourcesPlugin = class extends import_obsidian15.Plugin {
     var _a, _b, _c, _d;
     const item = this.activeItem();
     if (!item) {
-      new import_obsidian15.Notice("Open a literature note (@citekey) first.");
+      new import_obsidian16.Notice("Open a literature note (@citekey) first.");
       return;
     }
     if (!this.ensureApiKey("translation"))
@@ -16315,7 +16334,7 @@ var MidadArabicSourcesPlugin = class extends import_obsidian15.Plugin {
       prompts = await this.loadPromptSet("translation");
     } catch (e) {
       console.error("[midad-arabic-sources] translation prompts", e);
-      new import_obsidian15.Notice("Could not load the translation prompts \u2014 see the developer console.");
+      new import_obsidian16.Notice("Could not load the translation prompts \u2014 see the developer console.");
       return;
     }
     new TranslateModal(this.app, this, item.citekey, notes, pdfs, prompts).open();
@@ -16337,7 +16356,7 @@ var MidadArabicSourcesPlugin = class extends import_obsidian15.Plugin {
     return works;
   }
   customWorksPath() {
-    return (0, import_obsidian15.normalizePath)(".midad-arabic-sources/turath-custom-works.json");
+    return (0, import_obsidian16.normalizePath)(".midad-arabic-sources/turath-custom-works.json");
   }
   async customWorksStamp() {
     var _a, _b;
@@ -16363,7 +16382,7 @@ var MidadArabicSourcesPlugin = class extends import_obsidian15.Plugin {
     await this.app.vault.adapter.write(this.customWorksPath(), JSON.stringify({ works }, null, 2));
     this.sourceCatalog = null;
     try {
-      const catalogPath = (0, import_obsidian15.normalizePath)(".midad-arabic-sources/source-catalog.json");
+      const catalogPath = (0, import_obsidian16.normalizePath)(".midad-arabic-sources/source-catalog.json");
       if (await this.app.vault.adapter.exists(catalogPath))
         await this.app.vault.adapter.remove(catalogPath);
     } catch (e) {
@@ -16380,7 +16399,7 @@ var MidadArabicSourcesPlugin = class extends import_obsidian15.Plugin {
     if (!value)
       return "";
     try {
-      const res = await (0, import_obsidian15.requestUrl)({
+      const res = await (0, import_obsidian16.requestUrl)({
         url: this.baseUrl() + "/transliterate",
         method: "POST",
         contentType: "application/json",
@@ -16396,19 +16415,19 @@ var MidadArabicSourcesPlugin = class extends import_obsidian15.Plugin {
     var _a, _b, _c;
     const id = this.parseTurathId(input);
     if (!id) {
-      new import_obsidian15.Notice("Paste a Turath book URL (or its numeric ID).");
+      new import_obsidian16.Notice("Paste a Turath book URL (or its numeric ID).");
       return null;
     }
     let meta;
     try {
-      const res = await (0, import_obsidian15.requestUrl)({ url: `https://api.turath.io/book?id=${id}&include=indexes&ver=3`, method: "GET" });
+      const res = await (0, import_obsidian16.requestUrl)({ url: `https://api.turath.io/book?id=${id}&include=indexes&ver=3`, method: "GET" });
       meta = (_a = res.json) == null ? void 0 : _a.meta;
     } catch (e) {
-      new import_obsidian15.Notice(`Could not fetch Turath book ${id}: ${e instanceof Error ? e.message : e}`);
+      new import_obsidian16.Notice(`Could not fetch Turath book ${id}: ${e instanceof Error ? e.message : e}`);
       return null;
     }
     if (!(meta == null ? void 0 : meta.name)) {
-      new import_obsidian15.Notice(`Turath book ${id} was not found (or has no metadata).`);
+      new import_obsidian16.Notice(`Turath book ${id} was not found (or has no metadata).`);
       return null;
     }
     const cat = Number((_b = meta.cat_id) != null ? _b : 0);
@@ -16436,7 +16455,7 @@ var MidadArabicSourcesPlugin = class extends import_obsidian15.Plugin {
     else
       list.push(work);
     await this.saveCustomWorks(list);
-    new import_obsidian15.Notice(`Added \u201C${work.title}\u201D. Select it under Install/uninstall sources, then Apply.`);
+    new import_obsidian16.Notice(`Added \u201C${work.title}\u201D. Select it under Install/uninstall sources, then Apply.`);
   }
   async removeTurathWork(id) {
     await this.saveCustomWorks((await this.loadCustomWorks()).filter((w) => String(w.id) !== String(id)));
@@ -16451,7 +16470,7 @@ var MidadArabicSourcesPlugin = class extends import_obsidian15.Plugin {
     var _a, _b;
     if (!force && this.sourceCatalog)
       return this.sourceCatalog;
-    const path2 = (0, import_obsidian15.normalizePath)(".midad-arabic-sources/source-catalog.json");
+    const path2 = (0, import_obsidian16.normalizePath)(".midad-arabic-sources/source-catalog.json");
     let cached = null;
     try {
       cached = JSON.parse(await this.app.vault.adapter.read(path2));
@@ -16484,7 +16503,7 @@ var MidadArabicSourcesPlugin = class extends import_obsidian15.Plugin {
       const works = await this.listSources();
       if (works.length) {
         this.sourceCatalog = works;
-        await this.app.vault.adapter.write((0, import_obsidian15.normalizePath)(".midad-arabic-sources/source-catalog.json"), JSON.stringify({ at: Date.now(), schema: SOURCE_CATALOG_SCHEMA, customAt: await this.customWorksStamp(), works }));
+        await this.app.vault.adapter.write((0, import_obsidian16.normalizePath)(".midad-arabic-sources/source-catalog.json"), JSON.stringify({ at: Date.now(), schema: SOURCE_CATALOG_SCHEMA, customAt: await this.customWorksStamp(), works }));
       }
     } catch (e) {
       console.error("[midad-arabic-sources] catalogue refresh", e);
@@ -16495,7 +16514,7 @@ var MidadArabicSourcesPlugin = class extends import_obsidian15.Plugin {
   async maybeRefreshSourceCatalog() {
     var _a;
     try {
-      const text = await this.app.vault.adapter.read((0, import_obsidian15.normalizePath)(".midad-arabic-sources/source-catalog.json"));
+      const text = await this.app.vault.adapter.read((0, import_obsidian16.normalizePath)(".midad-arabic-sources/source-catalog.json"));
       const cached = JSON.parse(text);
       if (Date.now() - ((_a = cached.at) != null ? _a : 0) >= SOURCE_CATALOG_TTL)
         await this.refreshSourceCatalogInBackground();
@@ -16508,7 +16527,7 @@ var MidadArabicSourcesPlugin = class extends import_obsidian15.Plugin {
   async loadZoteroState() {
     var _a;
     try {
-      const text = await this.app.vault.adapter.read((0, import_obsidian15.normalizePath)(this.zoteroStatePath()));
+      const text = await this.app.vault.adapter.read((0, import_obsidian16.normalizePath)(this.zoteroStatePath()));
       const parsed = JSON.parse(text);
       return (_a = parsed.items) != null ? _a : {};
     } catch (e) {
@@ -16517,13 +16536,13 @@ var MidadArabicSourcesPlugin = class extends import_obsidian15.Plugin {
   }
   async saveZoteroState(items) {
     try {
-      await this.app.vault.adapter.write((0, import_obsidian15.normalizePath)(this.zoteroStatePath()), JSON.stringify({ items }, null, 1));
+      await this.app.vault.adapter.write((0, import_obsidian16.normalizePath)(this.zoteroStatePath()), JSON.stringify({ items }, null, 1));
     } catch (e) {
     }
   }
   async loadSourceStats() {
     try {
-      const text = await this.app.vault.adapter.read((0, import_obsidian15.normalizePath)(".midad-arabic-sources/source-stats.json"));
+      const text = await this.app.vault.adapter.read((0, import_obsidian16.normalizePath)(".midad-arabic-sources/source-stats.json"));
       const parsed = JSON.parse(text);
       return (parsed == null ? void 0 : parsed.works) && typeof parsed.works === "object" ? parsed.works : {};
     } catch (e) {
@@ -16532,15 +16551,15 @@ var MidadArabicSourcesPlugin = class extends import_obsidian15.Plugin {
   }
   async saveSourceStats(works) {
     try {
-      await this.app.vault.adapter.write((0, import_obsidian15.normalizePath)(".midad-arabic-sources/source-stats.json"), JSON.stringify({ works }, null, 1));
+      await this.app.vault.adapter.write((0, import_obsidian16.normalizePath)(".midad-arabic-sources/source-stats.json"), JSON.stringify({ works }, null, 1));
     } catch (e) {
     }
   }
   hubUpdatedMs(work) {
     var _a, _b;
     const outRoot = this.installedSourcesRoot();
-    const file = this.app.vault.getAbstractFileByPath((0, import_obsidian15.normalizePath)(`${outRoot}/${work.dir}.md`));
-    const fm = file instanceof import_obsidian15.TFile ? (_a = this.app.metadataCache.getFileCache(file)) == null ? void 0 : _a.frontmatter : null;
+    const file = this.app.vault.getAbstractFileByPath((0, import_obsidian16.normalizePath)(`${outRoot}/${work.dir}.md`));
+    const fm = file instanceof import_obsidian16.TFile ? (_a = this.app.metadataCache.getFileCache(file)) == null ? void 0 : _a.frontmatter : null;
     return (_b = frontmatterTimeMs(fm == null ? void 0 : fm["updated"])) != null ? _b : 0;
   }
   workRenderedMs(work, stat) {
@@ -16581,7 +16600,7 @@ var MidadArabicSourcesPlugin = class extends import_obsidian15.Plugin {
       if (!p)
         continue;
       try {
-        const text = await this.app.vault.adapter.read((0, import_obsidian15.normalizePath)(p));
+        const text = await this.app.vault.adapter.read((0, import_obsidian16.normalizePath)(p));
         return (_a = JSON.parse(text)) != null ? _a : {};
       } catch (e) {
       }
@@ -16735,7 +16754,7 @@ var MidadArabicSourcesPlugin = class extends import_obsidian15.Plugin {
       text = r.text;
       hdrs = r.headers;
     } else {
-      const resp = await (0, import_obsidian15.requestUrl)({
+      const resp = await (0, import_obsidian16.requestUrl)({
         method,
         url,
         headers,
@@ -16797,7 +16816,7 @@ var MidadArabicSourcesPlugin = class extends import_obsidian15.Plugin {
   }
   async addCitekeyUp(work, citekey) {
     const outRoot = this.installedSourcesRoot();
-    const hub = (0, import_obsidian15.normalizePath)(`${outRoot}/${work.dir}.md`);
+    const hub = (0, import_obsidian16.normalizePath)(`${outRoot}/${work.dir}.md`);
     try {
       const text = await this.app.vault.adapter.read(hub);
       if (text.includes(`[[@${citekey}]]`))
@@ -16908,14 +16927,14 @@ var MidadArabicSourcesPlugin = class extends import_obsidian15.Plugin {
         note: it.extra || void 0
       };
     });
-    const path2 = (0, import_obsidian15.normalizePath)(`${this.sourcesRoot()}/zotero-export.csl.json`);
+    const path2 = (0, import_obsidian16.normalizePath)(`${this.sourcesRoot()}/zotero-export.csl.json`);
     await this.app.vault.adapter.write(path2, JSON.stringify(csl, null, 2));
     return path2;
   }
   async exportToZotero(onlyKeys, silent = false) {
     if (!this.settings.zoteroExport) {
       if (!silent)
-        new import_obsidian15.Notice("Enable Zotero export in settings first.");
+        new import_obsidian16.Notice("Enable Zotero export in settings first.");
       return;
     }
     const method = this.settings.zoteroMethod;
@@ -16924,10 +16943,10 @@ var MidadArabicSourcesPlugin = class extends import_obsidian15.Plugin {
       pending2 = pending2.filter((p) => onlyKeys.has(String(p.work.key)));
     if (!pending2.length) {
       if (!silent)
-        new import_obsidian15.Notice("Nothing to send \u2014 the selection is already up to date.");
+        new import_obsidian16.Notice("Nothing to send \u2014 the selection is already up to date.");
       return;
     }
-    const progress = silent ? null : new import_obsidian15.Notice(`Sending ${pending2.length} source(s) to Zotero\u2026`, 0);
+    const progress = silent ? null : new import_obsidian16.Notice(`Sending ${pending2.length} source(s) to Zotero\u2026`, 0);
     try {
       const state = await this.loadZoteroState();
       if (method === "csl") {
@@ -16935,7 +16954,7 @@ var MidadArabicSourcesPlugin = class extends import_obsidian15.Plugin {
         for (const p of pending2)
           state[String(p.work.key)] = { itemKey: "", hash: p.hash };
         if (!silent)
-          new import_obsidian15.Notice(`Wrote ${pending2.length} item(s) to ${path2}. Import it in Zotero (File \u2192 Import).`);
+          new import_obsidian16.Notice(`Wrote ${pending2.length} item(s) to ${path2}. Import it in Zotero (File \u2192 Import).`);
       } else {
         progress == null ? void 0 : progress.setMessage(`Sending ${pending2.length} source(s) to Zotero (${method} API)\u2026`);
         const coll = await this.ensureZoteroCollection(method);
@@ -16948,12 +16967,12 @@ var MidadArabicSourcesPlugin = class extends import_obsidian15.Plugin {
         });
         await this.applyCitekeys(pending2, keys, method);
         if (!silent)
-          new import_obsidian15.Notice(`Sent ${pending2.length} item(s) to Zotero.`);
+          new import_obsidian16.Notice(`Sent ${pending2.length} item(s) to Zotero.`);
       }
       await this.saveZoteroState(state);
     } catch (e) {
       if (!silent)
-        new import_obsidian15.Notice(`Zotero export failed: ${e instanceof Error ? e.message : e}`);
+        new import_obsidian16.Notice(`Zotero export failed: ${e instanceof Error ? e.message : e}`);
       console.error("[midad-arabic-sources] zotero export", e);
     } finally {
       progress == null ? void 0 : progress.hide();
@@ -16994,29 +17013,29 @@ var MidadArabicSourcesPlugin = class extends import_obsidian15.Plugin {
   }
   async openZoteroSend() {
     if (!this.settings.zoteroExport) {
-      new import_obsidian15.Notice("Enable Zotero export in settings first.");
+      new import_obsidian16.Notice("Enable Zotero export in settings first.");
       return;
     }
     const entries = await this.zoteroEntries();
     if (!entries.length) {
-      new import_obsidian15.Notice("No installed sources to send.");
+      new import_obsidian16.Notice("No installed sources to send.");
       return;
     }
     new ZoteroSendModal(this.app, this, entries).open();
   }
   async sendActiveSource() {
     if (!this.settings.zoteroExport) {
-      new import_obsidian15.Notice("Enable Zotero export in settings first.");
+      new import_obsidian16.Notice("Enable Zotero export in settings first.");
       return;
     }
     const file = this.app.workspace.getActiveFile();
     if (!file) {
-      new import_obsidian15.Notice("Open a source note first.");
+      new import_obsidian16.Notice("Open a source note first.");
       return;
     }
     const work = await this.workForPath(file.path);
     if (!work) {
-      new import_obsidian15.Notice("That note is not an imported source.");
+      new import_obsidian16.Notice("That note is not an imported source.");
       return;
     }
     await this.exportToZotero(new Set([this.workKey(work)]));
@@ -17041,7 +17060,7 @@ var MidadArabicSourcesPlugin = class extends import_obsidian15.Plugin {
     var _a;
     const id = (_a = key.split(":")[1]) != null ? _a : key;
     try {
-      const listed = await this.app.vault.adapter.list((0, import_obsidian15.normalizePath)(".midad-arabic-sources/cache/text-sources"));
+      const listed = await this.app.vault.adapter.list((0, import_obsidian16.normalizePath)(".midad-arabic-sources/cache/text-sources"));
       const needle = new RegExp(`_${id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?:_|\\.json$)`);
       return listed.files.some((f) => needle.test(f));
     } catch (e) {
@@ -17050,11 +17069,11 @@ var MidadArabicSourcesPlugin = class extends import_obsidian15.Plugin {
   }
   async openManageSources(force = false, showFilter, initialMode = "manage") {
     var _a;
-    const loading = new import_obsidian15.Notice("Loading available sources\u2026", 0);
+    const loading = new import_obsidian16.Notice("Loading available sources\u2026", 0);
     try {
       const works = [...await this.listSourcesCached(force)];
       if (!works.length) {
-        new import_obsidian15.Notice("No sources found. Is Python configured and the importer script present?");
+        new import_obsidian16.Notice("No sources found. Is Python configured and the importer script present?");
         return;
       }
       const manifest = await this.loadSourceManifest();
@@ -17114,9 +17133,9 @@ var MidadArabicSourcesPlugin = class extends import_obsidian15.Plugin {
     const key = this.workKey(work);
     await this.markPendingDeletion(key);
     try {
-      const modelPath = (0, import_obsidian15.normalizePath)(`.midad-arabic-sources/source-models/${work.collection}/${work.id}.json`);
-      const hubPath = (0, import_obsidian15.normalizePath)(`${outRoot}/${dir}.md`);
-      const folderPath = (0, import_obsidian15.normalizePath)(`${outRoot}/${dir}`);
+      const modelPath = (0, import_obsidian16.normalizePath)(`.midad-arabic-sources/source-models/${work.collection}/${work.id}.json`);
+      const hubPath = (0, import_obsidian16.normalizePath)(`${outRoot}/${dir}.md`);
+      const folderPath = (0, import_obsidian16.normalizePath)(`${outRoot}/${dir}`);
       if (await adapter.exists(modelPath)) {
         try {
           await adapter.remove(modelPath);
@@ -17168,7 +17187,7 @@ var MidadArabicSourcesPlugin = class extends import_obsidian15.Plugin {
     }
     if (problems.length) {
       console.error("[midad-arabic-sources] removeSource", key, problems);
-      new import_obsidian15.Notice(`Removed \u201C${work.title || dir}\u201D with problems: ${problems.join("; ")}`);
+      new import_obsidian16.Notice(`Removed \u201C${work.title || dir}\u201D with problems: ${problems.join("; ")}`);
       return false;
     }
     return true;
@@ -17190,14 +17209,14 @@ var MidadArabicSourcesPlugin = class extends import_obsidian15.Plugin {
     const paths = model ? expectedNotePaths(model, outRoot, canonicalRoot, canonicalId) : [`${outRoot}/${dir}.md`];
     for (const path2 of paths) {
       try {
-        const rel = (0, import_obsidian15.normalizePath)(path2);
+        const rel = (0, import_obsidian16.normalizePath)(path2);
         if (await adapter.exists(rel))
           await adapter.remove(rel);
       } catch (e) {
         problems.push(`${path2}: ${e instanceof Error ? e.message : e}`);
       }
     }
-    const folder = (0, import_obsidian15.normalizePath)(`${outRoot}/${dir}`);
+    const folder = (0, import_obsidian16.normalizePath)(`${outRoot}/${dir}`);
     try {
       if (await adapter.exists(folder)) {
         for (const file of await this.listFilesUnder(folder)) {
@@ -17217,12 +17236,12 @@ var MidadArabicSourcesPlugin = class extends import_obsidian15.Plugin {
   async archiveSourceWithProgress(work) {
     const key = this.workKey(work);
     this.archivingSources.add(key);
-    const progress = new import_obsidian15.Notice(`Archiving \u201C${work.title || work.dir}\u201D\u2026`, 0);
+    const progress = new import_obsidian16.Notice(`Archiving \u201C${work.title || work.dir}\u201D\u2026`, 0);
     try {
       return await this.archiveSource(work);
     } catch (e) {
       console.error("[midad-arabic-sources] archive", key, e);
-      new import_obsidian15.Notice(`Could not archive the source: ${e instanceof Error ? e.message : e}`);
+      new import_obsidian16.Notice(`Could not archive the source: ${e instanceof Error ? e.message : e}`);
       return false;
     } finally {
       this.archivingSources.delete(key);
@@ -17232,17 +17251,17 @@ var MidadArabicSourcesPlugin = class extends import_obsidian15.Plugin {
   async archiveSource(work) {
     var _a;
     if (this.sourceOperationActive) {
-      new import_obsidian15.Notice("Wait for the current source operation to finish before archiving.");
+      new import_obsidian16.Notice("Wait for the current source operation to finish before archiving.");
       return false;
     }
     const key = this.workKey(work);
     if (this.workStatus(work) === "archived") {
-      new import_obsidian15.Notice("That source is already archived.");
+      new import_obsidian16.Notice("That source is already archived.");
       return false;
     }
     const modelAbs = `${this.vaultPath()}/.midad-arabic-sources/source-models/${work.collection}/${work.id}.json`;
     if (!fs2.existsSync(modelAbs)) {
-      new import_obsidian15.Notice("That source has no cached model to archive.");
+      new import_obsidian16.Notice("That source has no cached model to archive.");
       return false;
     }
     const archive = this.sourceArchivePath(work);
@@ -17253,7 +17272,7 @@ var MidadArabicSourcesPlugin = class extends import_obsidian15.Plugin {
       fs2.mkdirSync(archive.slice(0, archive.lastIndexOf("/")), { recursive: true });
       fs2.writeFileSync(archive, zlib.gzipSync(Buffer.from(text, "utf8")));
     } catch (e) {
-      new import_obsidian15.Notice(`Could not archive the source: ${e instanceof Error ? e.message : e}`);
+      new import_obsidian16.Notice(`Could not archive the source: ${e instanceof Error ? e.message : e}`);
       return false;
     }
     await this.setWorkStatus(key, "archived");
@@ -17269,22 +17288,22 @@ var MidadArabicSourcesPlugin = class extends import_obsidian15.Plugin {
     } catch (e) {
       console.error("[midad-arabic-sources] annotation status after archive", e);
     }
-    new import_obsidian15.Notice(problems.length ? `Archived \u201C${work.title || work.dir}\u201D with problems: ${problems.join("; ")}` : `Archived \u201C${work.title || work.dir}\u201D.`);
+    new import_obsidian16.Notice(problems.length ? `Archived \u201C${work.title || work.dir}\u201D with problems: ${problems.join("; ")}` : `Archived \u201C${work.title || work.dir}\u201D.`);
     return true;
   }
   async restoreArchivedSource(work) {
     var _a;
     if (this.sourceOperationActive) {
-      new import_obsidian15.Notice("Wait for the current source operation to finish before restoring.");
+      new import_obsidian16.Notice("Wait for the current source operation to finish before restoring.");
       return false;
     }
     const key = this.workKey(work);
     const archive = this.sourceArchivePath(work);
     if (!fs2.existsSync(archive)) {
-      new import_obsidian15.Notice("No archive was found for that source.");
+      new import_obsidian16.Notice("No archive was found for that source.");
       return false;
     }
-    const modelRel = (0, import_obsidian15.normalizePath)(`.midad-arabic-sources/source-models/${work.collection}/${work.id}.json`);
+    const modelRel = (0, import_obsidian16.normalizePath)(`.midad-arabic-sources/source-models/${work.collection}/${work.id}.json`);
     const modelAbs = `${this.vaultPath()}/${modelRel}`;
     try {
       const text = zlib.gunzipSync(fs2.readFileSync(archive)).toString("utf8");
@@ -17292,14 +17311,14 @@ var MidadArabicSourcesPlugin = class extends import_obsidian15.Plugin {
       fs2.mkdirSync(modelAbs.slice(0, modelAbs.lastIndexOf("/")), { recursive: true });
       fs2.writeFileSync(modelAbs, text);
     } catch (e) {
-      new import_obsidian15.Notice(`Could not restore the archive: ${e instanceof Error ? e.message : e}`);
+      new import_obsidian16.Notice(`Could not restore the archive: ${e instanceof Error ? e.message : e}`);
       return false;
     }
     await this.renderWithProgress([modelAbs], true, `Restoring ${work.title || work.dir}`);
     const outRoot = this.installedSourcesRoot();
-    const hub = (0, import_obsidian15.normalizePath)(`${outRoot}/${work.dir}.md`);
+    const hub = (0, import_obsidian16.normalizePath)(`${outRoot}/${work.dir}.md`);
     if (!this.app.vault.getAbstractFileByPath(hub)) {
-      new import_obsidian15.Notice("The archive was extracted, but its notes could not be rendered. It remains archived.");
+      new import_obsidian16.Notice("The archive was extracted, but its notes could not be rendered. It remains archived.");
       return false;
     }
     await this.setWorkStatus(key, "installed");
@@ -17313,7 +17332,7 @@ var MidadArabicSourcesPlugin = class extends import_obsidian15.Plugin {
       fs2.unlinkSync(archive);
     } catch (e) {
     }
-    new import_obsidian15.Notice(`Restored \u201C${work.title || work.dir}\u201D.`);
+    new import_obsidian16.Notice(`Restored \u201C${work.title || work.dir}\u201D.`);
     return true;
   }
   async listFilesUnder(path2) {
@@ -17340,13 +17359,13 @@ var MidadArabicSourcesPlugin = class extends import_obsidian15.Plugin {
     const adapter = this.app.vault.adapter;
     let total = Number((_a = work.cache_bytes) != null ? _a : 0);
     try {
-      const s = await adapter.stat((0, import_obsidian15.normalizePath)(`.midad-arabic-sources/source-models/${work.collection}/${work.id}.json`));
+      const s = await adapter.stat((0, import_obsidian16.normalizePath)(`.midad-arabic-sources/source-models/${work.collection}/${work.id}.json`));
       if (s)
         total += s.size;
     } catch (e) {
     }
-    const hub = (0, import_obsidian15.normalizePath)(`${outRoot}/${work.dir}.md`);
-    const prefix = (0, import_obsidian15.normalizePath)(`${outRoot}/${work.dir}/`);
+    const hub = (0, import_obsidian16.normalizePath)(`${outRoot}/${work.dir}.md`);
+    const prefix = (0, import_obsidian16.normalizePath)(`${outRoot}/${work.dir}/`);
     for (const f of this.app.vault.getFiles()) {
       if (f.path === hub || f.path.startsWith(prefix))
         total += f.stat.size;
@@ -17362,7 +17381,7 @@ var MidadArabicSourcesPlugin = class extends import_obsidian15.Plugin {
     if (!dir || !title || !key || dir === title)
       return;
     const adapter = this.app.vault.adapter;
-    const hub = (0, import_obsidian15.normalizePath)(`${outRoot}/${title}.md`);
+    const hub = (0, import_obsidian16.normalizePath)(`${outRoot}/${title}.md`);
     try {
       if (!await adapter.exists(hub))
         return;
@@ -17372,18 +17391,17 @@ var MidadArabicSourcesPlugin = class extends import_obsidian15.Plugin {
       if (!content.includes(`mas-key: ${key}`) && !content.includes(`mas-key: "${key}"`))
         return;
       await adapter.remove(hub);
-      const folder = (0, import_obsidian15.normalizePath)(`${outRoot}/${title}`);
+      const folder = (0, import_obsidian16.normalizePath)(`${outRoot}/${title}`);
       if (await adapter.exists(folder))
         await adapter.rmdir(folder, true);
     } catch (e) {
     }
   }
   async renameLegacySourceIndex() {
-    const root = this.sourcesRoot();
-    const legacy = (0, import_obsidian15.normalizePath)(`${root}/Midad Sources.md`);
-    const canonical = (0, import_obsidian15.normalizePath)(`${root}/${SOURCE_INDEX_NOTE}.md`);
+    const legacy = this.sourceNotePath("Midad Sources");
+    const canonical = this.sourceNotePath(SOURCE_INDEX_NOTE);
     const old = this.app.vault.getAbstractFileByPath(legacy);
-    if (old instanceof import_obsidian15.TFile && !this.app.vault.getAbstractFileByPath(canonical)) {
+    if (old instanceof import_obsidian16.TFile && !this.app.vault.getAbstractFileByPath(canonical)) {
       try {
         await this.app.fileManager.renameFile(old, canonical);
       } catch (error) {
@@ -17409,7 +17427,7 @@ var MidadArabicSourcesPlugin = class extends import_obsidian15.Plugin {
       if (byKey.has(key))
         continue;
       try {
-        const rel = (0, import_obsidian15.normalizePath)(`.midad-arabic-sources/source-models/${key.replace(":", "/")}.json`);
+        const rel = (0, import_obsidian16.normalizePath)(`.midad-arabic-sources/source-models/${key.replace(":", "/")}.json`);
         const m = JSON.parse(await this.app.vault.adapter.read(rel));
         byKey.set(key, m.work);
       } catch (e) {
@@ -17490,7 +17508,7 @@ var MidadArabicSourcesPlugin = class extends import_obsidian15.Plugin {
       }
       let model;
       try {
-        const rel = (0, import_obsidian15.normalizePath)(`.midad-arabic-sources/source-models/${work.collection}/${work.id}.json`);
+        const rel = (0, import_obsidian16.normalizePath)(`.midad-arabic-sources/source-models/${work.collection}/${work.id}.json`);
         model = JSON.parse(await this.app.vault.adapter.read(rel));
       } catch (e) {
         out.push({ work, missing: 0, total: 0, reason: "model" });
@@ -17503,7 +17521,7 @@ var MidadArabicSourcesPlugin = class extends import_obsidian15.Plugin {
       const paths = expectedNotePaths(model, outRoot, canonicalRoot, canonicalId);
       let missing = 0;
       for (const p of paths)
-        if (!this.app.vault.getAbstractFileByPath((0, import_obsidian15.normalizePath)(p)))
+        if (!this.app.vault.getAbstractFileByPath((0, import_obsidian16.normalizePath)(p)))
           missing++;
       if (missing > 0)
         out.push({ work, missing, total: paths.length, reason: "notes" });
@@ -17512,8 +17530,8 @@ var MidadArabicSourcesPlugin = class extends import_obsidian15.Plugin {
   }
   countWorkFiles(work) {
     const outRoot = this.installedSourcesRoot();
-    const hub = (0, import_obsidian15.normalizePath)(`${outRoot}/${work.dir}.md`);
-    const prefix = (0, import_obsidian15.normalizePath)(`${outRoot}/${work.dir}/`);
+    const hub = (0, import_obsidian16.normalizePath)(`${outRoot}/${work.dir}.md`);
+    const prefix = (0, import_obsidian16.normalizePath)(`${outRoot}/${work.dir}/`);
     let n = 0;
     for (const f of this.app.vault.getFiles()) {
       if (f.path === hub || f.path.startsWith(prefix))
@@ -17548,7 +17566,7 @@ var MidadArabicSourcesPlugin = class extends import_obsidian15.Plugin {
       for (const k of pending2)
         keys.delete(k);
       if (!keys.size) {
-        new import_obsidian15.Notice("No imported sources to check.");
+        new import_obsidian16.Notice("No imported sources to check.");
         return [];
       }
       const args = ["check-updates"];
@@ -17560,7 +17578,7 @@ var MidadArabicSourcesPlugin = class extends import_obsidian15.Plugin {
       const changed = (_a = result == null ? void 0 : result.changed) != null ? _a : [];
       const dateOnly = (_b = result == null ? void 0 : result.date_only) != null ? _b : [];
       if (!changed.length && !dateOnly.length) {
-        new import_obsidian15.Notice("All imported sources are up to date.");
+        new import_obsidian16.Notice("All imported sources are up to date.");
         return [];
       }
       if (dateOnly.length)
@@ -17568,7 +17586,7 @@ var MidadArabicSourcesPlugin = class extends import_obsidian15.Plugin {
       if (this.isSourceCancelled(op))
         return [];
       if (changed.length) {
-        new import_obsidian15.Notice(`Text changed in ${changed.length} work(s); updating\u2026`);
+        new import_obsidian16.Notice(`Text changed in ${changed.length} work(s); updating\u2026`);
         await this.importSources(changed, true, op);
       }
       return changed;
@@ -17606,7 +17624,7 @@ var MidadArabicSourcesPlugin = class extends import_obsidian15.Plugin {
     const days = (_a = this.settings.sourceUpdateCheckDays) != null ? _a : 7;
     if (!days || days <= 0)
       return;
-    const path2 = (0, import_obsidian15.normalizePath)(".midad-arabic-sources/last-update-check.json");
+    const path2 = (0, import_obsidian16.normalizePath)(".midad-arabic-sources/last-update-check.json");
     let last = 0;
     try {
       const parsed = JSON.parse(await this.app.vault.adapter.read(path2));
@@ -17630,7 +17648,7 @@ var MidadArabicSourcesPlugin = class extends import_obsidian15.Plugin {
   async isSourceDirInstalled(dir) {
     const outRoot = this.installedSourcesRoot();
     try {
-      return await this.app.vault.adapter.exists((0, import_obsidian15.normalizePath)(`${outRoot}/${dir}.md`));
+      return await this.app.vault.adapter.exists((0, import_obsidian16.normalizePath)(`${outRoot}/${dir}.md`));
     } catch (e) {
       return false;
     }
@@ -17638,7 +17656,7 @@ var MidadArabicSourcesPlugin = class extends import_obsidian15.Plugin {
   async importSources(keys, refresh = false, operationId, kind = "explicit") {
     var _a;
     if (!keys.length) {
-      new import_obsidian15.Notice("Select at least one source.");
+      new import_obsidian16.Notice("Select at least one source.");
       return;
     }
     const op = operationId != null ? operationId : this.beginSourceOperation(kind);
@@ -17671,20 +17689,20 @@ var MidadArabicSourcesPlugin = class extends import_obsidian15.Plugin {
       const allCached = !refresh && (await Promise.all(keys.map((k) => this.sourceIsCached(k)))).every(Boolean);
       const result = await this.runWithProgress(allCached ? "Preparing sources (from cache)" : "Downloading sources", args, this.settings.sourceImportScript);
       if (this.isSourceCancelled(op)) {
-        new import_obsidian15.Notice("Stopped. The work is not installed; install it again to resume.");
+        new import_obsidian16.Notice("Stopped. The work is not installed; install it again to resume.");
         return;
       }
       const models = (_a = result == null ? void 0 : result.models) != null ? _a : [];
       if (!models.length) {
-        new import_obsidian15.Notice("No models were produced \u2014 see the pipeline status.");
+        new import_obsidian16.Notice("No models were produced \u2014 see the pipeline status.");
         return;
       }
       const written = await this.renderWithProgress(models, false, "Rendering notes", op);
       if (this.isSourceCancelled(op)) {
-        new import_obsidian15.Notice("Stopped. Partial notes remain; install again to finish.");
+        new import_obsidian16.Notice("Stopped. Partial notes remain; install again to finish.");
         return;
       }
-      new import_obsidian15.Notice(`Rendered ${written.length} notes.`);
+      new import_obsidian16.Notice(`Rendered ${written.length} notes.`);
       void this.maybeWarnEngineFallback();
     } finally {
       if (owns)
@@ -17696,7 +17714,7 @@ var MidadArabicSourcesPlugin = class extends import_obsidian15.Plugin {
     if (op === null)
       return [];
     const owns = operationId === void 0;
-    const progress = new import_obsidian15.Notice(`${title}\u2026`, 0);
+    const progress = new import_obsidian16.Notice(`${title}\u2026`, 0);
     const stop = progress.messageEl.createEl("button", { text: "Stop" });
     stop.addEventListener("click", () => {
       stop.disabled = true;
@@ -17740,7 +17758,7 @@ var MidadArabicSourcesPlugin = class extends import_obsidian15.Plugin {
     try {
       templates = await loadTemplates(this.app, this.bundledTemplateDir(), userFolder);
     } catch (e) {
-      new import_obsidian15.Notice(`Import templates could not be loaded: ${e instanceof Error ? e.message : e}`);
+      new import_obsidian16.Notice(`Import templates could not be loaded: ${e instanceof Error ? e.message : e}`);
       return [];
     }
     const outRoot = this.installedSourcesRoot();
@@ -17808,7 +17826,7 @@ var MidadArabicSourcesPlugin = class extends import_obsidian15.Plugin {
         if (shouldCancel == null ? void 0 : shouldCancel())
           break;
         console.error("[midad-arabic-sources] render failed", this.workKey(model.work), e);
-        new import_obsidian15.Notice(`Could not render ${work}: ${e instanceof Error ? e.message : e}`);
+        new import_obsidian16.Notice(`Could not render ${work}: ${e instanceof Error ? e.message : e}`);
       }
       await this.pruneRenamedFolder(model.work);
     }
@@ -17876,7 +17894,7 @@ var MidadArabicSourcesPlugin = class extends import_obsidian15.Plugin {
   }
   transcriptionNotePath(path2) {
     var _a;
-    const note = (0, import_obsidian15.normalizePath)(path2);
+    const note = (0, import_obsidian16.normalizePath)(path2);
     if (!note.endsWith(".md"))
       return false;
     if (note.startsWith("tmp/") || note.startsWith(".midad-") || note.startsWith(".trash/") || note.includes("/tmp/"))
@@ -17899,16 +17917,16 @@ var MidadArabicSourcesPlugin = class extends import_obsidian15.Plugin {
     const notePattern = /^(.*?)\s+[-–—]\s+(?:(?:[A-Za-z]+\s+)*)(transcription|translation)(?:\s+[-–—]\s+(?:v(?:ol)?\.?|volume)\s*(\d+))?(?:\s*[,–—]\s*(.+))?(?:\s+(\([^)]+\)))?$/i;
     const cleanLabel = (value) => value.replace(/^\s*(?:transcription|translation)\s*[-–—]\s*/i, "").replace(/\s*\((?:transcription|translation)(?:[^()]*)\)\s*$/i, "").replace(/\s*[-–—]\s*(?:transcription|translation)\s*$/i, "").replace(/\s+v(?:ol)?\.?\s*\d+\s*$/i, "").trim();
     const indexPath = async (name) => {
-      const canonical = (0, import_obsidian15.normalizePath)(`${this.sourcesRoot()}/${name}.md`);
+      const canonical = this.sourceNotePath(name);
       const existing = this.app.vault.getAbstractFileByPath(canonical);
-      if (existing instanceof import_obsidian15.TFile)
+      if (existing instanceof import_obsidian16.TFile)
         return existing.path;
       const first = this.app.metadataCache.getFirstLinkpathDest(name, "");
-      if (first instanceof import_obsidian15.TFile && first.path !== canonical) {
+      if (first instanceof import_obsidian16.TFile && first.path !== canonical) {
         try {
           await this.app.fileManager.renameFile(first, canonical);
           const moved = this.app.vault.getAbstractFileByPath(canonical);
-          if (moved instanceof import_obsidian15.TFile)
+          if (moved instanceof import_obsidian16.TFile)
             return moved.path;
         } catch (e) {
         }
@@ -17925,15 +17943,15 @@ var MidadArabicSourcesPlugin = class extends import_obsidian15.Plugin {
       const raw = JSON.parse(await this.app.vault.adapter.read(".midad-arabic-sources/annotations/adopted.json"));
       for (const [key, value] of Object.entries((_a = raw.notes) != null ? _a : {})) {
         if (value && typeof value === "object")
-          adopted.set((0, import_obsidian15.normalizePath)(key), value);
+          adopted.set((0, import_obsidian16.normalizePath)(key), value);
       }
     } catch (e) {
     }
-    const folders = [this.transcriptionsFolder(), this.translationsFolder()].map((folder) => (0, import_obsidian15.normalizePath)(folder).replace(/\/+$/, "")).filter(Boolean);
+    const folders = [this.transcriptionsFolder(), this.translationsFolder()].map((folder) => (0, import_obsidian16.normalizePath)(folder).replace(/\/+$/, "")).filter(Boolean);
     const inFolder = (path2) => folders.some((folder) => path2.startsWith(`${folder}/`));
     const groups = new Map();
     for (const file of this.app.vault.getMarkdownFiles()) {
-      const path2 = (0, import_obsidian15.normalizePath)(file.path);
+      const path2 = (0, import_obsidian16.normalizePath)(file.path);
       if (path2.startsWith("tmp/") || path2.startsWith(".midad-") || path2.startsWith(".trash/") || path2.includes("/tmp/"))
         continue;
       const entry = adopted.get(path2);
@@ -18051,17 +18069,17 @@ ${lines.join("\n")}`;
     if (!mocs.length)
       return null;
     const isMidadParent = name === "Midad Arabic Sources";
-    const canonicalPath = (0, import_obsidian15.normalizePath)(`${this.sourcesRoot()}/${name}.md`);
+    const canonicalPath = this.sourceNotePath(name);
     const existingCanonical = this.app.vault.getAbstractFileByPath(canonicalPath);
-    let file = existingCanonical instanceof import_obsidian15.TFile ? existingCanonical : null;
+    let file = existingCanonical instanceof import_obsidian16.TFile ? existingCanonical : null;
     if (!file && isMidadParent) {
       const existing = this.app.metadataCache.getFirstLinkpathDest(name, "");
-      if (existing instanceof import_obsidian15.TFile)
+      if (existing instanceof import_obsidian16.TFile)
         file = existing;
     }
     if (!file) {
       const first = this.app.metadataCache.getFirstLinkpathDest(name, "");
-      if (first instanceof import_obsidian15.TFile && first.path !== canonicalPath) {
+      if (first instanceof import_obsidian16.TFile && first.path !== canonicalPath) {
         try {
           const folder = canonicalPath.split("/").slice(0, -1).join("/");
           if (folder && !await this.app.vault.adapter.exists(folder)) {
@@ -18069,7 +18087,7 @@ ${lines.join("\n")}`;
           }
           await this.app.fileManager.renameFile(first, canonicalPath);
           const moved = this.app.vault.getAbstractFileByPath(canonicalPath);
-          if (moved instanceof import_obsidian15.TFile)
+          if (moved instanceof import_obsidian16.TFile)
             file = moved;
         } catch (e) {
           console.error("[midad-arabic-sources] move source parent", e);
@@ -18113,7 +18131,7 @@ ${lines.join("\n")}`;
   }
   async loadSourceManifest() {
     try {
-      const text = await this.app.vault.adapter.read((0, import_obsidian15.normalizePath)(".midad-arabic-sources/source-imports.json"));
+      const text = await this.app.vault.adapter.read((0, import_obsidian16.normalizePath)(".midad-arabic-sources/source-imports.json"));
       const parsed = JSON.parse(text);
       return Array.isArray(parsed.works) ? parsed.works : [];
     } catch (e) {
@@ -18122,7 +18140,7 @@ ${lines.join("\n")}`;
   }
   async saveSourceManifest(works) {
     try {
-      await this.app.vault.adapter.write((0, import_obsidian15.normalizePath)(".midad-arabic-sources/source-imports.json"), JSON.stringify({ works }, null, 1));
+      await this.app.vault.adapter.write((0, import_obsidian16.normalizePath)(".midad-arabic-sources/source-imports.json"), JSON.stringify({ works }, null, 1));
     } catch (e) {
     }
   }
@@ -18227,21 +18245,21 @@ ${lines.join("\n")}`;
   async copyImportTemplates() {
     const folder = this.settings.sourceTemplateFolder.trim();
     if (!folder) {
-      new import_obsidian15.Notice("Set a template folder in the Midad Arabic Sources settings first.");
+      new import_obsidian16.Notice("Set a template folder in the Midad Arabic Sources settings first.");
       return;
     }
     const src = this.bundledTemplateDir();
-    const dest = (0, import_obsidian15.normalizePath)(`${folder}/${TEMPLATE_FOLDER}`);
+    const dest = (0, import_obsidian16.normalizePath)(`${folder}/${TEMPLATE_FOLDER}`);
     try {
       if (!await this.app.vault.adapter.exists(dest))
         await this.app.vault.createFolder(dest);
       for (const file of Object.values(TEMPLATE_FILES)) {
-        const text = await this.app.vault.adapter.read((0, import_obsidian15.normalizePath)(`${src}/${file}`));
-        await this.app.vault.adapter.write((0, import_obsidian15.normalizePath)(`${dest}/${file}`), text);
+        const text = await this.app.vault.adapter.read((0, import_obsidian16.normalizePath)(`${src}/${file}`));
+        await this.app.vault.adapter.write((0, import_obsidian16.normalizePath)(`${dest}/${file}`), text);
       }
-      new import_obsidian15.Notice(`Copied import templates to ${dest}.`);
+      new import_obsidian16.Notice(`Copied import templates to ${dest}.`);
     } catch (e) {
-      new import_obsidian15.Notice(`Could not copy templates: ${e}`);
+      new import_obsidian16.Notice(`Could not copy templates: ${e}`);
     }
   }
   async redownloadSources() {
@@ -18249,10 +18267,10 @@ ${lines.join("\n")}`;
     const pending2 = await this.loadPendingDeletions();
     const keys = manifest.filter((w) => this.workStatus(w) === "installed" && !pending2.has(this.workKey(w))).map((w) => this.workKey(w));
     if (!keys.length) {
-      new import_obsidian15.Notice("No installed sources to re-download.");
+      new import_obsidian16.Notice("No installed sources to re-download.");
       return;
     }
-    new import_obsidian15.Notice(`Re-downloading ${keys.length} source(s)\u2026`);
+    new import_obsidian16.Notice(`Re-downloading ${keys.length} source(s)\u2026`);
     await this.importSources(keys);
   }
   async migrateSourceNaming() {
@@ -18263,7 +18281,7 @@ ${lines.join("\n")}`;
     try {
       catalogue = await this.listSources(true);
     } catch (e) {
-      new import_obsidian15.Notice(`Could not read the catalogue: ${e instanceof Error ? e.message : e}`);
+      new import_obsidian16.Notice(`Could not read the catalogue: ${e instanceof Error ? e.message : e}`);
       return;
     }
     const targets = new Map(catalogue.map((w) => [w.key, w.dir]));
@@ -18272,7 +18290,7 @@ ${lines.join("\n")}`;
     const migrated = [];
     const models = [];
     const problems = [];
-    const notice = new import_obsidian15.Notice("Checking source names\u2026", 0);
+    const notice = new import_obsidian16.Notice("Checking source names\u2026", 0);
     try {
       for (const work of manifest) {
         if (this.workStatus(work) !== "installed" || pending2.has(this.workKey(work)))
@@ -18282,7 +18300,7 @@ ${lines.join("\n")}`;
         const newDir = String((_b = targets.get(key)) != null ? _b : "");
         if (!oldDir || !newDir || oldDir === newDir)
           continue;
-        const modelRel = (0, import_obsidian15.normalizePath)(`.midad-arabic-sources/source-models/${work.collection}/${work.id}.json`);
+        const modelRel = (0, import_obsidian16.normalizePath)(`.midad-arabic-sources/source-models/${work.collection}/${work.id}.json`);
         let text;
         try {
           text = await adapter.read(modelRel);
@@ -18323,16 +18341,16 @@ ${lines.join("\n")}`;
       await this.renderWithProgress(models, false, "Renaming imported sources");
     }
     const summary = migrated.length ? `Renamed ${migrated.length} source(s) and re-rendered their notes.` : "No source folders needed renaming.";
-    new import_obsidian15.Notice(problems.length ? `${summary} Problems: ${problems.join("; ")}` : summary);
+    new import_obsidian16.Notice(problems.length ? `${summary} Problems: ${problems.join("; ")}` : summary);
   }
   async moveWorkFiles(work, model, oldDir, newDir, canonicalId) {
     var _a;
     const outRoot = this.installedSourcesRoot();
     const adapter = this.app.vault.adapter;
-    const oldHub = (0, import_obsidian15.normalizePath)(`${outRoot}/${oldDir}.md`);
-    const newHub = (0, import_obsidian15.normalizePath)(`${outRoot}/${newDir}.md`);
-    const oldFolder = (0, import_obsidian15.normalizePath)(`${outRoot}/${oldDir}`);
-    const newFolder = (0, import_obsidian15.normalizePath)(`${outRoot}/${newDir}`);
+    const oldHub = (0, import_obsidian16.normalizePath)(`${outRoot}/${oldDir}.md`);
+    const newHub = (0, import_obsidian16.normalizePath)(`${outRoot}/${newDir}.md`);
+    const oldFolder = (0, import_obsidian16.normalizePath)(`${outRoot}/${oldDir}`);
+    const newFolder = (0, import_obsidian16.normalizePath)(`${outRoot}/${newDir}`);
     if (await adapter.exists(newHub) || await adapter.exists(newFolder)) {
       throw new Error(`\u201C${newDir}\u201D already exists`);
     }
@@ -18348,8 +18366,8 @@ ${lines.join("\n")}`;
       const base = String((_a = unit.base) != null ? _a : "");
       if (!base)
         continue;
-      const from = (0, import_obsidian15.normalizePath)(`${newFolder}/${oldDir} - ${base}.md`);
-      const to = (0, import_obsidian15.normalizePath)(`${newFolder}/${newDir} - ${base}.md`);
+      const from = (0, import_obsidian16.normalizePath)(`${newFolder}/${oldDir} - ${base}.md`);
+      const to = (0, import_obsidian16.normalizePath)(`${newFolder}/${newDir} - ${base}.md`);
       if (from !== to && await adapter.exists(from))
         await adapter.rename(from, to);
     }
@@ -18358,7 +18376,7 @@ ${lines.join("\n")}`;
     var _a, _b;
     const target = file != null ? file : this.app.workspace.getActiveFile();
     if (!target) {
-      new import_obsidian15.Notice("Open a note that belongs to an imported source first.");
+      new import_obsidian16.Notice("Open a note that belongs to an imported source first.");
       return;
     }
     const work = await this.workForPath(target.path);
@@ -18366,20 +18384,20 @@ ${lines.join("\n")}`;
       await this.rerenderArchivedNote(target);
       return;
     }
-    const rel = (0, import_obsidian15.normalizePath)(`.midad-arabic-sources/source-models/${work.collection}/${work.id}.json`);
+    const rel = (0, import_obsidian16.normalizePath)(`.midad-arabic-sources/source-models/${work.collection}/${work.id}.json`);
     if (!await this.app.vault.adapter.exists(rel)) {
-      new import_obsidian15.Notice("That source has no cached model \u2014 install it again from Manage text sources.");
+      new import_obsidian16.Notice("That source has no cached model \u2014 install it again from Manage text sources.");
       return;
     }
     const label = String((_b = (_a = work.title) != null ? _a : work.dir) != null ? _b : work.id);
     await this.renderWithProgress([`${this.vaultPath()}/${rel}`], true, `Re-rendering ${label}`);
-    new import_obsidian15.Notice(`Re-rendered ${label}.`);
+    new import_obsidian16.Notice(`Re-rendered ${label}.`);
   }
   async rerenderArchivedNote(file) {
     var _a, _b, _c;
     const info = archivedNoteInfo(file.path);
     if (!info) {
-      new import_obsidian15.Notice("That note does not belong to an imported source and has no archived transcription.");
+      new import_obsidian16.Notice("That note does not belong to an imported source and has no archived transcription.");
       return;
     }
     const all = (_b = (_a = await this.pipelineResult(["list-archive"])) == null ? void 0 : _a.zips) != null ? _b : [];
@@ -18393,14 +18411,14 @@ ${lines.join("\n")}`;
     });
     if (!batches.length) {
       const kind = info.type ? ` ${info.type}` : "";
-      new import_obsidian15.Notice(`No archived${kind} batch found for @${info.citekey}.`);
+      new import_obsidian16.Notice(`No archived${kind} batch found for @${info.citekey}.`);
       return;
     }
     let chosen = batches;
     if (info.volume != null) {
       const exact = batches.filter((entry) => entry.info.volume === info.volume);
       if (!exact.length) {
-        new import_obsidian15.Notice(`No archived ${(_c = info.type) != null ? _c : "transcription"} batch found for @${info.citekey}, vol. ${info.volume}.`);
+        new import_obsidian16.Notice(`No archived ${(_c = info.type) != null ? _c : "transcription"} batch found for @${info.citekey}, vol. ${info.volume}.`);
         return;
       }
       if (batches.some((entry) => entry.info.volume !== info.volume)) {
@@ -18417,7 +18435,7 @@ ${lines.join("\n")}`;
     for (const entry of chosen) {
       await this.runWithProgress(`Re-rendering @${info.citekey}`, ["reprocess", "--zip", entry.zip.path]);
     }
-    new import_obsidian15.Notice(`Re-rendered ${chosen.length} archived batch(es) for @${info.citekey}.`);
+    new import_obsidian16.Notice(`Re-rendered ${chosen.length} archived batch(es) for @${info.citekey}.`);
   }
   async rerenderAllSources() {
     const root = `${this.vaultPath()}/.midad-arabic-sources/source-models`;
@@ -18436,11 +18454,11 @@ ${lines.join("\n")}`;
     } catch (e) {
     }
     if (!models.length) {
-      new import_obsidian15.Notice("No cached source models found.");
+      new import_obsidian16.Notice("No cached source models found.");
       return [];
     }
     const written = await this.renderWithProgress(models, true, "Re-rendering imported sources");
-    new import_obsidian15.Notice(`Re-rendered ${written.length} notes.`);
+    new import_obsidian16.Notice(`Re-rendered ${written.length} notes.`);
     return written;
   }
   sourceHistoryPath() {
@@ -18487,7 +18505,7 @@ ${lines.join("\n")}`;
   }
   async loadSourceHashes() {
     try {
-      const text = await this.app.vault.adapter.read((0, import_obsidian15.normalizePath)(this.sourceHistoryPath()));
+      const text = await this.app.vault.adapter.read((0, import_obsidian16.normalizePath)(this.sourceHistoryPath()));
       const parsed = JSON.parse(text);
       const templates = parsed == null ? void 0 : parsed.templates;
       return { templates: templates && typeof templates === "object" ? templates : {} };
@@ -18497,7 +18515,7 @@ ${lines.join("\n")}`;
   }
   async saveSourceHashes(store) {
     try {
-      await this.app.vault.adapter.write((0, import_obsidian15.normalizePath)(this.sourceHistoryPath()), JSON.stringify(store, null, 1));
+      await this.app.vault.adapter.write((0, import_obsidian16.normalizePath)(this.sourceHistoryPath()), JSON.stringify(store, null, 1));
     } catch (e) {
     }
   }
@@ -18516,7 +18534,7 @@ ${lines.join("\n")}`;
     const folder = this.settings.sourceTemplateFolder.trim();
     if (!folder)
       return false;
-    return path2.startsWith((0, import_obsidian15.normalizePath)(`${folder}/${TEMPLATE_FOLDER}/`));
+    return path2.startsWith((0, import_obsidian16.normalizePath)(`${folder}/${TEMPLATE_FOLDER}/`));
   }
   scheduleSourceTemplateCheck() {
     if (this.sourceTemplateCheckTimer != null)
@@ -18566,7 +18584,7 @@ ${lines.join("\n")}`;
         out.push({ work, kinds: null });
         continue;
       }
-      const modelRel = (0, import_obsidian15.normalizePath)(`.midad-arabic-sources/source-models/${work.collection}/${work.id}.json`);
+      const modelRel = (0, import_obsidian16.normalizePath)(`.midad-arabic-sources/source-models/${work.collection}/${work.id}.json`);
       const modelStat = await this.app.vault.adapter.stat(modelRel).catch(() => null);
       const renderedAt = hasRendered ? Math.max(0, ...Object.values(rendered != null ? rendered : {})) : legacyMs;
       if (renderedAt > 0 && modelStat && modelStat.mtime > 0 && modelStat.mtime > renderedAt) {
@@ -18591,7 +18609,7 @@ ${lines.join("\n")}`;
     try {
       templates = await loadTemplates(this.app, this.bundledTemplateDir(), userFolder);
     } catch (e) {
-      new import_obsidian15.Notice(`Import templates could not be loaded: ${e instanceof Error ? e.message : e}`);
+      new import_obsidian16.Notice(`Import templates could not be loaded: ${e instanceof Error ? e.message : e}`);
       this.endSourceOperation(op);
       return;
     }
@@ -18599,7 +18617,7 @@ ${lines.join("\n")}`;
     const canonicalId = this.resolveCanonicalQuran();
     const canonicalRoot = this.settings.canonicalQuranFolder.trim() || `${outRoot}/Quran`;
     const stats = await this.loadSourceStats();
-    const notice = new import_obsidian15.Notice("Updating imported sources\u2026", 0);
+    const notice = new import_obsidian16.Notice("Updating imported sources\u2026", 0);
     const stop = notice.messageEl.createEl("button", { text: "Stop" });
     stop.addEventListener("click", () => {
       stop.disabled = true;
@@ -18616,7 +18634,7 @@ ${lines.join("\n")}`;
         notice.setMessage(`Updating imported sources: ${nth} \u2014 ${label}`);
         const key = this.workKey(it.work);
         const legacy = this.hubUpdatedMs(it.work);
-        const rel = (0, import_obsidian15.normalizePath)(`.midad-arabic-sources/source-models/${it.work.collection}/${it.work.id}.json`);
+        const rel = (0, import_obsidian16.normalizePath)(`.midad-arabic-sources/source-models/${it.work.collection}/${it.work.id}.json`);
         try {
           if (!await this.app.vault.adapter.exists(rel))
             continue;
@@ -18671,7 +18689,7 @@ ${lines.join("\n")}`;
       const cancelled = this.isSourceCancelled(op);
       this.endSourceOperation(op);
       if (cancelled)
-        new import_obsidian15.Notice("Stopped updating sources.");
+        new import_obsidian16.Notice("Stopped updating sources.");
     }
   }
   async applyTemplateChanges(kind = "explicit") {
@@ -18732,7 +18750,7 @@ ${lines.join("\n")}`;
     const apply = async () => {
       const rerender = [];
       for (const it of incomplete) {
-        const rel = (0, import_obsidian15.normalizePath)(`.midad-arabic-sources/source-models/${it.work.collection}/${it.work.id}.json`);
+        const rel = (0, import_obsidian16.normalizePath)(`.midad-arabic-sources/source-models/${it.work.collection}/${it.work.id}.json`);
         if (it.reason === "notes" && await this.app.vault.adapter.exists(rel)) {
           rerender.push({ work: it.work, kinds: null });
           continue;
@@ -18775,14 +18793,14 @@ ${lines.join("\n")}`;
   }
   async runTransliteration(text, opts) {
     var _a, _b;
-    const loading = new import_obsidian15.Notice("Transliterating\u2026", 0);
+    const loading = new import_obsidian16.Notice("Transliterating\u2026", 0);
     try {
       const body = { text };
       let path2 = "/transliterate";
       if (opts.useLlm) {
         const config = this.llmConfigForTask("transliteration");
         if (!config) {
-          new import_obsidian15.Notice("Add an LLM configuration in Settings \u2192 Midad Arabic Sources \u2192 LLM.");
+          new import_obsidian16.Notice("Add an LLM configuration in Settings \u2192 Midad Arabic Sources \u2192 LLM.");
           return null;
         }
         path2 = "/romanize";
@@ -18801,7 +18819,7 @@ ${lines.join("\n")}`;
         body.dotless_ya = this.settings.dotlessYa;
         body.name = this.settings.nameMode;
       }
-      const res = await (0, import_obsidian15.requestUrl)({
+      const res = await (0, import_obsidian16.requestUrl)({
         url: this.baseUrl() + path2,
         method: "POST",
         contentType: "application/json",
@@ -18810,12 +18828,12 @@ ${lines.join("\n")}`;
       const data = (_a = res.json) != null ? _a : {};
       this.lastUnknown = Array.isArray(data.unknown) ? data.unknown : [];
       if (data.error) {
-        new import_obsidian15.Notice(`Transliteration error: ${data.error}`);
+        new import_obsidian16.Notice(`Transliteration error: ${data.error}`);
         return null;
       }
       return (_b = data.romanized) != null ? _b : "";
     } catch (e) {
-      new import_obsidian15.Notice(`Transliteration server not reachable at ${this.settings.serverUrl}. Start it with: python3 scripts/transliterate-server.py`);
+      new import_obsidian16.Notice(`Transliteration server not reachable at ${this.settings.serverUrl}. Start it with: python3 scripts/transliterate-server.py`);
       return null;
     } finally {
       loading.hide();
@@ -18834,20 +18852,20 @@ ${lines.join("\n")}`;
   }
   async saveLexicon(entries) {
     try {
-      await (0, import_obsidian15.requestUrl)({
+      await (0, import_obsidian16.requestUrl)({
         url: this.baseUrl() + "/lexicon",
         method: "POST",
         contentType: "application/json",
         body: JSON.stringify({ entries })
       });
-      new import_obsidian15.Notice(`Lexicon updated (${Object.keys(entries).length} term(s)).`);
+      new import_obsidian16.Notice(`Lexicon updated (${Object.keys(entries).length} term(s)).`);
     } catch (e) {
-      new import_obsidian15.Notice("Could not update the lexicon.");
+      new import_obsidian16.Notice("Could not update the lexicon.");
     }
   }
   async health() {
     try {
-      const res = await (0, import_obsidian15.requestUrl)({ url: this.baseUrl() + "/health", method: "GET" });
+      const res = await (0, import_obsidian16.requestUrl)({ url: this.baseUrl() + "/health", method: "GET" });
       return res.json;
     } catch (e) {
       return null;
@@ -18861,7 +18879,7 @@ ${lines.join("\n")}`;
     if (!actual || !actual.bert || actual.bert === "bert")
       return;
     this.engineFallbackWarned = true;
-    new import_obsidian15.Notice("Transliteration is using the MLE engine because BERT could not be loaded. For best results, install `transformers` and the BERT model data (`camel_data -i disambig-bert-unfactored-msa`), then restart the transliteration server.", 15e3);
+    new import_obsidian16.Notice("Transliteration is using the MLE engine because BERT could not be loaded. For best results, install `transformers` and the BERT model data (`camel_data -i disambig-bert-unfactored-msa`), then restart the transliteration server.", 15e3);
   }
   async serverStatusSummary() {
     var _a, _b;
@@ -18882,7 +18900,7 @@ ${lines.join("\n")}`;
   async startTransliterationServer() {
     var _a;
     if (await this.health()) {
-      new import_obsidian15.Notice(`Transliteration server already running at ${this.settings.serverUrl}.`);
+      new import_obsidian16.Notice(`Transliteration server already running at ${this.settings.serverUrl}.`);
       return;
     }
     const vault = this.vaultPath();
@@ -18913,15 +18931,15 @@ ${lines.join("\n")}`;
       proc.unref();
       this.translitServerPid = (_a = proc.pid) != null ? _a : null;
     } catch (e) {
-      new import_obsidian15.Notice(`Could not start the transliteration server: ${e}`);
+      new import_obsidian16.Notice(`Could not start the transliteration server: ${e}`);
       return;
     }
-    const loading = new import_obsidian15.Notice("Starting transliteration server\u2026", 0);
+    const loading = new import_obsidian16.Notice("Starting transliteration server\u2026", 0);
     try {
       for (let i = 0; i < 40; i++) {
         await new Promise((resolve) => window.setTimeout(resolve, 1e3));
         if (await this.health()) {
-          new import_obsidian15.Notice("Transliteration server started.");
+          new import_obsidian16.Notice("Transliteration server started.");
           await this.maybeWarnEngineFallback();
           return;
         }
@@ -18931,7 +18949,7 @@ ${lines.join("\n")}`;
         tail = fs2.readFileSync(logPath, "utf8").trim().split("\n").slice(-4).join("\n");
       } catch (e) {
       }
-      new import_obsidian15.Notice("The transliteration server did not start." + (tail ? `
+      new import_obsidian16.Notice("The transliteration server did not start." + (tail ? `
 
 ${tail}` : "") + "\n\nIf it mentions a missing module, set the Python path under Transliteration \u2192 Python path.", 2e4);
     } finally {
@@ -18968,7 +18986,7 @@ ${tail}` : "") + "\n\nIf it mentions a missing module, set the Python path under
         break;
       await new Promise((resolve) => window.setTimeout(resolve, 150));
     }
-    new import_obsidian15.Notice(found ? "Transliteration server stopped." : "No running transliteration server found.");
+    new import_obsidian16.Notice(found ? "Transliteration server stopped." : "No running transliteration server found.");
   }
   baseUrl() {
     return this.settings.serverUrl.replace(/\/+$/, "");
@@ -18991,9 +19009,9 @@ ${tail}` : "") + "\n\nIf it mentions a missing module, set the Python path under
       if (data) {
         const oldRoot = (data.sourceImportRoot || "_7 Sources").trim();
         this.settings.sourceRoot = oldRoot;
-        this.settings.sourceImportRoot = (0, import_obsidian15.normalizePath)(`${oldRoot}/Installed Sources`);
-        this.settings.annotationNoteFolder = (0, import_obsidian15.normalizePath)(`${oldRoot}/Annotation Notes`);
-        this.settings.canonicalQuranFolder = (0, import_obsidian15.normalizePath)(`${oldRoot}/Installed Sources/Quran`);
+        this.settings.sourceImportRoot = (0, import_obsidian16.normalizePath)(`${oldRoot}/Installed Sources`);
+        this.settings.annotationNoteFolder = (0, import_obsidian16.normalizePath)(`${oldRoot}/Annotation Notes`);
+        this.settings.canonicalQuranFolder = (0, import_obsidian16.normalizePath)(`${oldRoot}/Installed Sources/Quran`);
         this.settings.sourceLayoutMigrated = false;
         this.sourceLayoutLegacy = {
           installedRoot: oldRoot,
@@ -19016,7 +19034,7 @@ ${tail}` : "") + "\n\nIf it mentions a missing module, set the Python path under
     await this.ensureLlmSettings();
     if (!this.settings.canonicalQuranRiw\u0101ya.trim()) {
       try {
-        if (await this.app.vault.adapter.exists((0, import_obsidian15.normalizePath)(".midad-arabic-sources/source-models/quran-text/hafs.json"))) {
+        if (await this.app.vault.adapter.exists((0, import_obsidian16.normalizePath)(".midad-arabic-sources/source-models/quran-text/hafs.json"))) {
           this.settings.canonicalQuranRiw\u0101ya = "hafs";
           await this.saveSettings();
         }
@@ -19028,7 +19046,7 @@ ${tail}` : "") + "\n\nIf it mentions a missing module, set the Python path under
     await this.saveData(this.settings);
   }
 };
-var TransliterationServerModal = class extends import_obsidian15.Modal {
+var TransliterationServerModal = class extends import_obsidian16.Modal {
   constructor(app, plugin) {
     super(app);
     this.button = null;
@@ -19038,7 +19056,7 @@ var TransliterationServerModal = class extends import_obsidian15.Modal {
   onOpen() {
     this.contentEl.createEl("h2", { text: "Transliteration server" });
     this.statusEl = this.contentEl.createEl("p", { text: "Checking\u2026" });
-    new import_obsidian15.Setting(this.contentEl).addButton((button) => {
+    new import_obsidian16.Setting(this.contentEl).addButton((button) => {
       this.button = button;
       button.onClick(async () => {
         button.setDisabled(true);
@@ -19064,7 +19082,7 @@ var TransliterationServerModal = class extends import_obsidian15.Modal {
     this.contentEl.empty();
   }
 };
-var TransliterateModal = class extends import_obsidian15.Modal {
+var TransliterateModal = class extends import_obsidian16.Modal {
   constructor(app, plugin, text, onDone) {
     super(app);
     this.plugin = plugin;
@@ -19076,13 +19094,13 @@ var TransliterateModal = class extends import_obsidian15.Modal {
   onOpen() {
     const { contentEl } = this;
     contentEl.createEl("h3", { text: "Transliterate" });
-    new import_obsidian15.Setting(contentEl).setName("Full vocalization").setDesc("Retain case endings and tanw\u012Bn (pausal shortening at the end of a passage).").addToggle((toggle) => toggle.setValue(this.fullVocalization).onChange((value) => {
+    new import_obsidian16.Setting(contentEl).setName("Full vocalization").setDesc("Retain case endings and tanw\u012Bn (pausal shortening at the end of a passage).").addToggle((toggle) => toggle.setValue(this.fullVocalization).onChange((value) => {
       this.fullVocalization = value;
     }));
-    new import_obsidian15.Setting(contentEl).setName("Use LLM").setDesc("Romanize with the configured API instead of the rule engine.").addToggle((toggle) => toggle.setValue(this.useLlm).onChange((value) => {
+    new import_obsidian16.Setting(contentEl).setName("Use LLM").setDesc("Romanize with the configured API instead of the rule engine.").addToggle((toggle) => toggle.setValue(this.useLlm).onChange((value) => {
       this.useLlm = value;
     }));
-    new import_obsidian15.Setting(contentEl).addButton((button) => button.setButtonText("Transliterate").setCta().onClick(async () => {
+    new import_obsidian16.Setting(contentEl).addButton((button) => button.setButtonText("Transliterate").setCta().onClick(async () => {
       this.plugin.settings.useLlm = this.useLlm;
       this.plugin.settings.fullVocalization = this.fullVocalization;
       await this.plugin.saveSettings();
@@ -19100,7 +19118,7 @@ var TransliterateModal = class extends import_obsidian15.Modal {
     this.contentEl.empty();
   }
 };
-var LexiconModal = class extends import_obsidian15.Modal {
+var LexiconModal = class extends import_obsidian16.Modal {
   constructor(app, plugin, unknown, onSaved = null) {
     super(app);
     this.inputs = [];
@@ -19115,12 +19133,12 @@ var LexiconModal = class extends import_obsidian15.Modal {
       text: "These terms had no morphological analysis. Edit or confirm their romanization to remember them for next time."
     });
     for (const item of this.unknown) {
-      new import_obsidian15.Setting(contentEl).setName(item.term).addText((text) => {
+      new import_obsidian16.Setting(contentEl).setName(item.term).addText((text) => {
         text.setValue(item.guess || "");
         this.inputs.push({ term: item.term, comp: text });
       });
     }
-    new import_obsidian15.Setting(contentEl).addButton((button) => button.setButtonText("Save").setCta().onClick(async () => {
+    new import_obsidian16.Setting(contentEl).addButton((button) => button.setButtonText("Save").setCta().onClick(async () => {
       const entries = {};
       for (const { term, comp } of this.inputs) {
         const value = comp.getValue().trim();
@@ -19141,7 +19159,7 @@ var LexiconModal = class extends import_obsidian15.Modal {
     this.contentEl.empty();
   }
 };
-var MidadArabicSourcesSettingTab = class extends import_obsidian15.PluginSettingTab {
+var MidadArabicSourcesSettingTab = class extends import_obsidian16.PluginSettingTab {
   constructor(app, plugin) {
     super(app, plugin);
     this.zoteroProbed = false;
@@ -19175,7 +19193,7 @@ var MidadArabicSourcesSettingTab = class extends import_obsidian15.PluginSetting
     setting.controlEl.empty();
     const current = this.plugin.settings.sourceRoot || "Midad Arabic Sources";
     let value = current;
-    const text = new import_obsidian15.TextComponent(setting.controlEl);
+    const text = new import_obsidian16.TextComponent(setting.controlEl);
     text.setValue(value).onChange((v) => {
       value = v;
     });
@@ -19211,7 +19229,7 @@ var MidadArabicSourcesSettingTab = class extends import_obsidian15.PluginSetting
         this.update();
       })().catch((e) => {
         console.error("[midad-arabic-sources] move source root", e);
-        new import_obsidian15.Notice("Could not move the source folders \u2014 see the developer console.");
+        new import_obsidian16.Notice("Could not move the source folders \u2014 see the developer console.");
       });
     });
   }
@@ -19232,14 +19250,14 @@ var MidadArabicSourcesSettingTab = class extends import_obsidian15.PluginSetting
   }
   renderLlmConfigCard(container, config, configs) {
     const card = container.createDiv({ cls: "mas-llm-config-card" });
-    new import_obsidian15.Setting(card).setName("Name").addText((text) => {
+    new import_obsidian16.Setting(card).setName("Name").addText((text) => {
       text.setValue(config.name).onChange(async (value) => {
         config.name = value.trim() || "Untitled configuration";
         await this.plugin.saveSettings();
       });
       text.inputEl.setCssStyles({ width: "100%" });
     });
-    new import_obsidian15.Setting(card).setName("Provider").setDesc("Gemini for transcription/translation; all three providers are available for transliteration.").addDropdown((dropdown) => {
+    new import_obsidian16.Setting(card).setName("Provider").setDesc("Gemini for transcription/translation; all three providers are available for transliteration.").addDropdown((dropdown) => {
       for (const [value, label] of [
         ["gemini", "Gemini"],
         ["deepseek", "DeepSeek"],
@@ -19255,14 +19273,14 @@ var MidadArabicSourcesSettingTab = class extends import_obsidian15.PluginSetting
         this.update();
       });
     });
-    new import_obsidian15.Setting(card).setName("Model").setDesc("The model identifier for the selected provider.").addText((text) => {
+    new import_obsidian16.Setting(card).setName("Model").setDesc("The model identifier for the selected provider.").addText((text) => {
       text.setValue(config.model).onChange(async (value) => {
         config.model = value.trim();
         await this.plugin.saveSettings();
       });
       text.inputEl.setCssStyles({ width: "100%" });
     });
-    new import_obsidian15.Setting(card).setName("API key").addText((text) => {
+    new import_obsidian16.Setting(card).setName("API key").addText((text) => {
       text.setValue(config.apiKey).onChange(async (value) => {
         config.apiKey = value.trim();
         await this.plugin.saveSettings();
@@ -19271,7 +19289,7 @@ var MidadArabicSourcesSettingTab = class extends import_obsidian15.PluginSetting
       text.inputEl.setCssStyles({ width: "100%" });
     });
     if (config.provider === "openai") {
-      new import_obsidian15.Setting(card).setName("Base URL").setDesc("The endpoint for an OpenAI-compatible provider; leave blank to use its environment default.").addText((text) => {
+      new import_obsidian16.Setting(card).setName("Base URL").setDesc("The endpoint for an OpenAI-compatible provider; leave blank to use its environment default.").addText((text) => {
         text.setValue(config.baseUrl).onChange(async (value) => {
           config.baseUrl = value.trim();
           await this.plugin.saveSettings();
@@ -19279,7 +19297,7 @@ var MidadArabicSourcesSettingTab = class extends import_obsidian15.PluginSetting
         text.inputEl.setCssStyles({ width: "100%" });
       });
     }
-    new import_obsidian15.Setting(card).addButton((button) => button.setButtonText("Delete configuration").setDisabled(configs.length <= 1).onClick(async () => {
+    new import_obsidian16.Setting(card).addButton((button) => button.setButtonText("Delete configuration").setDisabled(configs.length <= 1).onClick(async () => {
       this.plugin.settings.llmConfigs = configs.filter((c) => c.id !== config.id);
       await this.plugin.saveSettings();
       await this.plugin.ensureLlmSettings();
@@ -19291,7 +19309,7 @@ var MidadArabicSourcesSettingTab = class extends import_obsidian15.PluginSetting
     setting.settingEl.querySelectorAll(":scope > .mas-llm-configs-dynamic").forEach((el) => el.remove());
     const dynamic = setting.settingEl.createDiv({ cls: "mas-llm-configs-dynamic" });
     const actions = dynamic.createDiv({ cls: "mas-llm-config-actions" });
-    new import_obsidian15.ButtonComponent(actions).setButtonText("Add LLM configuration").setCta().onClick(() => {
+    new import_obsidian16.ButtonComponent(actions).setButtonText("Add LLM configuration").setCta().onClick(() => {
       this.addLlmConfig();
       this.update();
     });
@@ -19338,14 +19356,14 @@ var MidadArabicSourcesSettingTab = class extends import_obsidian15.PluginSetting
   async detectZotero() {
     const found = await this.plugin.detectZoteroLocal();
     if (!found) {
-      new import_obsidian15.Notice("No local Zotero found on port 23119.");
+      new import_obsidian16.Notice("No local Zotero found on port 23119.");
       return;
     }
     this.plugin.settings.zoteroLibraryId = String(found.libraryId);
     this.plugin.settings.zoteroServerId = found.serverId;
     await this.plugin.saveSettings();
     this.update();
-    new import_obsidian15.Notice(`Local Zotero: library ${found.libraryId}.`);
+    new import_obsidian16.Notice(`Local Zotero: library ${found.libraryId}.`);
   }
   probeZotero() {
     if (this.zoteroProbed)
@@ -19397,7 +19415,7 @@ var MidadArabicSourcesSettingTab = class extends import_obsidian15.PluginSetting
             render: (setting) => {
               setting.addButton((button) => button.setButtonText("Rebuild registry").onClick(async () => {
                 await this.plugin.refreshSourceRegistry();
-                new import_obsidian15.Notice("Source registry rebuilt.");
+                new import_obsidian16.Notice("Source registry rebuilt.");
               }));
             }
           }
@@ -19613,7 +19631,7 @@ var MidadArabicSourcesSettingTab = class extends import_obsidian15.PluginSetting
                 if (this.plugin.annotations)
                   new AnnotationTrashModal(this.app, this.plugin.annotations).open();
                 else
-                  new import_obsidian15.Notice("The annotation layer is not running.");
+                  new import_obsidian16.Notice("The annotation layer is not running.");
               }));
               setting.addButton((button) => button.setButtonText("Re-anchor active source").onClick(async () => {
                 var _a;
@@ -19845,7 +19863,7 @@ var StatusPanel = class {
     const vault = (_b = (_a = adapter == null ? void 0 : adapter.getBasePath) == null ? void 0 : _a.call(adapter)) != null ? _b : "";
     const rel = vault && path2.startsWith(vault) ? path2.slice(vault.length + 1) : path2;
     const file = this.app.vault.getAbstractFileByPath(rel);
-    if (file instanceof import_obsidian15.TFile)
+    if (file instanceof import_obsidian16.TFile)
       void this.app.workspace.getLeaf("tab").openFile(file);
     else
       void this.app.workspace.openLinkText(rel, "", true);
@@ -19872,7 +19890,7 @@ var StatusPanel = class {
       this.onClose();
   }
 };
-var LogModal = class extends import_obsidian15.Modal {
+var LogModal = class extends import_obsidian16.Modal {
   constructor(app, title, text) {
     super(app);
     this.title = title;
@@ -19894,7 +19912,7 @@ var LogModal = class extends import_obsidian15.Modal {
     this.contentEl.empty();
   }
 };
-var ApiKeyModal = class extends import_obsidian15.Modal {
+var ApiKeyModal = class extends import_obsidian16.Modal {
   constructor(app, plugin, task) {
     super(app);
     this.plugin = plugin;
@@ -19909,7 +19927,7 @@ var ApiKeyModal = class extends import_obsidian15.Modal {
     contentEl.createEl("p", {
       text: "Add a configuration and assign it to this task under Settings \u2192 Midad Arabic Sources \u2192 LLM. A key can also come from GEMINI_API_KEY / GOOGLE_API_KEY in the environment Obsidian was launched from."
     });
-    new import_obsidian15.Setting(contentEl).addButton((b) => b.setButtonText("Open plugin settings").setCta().onClick(() => {
+    new import_obsidian16.Setting(contentEl).addButton((b) => b.setButtonText("Open plugin settings").setCta().onClick(() => {
       this.close();
       this.plugin.openSettings();
     })).addButton((b) => b.setButtonText("Cancel").onClick(() => this.close()));
@@ -19918,7 +19936,7 @@ var ApiKeyModal = class extends import_obsidian15.Modal {
     this.contentEl.empty();
   }
 };
-var ResumeModal = class extends import_obsidian15.Modal {
+var ResumeModal = class extends import_obsidian16.Modal {
   constructor(app, plugin, state) {
     super(app);
     this.plugin = plugin;
@@ -19937,7 +19955,7 @@ var ResumeModal = class extends import_obsidian15.Modal {
       overflow: "auto",
       fontSize: "var(--font-ui-smaller)"
     });
-    const setting = new import_obsidian15.Setting(contentEl);
+    const setting = new import_obsidian16.Setting(contentEl);
     let alive = false;
     try {
       if (this.state.pid) {
@@ -19995,7 +20013,7 @@ var PromptPicker = class {
   }
   render() {
     this.containerEl.empty();
-    const row = new import_obsidian15.Setting(this.containerEl).setName("Prompt");
+    const row = new import_obsidian16.Setting(this.containerEl).setName("Prompt");
     row.addDropdown((dd) => {
       for (const p of this.entries)
         dd.addOption(p.name, p.name);
@@ -20015,7 +20033,7 @@ var PromptPicker = class {
         return (_a = this.onSelectNone) == null ? void 0 : _a.call(this);
       }));
     }
-    const actions = new import_obsidian15.Setting(this.containerEl).setName("Manage prompts");
+    const actions = new import_obsidian16.Setting(this.containerEl).setName("Manage prompts");
     actions.addButton((b) => b.setButtonText("Modify selected").onClick(() => this.openEditor("edit")));
     actions.addButton((b) => b.setButtonText("Create a new prompt from selected").onClick(() => this.openEditor("new")));
     actions.addButton((b) => {
@@ -20023,7 +20041,7 @@ var PromptPicker = class {
       b.setButtonText("Delete selected prompt").onClick(() => {
         void this.deleteSelected().catch((e) => {
           console.error("[midad-arabic-sources] delete prompt", e);
-          new import_obsidian15.Notice("Could not delete the prompt \u2014 see the developer console.");
+          new import_obsidian16.Notice("Could not delete the prompt \u2014 see the developer console.");
         });
       });
     });
@@ -20056,10 +20074,10 @@ var PromptPicker = class {
     this.entries = remaining;
     this.selectedName = (_d = (_c = (_a = remaining.find((e) => e.builtin)) == null ? void 0 : _a.name) != null ? _c : (_b = remaining[0]) == null ? void 0 : _b.name) != null ? _d : "";
     this.render();
-    new import_obsidian15.Notice(`Deleted prompt \u201C${entry.name}\u201D.`);
+    new import_obsidian16.Notice(`Deleted prompt \u201C${entry.name}\u201D.`);
   }
 };
-var PromptEditorModal = class extends import_obsidian15.Modal {
+var PromptEditorModal = class extends import_obsidian16.Modal {
   constructor(plugin, kind, mode, source, initialName, onSaved) {
     super(plugin.app);
     this.plugin = plugin;
@@ -20084,7 +20102,7 @@ var PromptEditorModal = class extends import_obsidian15.Modal {
     contentEl.createEl("p", {
       text: `The text below is appended to the pipeline's built-in page-formatting and ${kindLabel} instructions. Describe the document and any text-specific handling here.`
     });
-    new import_obsidian15.Setting(contentEl).setName("Name").addText((t) => {
+    new import_obsidian16.Setting(contentEl).setName("Name").addText((t) => {
       t.setValue(this.name).onChange((v) => this.name = v);
       t.inputEl.setCssStyles({ width: "100%" });
     });
@@ -20100,30 +20118,30 @@ var PromptEditorModal = class extends import_obsidian15.Modal {
       lineHeight: "1.45"
     });
     textarea.addEventListener("input", () => this.text = textarea.value);
-    new import_obsidian15.Setting(contentEl).addButton((b) => b.setButtonText("Save").setCta().onClick(() => {
+    new import_obsidian16.Setting(contentEl).addButton((b) => b.setButtonText("Save").setCta().onClick(() => {
       void this.save(false).catch((e) => {
         console.error("[midad-arabic-sources] save prompt", e);
-        new import_obsidian15.Notice("Could not save the prompt \u2014 see the developer console.");
+        new import_obsidian16.Notice("Could not save the prompt \u2014 see the developer console.");
       });
     })).addButton((b) => b.setButtonText("Save as").onClick(() => {
       void this.save(true).catch((e) => {
         console.error("[midad-arabic-sources] save prompt copy", e);
-        new import_obsidian15.Notice("Could not save the prompt \u2014 see the developer console.");
+        new import_obsidian16.Notice("Could not save the prompt \u2014 see the developer console.");
       });
     })).addButton((b) => b.setButtonText("Cancel").onClick(() => this.close()));
   }
   async save(asCopy) {
     const name = this.name.trim();
     if (!name) {
-      new import_obsidian15.Notice("Enter a prompt name.");
+      new import_obsidian16.Notice("Enter a prompt name.");
       return;
     }
     if (!this.text.trim()) {
-      new import_obsidian15.Notice("The prompt cannot be empty.");
+      new import_obsidian16.Notice("The prompt cannot be empty.");
       return;
     }
     if (asCopy && this.mode === "edit" && name === this.originalName) {
-      new import_obsidian15.Notice("Enter a different name in the name field to save a copy.");
+      new import_obsidian16.Notice("Enter a different name in the name field to save a copy.");
       return;
     }
     const entries = await this.plugin.loadPromptSet(this.kind);
@@ -20131,11 +20149,11 @@ var PromptEditorModal = class extends import_obsidian15.Modal {
     if (this.mode === "edit" && !asCopy) {
       const target = entries.find((e) => e.name === this.originalName);
       if (!target) {
-        new import_obsidian15.Notice("This prompt no longer exists.");
+        new import_obsidian16.Notice("This prompt no longer exists.");
         return;
       }
       if (!target.builtin && name !== this.originalName && existing) {
-        new import_obsidian15.Notice(`A prompt named \u201C${name}\u201D already exists.`);
+        new import_obsidian16.Notice(`A prompt named \u201C${name}\u201D already exists.`);
         return;
       }
       target.text = this.text;
@@ -20149,7 +20167,7 @@ var PromptEditorModal = class extends import_obsidian15.Modal {
       await this.onSaved(target.name);
     } else {
       if (existing) {
-        new import_obsidian15.Notice(`A prompt named \u201C${name}\u201D already exists.`);
+        new import_obsidian16.Notice(`A prompt named \u201C${name}\u201D already exists.`);
         return;
       }
       entries.push({ name, text: this.text });
@@ -20162,7 +20180,7 @@ var PromptEditorModal = class extends import_obsidian15.Modal {
     this.contentEl.empty();
   }
 };
-var TranscribeModal = class extends import_obsidian15.Modal {
+var TranscribeModal = class extends import_obsidian16.Modal {
   constructor(app, plugin, citekey, pdfs, prompts) {
     super(app);
     this.checks = [];
@@ -20190,20 +20208,20 @@ var TranscribeModal = class extends import_obsidian15.Modal {
       cb.disabled = !pdf.exists;
       row.createSpan({ text: ` ${pdf.filename}${pdf.exists ? "" : " (file not found)"} ` });
       row.createSpan({ text: "vol." });
-      const vol = new import_obsidian15.TextComponent(row);
+      const vol = new import_obsidian16.TextComponent(row);
       vol.setValue(pdf.volume != null ? String(pdf.volume) : "").setPlaceholder("\u2014");
       vol.inputEl.setCssStyles({ width: "3.5em" });
       this.checks.push({ pdf, el: cb, vol });
     }
-    new import_obsidian15.Setting(contentEl).addButton((b) => b.setButtonText("Transcribe").setCta().onClick(async () => {
+    new import_obsidian16.Setting(contentEl).addButton((b) => b.setButtonText("Transcribe").setCta().onClick(async () => {
       const chosen = this.checks.filter((c) => c.el.checked);
       if (!chosen.length) {
-        new import_obsidian15.Notice("Select at least one PDF.");
+        new import_obsidian16.Notice("Select at least one PDF.");
         return;
       }
       const prompt = this.picker.selectedEntry();
       if (!prompt) {
-        new import_obsidian15.Notice("Select a prompt.");
+        new import_obsidian16.Notice("Select a prompt.");
         return;
       }
       const args = ["transcribe", "--citekey", this.citekey];
@@ -20242,7 +20260,7 @@ function standaloneCitekey(path2) {
 function stripTranscriptionSuffix(title) {
   return title.replace(/\s*\((?:transcription|translation)(?:,\s*vol\.\s*\d+)?\)\s*$/i, "").trim();
 }
-var StandalonePdfModal = class extends import_obsidian15.Modal {
+var StandalonePdfModal = class extends import_obsidian16.Modal {
   constructor(app, plugin, prompts) {
     super(app);
     this.path = "";
@@ -20270,12 +20288,12 @@ var StandalonePdfModal = class extends import_obsidian15.Modal {
       const path2 = chosenFilePath(file);
       fileInput.value = "";
       if (!path2) {
-        new import_obsidian15.Notice("Obsidian did not expose that file's path. Paste it into the field instead.");
+        new import_obsidian16.Notice("Obsidian did not expose that file's path. Paste it into the field instead.");
         return;
       }
       this.setPath(path2);
     });
-    new import_obsidian15.Setting(contentEl).setName("PDF file").setDesc("Choose a PDF, or paste its full path.").addText((t) => {
+    new import_obsidian16.Setting(contentEl).setName("PDF file").setDesc("Choose a PDF, or paste its full path.").addText((t) => {
       this.pathInput = t;
       t.setPlaceholder("/Users/you/Downloads/book.pdf").onChange((v) => {
         this.path = v.trim();
@@ -20284,7 +20302,7 @@ var StandalonePdfModal = class extends import_obsidian15.Modal {
       });
       t.inputEl.setCssStyles({ width: "100%" });
     }).addButton((b) => b.setButtonText("Choose PDF\u2026").onClick(() => fileInput.click()));
-    new import_obsidian15.Setting(contentEl).setName("Citekey").setDesc("Used in the transcription's filename and links. It can be edited.").addText((t) => {
+    new import_obsidian16.Setting(contentEl).setName("Citekey").setDesc("Used in the transcription's filename and links. It can be edited.").addText((t) => {
       this.citekeyInput = t;
       t.setPlaceholder("Book title").onChange((v) => {
         this.citekey = v.trim().replace(/^@+/, "");
@@ -20294,10 +20312,10 @@ var StandalonePdfModal = class extends import_obsidian15.Modal {
     });
     const promptRow = contentEl.createDiv();
     this.picker = new PromptPicker(this.plugin, "transcription", promptRow, this.prompts);
-    new import_obsidian15.Setting(contentEl).addButton((b) => b.setButtonText("Transcribe").setCta().onClick(() => {
+    new import_obsidian16.Setting(contentEl).addButton((b) => b.setButtonText("Transcribe").setCta().onClick(() => {
       void this.transcribe().catch((e) => {
         console.error("[midad-arabic-sources] standalone transcribe", e);
-        new import_obsidian15.Notice("Could not start the transcription \u2014 see the developer console.");
+        new import_obsidian16.Notice("Could not start the transcription \u2014 see the developer console.");
       });
     })).addButton((b) => b.setButtonText("Cancel").onClick(() => this.close()));
   }
@@ -20320,25 +20338,25 @@ var StandalonePdfModal = class extends import_obsidian15.Modal {
     const entered = ((_b = (_a = this.pathInput) == null ? void 0 : _a.getValue()) != null ? _b : this.path).trim();
     const path2 = entered.startsWith("~/") ? `${os.homedir()}${entered.slice(1)}` : entered;
     if (!path2) {
-      new import_obsidian15.Notice("Choose a PDF first.");
+      new import_obsidian16.Notice("Choose a PDF first.");
       return;
     }
     if (!path2.toLowerCase().endsWith(".pdf")) {
-      new import_obsidian15.Notice("Choose a PDF file.");
+      new import_obsidian16.Notice("Choose a PDF file.");
       return;
     }
     if (!fs2.existsSync(path2)) {
-      new import_obsidian15.Notice("That PDF could not be found at the selected path.");
+      new import_obsidian16.Notice("That PDF could not be found at the selected path.");
       return;
     }
     const citekey = ((_d = (_c = this.citekeyInput) == null ? void 0 : _c.getValue()) != null ? _d : this.citekey).trim().replace(/^@+/, "").replace(/[\\/:*?"<>|\s]+/g, "-").replace(/^-+|-+$/g, "");
     if (!citekey) {
-      new import_obsidian15.Notice("Enter a citekey.");
+      new import_obsidian16.Notice("Enter a citekey.");
       return;
     }
     (_e = this.citekeyInput) == null ? void 0 : _e.setValue(citekey);
     const folder = this.plugin.transcriptionsFolder();
-    const notePrefix = (0, import_obsidian15.normalizePath)(`${folder}/mas-${citekey} - transcription`);
+    const notePrefix = (0, import_obsidian16.normalizePath)(`${folder}/mas-${citekey} - transcription`);
     const existing = this.app.vault.getFiles().find((f) => f.extension === "md" && f.path.startsWith(notePrefix));
     let existingName = (_f = existing == null ? void 0 : existing.name) != null ? _f : "";
     if (!existingName) {
@@ -20349,12 +20367,12 @@ var StandalonePdfModal = class extends import_obsidian15.Modal {
       }
     }
     if (existingName) {
-      new import_obsidian15.Notice(`A transcription already exists at ${existingName}. Choose a different citekey.`);
+      new import_obsidian16.Notice(`A transcription already exists at ${existingName}. Choose a different citekey.`);
       return;
     }
     const prompt = this.picker.selectedEntry();
     if (!prompt) {
-      new import_obsidian15.Notice("Select a prompt.");
+      new import_obsidian16.Notice("Select a prompt.");
       return;
     }
     const promptFile = this.plugin.writePromptFile("transcription", prompt.text);
@@ -20380,13 +20398,13 @@ var StandalonePdfModal = class extends import_obsidian15.Modal {
     if (note) {
       new VerifyTranscriptionMetadataModal(this.app, note).open();
     } else {
-      new import_obsidian15.Notice(`Transcription written to ${rel}. Open it to check its title and author.`);
+      new import_obsidian16.Notice(`Transcription written to ${rel}. Open it to check its title and author.`);
     }
   }
   async waitForNote(path2) {
     for (let i = 0; i < 40; i++) {
       const file = this.app.vault.getAbstractFileByPath(path2);
-      if (file instanceof import_obsidian15.TFile)
+      if (file instanceof import_obsidian16.TFile)
         return file;
       await new Promise((resolve) => window.setTimeout(resolve, 150));
     }
@@ -20396,7 +20414,7 @@ var StandalonePdfModal = class extends import_obsidian15.Modal {
     this.contentEl.empty();
   }
 };
-var VerifyTranscriptionMetadataModal = class extends import_obsidian15.Modal {
+var VerifyTranscriptionMetadataModal = class extends import_obsidian16.Modal {
   constructor(app, file) {
     super(app);
     this.title = "";
@@ -20410,17 +20428,17 @@ var VerifyTranscriptionMetadataModal = class extends import_obsidian15.Modal {
     contentEl.createEl("p", {
       text: "Gemini guessed these from the title page. Correct them if needed, then save. They fill the same bibliography fields as a Zotero-derived transcription."
     });
-    new import_obsidian15.Setting(contentEl).setName("Title").addText((t) => {
+    new import_obsidian16.Setting(contentEl).setName("Title").addText((t) => {
       this.titleInput = t;
       t.setPlaceholder("Book title").onChange((v) => this.title = v);
       t.inputEl.setCssStyles({ width: "100%" });
     });
-    new import_obsidian15.Setting(contentEl).setName("Author").setDesc("Separate multiple authors with semicolons.").addText((t) => {
+    new import_obsidian16.Setting(contentEl).setName("Author").setDesc("Separate multiple authors with semicolons.").addText((t) => {
       this.authorInput = t;
       t.setPlaceholder("Author").onChange((v) => this.author = v);
       t.inputEl.setCssStyles({ width: "100%" });
     });
-    new import_obsidian15.Setting(contentEl).addButton((b) => b.setButtonText("Save").setCta().onClick(() => {
+    new import_obsidian16.Setting(contentEl).addButton((b) => b.setButtonText("Save").setCta().onClick(() => {
       void this.save(false).catch((e) => this.reportError(e));
     })).addButton((b) => b.setButtonText("Save and open").onClick(() => {
       void this.save(true).catch((e) => this.reportError(e));
@@ -20432,7 +20450,7 @@ var VerifyTranscriptionMetadataModal = class extends import_obsidian15.Modal {
     try {
       const text = await this.app.vault.read(this.file);
       const match = /^---\r?\n([\s\S]*?)\r?\n---/.exec(text);
-      const parsed = match ? (0, import_obsidian15.parseYaml)(match[1]) : {};
+      const parsed = match ? (0, import_obsidian16.parseYaml)(match[1]) : {};
       const fm = parsed && typeof parsed === "object" ? parsed : {};
       const rawTitle = typeof fm.title === "string" ? fm.title : "";
       const rawAuthors = fm.authors;
@@ -20463,7 +20481,7 @@ var VerifyTranscriptionMetadataModal = class extends import_obsidian15.Modal {
         aliases.push(`${authors[0]} - ${title} (${suffix})`);
       fm.aliases = Array.from(new Set(aliases));
     });
-    new import_obsidian15.Notice("Transcription metadata saved.");
+    new import_obsidian16.Notice("Transcription metadata saved.");
     this.close();
     if (open) {
       await this.app.workspace.getLeaf(false).openFile(this.file);
@@ -20471,13 +20489,13 @@ var VerifyTranscriptionMetadataModal = class extends import_obsidian15.Modal {
   }
   reportError(e) {
     console.error("[midad-arabic-sources] save transcription metadata", e);
-    new import_obsidian15.Notice("Could not save the metadata \u2014 see the developer console.");
+    new import_obsidian16.Notice("Could not save the metadata \u2014 see the developer console.");
   }
   onClose() {
     this.contentEl.empty();
   }
 };
-var TranslateModal = class extends import_obsidian15.Modal {
+var TranslateModal = class extends import_obsidian16.Modal {
   constructor(app, plugin, citekey, notes, pdfs, prompts) {
     super(app);
     this.checks = [];
@@ -20517,16 +20535,16 @@ var TranslateModal = class extends import_obsidian15.Modal {
         ul.createEl("li", { text: `${p.filename}${p.exists ? "" : " (file not found)"}` });
       }
     }
-    new import_obsidian15.Setting(contentEl).setName("Volume").setDesc("Optional volume number.").addText((t) => t.setPlaceholder("E.g. 2").onChange((v) => this.volume = v.trim()));
-    new import_obsidian15.Setting(contentEl).addButton((b) => b.setButtonText("Translate").setCta().onClick(async () => {
+    new import_obsidian16.Setting(contentEl).setName("Volume").setDesc("Optional volume number.").addText((t) => t.setPlaceholder("E.g. 2").onChange((v) => this.volume = v.trim()));
+    new import_obsidian16.Setting(contentEl).addButton((b) => b.setButtonText("Translate").setCta().onClick(async () => {
       const chosen = this.checks.filter((c) => c.el.checked).map((c) => c.note.path);
       if (!chosen.length) {
-        new import_obsidian15.Notice("Select at least one transcription.");
+        new import_obsidian16.Notice("Select at least one transcription.");
         return;
       }
       const prompt = this.picker.selectedEntry();
       if (!prompt) {
-        new import_obsidian15.Notice("Select a prompt.");
+        new import_obsidian16.Notice("Select a prompt.");
         return;
       }
       const args = ["translate", "--citekey", this.citekey];
@@ -20546,7 +20564,7 @@ var TranslateModal = class extends import_obsidian15.Modal {
     this.contentEl.empty();
   }
 };
-var SourceRootMoveModal = class extends import_obsidian15.Modal {
+var SourceRootMoveModal = class extends import_obsidian16.Modal {
   constructor(app, root, sourceHasFiles, targetHasFiles, onChoose) {
     super(app);
     this.settled = false;
@@ -20573,7 +20591,7 @@ var SourceRootMoveModal = class extends import_obsidian15.Modal {
         text: "The destination already contains files. Existing folders will be merged; files with the same name are left untouched."
       });
     }
-    new import_obsidian15.Setting(contentEl).addButton((b) => b.setButtonText("Cancel").onClick(() => this.choose(false))).addButton((b) => b.setButtonText("Move folders").setCta().onClick(() => this.choose(true)));
+    new import_obsidian16.Setting(contentEl).addButton((b) => b.setButtonText("Cancel").onClick(() => this.choose(false))).addButton((b) => b.setButtonText("Move folders").setCta().onClick(() => this.choose(true)));
   }
   onClose() {
     this.contentEl.empty();
@@ -20583,7 +20601,7 @@ var SourceRootMoveModal = class extends import_obsidian15.Modal {
     }
   }
 };
-var ReRenderBatchScopeModal = class extends import_obsidian15.Modal {
+var ReRenderBatchScopeModal = class extends import_obsidian16.Modal {
   constructor(app, citekey, volume, count, onChoose) {
     super(app);
     this.settled = false;
@@ -20605,7 +20623,7 @@ var ReRenderBatchScopeModal = class extends import_obsidian15.Modal {
     contentEl.createEl("p", {
       text: `This work has ${this.count} archived batch(es). Re-render only volume ${this.volume}, or every archived batch?`
     });
-    new import_obsidian15.Setting(contentEl).addButton((b) => b.setButtonText("Cancel").onClick(() => this.choose(null))).addButton((b) => b.setButtonText(`Only vol. ${this.volume}`).onClick(() => this.choose("one"))).addButton((b) => b.setButtonText(`All ${this.count} archived batches`).setCta().onClick(() => this.choose("all")));
+    new import_obsidian16.Setting(contentEl).addButton((b) => b.setButtonText("Cancel").onClick(() => this.choose(null))).addButton((b) => b.setButtonText(`Only vol. ${this.volume}`).onClick(() => this.choose("one"))).addButton((b) => b.setButtonText(`All ${this.count} archived batches`).setCta().onClick(() => this.choose("all")));
   }
   onClose() {
     this.contentEl.empty();
@@ -20615,7 +20633,7 @@ var ReRenderBatchScopeModal = class extends import_obsidian15.Modal {
     }
   }
 };
-var ReprocessModal = class extends import_obsidian15.Modal {
+var ReprocessModal = class extends import_obsidian16.Modal {
   constructor(app, plugin, zips) {
     super(app);
     this.checks = [];
@@ -20637,10 +20655,10 @@ var ReprocessModal = class extends import_obsidian15.Modal {
       row.createSpan({ text: ` ${z.name}` });
       this.checks.push({ zip: z, el: cb });
     }
-    new import_obsidian15.Setting(contentEl).addButton((b) => b.setButtonText("Reprocess").setCta().onClick(async () => {
+    new import_obsidian16.Setting(contentEl).addButton((b) => b.setButtonText("Reprocess").setCta().onClick(async () => {
       const chosen = this.checks.filter((c) => c.el.checked).map((c) => c.zip.path);
       if (!chosen.length) {
-        new import_obsidian15.Notice("Select at least one archive.");
+        new import_obsidian16.Notice("Select at least one archive.");
         return;
       }
       this.close();
@@ -20652,7 +20670,7 @@ var ReprocessModal = class extends import_obsidian15.Modal {
     this.contentEl.empty();
   }
 };
-var SourceTemplateUpdateConsentModal = class extends import_obsidian15.Modal {
+var SourceTemplateUpdateConsentModal = class extends import_obsidian16.Modal {
   constructor(app, count, onChoose) {
     super(app);
     this.count = count;
@@ -20664,7 +20682,7 @@ var SourceTemplateUpdateConsentModal = class extends import_obsidian15.Modal {
     contentEl.createEl("p", {
       text: `The import templates changed. ${this.count} note(s) were rendered with an older version. Re-render them now? Your own edits and out-of-template properties are preserved.`
     });
-    new import_obsidian15.Setting(contentEl).addButton((b) => b.setButtonText("Yes, update").setCta().onClick(() => {
+    new import_obsidian16.Setting(contentEl).addButton((b) => b.setButtonText("Yes, update").setCta().onClick(() => {
       this.close();
       this.onChoose("yes");
     })).addButton((b) => b.setButtonText("Not now").onClick(() => {
@@ -20679,7 +20697,7 @@ var SourceTemplateUpdateConsentModal = class extends import_obsidian15.Modal {
     this.contentEl.empty();
   }
 };
-var ReconcileSourcesModal = class extends import_obsidian15.Modal {
+var ReconcileSourcesModal = class extends import_obsidian16.Modal {
   constructor(app, plugin, items) {
     super(app);
     this.checks = [];
@@ -20701,33 +20719,33 @@ var ReconcileSourcesModal = class extends import_obsidian15.Modal {
       row.createSpan({ text: ` ${it.work.title} \u2014 ${detail}` });
       this.checks.push({ work: it.work, el: cb });
     }
-    new import_obsidian15.Setting(contentEl).addButton((b) => b.setButtonText("Reinstall selected").setCta().onClick(async () => {
+    new import_obsidian16.Setting(contentEl).addButton((b) => b.setButtonText("Reinstall selected").setCta().onClick(async () => {
       const chosen = this.checks.filter((c) => c.el.checked);
       if (!chosen.length) {
-        new import_obsidian15.Notice("Select at least one work.");
+        new import_obsidian16.Notice("Select at least one work.");
         return;
       }
       this.close();
       for (const c of chosen)
         await this.plugin.reinstallSource(c.work);
-      new import_obsidian15.Notice(`Reinstalled ${chosen.length} work(s).`);
+      new import_obsidian16.Notice(`Reinstalled ${chosen.length} work(s).`);
     })).addButton((b) => b.setButtonText("Remove selected").setDestructive().onClick(async () => {
       const chosen = this.checks.filter((c) => c.el.checked);
       if (!chosen.length) {
-        new import_obsidian15.Notice("Select at least one work.");
+        new import_obsidian16.Notice("Select at least one work.");
         return;
       }
       this.close();
       for (const c of chosen)
         await this.plugin.removeSource(c.work);
-      new import_obsidian15.Notice(`Removed ${chosen.length} work(s).`);
+      new import_obsidian16.Notice(`Removed ${chosen.length} work(s).`);
     })).addButton((b) => b.setButtonText("Decide later").onClick(() => this.close()));
   }
   onClose() {
     this.contentEl.empty();
   }
 };
-var TransliterationUnavailableModal = class extends import_obsidian15.Modal {
+var TransliterationUnavailableModal = class extends import_obsidian16.Modal {
   constructor(app, sourceName, resolve) {
     super(app);
     this.answered = false;
@@ -20739,7 +20757,7 @@ var TransliterationUnavailableModal = class extends import_obsidian15.Modal {
     this.contentEl.createEl("p", {
       text: `This source, ${this.sourceName}, requires transliteration to render, but the transliteration server is not running. Start it now, or proceed without transliteration.`
     });
-    const footer = new import_obsidian15.Setting(this.contentEl);
+    const footer = new import_obsidian16.Setting(this.contentEl);
     footer.addButton((b) => b.setButtonText("Start server").setCta().onClick(async () => {
       this.answered = true;
       this.resolve("start");
@@ -20994,7 +21012,7 @@ function buildUrlAdder(plugin, container, onAdded) {
     for (const w of works) {
       const key = `turath:${w.id}`;
       const installed = await plugin.isSourceInstalled(key);
-      new import_obsidian15.Setting(listEl).setName(w.title || w.arabic || w.id).setDesc(w.author ? `${w.author} \u2014 ${w.url}` : w.url).addButton((b) => b.setButtonText(installed ? "Installed" : "Install").setDisabled(installed).onClick(async () => {
+      new import_obsidian16.Setting(listEl).setName(w.title || w.arabic || w.id).setDesc(w.author ? `${w.author} \u2014 ${w.url}` : w.url).addButton((b) => b.setButtonText(installed ? "Installed" : "Install").setDisabled(installed).onClick(async () => {
         b.setDisabled(true);
         b.setButtonText("Installing\u2026");
         try {
@@ -21013,11 +21031,11 @@ function buildUrlAdder(plugin, container, onAdded) {
             message: "This work is not in the built-in catalogue. Removing it from the list will also uninstall it and delete its generated notes; annotations are kept. Continue?",
             confirmText: "Remove",
             onConfirm: async () => {
-              const progress = new import_obsidian15.Notice(`Uninstalling \u201C${w.title || w.id}\u201D\u2026`, 0);
+              const progress = new import_obsidian16.Notice(`Uninstalling \u201C${w.title || w.id}\u201D\u2026`, 0);
               try {
                 const ok = await plugin.removeSource(source, (done, total) => progress.setMessage(`Uninstalling \u201C${w.title || w.id}\u201D \u2014 ${done}/${total} files\u2026`));
                 if (!ok) {
-                  new import_obsidian15.Notice("The source could not be fully uninstalled; its custom entry was kept.");
+                  new import_obsidian16.Notice("The source could not be fully uninstalled; its custom entry was kept.");
                   return;
                 }
                 await plugin.removeTurathWork(w.id);
@@ -21045,7 +21063,7 @@ function buildUrlAdder(plugin, container, onAdded) {
     authorEl.value = work.author;
     preview.classList.remove("mas-manage__hidden");
   };
-  new import_obsidian15.Setting(container).addText((text) => {
+  new import_obsidian16.Setting(container).addText((text) => {
     inputEl = text.inputEl;
     text.setPlaceholder("https://app.turath.io/book/95864");
     text.inputEl.addEventListener("keydown", (ev) => {
@@ -21055,13 +21073,13 @@ function buildUrlAdder(plugin, container, onAdded) {
       }
     });
   }).addButton((b) => b.setButtonText("Fetch").setCta().onClick(() => void pull()));
-  new import_obsidian15.Setting(preview).setName("Title (romanized)").addText((text) => {
+  new import_obsidian16.Setting(preview).setName("Title (romanized)").addText((text) => {
     titleEl = text.inputEl;
   });
-  new import_obsidian15.Setting(preview).setName("Author (romanized)").addText((text) => {
+  new import_obsidian16.Setting(preview).setName("Author (romanized)").addText((text) => {
     authorEl = text.inputEl;
   });
-  new import_obsidian15.Setting(preview).addButton((b) => b.setButtonText("Add to list").onClick(async () => {
+  new import_obsidian16.Setting(preview).addButton((b) => b.setButtonText("Add to list").onClick(async () => {
     if (!pending2)
       return;
     const work = pending2;
@@ -21091,7 +21109,7 @@ function buildUrlAdder(plugin, container, onAdded) {
   }));
   void renderList();
 }
-var TurathUrlModal = class extends import_obsidian15.Modal {
+var TurathUrlModal = class extends import_obsidian16.Modal {
   constructor(app, plugin) {
     super(app);
     this.plugin = plugin;
@@ -21104,7 +21122,7 @@ var TurathUrlModal = class extends import_obsidian15.Modal {
     this.contentEl.empty();
   }
 };
-var ManageSourcesModal = class extends import_obsidian15.Modal {
+var ManageSourcesModal = class extends import_obsidian16.Modal {
   constructor(app, plugin, works, installed, deleting = new Set(), archived = new Set(), sizes = new Map(), zoteroStatus = new Map(), onReload, archiving = new Set(), showFilter, initialMode = "manage") {
     super(app);
     this.rows = [];
@@ -21269,7 +21287,7 @@ var ManageSourcesModal = class extends import_obsidian15.Modal {
         titleCell.createDiv({ cls: "mas-manage__subtitle", text: w.subtitle });
       if (annotationCount) {
         const badge = titleCell.createDiv({ cls: "mas-manage__ann" });
-        (0, import_obsidian15.setIcon)(badge.createSpan({ cls: "mas-manage__ann-icon" }), "highlighter");
+        (0, import_obsidian16.setIcon)(badge.createSpan({ cls: "mas-manage__ann-icon" }), "highlighter");
         badge.createSpan({ cls: "mas-manage__ann-count", text: String(annotationCount) });
         badge.title = `${annotationCount} annotation(s)`;
       }
@@ -21297,7 +21315,7 @@ var ManageSourcesModal = class extends import_obsidian15.Modal {
         if (!annotationCountNow && !isInstalledNow && !isArchivedNow)
           return;
         event.preventDefault();
-        const menu = new import_obsidian15.Menu();
+        const menu = new import_obsidian16.Menu();
         if (annotationCountNow) {
           menu.addItem((item) => item.setTitle("Delete annotations for this item\u2026").setIcon("trash-2").onClick(() => {
             var _a2;
@@ -21336,7 +21354,7 @@ var ManageSourcesModal = class extends import_obsidian15.Modal {
               onConfirm: () => {
                 this.close();
                 void (async () => {
-                  const progress = new import_obsidian15.Notice(`Removing \u201C${w.title || w.dir}\u201D\u2026`, 0);
+                  const progress = new import_obsidian16.Notice(`Removing \u201C${w.title || w.dir}\u201D\u2026`, 0);
                   try {
                     await this.plugin.removeSource(w, (done, total) => progress.setMessage(`Removing \u201C${w.title || w.dir}\u201D \u2014 ${done}/${total} files\u2026`));
                   } finally {
@@ -21352,7 +21370,7 @@ var ManageSourcesModal = class extends import_obsidian15.Modal {
       };
       row.onclick = () => {
         if (this.archiving.has(w.key)) {
-          new import_obsidian15.Notice("That source is still being archived.");
+          new import_obsidian16.Notice("That source is still being archived.");
           return;
         }
         if (this.selected.has(w.key))
@@ -21386,7 +21404,7 @@ var ManageSourcesModal = class extends import_obsidian15.Modal {
       if (this.plugin.annotations)
         new AnnotationTrashModal(this.app, this.plugin.annotations).open();
       else
-        new import_obsidian15.Notice("The annotation layer is not running.");
+        new import_obsidian16.Notice("The annotation layer is not running.");
     };
     const cancelBtn = actions.createEl("button", { text: "Cancel" });
     const applyBtn = actions.createEl("button", { cls: "mod-cta", text: "Apply" });
@@ -21489,7 +21507,7 @@ var ManageSourcesModal = class extends import_obsidian15.Modal {
       if (this.mode === "zotero") {
         const keys = new Set(this.works.filter((w) => this.selected.has(w.key) && this.installed.has(w.key)).map((w) => w.key));
         if (!keys.size) {
-          new import_obsidian15.Notice("Nothing selected.");
+          new import_obsidian16.Notice("Nothing selected.");
           return;
         }
         this.close();
@@ -21497,7 +21515,7 @@ var ManageSourcesModal = class extends import_obsidian15.Modal {
         return;
       }
       if (this.archiving.size) {
-        new import_obsidian15.Notice("Wait for the source archive to finish before applying other changes.");
+        new import_obsidian16.Notice("Wait for the source archive to finish before applying other changes.");
         return;
       }
       const toInstall = [];
@@ -21516,11 +21534,11 @@ var ManageSourcesModal = class extends import_obsidian15.Modal {
         }
       }
       if (!toInstall.length && !toRestore.length && !toRemove.length) {
-        new import_obsidian15.Notice("Nothing to change.");
+        new import_obsidian16.Notice("Nothing to change.");
         return;
       }
       this.close();
-      const progress = new import_obsidian15.Notice(`Applying\u2026 (${toInstall.length} to install, ${toRestore.length} to restore, ${toRemove.length} to remove)`, 0);
+      const progress = new import_obsidian16.Notice(`Applying\u2026 (${toInstall.length} to install, ${toRestore.length} to restore, ${toRemove.length} to remove)`, 0);
       const failed = [];
       try {
         let n = 0;
@@ -21559,7 +21577,7 @@ var ManageSourcesModal = class extends import_obsidian15.Modal {
       } finally {
         progress.hide();
       }
-      new import_obsidian15.Notice(`Applied: ${toInstall.length} installed, ${toRestore.length} restored, ${toRemove.length} removed.` + (failed.length ? ` ${failed.length} failed \u2014 see the console.` : ""));
+      new import_obsidian16.Notice(`Applied: ${toInstall.length} installed, ${toRestore.length} restored, ${toRemove.length} removed.` + (failed.length ? ` ${failed.length} failed \u2014 see the console.` : ""));
       if (failed.length)
         console.error("[midad-arabic-sources] apply failures", failed);
     };
@@ -21615,7 +21633,7 @@ var ManageSourcesModal = class extends import_obsidian15.Modal {
     this.contentEl.empty();
   }
 };
-var ZoteroSendModal = class extends import_obsidian15.Modal {
+var ZoteroSendModal = class extends import_obsidian16.Modal {
   constructor(app, plugin, entries) {
     super(app);
     this.checks = [];
@@ -21662,11 +21680,11 @@ var ZoteroSendModal = class extends import_obsidian15.Modal {
     }
     all.onclick = () => this.checks.forEach((c) => c.el.checked = true);
     none.onclick = () => this.checks.forEach((c) => c.el.checked = false);
-    const footer = new import_obsidian15.Setting(contentEl);
+    const footer = new import_obsidian16.Setting(contentEl);
     footer.addButton((b) => b.setButtonText("Send to Zotero").setCta().onClick(async () => {
       const keys = new Set(this.checks.filter((c) => c.el.checked).map((c) => c.key));
       if (!keys.size) {
-        new import_obsidian15.Notice("Nothing selected.");
+        new import_obsidian16.Notice("Nothing selected.");
         return;
       }
       this.close();

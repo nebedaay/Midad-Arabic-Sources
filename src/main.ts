@@ -52,6 +52,7 @@ import {
 	templateChangedAt,
 } from "./sourceImport/history";
 import { BUNDLED_ASSETS } from "./assets.generated";
+import { sourceRoot as resolveSourceRoot, installedSourcesRoot as resolveInstalledSourcesRoot, transcriptionsFolder as resolveTranscriptionsFolder, translationsFolder as resolveTranslationsFolder, canonicalQuranFolder as resolveCanonicalQuranFolder, sourceNotePath as resolveSourceNotePath } from "./sourcePaths";
 import { openDocs, getDocs } from "./docs";
 import { registerAnnotations, AnnotationService } from "./sourceAnnotations/service";
 import { buildSourceRegistry, writeSourceRegistry } from "./sourceRegistry/registry";
@@ -900,23 +901,27 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 	}
 
 	sourcesRoot(): string {
-		return normalizePath((this.settings.sourceRoot || "").trim() || "Midad Arabic Sources");
+		return resolveSourceRoot(this.settings);
 	}
 
 	installedSourcesRoot(): string {
-		return normalizePath((this.settings.sourceImportRoot || "").trim() || `${this.sourcesRoot()}/Installed Sources`);
+		return resolveInstalledSourcesRoot(this.settings);
 	}
 
 	transcriptionsFolder(): string {
-		return normalizePath(`${this.sourcesRoot()}/Transcriptions`);
+		return resolveTranscriptionsFolder(this.settings);
 	}
 
 	translationsFolder(): string {
-		return normalizePath(`${this.sourcesRoot()}/Translations`);
+		return resolveTranslationsFolder(this.settings);
 	}
 
 	canonicalQuranFolder(): string {
-		return normalizePath((this.settings.canonicalQuranFolder || "").trim() || `${this.installedSourcesRoot()}/Quran`);
+		return resolveCanonicalQuranFolder(this.settings);
+	}
+
+	sourceNotePath(name: string): string {
+		return resolveSourceNotePath(this.settings, name);
 	}
 
 	/**
@@ -2831,9 +2836,8 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 	 */
 	/** Rename the old “Midad Sources” index to its unambiguous name. */
 	async renameLegacySourceIndex(): Promise<void> {
-		const root = this.sourcesRoot();
-		const legacy = normalizePath(`${root}/Midad Sources.md`);
-		const canonical = normalizePath(`${root}/${SOURCE_INDEX_NOTE}.md`);
+		const legacy = this.sourceNotePath("Midad Sources");
+		const canonical = this.sourceNotePath(SOURCE_INDEX_NOTE);
 		const old = this.app.vault.getAbstractFileByPath(legacy);
 		if (old instanceof TFile && !this.app.vault.getAbstractFileByPath(canonical)) {
 			try {
@@ -3412,7 +3416,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			.replace(/\s+v(?:ol)?\.?\s*\d+\s*$/i, "")
 			.trim();
 		const indexPath = async (name: string): Promise<string> => {
-			const canonical = normalizePath(`${this.sourcesRoot()}/${name}.md`);
+			const canonical = this.sourceNotePath(name);
 			const existing = this.app.vault.getAbstractFileByPath(canonical);
 			if (existing instanceof TFile) return existing.path;
 			const first = this.app.metadataCache.getFirstLinkpathDest(name, "");
@@ -3574,7 +3578,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		const name = (this.settings.sourceMocParent || "").trim() || "Midad Arabic Sources";
 		if (!mocs.length) return null;
 		const isMidadParent = name === "Midad Arabic Sources";
-		const canonicalPath = normalizePath(`${this.sourcesRoot()}/${name}.md`);
+		const canonicalPath = this.sourceNotePath(name);
 		const existingCanonical = this.app.vault.getAbstractFileByPath(canonicalPath);
 		let file = existingCanonical instanceof TFile ? existingCanonical : null;
 		if (!file && isMidadParent) {

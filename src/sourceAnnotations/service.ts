@@ -23,9 +23,11 @@ import { AnnotationTrashModal } from "./trashModal";
 import { ANNOTATION_EVENTS, type AnnotationEventDetail } from "./events";
 import {
 	annotationMocPath,
+	annotationNotePathForDir,
 	renderAnnotationMoc,
 	renderAnnotationNote,
 } from "./note";
+import { ensureFolder, installedSourcesRoot } from "../sourcePaths";
 import { refreshReadingViews, registerReadingAnnotations } from "./reading";
 import { reanchorAnnotation } from "./reanchor";
 import { annotationLabel, findNormalized, resolveAnnotations, visibleSegments } from "./resolve";
@@ -223,9 +225,7 @@ export class AnnotationService {
 	): Promise<{ title: string; dir: string; note: string } | null> {
 		const meta = await this.resolver.metaForWork(workKey, notePath);
 		if (!meta) return null;
-		const folder = this.settings.annotationNoteFolder.trim() ||
-			`${this.settings.sourceRoot.trim() || this.settings.sourceImportRoot.trim() || "_7 Sources"}/Annotation Notes`;
-		const note = normalizePath(`${folder}/${meta.dir.replace(/[\\/:*?"<>|#^]/g, "-").trim() || "Annotations"} - Annotations.md`);
+		const note = annotationNotePathForDir(this.settings, meta.dir);
 		return { ...meta, note };
 	}
 
@@ -1570,7 +1570,7 @@ export class AnnotationService {
 	async onSourceRenamed(workKey: string, oldDir: string, newDir: string): Promise<void> {
 		const work = await this.store.getWork(workKey);
 		if (!work) return;
-		const outRoot = this.settings.sourceImportRoot.trim() || "_7 Sources";
+		const outRoot = installedSourcesRoot(this.settings);
 		const unitNotes = new Map<string, string>();
 		for (const [unitKey, entry] of Object.entries(work.units)) {
 			const oldHub = normalizePath(`${outRoot}/${oldDir}.md`);
@@ -1584,15 +1584,11 @@ export class AnnotationService {
 						: entry.note
 			);
 		}
-		const folder = this.settings.annotationNoteFolder.trim() ||
-			`${this.settings.sourceRoot.trim() || outRoot}/Annotation Notes`;
-		const newNote = normalizePath(`${folder}/${newDir.replace(/[\\/:*?"<>|#^]/g, "-").trim() || "Annotations"} - Annotations.md`);
+		const newNote = annotationNotePathForDir(this.settings, newDir);
 		const oldNote = work.note;
 		if (oldNote && oldNote !== newNote && await this.app.vault.adapter.exists(normalizePath(oldNote))) {
 			const parent = newNote.split("/").slice(0, -1).join("/");
-			if (parent && !(await this.app.vault.adapter.exists(normalizePath(parent)))) {
-				await this.app.vault.adapter.mkdir(normalizePath(parent));
-			}
+			if (parent) await ensureFolder(this.app, parent);
 			try {
 				await this.app.vault.adapter.rename(normalizePath(oldNote), newNote);
 			} catch { /* leave the file if the move fails */ }
