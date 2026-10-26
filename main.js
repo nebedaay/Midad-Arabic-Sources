@@ -10178,7 +10178,26 @@ function selectionWatcher(onSelection, onPointerDown, onDomSelection) {
   ];
 }
 function resolveForEditor(doc, annotations) {
-  return resolveAnnotations(doc, annotations, false);
+  const prior = splitNote(doc);
+  const bodyStart = doc.length - prior.body.length;
+  const out = [];
+  for (const annotation of annotations) {
+    if (annotation.position) {
+      const start = bodyStart + annotation.position.start;
+      const end = bodyStart + annotation.position.end;
+      if (start >= bodyStart && end <= doc.length && end > start) {
+        const ranges = visibleSegments(doc, start, end);
+        if (ranges.length) {
+          out.push({ ...annotation, start, end, ranges });
+          continue;
+        }
+      }
+    }
+    const fallback = resolveAnnotations(doc, [annotation], false)[0];
+    if (fallback)
+      out.push(fallback);
+  }
+  return out;
 }
 function applyEditorAnnotations(view, annotations) {
   view.dispatch({ effects: setEditorAnnotations.of(annotations) });
@@ -12243,6 +12262,8 @@ function scheduleReadingAnnotations(root, annotations) {
 }
 function registerReadingAnnotations(plugin, getAnnotations) {
   plugin.registerMarkdownPostProcessor((el, ctx) => {
+    if (el.closest(".mas-ann-sidebar, .mas-ann-card, .mas-ann-tooltip"))
+      return;
     const annotations = getAnnotations(ctx.sourcePath);
     if (!annotations || !annotations.length)
       return;
@@ -12580,9 +12601,23 @@ async function completeTrailingWikilink(app, target, text, annotation) {
   }
   return `${prefix}${visible}${suffix}`;
 }
+function normalizeQuoteList(text) {
+  const lines = text.split("\n");
+  const content = lines.filter((line) => line.trim());
+  if (content.length < 2 || !content.some((line) => /^\s*[-*+]\s+/.test(line)))
+    return text;
+  if (!content.every((line) => /^\s*[-*+]?\s*\[\[[^\]]+\]\]\s*$/.test(line)))
+    return text;
+  return lines.map((line) => {
+    if (!line.trim() || /^\s*[-*+]\s+/.test(line))
+      return line;
+    return `- ${line}`;
+  }).join("\n");
+}
 async function quoteMarkdown(app, target, annotation) {
   let text = (annotation.quoteMarkdown || annotation.quote || annotation.quoteText || "").replace(/\r\n?/g, "\n").replace(/^(?:>\s?)+/gm, "");
   text = await completeTrailingWikilink(app, target, text, annotation);
+  text = normalizeQuoteList(text);
   return text.trim() || "Empty quote";
 }
 function action(parent, icon, label, run) {

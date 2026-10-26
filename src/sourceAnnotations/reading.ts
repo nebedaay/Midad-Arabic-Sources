@@ -23,6 +23,9 @@ export function registerReadingAnnotations(
 	getAnnotations: (path: string) => SourceAnnotation[] | null
 ): void {
 	plugin.registerMarkdownPostProcessor((el: HTMLElement, ctx: MarkdownPostProcessorContext) => {
+		// The sidebar renders annotation quotes with MarkdownRenderer; do not paint
+		// annotations back onto that UI or append a margin rail beside it.
+		if (el.closest(".mas-ann-sidebar, .mas-ann-card, .mas-ann-tooltip")) return;
 		const annotations = getAnnotations(ctx.sourcePath);
 		if (!annotations || !annotations.length) return;
 		const sizer = el.closest<HTMLElement>(".markdown-preview-sizer");

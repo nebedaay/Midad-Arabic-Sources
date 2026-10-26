@@ -98,6 +98,17 @@ async function completeTrailingWikilink(
 	return `${prefix}${visible}${suffix}`;
 }
 
+function normalizeQuoteList(text: string): string {
+	const lines = text.split("\n");
+	const content = lines.filter((line) => line.trim());
+	if (content.length < 2 || !content.some((line) => /^\s*[-*+]\s+/.test(line))) return text;
+	if (!content.every((line) => /^\s*[-*+]?\s*\[\[[^\]]+\]\]\s*$/.test(line))) return text;
+	return lines.map((line) => {
+		if (!line.trim() || /^\s*[-*+]\s+/.test(line)) return line;
+		return `- ${line}`;
+	}).join("\n");
+}
+
 /**
  * The quote as renderable Markdown. Complete wikilinks stay as wikilinks so
  * Obsidian renders them as links; a truncated final wikilink is completed from
@@ -112,6 +123,7 @@ async function quoteMarkdown(
 		.replace(/\r\n?/g, "\n")
 		.replace(/^(?:>\s?)+/gm, "");
 	text = await completeTrailingWikilink(app, target, text, annotation);
+	text = normalizeQuoteList(text);
 	return text.trim() || "Empty quote";
 }
 

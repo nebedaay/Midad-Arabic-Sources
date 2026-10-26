@@ -7,9 +7,10 @@ import {
 } from "@codemirror/view";
 import { Extension, Range, StateEffect, StateField } from "@codemirror/state";
 import { annotationTint } from "./colors";
-import { annotationClass, bandClass, resolveAnnotations } from "./resolve";
+import { annotationClass, bandClass, resolveAnnotations, visibleSegments } from "./resolve";
 import { ANNOTATION_EVENTS, type AnnotationEventDetail } from "./events";
 import type { ResolvedAnnotation, SourceAnnotation } from "./types";
+import { splitNote } from "../sourceImport/merge";
 
 /** Annotations resolved against the current editor document. */
 export const setEditorAnnotations = StateEffect.define<ResolvedAnnotation[]>();
@@ -270,7 +271,28 @@ export function selectionWatcher(
 }
 
 export function resolveForEditor(doc: string, annotations: SourceAnnotation[]): ResolvedAnnotation[] {
-	return resolveAnnotations(doc, annotations, false);
+	const prior = splitNote(doc);
+	const bodyStart = doc.length - prior.body.length;
+	const out: ResolvedAnnotation[] = [];
+	for (const annotation of annotations) {
+		// Stored positions are authoritative on the source document. This is what
+		// keeps a second overlapping annotation visible when its selected quote is
+		// truncated inside a rendered link.
+		if (annotation.position) {
+			const start = bodyStart + annotation.position.start;
+			const end = bodyStart + annotation.position.end;
+			if (start >= bodyStart && end <= doc.length && end > start) {
+				const ranges = visibleSegments(doc, start, end);
+				if (ranges.length) {
+					out.push({ ...annotation, start, end, ranges });
+					continue;
+				}
+			}
+		}
+		const fallback = resolveAnnotations(doc, [annotation], false)[0];
+		if (fallback) out.push(fallback);
+	}
+	return out;
 }
 
 export function applyEditorAnnotations(view: EditorView, annotations: ResolvedAnnotation[]): void {
