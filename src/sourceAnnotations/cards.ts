@@ -35,20 +35,54 @@ function openLink(event: MouseEvent, app: App, sourcePath: string): boolean {
 }
 
 /**
- * The quote as displayable Markdown: links become their visible text, while
- * emphasis and other Markdown are left for MarkdownRenderer. Selections that
- * stop inside a wikilink leave an unterminated `[[target|visible` fragment;
- * the visible half is retained rather than dropping the whole line.
+ * Complete a selection that stops inside a wikilink. The source note is the
+ * authority for the full target; the selected prefix remains the visible alias.
  */
-function quoteMarkdown(annotation: SourceAnnotation): string {
+async function completeTrailingWikilink(
+	app: App,
+	sourcePath: string,
+	text: string
+): Promise<string> {
+	const start = text.lastIndexOf("[[");
+	if (start < 0) return text;
+	if (text.indexOf("]]", start + 2) >= 0) return text;
+	const fragment = text.slice(start + 2);
+	const lineEnd = fragment.indexOf("\n");
+	const line = lineEnd >= 0 ? fragment.slice(0, lineEnd) : fragment;
+	const pipe = line.indexOf("|");
+	const targetPrefix = (pipe >= 0 ? line.slice(0, pipe) : line).trim();
+	if (!targetPrefix) return text;
+	const visible = pipe >= 0 ? line.slice(pipe + 1).trim() : targetPrefix;
+	const suffix = lineEnd >= 0 ? fragment.slice(lineEnd) : "";
+	try {
+		const source = await app.vault.adapter.read(sourcePath);
+		const links = /\[\[([^\]\n|]+)(?:\|([^\]\n]*))?\]\]/g;
+		for (const match of source.matchAll(links)) {
+			const target = match[1].trim();
+			if (target.startsWith(targetPrefix) || targetPrefix.startsWith(target)) {
+				return text.slice(0, start) + `[[${target}|${visible}]]` + suffix;
+			}
+		}
+	} catch {
+		/* source unavailable: fall through to the visible fragment */
+	}
+	return text.slice(0, start) + visible + suffix;
+}
+
+/**
+ * The quote as renderable Markdown. Complete wikilinks stay as wikilinks so
+ * Obsidian renders them as links; a truncated final wikilink is completed from
+ * the source, or flattened to its visible text when the source cannot help.
+ */
+async function quoteMarkdown(
+	app: App,
+	target: AnnotationTarget,
+	annotation: SourceAnnotation
+): Promise<string> {
 	let text = (annotation.quoteMarkdown || annotation.quote || annotation.quoteText || "")
 		.replace(/\r\n?/g, "\n")
 		.replace(/^(?:>\s?)+/gm, "");
-	text = text
-		.replace(/\[\[([^\]|\n]+)\|([^\]]+)\]\]/g, "$2")
-		.replace(/\[\[([^\]\n]+)\]\]/g, "$1")
-		.replace(/\[\[([^\]|\n]+)\|([^\n]*)$/gm, "$2")
-		.replace(/\[\[([^\n]*)$/gm, (_match, rest: string) => rest.split("|").pop()?.trim() || rest.trim());
+	text = await completeTrailingWikilink(app, target.notePath, text);
 	return text.trim() || "Empty quote";
 }
 
@@ -101,7 +135,11 @@ export async function renderAnnotationCard(
 		comment.setCssStyles({ background: annotationTint(annotation.color, 96, 0.32) });
 		// The comment leads; the highlighted excerpt sits directly beneath it.
 		const quote = body.createDiv({ cls: "mas-ann-card-quote" });
-		await MarkdownRenderer.render(app, quoteMarkdown(annotation), quote, target.notePath, component);
+		try {
+			await MarkdownRenderer.render(app, await quoteMarkdown(app, target, annotation), quote, target.notePath, component);
+		} catch {
+			quote.setText(annotation.quoteText || annotation.quote || "Empty quote");
+		}
 		quote.setCssStyles({ background: annotationTint(annotation.color, 84, 0.65) });
 	}
 

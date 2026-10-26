@@ -12530,12 +12530,37 @@ function openLink(event, app, sourcePath) {
   }
   return true;
 }
-function quoteMarkdown(annotation) {
+async function completeTrailingWikilink(app, sourcePath, text) {
+  const start = text.lastIndexOf("[[");
+  if (start < 0)
+    return text;
+  if (text.indexOf("]]", start + 2) >= 0)
+    return text;
+  const fragment = text.slice(start + 2);
+  const lineEnd = fragment.indexOf("\n");
+  const line = lineEnd >= 0 ? fragment.slice(0, lineEnd) : fragment;
+  const pipe = line.indexOf("|");
+  const targetPrefix = (pipe >= 0 ? line.slice(0, pipe) : line).trim();
+  if (!targetPrefix)
+    return text;
+  const visible = pipe >= 0 ? line.slice(pipe + 1).trim() : targetPrefix;
+  const suffix = lineEnd >= 0 ? fragment.slice(lineEnd) : "";
+  try {
+    const source = await app.vault.adapter.read(sourcePath);
+    const links = /\[\[([^\]\n|]+)(?:\|([^\]\n]*))?\]\]/g;
+    for (const match of source.matchAll(links)) {
+      const target = match[1].trim();
+      if (target.startsWith(targetPrefix) || targetPrefix.startsWith(target)) {
+        return text.slice(0, start) + `[[${target}|${visible}]]` + suffix;
+      }
+    }
+  } catch (e) {
+  }
+  return text.slice(0, start) + visible + suffix;
+}
+async function quoteMarkdown(app, target, annotation) {
   let text = (annotation.quoteMarkdown || annotation.quote || annotation.quoteText || "").replace(/\r\n?/g, "\n").replace(/^(?:>\s?)+/gm, "");
-  text = text.replace(/\[\[([^\]|\n]+)\|([^\]]+)\]\]/g, "$2").replace(/\[\[([^\]\n]+)\]\]/g, "$1").replace(/\[\[([^\]|\n]+)\|([^\n]*)$/gm, "$2").replace(/\[\[([^\n]*)$/gm, (_match, rest) => {
-    var _a;
-    return ((_a = rest.split("|").pop()) == null ? void 0 : _a.trim()) || rest.trim();
-  });
+  text = await completeTrailingWikilink(app, target.notePath, text);
   return text.trim() || "Empty quote";
 }
 function action(parent, icon, label, run) {
@@ -12576,7 +12601,11 @@ async function renderAnnotationCard(parent, options) {
   if (variant === "sidebar") {
     comment.setCssStyles({ background: annotationTint(annotation.color, 96, 0.32) });
     const quote = body.createDiv({ cls: "mas-ann-card-quote" });
-    await import_obsidian10.MarkdownRenderer.render(app, quoteMarkdown(annotation), quote, target.notePath, component);
+    try {
+      await import_obsidian10.MarkdownRenderer.render(app, await quoteMarkdown(app, target, annotation), quote, target.notePath, component);
+    } catch (e) {
+      quote.setText(annotation.quoteText || annotation.quote || "Empty quote");
+    }
     quote.setCssStyles({ background: annotationTint(annotation.color, 84, 0.65) });
   }
   if (options.onEdit || options.onDelete || options.onOpenNote) {
