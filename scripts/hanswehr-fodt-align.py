@@ -518,8 +518,6 @@ def export(out: Path, app: list[dict], fodt: list[dict],
     (out / "README.md").write_text(
         "---\n"
         "created: 2026-10-19\n"
-        "up:\n"
-        '  - "[[AI gen]]"\n'
         "aliases:\n"
         "---\n\n"
         "# Hans Wehr FODT alignment artefacts\n\n"

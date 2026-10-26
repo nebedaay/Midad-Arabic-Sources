@@ -80,20 +80,20 @@ export async function buildSourceRegistry(app: App, paths: RegistryPaths): Promi
 		&& !path.startsWith("src/")
 		&& !path.startsWith("AI OS/");
 
-	// Notes that already carry a mas-id (repo hubs, new transcriptions,
+	// Notes that already carry a midad-id (repo hubs, new transcriptions,
 	// translations, adopted notes, and any user note adopted into the system).
 	for (const file of app.vault.getMarkdownFiles().filter((f) => indexed(f.path))) {
 		const frontmatter = app.metadataCache.getFileCache(file)?.frontmatter as Record<string, unknown> | undefined;
-		const masId = stringField(frontmatter, "mas-id");
+		const masId = stringField(frontmatter, "midad-id");
 		if (!masId) continue;
 		add({
 			masId,
-			kind: sourceKind(stringField(frontmatter, "mas-kind")),
+			kind: sourceKind(stringField(frontmatter, "midad-kind")),
 			title: stringField(frontmatter, "title") || file.basename,
 			path: file.path,
-			source: stringField(frontmatter, "mas-source"),
-			workKey: stringField(frontmatter, "mas-work") || undefined,
-			unitKey: stringField(frontmatter, "mas-unit") || undefined,
+			source: stringField(frontmatter, "midad-source"),
+			workKey: stringField(frontmatter, "midad-work") || undefined,
+			unitKey: stringField(frontmatter, "midad-unit") || undefined,
 			status: stringField(frontmatter, "status") || undefined,
 		});
 	}
@@ -119,7 +119,7 @@ export async function buildSourceRegistry(app: App, paths: RegistryPaths): Promi
 		}
 	} catch { /* no manifest yet */ }
 
-	// Zotero literature notes: the stable Zotero item id is the natural mas-id.
+	// Zotero literature notes: the stable Zotero item id is the natural midad-id.
 	for (const file of app.vault.getMarkdownFiles().filter((f) => indexed(f.path))) {
 		const frontmatter = app.metadataCache.getFileCache(file)?.frontmatter as Record<string, unknown> | undefined;
 		const zoteroId = stringField(frontmatter, "sw-zotero-id");
@@ -137,17 +137,17 @@ export async function buildSourceRegistry(app: App, paths: RegistryPaths): Promi
 		});
 	}
 
-	// Adopted-note registry: older entries may predate the mas-id property.
+	// Adopted-note registry: older entries may predate the midad-id property.
 	try {
 		const adopted = JSON.parse(await app.vault.adapter.read(normalizePath(paths.adopted))) as { notes?: Record<string, AdoptedEntry> };
 		for (const [path, entry] of Object.entries(adopted.notes ?? {})) {
 			const file = app.vault.getAbstractFileByPath(normalizePath(path));
 			if (!(file instanceof TFile)) continue;
 			const frontmatter = app.metadataCache.getFileCache(file)?.frontmatter as Record<string, unknown> | undefined;
-			const masId = stringField(frontmatter, "mas-id") || `note:${entry.workKey || path}`;
+			const masId = stringField(frontmatter, "midad-id") || `note:${entry.workKey || path}`;
 			add({
 				masId,
-				kind: sourceKind(stringField(frontmatter, "mas-kind") || String(entry.kind ?? "adopted")),
+				kind: sourceKind(stringField(frontmatter, "midad-kind") || String(entry.kind ?? "adopted")),
 				title: String(entry.workTitle ?? entry.unitTitle ?? file.basename),
 				path: file.path,
 				source: String(entry.sourceKey ?? "adopted"),

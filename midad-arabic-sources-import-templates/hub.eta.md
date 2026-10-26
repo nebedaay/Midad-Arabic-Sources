@@ -2,13 +2,15 @@
 <% add_property('document-type', '[[text-source]]'); -%>
 <% add_property('created', generated); -%>
 <% add_property('updated', updated()); -%>
-<% add_property('mas-up', [...work.up, '[[Midad Arabic Sources]]']); -%>
-<% add_property('mas-id', 'repo:' + work.key); -%>
-<% add_property('mas-kind', 'repo-work'); -%>
-<% add_property('mas-source', 'repo:' + work.key); -%>
+<% const pub = work.publication || {}; -%>
+<% add_property('midad-up', [...work.up, '[[Midad Arabic Sources]]']); -%>
+<% add_property('midad-id', 'repo:' + work.key); -%>
+<% add_property('midad-kind', 'repo-work'); -%>
+<% add_property('midad-source', 'repo:' + work.key); -%>
+<% add_property('midad-key', work.key); -%>
+<% if (pub.mas_note) { add_property('midad-note', pub.mas_note); } -%>
 <% add_property('related', [], { force: true, merge: 'keep' }); -%>
 <% add_property('title', work.title); -%>
-<% const pub = work.publication || {}; -%>
 <% const person = (a) => (typeof a === 'string' ? a : (a.name || [a.first, a.last].filter(Boolean).join(' '))); -%>
 <% const pubAuthors = (pub.authors && pub.authors.length) ? pub.authors : (work.authors || []); -%>
 <% const pubTranslators = (pub.translators && pub.translators.length) ? pub.translators : (work.translators || []); -%>
@@ -21,8 +23,6 @@
 <% if (pub.place) { add_property('place', pub.place); } -%>
 <% if (pub.date) { add_property('year', wikilink(String(pub.date).slice(0, 4))); } -%>
 <% if (pub.edition) { add_property('edition', pub.edition); } -%>
-<% if (pub.mas_note) { add_property('mas-note', pub.mas_note); } -%>
-<% add_property('mas-key', work.key); -%>
 <% if (work.language_links.length > 1) { add_property('language', work.language_links.map(l => wikilink(l))); } else { add_property('language', wikilink(work.language_links[0])); } -%>
 <% if (work.repo) { add_property('repository', `[${work.repo_name || work.repo}](${work.repo})`); } -%>
 <% if (work.source) { const label = work.repo_name && work.source_name && work.repo_name !== work.source_name ? `${work.source_name} (upstream)` : (work.source_name || work.source); add_property('source', `[${label}](${work.source})`); } -%>

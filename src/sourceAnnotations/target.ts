@@ -36,7 +36,7 @@ function statusOf(work: ManifestWork): SourceStatus {
 
 /**
  * Resolve a source note to its stable work/unit identity. The fast paths are
- * the `mas-work`/`mas-unit` frontmatter properties; the fallback reads the
+ * the `midad-work`/`midad-unit` frontmatter properties; the fallback reads the
  * work's render model and reproduces the renderer's note-path computation.
  */
 export class AnnotationTargetResolver {
@@ -150,8 +150,8 @@ export class AnnotationTargetResolver {
 		const file = this.app.vault.getAbstractFileByPath(normalized);
 		if (!(file instanceof TFile)) return null;
 		const frontmatter = this.app.metadataCache.getFileCache(file)?.frontmatter as Record<string, unknown> | undefined;
-		const masWork = typeof frontmatter?.["mas-work"] === "string" ? String(frontmatter["mas-work"]) : "";
-		const masUnit = typeof frontmatter?.["mas-unit"] === "string" ? String(frontmatter["mas-unit"]) : "";
+		const masWork = typeof frontmatter?.["midad-work"] === "string" ? String(frontmatter["midad-work"]) : "";
+		const masUnit = typeof frontmatter?.["midad-unit"] === "string" ? String(frontmatter["midad-unit"]) : "";
 
 		// Known transcriptions/translations are registered without touching their
 		// YAML or filenames.

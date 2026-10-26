@@ -93,9 +93,9 @@ function isSourceFrontmatter(frontmatter: Record<string, unknown> | undefined): 
 	if (!frontmatter) return false;
 	const rawType = frontmatter["document-type"];
 	const type = typeof rawType === "string" ? rawType : "";
-	// Annotation notes and MOCs also carry mas-up; only text-source notes are
-	// annotatable. `mas-key` covers older hubs that predate document-type.
-	return type.includes("text-source") || !!frontmatter["mas-key"] || !!frontmatter["mas-work"];
+	// Annotation notes and MOCs also carry midad-up; only text-source notes are
+	// annotatable. `midad-key` covers older hubs that predate document-type.
+	return type.includes("text-source") || !!frontmatter["midad-key"] || !!frontmatter["midad-work"];
 }
 
 /**
@@ -259,11 +259,11 @@ export class AnnotationService {
 		}
 		const key = newAdoptedNoteKey();
 		await this.app.fileManager.processFrontMatter(file, (fm: Record<string, unknown>) => {
-			if (!fm["mas-id"]) fm["mas-id"] = key;
-			fm["mas-kind"] = "adopted";
-			fm["mas-source"] = "adopted";
-			fm["mas-work"] = key;
-			if (!fm["mas-unit"]) fm["mas-unit"] = "note";
+			if (!fm["midad-id"]) fm["midad-id"] = key;
+			fm["midad-kind"] = "adopted";
+			fm["midad-source"] = "adopted";
+			fm["midad-work"] = key;
+			if (!fm["midad-unit"]) fm["midad-unit"] = "note";
 			if (!fm["title"]) fm["title"] = file.basename;
 		});
 		const text = await this.app.vault.adapter.read(normalizePath(file.path));
@@ -992,7 +992,7 @@ export class AnnotationService {
 		if (!file) return null;
 		const cache = this.app.metadataCache.getFileCache(file);
 		const frontmatter = cache?.frontmatter as Record<string, unknown> | undefined;
-		const adopted = !!frontmatter?.["mas-work"] || this.adoption.has(file.path);
+		const adopted = !!frontmatter?.["midad-work"] || this.adoption.has(file.path);
 		if (!adopted && !isSourceFrontmatter(frontmatter)) return null;
 		const value = editor.getValue();
 		const bounds = managedBounds(value) ?? (adopted ? bodyBounds(value) : null);

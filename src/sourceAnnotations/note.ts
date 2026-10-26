@@ -6,6 +6,7 @@ import { annotationNotesFolder, ensureFolder, safeFileSegment, sourceRoot } from
 import { annotationLabel } from "./resolve";
 import type { AnnotationStore } from "./store";
 import { annotationToday } from "./store";
+import { localTimestamp } from "../time";
 import { noteHeadingLink } from "./text";
 import type {
 	AnnotationSettings,
@@ -14,12 +15,6 @@ import type {
 	AnnotationIndexEntry,
 	SourceAnnotation,
 } from "./types";
-
-function nowStamp(): string {
-	const d = new Date();
-	const pad = (n: number) => String(n).padStart(2, "0");
-	return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
-}
 
 export function annotationNotePathForDir(settings: AnnotationSettings, dir: string): string {
 	return normalizePath(`${annotationNotesFolder(settings)}/${safeFileSegment(dir, "Annotations")} - Annotations.md`);
@@ -91,8 +86,8 @@ function buildNoteFrontmatter(work: AnnotationWorkFile): { frontmatter: string; 
 	yaml.start();
 	yaml.add("document-type", "[[source-annotation]]");
 	yaml.add("created", annotationToday(), { merge: "keep" });
-	yaml.add("updated", nowStamp());
-	yaml.add("mas-up", [`[[${work.dir}]]`, "[[Midad Arabic Sources]]"]);
+	yaml.add("updated", localTimestamp());
+	yaml.add("midad-up", [`[[${work.dir}]]`, "[[Midad Arabic Sources]]"]);
 	yaml.add("related", [], { force: true, merge: "keep" });
 	yaml.add("title", `${work.title} — Annotations`);
 	yaml.add("aliases", [`${work.title} Annotations`, `${work.dir} - Annotations`]);
@@ -192,11 +187,11 @@ function mocFrontmatter(settings: AnnotationSettings): { frontmatter: string; sp
 	const yaml = new YamlBuilder();
 	yaml.start();
 	yaml.add("created", annotationToday(), { merge: "keep" });
-	yaml.add("updated", nowStamp());
+	yaml.add("updated", localTimestamp());
 	yaml.add("title", "Source Annotations");
 	yaml.add("aliases", ["Source Annotations"]);
 	const parent = settings.sourceMocParent.trim() || "Midad Arabic Sources";
-	yaml.add("mas-up", parent === "Midad Arabic Sources" ? ["[[Midad Arabic Sources]]"] : [`[[${parent}]]`, "[[Midad Arabic Sources]]"]);
+	yaml.add("midad-up", parent === "Midad Arabic Sources" ? ["[[Midad Arabic Sources]]"] : [`[[${parent}]]`, "[[Midad Arabic Sources]]"]);
 	const frontmatter = yaml.end();
 	return { frontmatter, specs: yaml.fieldSpecs() };
 }

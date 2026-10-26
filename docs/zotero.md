@@ -35,9 +35,9 @@ The **publication map** (`midad-arabic-sources-import-templates/publication-map.
 
 - Entries are marked `verified: false` until you check them; an unverified entry adds a *“Bibliographic details are provisional — verify”* line to the Zotero item’s `extra`.
 - A creator is a name string (the last word becomes Zotero’s last name) or, where that split is wrong, an object `{ "first": …, "last": … }`. Creators are exported as `author`, `translator`, or `editor` by role.
-- A Better BibTeX citekey becomes `mas-up: [[@citekey]]` on the work hub.
+- A Better BibTeX citekey becomes `midad-up: [[@citekey]]` on the work hub.
 
-Nothing that ends up in the Zotero item’s `extra` lives only in Zotero: `mas-note` holds the map’s edition note plus the provisional caveat, and `mas-key` holds the plugin’s `<collection>:<id>`. The repository, attribution, and repository date are already the `repository`, `license-attribution`, and `repository-updated` properties on the hub.
+Nothing that ends up in the Zotero item’s `extra` lives only in Zotero: `midad-note` holds the map’s edition note plus the provisional caveat, and `midad-key` holds the plugin’s `<collection>:<id>`. The repository, attribution, and repository date are already the `repository`, `license-attribution`, and `repository-updated` properties on the hub.
 
 ## Update-in-place details
 

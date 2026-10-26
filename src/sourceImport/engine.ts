@@ -1,3 +1,4 @@
+import { localDate, localTimestamp } from "../time";
 import { Eta } from "eta";
 import { YamlBuilder, YamlPropertyOptions, YamlValue } from "./yaml";
 
@@ -50,15 +51,11 @@ export class SourceTemplateEngine extends Eta {
 	}
 
 	updated(): string {
-		const d = new Date();
-		const pad = (n: number) => String(n).padStart(2, "0");
-		return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+		return localTimestamp();
 	}
 
 	importDate(): string {
-		const d = new Date();
-		const pad = (n: number) => String(n).padStart(2, "0");
-		return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+		return localDate();
 	}
 }
 

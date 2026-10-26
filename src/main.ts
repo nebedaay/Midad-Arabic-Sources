@@ -52,6 +52,7 @@ import {
 	templateChangedAt,
 } from "./sourceImport/history";
 import { BUNDLED_ASSETS } from "./assets.generated";
+import { localDate } from "./time";
 import { sourceRoot as resolveSourceRoot, installedSourcesRoot as resolveInstalledSourcesRoot, transcriptionsFolder as resolveTranscriptionsFolder, translationsFolder as resolveTranslationsFolder, canonicalQuranFolder as resolveCanonicalQuranFolder, sourceNotePath as resolveSourceNotePath } from "./sourcePaths";
 import { openDocs, getDocs } from "./docs";
 import { registerAnnotations, AnnotationService } from "./sourceAnnotations/service";
@@ -1944,7 +1945,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 
 	/**
 	 * The human-readable notes that accompany an item — the publication map's own
-	 * `note` plus the provisional caveat — combined into the single `mas-note`
+	 * `note` plus the provisional caveat — combined into the single `midad-note`
 	 * property the hub carries, so nothing in the Zotero `extra` is kept only in
 	 * Zotero. Mirrors the `extra` built by `zoteroItem`.
 	 */
@@ -2138,7 +2139,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		return String(created?.successful?.["0"]?.key ?? "");
 	}
 
-	/** Add `mas-up: [[@citekey]]` to the work note for any item Better BibTeX has keyed. */
+	/** Add `midad-up: [[@citekey]]` to the work note for any item Better BibTeX has keyed. */
 	async applyCitekeys(
 		pending: Array<{ work: JsonObject }>,
 		keys: string[],
@@ -2157,14 +2158,14 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		}
 	}
 
-	/** Prepend `- "[[@citekey]]"` under the work note's `mas-up:` list, once. */
+	/** Prepend `- "[[@citekey]]"` under the work note's `midad-up:` list, once. */
 	async addCitekeyUp(work: JsonObject, citekey: string): Promise<void> {
 		const outRoot = this.installedSourcesRoot();
 		const hub = normalizePath(`${outRoot}/${work.dir}.md`);
 		try {
 			const text = await this.app.vault.adapter.read(hub);
 			if (text.includes(`[[@${citekey}]]`)) return;
-			const next = text.replace(/^(mas-up:\n(?: {2}- .+\n)+)/m, (m) => `${m}  - "[[@${citekey}]]"\n`);
+			const next = text.replace(/^(midad-up:\n(?: {2}- .+\n)+)/m, (m) => `${m}  - "[[@${citekey}]]"\n`);
 			if (next !== text) await this.app.vault.adapter.write(hub, next);
 		} catch { /* ignore */ }
 	}
@@ -2822,7 +2823,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			if (!content.includes("text-source")) return;
 			// Only prune a folder this work used to own. Two editions can share a
 			// `title`, so a same-named hub may belong to another work.
-			if (!content.includes(`mas-key: ${key}`) && !content.includes(`mas-key: "${key}"`)) return;
+			if (!content.includes(`midad-key: ${key}`) && !content.includes(`midad-key: "${key}"`)) return;
 			await adapter.remove(hub);
 			const folder = normalizePath(`${outRoot}/${title}`);
 			if (await adapter.exists(folder)) await adapter.rmdir(folder, true);
@@ -2879,7 +2880,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		// authoritative, so a work with missing files still belongs (it will be
 		// restored); a work being removed does not.
 		const installed = works.filter((w) => this.workStatus(w) === "installed");
-		const today = new Date().toISOString().slice(0, 10);
+		const today = localDate();
 		const written = await renderMocs(this.app, templates, installed, this.sourcesRoot(), today, this.settings.sourceMocParent.trim() || "Midad Arabic Sources", true);
 		const repositoryGroups = new Map<string, { label: string; works: JsonObject[] }>();
 		const repositoryNames = new Map<string, string>();
@@ -3270,7 +3271,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			if (shouldCancel?.()) break;
 			const model = batch[i];
 			// Hand the templates the researched bibliographic details, if any — plus
-			// the combined `mas-note` text, so the note holds everything the Zotero
+			// the combined `midad-note` text, so the note holds everything the Zotero
 			// `extra` does.
 			const pub = pubs[this.workKey(model.work)] ?? {};
 			model.work.publication = { ...pub, mas_note: this.masNote(pub) };
@@ -3347,7 +3348,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 				if (!mocNames.includes("source-annotation")) mocNames.push("source-annotation");
 			}
 			if (!mocNames.length) return;
-			const today = new Date().toISOString().slice(0, 10);
+			const today = localDate();
 			await this.updateSourceParent(templates, mocNames, today);
 			try { await this.refreshTranscriptionMocs(); } catch (error) { console.error("[midad-arabic-sources] transcription MOCs", error); }
 		} catch (error) {
@@ -3461,8 +3462,8 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			if (!inFolder(path) && !entry && !(match && /^(?:@|mas-)/.test(file.basename))) continue;
 			const fm = (this.app.metadataCache.getFileCache(file)?.frontmatter ?? {}) as Record<string, unknown>;
 			const entryString = (key: string): string => typeof entry?.[key] === "string" ? String(entry[key]) : "";
-			const source = typeof fm["mas-source"] === "string" ? String(fm["mas-source"]) : "";
-			const kind = typeof fm["mas-kind"] === "string" ? String(fm["mas-kind"]) : "";
+			const source = typeof fm["midad-source"] === "string" ? String(fm["midad-source"]) : "";
+			const kind = typeof fm["midad-kind"] === "string" ? String(fm["midad-kind"]) : "";
 			const rawBase = (match?.[1] ?? "").trim();
 			const baseVolume = /^(.*?)\s+(?:vol\.?|v\.?|volume)\s*(\d+)$/i.exec(rawBase);
 			const base = baseVolume ? baseVolume[1].trim() : rawBase;
@@ -3558,11 +3559,11 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 				append("adopted");
 			}
 			lines.push('<span class="mas-managed">/mas-managed</span>', "");
-			const today = new Date().toISOString().slice(0, 10);
+			const today = localDate();
 			const yaml = new YamlBuilder();
 			yaml.start();
 			yaml.add("created", today, { merge: "keep" });
-			yaml.add("mas-up", [`[[${SOURCE_INDEX_NOTE}]]`, "[[Midad Arabic Sources]]"]);
+			yaml.add("midad-up", [`[[${SOURCE_INDEX_NOTE}]]`, "[[Midad Arabic Sources]]"]);
 			const specs = yaml.fieldSpecs();
 			const content = `${yaml.end()}\n${lines.join("\n")}`;
 			await writeMerged(this.app, path, { content, specs }, true, false);

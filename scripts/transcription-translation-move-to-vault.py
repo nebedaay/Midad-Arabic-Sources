@@ -149,8 +149,9 @@ def build_yaml(citekey: str, doc_type: str, related: list[str], volume: int = No
 
     A standalone transcription (a PDF the user chose directly, with no Zotero
     record) instead takes its title/authors from the metadata guessed during
-    transcription. It deliberately has no `[[@citekey]]` up link, because no
-    literature note exists.
+    transcription. It deliberately has no `[[@citekey]]` midad-up link, because no
+    literature note exists. Generated relationships go in `midad-up`; `up` stays
+    user-managed.
     """
     ref = None if standalone else find_zotero(citekey)
     title_base = (title or "").strip() or "Untitled"
@@ -168,38 +169,36 @@ def build_yaml(citekey: str, doc_type: str, related: list[str], volume: int = No
 
     title = f"{title_base} ({doc_type})"
     shorttitle = f"{short_base} ({doc_type})" if short_base != title_base else ""
-    up_category = "Arabic transcriptions" if doc_type == "transcription" else "Translations"
+    up_category = "Arabic transcriptions" if doc_type == "transcription" else "Arabic translations"
 
-    up_items = [
-        f'  - "[[{up_category}]]"',
-        f'  - "[[AI gen]]"',
-    ]
-    if not volume:
-        up_items.append('  - "[[Midad Arabic Sources]]"')
+    mas_up_items = [f'  - "[[{up_category}]]"']
     if not standalone:
-        up_items.append(f'  - "[[@{citekey}]]"')
+        mas_up_items.append(f'  - "[[@{citekey}]]"')
         if volume:
             prefix = _note_prefix(standalone)
-            up_items.append(f'  - "[[{prefix}{citekey} - {doc_type}]]"')
+            mas_up_items.append(f'  - "[[{prefix}{citekey} - {doc_type}]]"')
+    if not volume:
+        mas_up_items.append('  - "[[Midad Arabic Sources]]"')
+
+    source_id = _source_id(citekey, ref)
+    mas_work = f"{source_id}:{doc_type}"
+    mas_id = f"{mas_work}:vol.{volume}" if volume else mas_work
 
     yaml = f"""---
 created: {datetime.now().strftime('%Y-%m-%d %H:%M')}
-up:
-{chr(10).join(up_items)}
+midad-up:
+{chr(10).join(mas_up_items)}
+midad-id: "{_yaml_quote(mas_id)}"
+midad-kind: "{doc_type}"
+midad-source: "{_yaml_quote(source_id)}"
+midad-work: "{_yaml_quote(mas_work)}"
+midad-unit: "{("vol." + str(volume)) if volume else "note"}"
 title: "{_yaml_quote(title)}"
 """
     if shorttitle:
         yaml += f'shorttitle: "{_yaml_quote(shorttitle)}"\n'
     if volume:
         yaml += f'volume: {volume}\n'
-    source_id = _source_id(citekey, ref)
-    mas_work = f"{source_id}:{doc_type}"
-    mas_id = f"{mas_work}:vol.{volume}" if volume else mas_work
-    yaml += f'mas-id: "{_yaml_quote(mas_id)}"\n'
-    yaml += f'mas-kind: "{doc_type}"\n'
-    yaml += f'mas-source: "{_yaml_quote(source_id)}"\n'
-    yaml += f'mas-work: "{_yaml_quote(mas_work)}"\n'
-    yaml += f'mas-unit: "{("vol." + str(volume)) if volume else "note"}"\n'
     if author_list:
         yaml += "authors:\n"
         for a in author_list:

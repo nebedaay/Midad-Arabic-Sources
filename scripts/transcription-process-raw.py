@@ -23,88 +23,7 @@ import requests
 
 VAULT = Path(os.environ.get("OBSIDIAN_VAULT", os.path.expanduser("~/Documents/Obsidian Vault")))
 SCRIPTS = Path(__file__).resolve().parent
-BIB_DIR = VAULT / "_2 Bibliographic notes"
 
-def _build_yaml(stem: str) -> str:
-    """Build YAML frontmatter for a transcription file.
-    
-    If a matching Zotero reference exists (by stem keyword match), 
-    derives metadata from it. Otherwise falls back to a minimal template.
-    """
-    import re as _re
-    
-    # Try to find a Zotero reference matching the stem keywords
-    keywords = _re.sub(r'[-_]', ' ', stem).lower().split()
-    keywords = [k for k in keywords if len(k) > 3]  # skip short words
-    
-    ref_file = None
-    for f in BIB_DIR.glob("*.md"):
-        if f.name.startswith("@"):
-            f_text = f.read_text(encoding="utf-8")
-            f_lower = f_text.lower()
-            # Check if this reference is for the same work
-            matches = sum(1 for k in keywords if k in f_lower)
-            if matches >= 2:
-                ref_file = f
-                break
-    
-    if ref_file:
-        return _yaml_from_zotero(ref_file)
-    
-    # Fallback: minimal template
-    return f"""---
-created: {datetime.now().strftime('%Y-%m-%d')}
-up:
-  - "[[Arabic transcriptions]]"
-  - "[[AI gen]]"
----
-
-"""
-
-def _yaml_from_zotero(ref_file: Path) -> str:
-    """Build YAML frontmatter from a Zotero reference file."""
-    import re as _re
-    text = ref_file.read_text(encoding="utf-8")
-    
-    # Parse existing YAML from the reference file (between --- markers)
-    yaml_match = _re.search(r'^---\s*$(.+?)^---\s*$', text, _re.MULTILINE | _re.DOTALL)
-    if not yaml_match:
-        return _build_yaml("")  # fallback
-    
-    raw_yaml = yaml_match.group(1)
-    
-    # Extract fields
-    def get_field(key):
-        m = _re.search(rf'^{key}:\s*(.+)', raw_yaml, _re.MULTILINE)
-        return m.group(1).strip().strip('"') if m else None
-    
-    title = get_field('title') or "Untitled"
-    shorttitle = get_field('shorttitle') or title
-    citekey = ref_file.stem.lstrip('@')
-    authors = get_field('authors')
-    year = get_field('year')
-    
-    # Build up list from the reference
-    up_lines = [
-        '  - "[[Arabic transcriptions]]"',
-        '  - "[[AI gen]]"',
-        f'  - "[[@{citekey}]]"',
-    ]
-    
-    yaml = f"""---
-created: {datetime.now().strftime('%Y-%m-%d')}
-up:
-{chr(10).join(up_lines)}
-title: "{title}"
-shorttitle: "{shorttitle}"
-"""
-    if authors:
-        yaml += f"authors:\n{authors}\"\n"
-    if year:
-        yaml += f"year: \"{year}\"\n"
-    
-    yaml += "---\n"
-    return yaml
 API_KEY = os.environ.get("GEMINI_API_KEY", os.environ.get("GOOGLE_API_KEY", ""))
 API_KEY = API_KEY.replace("\u2011", "-").encode("ascii", errors="replace").decode("ascii")
 
@@ -319,16 +238,6 @@ def process_batch(batch_file: Path, poll: bool = False, interval: int = 600):
                         print(f"  {len(blanks)} blank page(s) (no text expected).")
                     print(f"  Clean — producing raw...")
                     n_pages = concatenate(jsonl_path, raw_path)
-                    yaml = f"""---
-created: {datetime.now().strftime('%Y-%m-%d %H:%M')}
-up:
-  - "[[Arabic transcriptions]]"
-  - "[[AI gen]]"
----
-"""
-                    raw_text = open(raw_path, encoding='utf-8').read()
-                    with open(raw_path, 'w', encoding='utf-8') as f:
-                        f.write(yaml + "\n" + raw_text)
                     print(f"  {n_pages} pages → {raw_path.name}")
                     print(f"  Ready to postprocess")
                 final_path = raw_path
@@ -368,16 +277,6 @@ if __name__ == "__main__":
             print(f"ERROR: {jsonl_path} not found"); sys.exit(1)
         print(f"Rebuilding {raw_path.name} from {jsonl_path.name}...")
         n = concatenate(jsonl_path, raw_path)
-        yaml = f"""---
-created: {datetime.now().strftime('%Y-%m-%d %H:%M')}
-up:
-  - "[[Arabic transcriptions]]"
-  - "[[AI gen]]"
----
-"""
-        raw_text = open(raw_path, encoding='utf-8').read()
-        with open(raw_path, 'w', encoding='utf-8') as f:
-            f.write(yaml + "\n" + raw_text)
         print(f"  {n} pages → {raw_path.name}")
         sys.exit(0)
     
@@ -527,16 +426,6 @@ up:
         open(jsonl_path, 'w').writelines([l for l in lines if l])
         print(f"\nRebuilding raw...")
         n = concatenate(jsonl_path, raw_path)
-        yaml = f"""---
-created: {datetime.now().strftime('%Y-%m-%d %H:%M')}
-up:
-  - "[[Arabic transcriptions]]"
-  - "[[AI gen]]"
----
-"""
-        raw_text = open(raw_path, encoding='utf-8').read()
-        with open(raw_path, 'w', encoding='utf-8') as f:
-            f.write(yaml + "\n" + raw_text)
         print(f"  {n} pages → {raw_path.name}")
         sys.exit(0)
     

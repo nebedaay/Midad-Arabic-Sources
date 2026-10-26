@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Remove per-unit mas-id properties from repository notes.
+"""Remove per-unit midad-id properties from repository notes.
 
 Repository works are tracked by their hub (`repo:<collection>:<id>`); the
 individual sūra/chapter/root notes do not need identities of their own. This
-cleans up the properties added during the initial mas-id rollout.
+cleans up the properties added during the initial midad-id rollout.
 """
 import argparse
 import os
@@ -11,11 +11,11 @@ import re
 from pathlib import Path
 
 VAULT = Path(os.environ.get("OBSIDIAN_VAULT", os.path.expanduser("~/Documents/Obsidian Vault")))
-PROPS = ("mas-id", "mas-kind", "mas-work", "mas-unit")
+PROPS = ("midad-id", "midad-kind", "midad-work", "midad-unit")
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Remove per-unit mas-id properties from repository notes.")
+    parser = argparse.ArgumentParser(description="Remove per-unit midad-id properties from repository notes.")
     parser.add_argument("--source-root", default="_7 Sources")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
@@ -32,7 +32,7 @@ def main() -> int:
         if end < 0:
             continue
         fm = text[:end]
-        if not re.search(r'^mas-kind:\s*"?repo-unit"?\s*$', fm, re.M):
+        if not re.search(r'^midad-kind:\s*"?repo-unit"?\s*$', fm, re.M):
             continue
         lines = [line for line in fm.splitlines() if not any(re.match(rf'^{re.escape(p)}:', line) for p in PROPS)]
         updated = "\n".join(lines) + text[end:]

@@ -4,7 +4,7 @@
 <% add_property('total_verses', unit.blocks.length); -%>
 <% add_property('created', generated); -%>
 <% add_property('updated', updated()); -%>
-<% add_property('mas-up', [unit.section_page ? wikilink(unit.section_page) : null, wikilink(work.dir)].filter(Boolean)); -%>
+<% add_property('midad-up', [unit.section_page ? wikilink(unit.section_page) : null, wikilink(work.dir)].filter(Boolean)); -%>
 <% add_property('related', [], { force: true, merge: 'keep' }); -%>
 <% add_property('title', unit.title || unit.base); -%>
 <% if (work.authors && work.authors.length) { add_property('authors', work.authors.map(a => wikilink(a))); } -%>

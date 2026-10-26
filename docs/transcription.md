@@ -23,7 +23,7 @@ The finished note is written to `<Sources>/Transcriptions/` as `@<citekey> - tra
 
 A standalone PDF has no Zotero record to supply its bibliography, so the transcription prompt adds a short title-page instruction: Gemini writes the printed title and author as `TITLE:` and `AUTHOR:` lines above the first page. Post-processing removes those lines from the body and saves them as a sidecar beside the processed text. The pipeline then writes them into the note’s `title:` and `authors:` fields. This instruction is passed only for standalone PDFs; literature-note transcriptions do not receive it.
 
-When the note is written, a second dialog shows the guessed title and author for verification. Correct them and choose **Save** (or **Save and open**); **Skip** keeps the guess and the note can be edited later. The resulting YAML carries the same bibliographic fields as a Zotero-derived transcription, except that there is no `[[@citekey]]` literature-note link in `up:` because no such note exists.
+When the note is written, a second dialog shows the guessed title and author for verification. Correct them and choose **Save** (or **Save and open**); **Skip** keeps the guess and the note can be edited later. The resulting YAML carries the same bibliographic fields as a Zotero-derived transcription, except that there is no `[[@citekey]]` literature-note link in `midad-up:` because no such note exists.
 
 ## Post-processing
 

@@ -3984,7 +3984,7 @@ def build_dictionary_units(work: dict, args: argparse.Namespace) -> list[dict]:
             "base": _hw_note_base(root, prefix),
             "title": f"{root['arabic']} {root['roman']}",
             # A two-level work: the bottom page names its letter page first in
-            # `mas-up`, so you can step to the adjacent entries of the same letter.
+            # `midad-up`, so you can step to the adjacent entries of the same letter.
             "section_page": f"{work['dir']} - {_hw_letter_page(_hw_letter_of(root['arabic']), convention)}",
             "root": root,
             "entries": entries,

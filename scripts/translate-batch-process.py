@@ -612,19 +612,6 @@ def citekey_and_volume(stem: str):
     return citekey, (int(vm.group(1)) if vm else None)
 
 
-def build_translation(stem: str, result: str) -> str:
-    yaml = (
-        "---\n"
-        f"created: {datetime.now().strftime('%Y-%m-%d')}\n"
-        "up:\n"
-        '  - "[[Translations]]"\n'
-        '  - "[[AI gen]]"\n'
-        f'title: "Translation of {stem}"\n'
-        "---\n\n"
-    )
-    return yaml + result
-
-
 def main():
     if len(sys.argv) < 2:
         print("Usage: python3 translate-batch-process.py <batch.txt> [--poll N] [--from-output] [--out PATH]")
@@ -692,14 +679,15 @@ def main():
     print(f"\nPost-processing {len(result):,} chars...")
     result = postprocess_translation(result)
 
+    # Use the same note builder as the move-to-vault step, whether writing to
+    # the canonical vault path or to an explicit --out path.
+    mv = SourceFileLoader("mv", str(SCRIPTS / "transcription-translation-move-to-vault.py")).load_module()
+    citekey, volume = citekey_and_volume(stem)
     if out_path is not None:
-        out_path.write_text(build_translation(stem, result), encoding="utf-8")
+        yaml = mv.build_yaml(citekey, "translation", [], volume=volume)
+        out_path.write_text(yaml + "\n" + result.strip() + "\n", encoding="utf-8")
         print(f"\nSaved: {out_path}")
     else:
-        # Write the finished note straight into the vault, with the same YAML
-        # and aliases as the move-to-vault step.
-        mv = SourceFileLoader("mv", str(SCRIPTS / "transcription-translation-move-to-vault.py")).load_module()
-        citekey, volume = citekey_and_volume(stem)
         dest = mv.write_note(result, citekey, "translation", volume=volume)
         print(f"\nSaved: {dest}")
 

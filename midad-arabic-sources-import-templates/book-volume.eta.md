@@ -2,7 +2,7 @@
 <% add_property('document-type', '[[text-source]]'); -%>
 <% add_property('created', generated); -%>
 <% add_property('updated', updated()); -%>
-<% add_property('mas-up', [wikilink(work.dir)]); -%>
+<% add_property('midad-up', [wikilink(work.dir)]); -%>
 <% add_property('related', [], { force: true, merge: 'keep' }); -%>
 <% add_property('title', unit.title || unit.base); -%>
 <% if (work.authors && work.authors.length) { add_property('authors', work.authors.map(a => wikilink(a))); } -%>

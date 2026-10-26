@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""Migrate MAS source notes to the unified mas-id naming and registry identity.
+"""Migrate MAS source notes to the unified midad-id naming and registry identity.
 
 - Zotero literature notes (`_2 Bibliographic notes/@*.md`) get a stable
-  `mas-id: zotero:<sw-zotero-id>` (falling back to `zotero:@<citekey>`).
-- Transcriptions/translations get a `mas-id`, `mas-kind`, `mas-source`,
-  `mas-work`, and `mas-unit`. A Zotero-associated note keeps its
+  `midad-id: zotero:<sw-zotero-id>` (falling back to `zotero:@<citekey>`).
+- Transcriptions/translations get a `midad-id`, `midad-kind`, `midad-source`,
+  `midad-work`, and `midad-unit`. A Zotero-associated note keeps its
   `@<citekey>` filename; only a standalone note with no Zotero reference
   (a `pdf:` source) changes from `@<citekey>` to `mas-<citekey>`.
-- Repository hubs get `mas-id: repo:<collection>:<id>`.
-- Adopted arbitrary notes get a `mas-id` when they have a `mas-work`.
+- Repository hubs get `midad-id: repo:<collection>:<id>`.
+- Adopted arbitrary notes get a `midad-id` when they have a `midad-work`.
 - Explicit wikilinks, the adopted-annotation registry, the annotation store,
   and the Source Annotations MOC are updated.
 
@@ -88,7 +88,7 @@ def add_fields_to_note(path: Path, fields: list[tuple[str, str]], dry: bool) -> 
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Migrate MAS source notes to mas-id naming.")
+    parser = argparse.ArgumentParser(description="Migrate MAS source notes to midad-id naming.")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
     dry = args.dry_run
@@ -131,11 +131,11 @@ def main() -> int:
             unit = unit or "note"
             mas_id = f"{work}:{unit}"
             fields = [
-                ("mas-id", mas_id),
-                ("mas-kind", typ),
-                ("mas-source", source_id),
-                ("mas-work", work),
-                ("mas-unit", unit),
+                ("midad-id", mas_id),
+                ("midad-kind", typ),
+                ("midad-source", source_id),
+                ("midad-work", work),
+                ("midad-unit", unit),
             ]
             if add_fields_to_note(note, fields, dry):
                 print(f"  source fields: {note.name} -> {mas_id}")
@@ -167,9 +167,9 @@ def main() -> int:
         hub = installed / f"{directory}.md"
         if hub.exists():
             add_fields_to_note(hub, [
-                ("mas-id", f"repo:{key}"),
-                ("mas-kind", "repo-work"),
-                ("mas-source", f"repo:{key}"),
+                ("midad-id", f"repo:{key}"),
+                ("midad-kind", "repo-work"),
+                ("midad-source", f"repo:{key}"),
             ], dry)
 
     # 4. Adopted arbitrary notes.
@@ -185,9 +185,9 @@ def main() -> int:
             mas_work = entry.get("workKey") or ""
             if mas_work:
                 add_fields_to_note(note, [
-                    ("mas-id", mas_work),
-                    ("mas-kind", "adopted"),
-                    ("mas-source", "adopted"),
+                    ("midad-id", mas_work),
+                    ("midad-kind", "adopted"),
+                    ("midad-source", "adopted"),
                 ], dry)
 
     # 5. Explicit links, adopted registry, annotation store and MOC.

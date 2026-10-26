@@ -11,7 +11,7 @@ export interface AdoptedEntry {
 	workKey: string;
 	unitKey: string;
 	workTitle: string;
-	/** A real note basename used for the annotation note's `mas-up` link. */
+	/** A real note basename used for the annotation note's `midad-up` link. */
 	workDir: string;
 	unitTitle: string;
 	ord: number;
@@ -163,7 +163,7 @@ export class AdoptedNotesRegistry {
 		}
 		const workKey = existing?.workKey ?? `adopted:${uuid()}`;
 		// A hub note carries the book title; a volume scanned first only has the
-		// citekey. Prefer the title-bearing note and use the hub as the mas-up link.
+		// citekey. Prefer the title-bearing note and use the hub as the midad-up link.
 		const isHub = !parsed.unitKey.startsWith("volume:");
 		const workTitle = existing && !parsed.hasTitle ? existing.workTitle : parsed.workTitle;
 		const workDir = existing

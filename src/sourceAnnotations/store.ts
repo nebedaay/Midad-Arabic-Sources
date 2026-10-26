@@ -1,5 +1,6 @@
 import { App, normalizePath } from "obsidian";
 import { ensureFolder as ensureVaultFolder, safeFileSegment } from "../sourcePaths";
+import { localDate, localTimestamp } from "../time";
 import type {
 	AnnotationIndexEntry,
 	AnnotationIndexFile,
@@ -42,15 +43,11 @@ function unitFileName(unitKey: string): string {
 }
 
 export function annotationNow(): string {
-	const d = new Date();
-	const pad = (n: number) => String(n).padStart(2, "0");
-	return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+	return localTimestamp();
 }
 
 export function annotationToday(): string {
-	const d = new Date();
-	const pad = (n: number) => String(n).padStart(2, "0");
-	return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+	return localDate();
 }
 
 export function newAnnotationId(): string {
