@@ -389,6 +389,17 @@ export class AnnotationService {
 		});
 
 		this.plugin.addCommand({
+			id: "resize-annotation-to-selection",
+			name: "Resize annotation to selection",
+			editorCheckCallback: (checking, editor, view) => {
+				if (!view.file || !this.store.findTarget(view.file.path)) return false;
+				if (checking) return true;
+				void this.resizeAnnotationToSelection(editor, view.file);
+				return true;
+			},
+		});
+
+		this.plugin.addCommand({
 			id: "delete-annotation-at-cursor",
 			name: "Delete annotation",
 			editorCheckCallback: (checking, editor, view) => {
@@ -585,6 +596,10 @@ export class AnnotationService {
 				.setTitle("Edit annotation")
 				.setIcon("pencil")
 				.onClick(() => { void this.openEditAtCursor(editor, file); }));
+			menu.addItem((item) => item
+				.setTitle("Resize annotation to selection")
+				.setIcon("move-horizontal")
+				.onClick(() => { void this.resizeAnnotationToSelection(editor, file); }));
 			menu.addItem((item) => item
 				.setTitle("Delete annotation")
 				.setIcon("trash-2")
@@ -1294,6 +1309,64 @@ export class AnnotationService {
 			return;
 		}
 		await this.openEditAnnotation(target, hit, this.anchorForEditor(editor));
+	}
+
+	/** Replace an existing highlight's span with the current selection. */
+	async resizeAnnotationToSelection(editor: Editor, file: TFile): Promise<void> {
+		const target = await this.targetForPath(file.path);
+		if (!target) {
+			new Notice("This note is not part of an annotated source.");
+			return;
+		}
+		const draft = this.draftFromEditor(editor, file);
+		if (!draft) {
+			new Notice("Select the complete replacement span first.");
+			return;
+		}
+		const annotations = await this.annotationsFor(target);
+		const value = editor.getValue();
+		const bodyStart = value.length - splitNote(value).body.length;
+		const start = bodyStart + draft.position.start;
+		const end = bodyStart + draft.position.end;
+		const candidates = resolveForEditor(value, annotations)
+			.filter((annotation) => annotation.start < end && annotation.end > start);
+		if (!candidates.length) {
+			new Notice("The selection does not overlap an annotation. Select over the existing highlight to resize it.");
+			return;
+		}
+		candidates.sort((a, b) =>
+			(Math.min(b.end, end) - Math.max(b.start, start)) -
+			(Math.min(a.end, end) - Math.max(a.start, start))
+		);
+		const chosen = candidates[0];
+		const now = annotationNow();
+		const quoteChanged = draft.quote !== chosen.quote;
+		const previousQuotes = quoteChanged
+			? [...(chosen.previousQuotes ?? []), chosen.quote].filter(Boolean).slice(-5)
+			: chosen.previousQuotes ?? [];
+		const updated = annotations.map((annotation) => annotation.id === chosen.id
+			? {
+				...annotation,
+				quote: draft.quote,
+				quoteText: draft.quoteText,
+				quoteMarkdown: draft.quoteMarkdown,
+				prefix: draft.prefix,
+				suffix: draft.suffix,
+				section: draft.section,
+				ordinal: draft.ordinal,
+				position: draft.position,
+				segments: draft.segments,
+				modified: now,
+				anchored: now,
+				anchorStatus: "ok" as const,
+				quoteChanged,
+				previousQuotes,
+			} : annotation);
+		await this.store.saveUnit(target, updated);
+		this.pathAnnotations.set(normalizePath(target.notePath), updated);
+		await this.syncArtifacts(target.workKey);
+		await this.refreshViews();
+		new Notice("Highlight resized.");
 	}
 
 	private viewForTarget(target: AnnotationTarget): MarkdownView | null {
