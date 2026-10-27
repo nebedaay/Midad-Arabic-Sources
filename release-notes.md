@@ -13,7 +13,7 @@ This release refreshes the documentation and release notes that ship with **Mida
 - **Annotations:** select text in Live Preview or Reading view, choose a colour and comment, and keep annotations separate from the generated source. Margin icons, comment tooltips, annotation notes, source-annotation MOCs, orphan detection and re-anchoring, archive/restore, and copy-with-annotations are included.
 - **Annotation editing:** caret/context-menu commands, selection-based resizing, and draggable oval handles in Live Preview. Wikilinks are treated as atomic selections, and legacy partial-link annotations are widened automatically.
 - **Sidebar:** annotation cards with rendered Markdown quotes and links, `midad-up` navigation for every note, Navigation and Annotations tabs, per-note annotation counts with comment icons, and a foldable current-note child list.
-- **Annotation notes:** lightly coloured callouts with each quote shown as highlighted text on a white inset page, plus the comment, dates, block ID, and a user-maintained notes area.
+- **Annotation notes:** light blue callouts with the comment first in a colour-gradient inset, each quote on a white inset page with highlighted text, plus dates, a valid block ID, and a user-maintained notes area.
 - **Transcription and translation:** Gemini OCR for Zotero PDFs or standalone PDFs, page-separated Arabic output, poetry and Qurʾān post-processing, reusable prompts, and translation of finished transcriptions.
 - **Transliteration:** CAMeL-backed selection and note romanization through a resident local service, with optional LLM configurations.
 - **Zotero export:** Local API, Web API, or CSL-JSON export with update-in-place support.

@@ -1531,8 +1531,8 @@ body.mas-ann-resizing .cm-content * {
     --callout-blend-mode: normal;
     --mas-annotation-box: #ffffff;
     --mas-annotation-ink: #26261f;
-    border-left: 3px solid hsla(var(--mas-hue), 75%, 55%, 0.8);
-    background-color: hsl(var(--mas-hue), var(--mas-annot-sat), 92%);
+    border-left: 3px solid hsla(220, 55%, 63%, 0.85);
+    background: linear-gradient(135deg, hsla(220, 72%, 93%, 1), hsla(220, 58%, 84%, 1));
     color: var(--mas-annotation-ink);
 }
 

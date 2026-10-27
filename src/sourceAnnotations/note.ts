@@ -44,7 +44,7 @@ function annotationBlock(annotation: SourceAnnotation, unitNote: string, section
 	lines.push(`> [!mas-annotation-${annotation.color}] ${annotationLabel(annotation.color)} · ${link}`);
 	if (annotation.comment?.trim()) {
 		lines.push(">");
-		lines.push(`> > [!mas-annotation-comment-${annotation.color}]`);
+		lines.push('> > [!mas-annotation-comment]');
 		lines.push(...calloutLines(annotation.comment.trim(), "> >"));
 	}
 	lines.push(">");
