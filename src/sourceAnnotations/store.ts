@@ -407,6 +407,12 @@ export class AnnotationStore {
 		return this.paths.get(normalizePath(path)) ?? null;
 	}
 
+	countForPath(path: string): number {
+		const target = this.findTarget(path);
+		if (!target) return 0;
+		return this.works.get(target.workKey)?.units[target.unitKey]?.count ?? 0;
+	}
+
 	getIndex(): AnnotationIndexFile {
 		return this.index ?? { schema: 1, works: {} };
 	}

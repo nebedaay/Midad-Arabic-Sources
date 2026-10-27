@@ -1,5 +1,6 @@
-import { TFile, type App } from "obsidian";
+import { TFile, normalizePath, type App } from "obsidian";
 import { AdoptedNotesRegistry } from "./adopted";
+import { buildNavigationData } from "./navigation";
 import { findNormalized, resolveAnnotations, visibleSegments } from "./resolve";
 import { reanchorAnnotation } from "./reanchor";
 import {
@@ -16,9 +17,24 @@ export interface RegressionResult {
 	lines: string[];
 }
 
-function fakeApp(files: Record<string, string>, frontmatter: Record<string, Record<string, unknown>> = {}): App {
+interface FakeCache {
+	links?: Array<{ link: string; displayText?: string }>;
+	headings?: Array<{ level: number; heading: string }>;
+}
+
+function fakeApp(
+	files: Record<string, string>,
+	frontmatter: Record<string, Record<string, unknown>> = {},
+	cache: Record<string, FakeCache> = {}
+): App {
 	const store = new Map(Object.entries(files));
 	const folders = new Set<string>();
+	const objects = new Map<string, TFile>();
+	for (const path of store.keys()) {
+		const file = new (TFile as unknown as new (path: string) => TFile)(path) as TFile & { basename: string };
+		file.basename = path.split("/").pop()?.replace(/\.md$/i, "") ?? path;
+		objects.set(normalizePath(path), file);
+	}
 	const adapter = {
 		exists: async (p: string) => store.has(p) || folders.has(p) || [...store.keys()].some((k) => k.startsWith(`${p}/`)),
 		read: async (p: string) => {
@@ -29,13 +45,28 @@ function fakeApp(files: Record<string, string>, frontmatter: Record<string, Reco
 		write: async (p: string, value: string) => { store.set(p, value); },
 		mkdir: async (p: string) => { folders.add(p); },
 	};
+	const resolveLink = (link: string, sourcePath: string): TFile | null => {
+		const target = normalizePath(link.split("#")[0]);
+		const direct = objects.get(target);
+		if (direct) return direct;
+		const sourceDir = sourcePath.split("/").slice(0, -1).join("/");
+		const local = objects.get(normalizePath(sourceDir ? `${sourceDir}/${target}` : target));
+		if (local) return local;
+		const basename = target.split("/").pop()?.replace(/\.md$/i, "");
+		return [...objects.values()].find((file) => file.basename === basename) ?? null;
+	};
 	const vault = {
 		adapter,
-		getMarkdownFiles: () => [...store.keys()].filter((p) => p.endsWith(".md")).map((p) =>
-			new (TFile as unknown as new (path: string) => TFile)(p)),
+		getAbstractFileByPath: (path: string) => objects.get(normalizePath(path)) ?? null,
+		getMarkdownFiles: () => [...objects.values()],
 	};
 	const metadataCache = {
-		getFileCache: (file: TFile) => ({ frontmatter: frontmatter[file.path] }),
+		getFileCache: (file: TFile) => ({
+			frontmatter: frontmatter[file.path] ?? {},
+			links: cache[file.path]?.links ?? [],
+			headings: cache[file.path]?.headings ?? [],
+		}),
+		getFirstLinkpathDest: (link: string, sourcePath: string) => resolveLink(link, sourcePath),
 	};
 	return { vault, metadataCache } as unknown as App;
 }
@@ -165,6 +196,57 @@ export async function runAnnotationRegressionTests(): Promise<RegressionResult> 
 	const newPath = "_2 Bibliographic notes/@demo - transcription - v. 2 - Renamed.md";
 	await registry.rename(oldPath, newPath);
 	check("adopted note rename updates the locator", !!registry.get(newPath) && !registry.get(oldPath));
+
+	const navigation = buildNavigationData(
+		fakeApp(
+			{
+				"Root.md": "",
+				"A.md": "",
+				"B.md": "",
+				"A1.md": "",
+				"A2.md": "",
+			},
+			{
+				"Root.md": { title: "Root" },
+				"A.md": { title: "A", "midad-up": ["[[Root]]"] },
+				"B.md": { title: "B", "midad-up": ["[[Root]]"] },
+				"A1.md": { title: "A1", "midad-up": ["[[A]]"], "document-type": "[[text-source]]" },
+				"A2.md": { title: "A2", "midad-up": ["[[A]]"] },
+			},
+			{
+				"Root.md": { links: [{ link: "A" }, { link: "B" }] },
+				"A.md": { links: [{ link: "A1" }, { link: "A2" }] },
+				"A1.md": { headings: [{ level: 2, heading: "One" }, { level: 2, heading: "Two" }] },
+			}
+		),
+		"A.md",
+		(path) => path === "A1.md" ? 2 : 0
+	);
+	check("navigation finds midad-up parents", navigation?.parents[0]?.title === "Root");
+	check("navigation lists siblings in parent order",
+		navigation?.items.map((item) => item.title).join(",") === "A,B");
+	check("navigation marks the current note",
+		navigation?.items.find((item) => item.current)?.title === "A");
+	check("navigation adds child notes to the current item",
+		navigation?.items.find((item) => item.current)?.children.map((item) => item.title).join(",") === "A1,A2");
+	check("navigation carries per-note annotation counts",
+		navigation?.items.find((item) => item.current)?.children
+			.find((item) => item.title === "A1")?.annotationCount === 2);
+
+	const contentNavigation = buildNavigationData(
+		fakeApp(
+			{ "A1.md": "", "A.md": "" },
+			{
+				"A.md": { title: "A" },
+				"A1.md": { title: "A1", "midad-up": ["[[A]]"], "document-type": "[[text-source]]" },
+			},
+			{ "A1.md": { headings: [{ level: 1, heading: "A1" }, { level: 2, heading: "One" }] } }
+		),
+		"A1.md",
+		() => 0
+	);
+	check("navigation uses sections for a content note",
+		contentNavigation?.items.find((item) => item.current)?.children.map((item) => item.title).join(",") === "One");
 
 	return { passed, failed, lines };
 }

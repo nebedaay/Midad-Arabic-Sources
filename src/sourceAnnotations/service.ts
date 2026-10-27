@@ -33,6 +33,7 @@ import { refreshReadingViews, registerReadingAnnotations } from "./reading";
 import { reanchorAnnotation } from "./reanchor";
 import { annotationLabel, findNormalized, resolveAnnotations, visibleSegments } from "./resolve";
 import { AnnotationSidebarView, ANNOTATION_SIDEBAR_VIEW, type AnnotationSidebarData } from "./sidebar";
+import { buildNavigationData } from "./navigation";
 import { AnnotationStore, annotationNow, newAnnotationId, type AnnotationTrashBatch } from "./store";
 import { AnnotationTargetResolver } from "./target";
 import { AnnotationTooltip } from "./tooltip";
@@ -1858,6 +1859,10 @@ export class AnnotationService {
 		return this.store.getIndex().works[workKey]?.count ?? 0;
 	}
 
+	annotationCountForPath(path: string): number {
+		return this.store.countForPath(path);
+	}
+
 	async listTrash(): Promise<AnnotationTrashBatch[]> {
 		return this.store.listTrash();
 	}
@@ -1988,22 +1993,30 @@ export class AnnotationService {
 			const path = normalizePath(view.file.path);
 			if (seen.has(path)) continue;
 			seen.add(path);
-			const target = await this.targetForPath(path);
-			if (!target) continue;
+			const navigation = buildNavigationData(this.app, path, (notePath) => this.annotationCountForPath(notePath));
+			if (!navigation) continue;
 			this.lastSidebarPath = path;
-			const annotations = await this.annotationsFor(target);
+			const target = await this.targetForPath(path);
+			const annotations = target ? await this.annotationsFor(target) : [];
 			annotations.sort((a, b) => {
 				const orphan = (a.anchorStatus === "orphaned" ? 1 : 0) - (b.anchorStatus === "orphaned" ? 1 : 0);
 				if (orphan) return orphan;
 				return (a.position?.start ?? Number.MAX_SAFE_INTEGER) - (b.position?.start ?? Number.MAX_SAFE_INTEGER);
 			});
-			const work = await this.store.getWork(target.workKey);
+			const work = target ? await this.store.getWork(target.workKey) : null;
+			const frontmatter = this.app.metadataCache.getFileCache(view.file)?.frontmatter as
+				Record<string, unknown> | undefined;
+			const rawTitle = frontmatter?.["title"];
+			const noteName = typeof rawTitle === "string" && rawTitle.trim()
+				? rawTitle.trim()
+				: view.file.basename;
 			return {
-				notePath: target.notePath,
-				noteName: view.file.basename,
-				workTitle: work?.title || target.workTitle,
+				notePath: path,
+				noteName,
+				workTitle: work?.title || target?.workTitle || noteName,
 				target,
 				annotations,
+				navigation,
 			};
 		}
 		return null;
@@ -2136,6 +2149,15 @@ export class AnnotationService {
 			return true;
 		};
 		if (!run()) window.setTimeout(run, Math.max(60, delay));
+	}
+
+	async openNavigationLink(path: string, heading?: string): Promise<void> {
+		const file = this.app.vault.getAbstractFileByPath(normalizePath(path));
+		if (!(file instanceof TFile)) return;
+		const base = file.path.replace(/\.md$/i, "");
+		const link = heading ? `${base}#${heading}` : base;
+		await this.app.workspace.openLinkText(link, file.path, false);
+		window.setTimeout(() => this.refreshSidebar(), 80);
 	}
 
 	async openNamedNote(names: string[]): Promise<void> {
