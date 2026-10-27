@@ -39,7 +39,7 @@ Turath has far more books than any catalogue can list. **Add by URL** (a tab in 
 - **Check imported sources** — find works whose notes or cached model are missing and offer to restore them.
 - **Check for source updates** — ask each repository whether a text changed upstream (also on the **Check repositories every … days** cadence, default 7).
 - **Archive this source…** — compress the work's model to `.midad-arabic-sources/source-archives/<collection>/<id>.json.gz`, remove its notes, and keep its annotations and a restorable manifest entry.
-- **Annotate the selected text**, **Edit annotation**, **Delete annotation**, **Re-anchor orphaned annotation…**, **Open Midad sidebar**, and **Copy source with annotations** — the annotation commands. See [Annotations](#annotations).
+- **Annotate the selected text**, **Edit annotation**, **Delete annotation**, **Resize annotation to selection**, **Re-anchor orphaned annotation…**, **Open Midad sidebar**, and **Copy source with annotations** — the annotation commands. See [Annotations](#annotations).
 
 ## Re-rendering and your edits
 
