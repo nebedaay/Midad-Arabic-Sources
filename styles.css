@@ -1529,7 +1529,6 @@ body.mas-ann-resizing .cm-content * {
 
 .callout[data-callout^="mas-annotation"]:not([data-callout^="mas-annotation-comment"]) {
     --callout-blend-mode: normal;
-    --mas-hue: var(--mas-gray);
     --mas-annotation-box: #ffffff;
     --mas-annotation-ink: #26261f;
     border-left: 3px solid hsla(var(--mas-hue), 75%, 55%, 0.8);
