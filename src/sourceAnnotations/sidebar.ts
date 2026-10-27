@@ -31,6 +31,7 @@ export class AnnotationSidebarView extends ItemView {
 	private renderToken = 0;
 	private activeTab: SidebarTab = "annotations";
 	private navigationPath = "";
+	private readonly foldedNavigation = new Set<string>();
 
 	constructor(leaf: WorkspaceLeaf, service: AnnotationService) {
 		super(leaf);
@@ -198,6 +199,30 @@ export class AnnotationSidebarView extends ItemView {
 			const heading = row.createDiv({
 				cls: `mas-ann-nav__row${item.current ? " is-current" : ""}`,
 			});
+			let children: HTMLUListElement | null = null;
+			if (item.current && item.children.length) {
+				const folded = this.foldedNavigation.has(item.path);
+				const fold = heading.createEl("button", {
+					cls: "mas-ann-nav__fold",
+					attr: {
+						type: "button",
+						"aria-label": folded ? "Expand current note" : "Collapse current note",
+						"aria-expanded": String(!folded),
+					},
+				});
+				setIcon(fold, folded ? "chevron-right" : "chevron-down");
+				fold.addEventListener("click", (event) => {
+					event.preventDefault();
+					event.stopPropagation();
+					const next = !this.foldedNavigation.has(item.path);
+					if (next) this.foldedNavigation.add(item.path);
+					else this.foldedNavigation.delete(item.path);
+					setIcon(fold, next ? "chevron-right" : "chevron-down");
+					fold.setAttribute("aria-expanded", String(!next));
+					fold.setAttribute("aria-label", next ? "Expand current note" : "Collapse current note");
+					children?.toggleClass("is-collapsed", next);
+				});
+			}
 			if (item.current) {
 				heading.createSpan({ cls: "mas-ann-nav__title", text: item.title });
 			} else {
@@ -210,7 +235,9 @@ export class AnnotationSidebarView extends ItemView {
 				});
 			}
 			if (item.current && item.children.length) {
-				const children = row.createEl("ul", { cls: "mas-ann-nav__children" });
+				children = row.createEl("ul", { cls: "mas-ann-nav__children" });
+				const folded = this.foldedNavigation.has(item.path);
+				children.toggleClass("is-collapsed", folded);
 				for (const child of item.children) {
 					const childRow = children.createEl("li", { cls: "mas-ann-nav__child" });
 					const line = childRow.createDiv({ cls: "mas-ann-nav__row" });

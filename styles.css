@@ -1284,6 +1284,36 @@ body.mas-ann-resizing .cm-content * {
     min-width: 0;
 }
 
+.mas-ann-nav__fold {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1rem;
+    height: 1rem;
+    padding: 0;
+    border: 0;
+    border-radius: 3px;
+    background: transparent;
+    color: var(--text-muted);
+    box-shadow: none;
+    cursor: pointer;
+}
+
+.mas-ann-nav__fold:hover {
+    color: var(--text-normal);
+    background: var(--background-modifier-hover);
+}
+
+.mas-ann-nav__fold svg {
+    width: var(--icon-xs);
+    height: var(--icon-xs);
+}
+
+.mas-ann-nav__children.is-collapsed {
+    display: none;
+}
+
 .mas-ann-nav__title,
 .mas-ann-nav__parent-link,
 .mas-ann-nav__child-link {
@@ -1479,12 +1509,70 @@ body.mas-ann-resizing .cm-content * {
 .callout[data-callout^="mas-annotation"] {
     --callout-blend-mode: normal;
     --mas-hue: var(--mas-gray);
+    --mas-annotation-paper: #fbfbf0;
+    --mas-annotation-ink: #26261f;
     border-left: 3px solid hsla(var(--mas-hue), 75%, 55%, 0.8);
-    background-color: hsla(var(--mas-hue), 75%, 90%, 0.45);
+    background: var(--mas-annotation-paper);
+    color: var(--mas-annotation-ink);
 }
 
 .callout[data-callout^="mas-annotation"] .callout-title {
-    color: var(--text-normal);
+    color: var(--mas-annotation-ink);
+}
+
+.callout[data-callout^="mas-annotation"] .callout-content {
+    display: block;
+    background: transparent;
+    color: var(--mas-annotation-ink);
+}
+
+.callout[data-callout^="mas-annotation"] .callout-content a {
+    color: var(--text-accent);
+}
+
+.callout[data-callout^="mas-annotation"] .callout-content sub {
+    color: #68685d;
+}
+
+.callout[data-callout^="mas-annotation"] blockquote {
+    display: block;
+    margin: 0.15em 0 0.55em;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: var(--mas-annotation-ink);
+    unicode-bidi: plaintext;
+}
+
+.callout[data-callout^="mas-annotation"] blockquote p,
+.callout[data-callout^="mas-annotation"] blockquote li {
+    display: block;
+    width: fit-content;
+    max-width: 100%;
+    margin: 0 0 0.18em;
+    padding: 0.08em 0.22em;
+    border-radius: 3px;
+    background-image: --mas-hl-gradient(var(--mas-hue));
+    box-decoration-break: clone;
+    -webkit-box-decoration-break: clone;
+    line-height: 1.55;
+    color: var(--mas-annotation-ink);
+}
+
+.callout[data-callout^="mas-annotation"] blockquote ul,
+.callout[data-callout^="mas-annotation"] blockquote ol {
+    margin: 0;
+    padding: 0;
+}
+
+.callout[data-callout^="mas-annotation"] blockquote li {
+    list-style: none;
+}
+
+.callout[data-callout^="mas-annotation"] blockquote li p {
+    margin: 0;
+    padding: 0;
+    background: none;
 }
 
 .callout[data-callout="mas-annotation-yellow"] { --mas-hue: var(--mas-yellow); }
@@ -1495,12 +1583,6 @@ body.mas-ann-resizing .cm-content * {
 .callout[data-callout="mas-annotation-blue"] { --mas-hue: var(--mas-blue); }
 .callout[data-callout="mas-annotation-green"] { --mas-hue: var(--mas-green); }
 .callout[data-callout="mas-annotation-gray"] { --mas-hue: var(--mas-gray); --mas-annot-sat: 0%; }
-
-.callout[data-callout^="mas-annotation"] blockquote {
-    border-left-color: hsla(var(--mas-hue), 60%, 55%, 0.5);
-    color: var(--text-normal);
-    unicode-bidi: plaintext;
-}
 
 /* ── Manage-sources annotation indicators and trash ───────────────────────── */
 
