@@ -17,8 +17,14 @@ export interface AnnotationSidebarData {
 
 type SidebarTab = "annotations" | "navigation";
 
-function annotationCountLabel(count: number): string {
-	return `(${count} ${count === 1 ? "annotation" : "annotations"})`;
+function renderAnnotationCount(parent: HTMLElement, count: number): void {
+	const label = `${count} ${count === 1 ? "annotation" : "annotations"}`;
+	const badge = parent.createSpan({
+		cls: "mas-ann-nav__count",
+		attr: { "aria-label": label, title: label },
+	});
+	setIcon(badge.createSpan({ cls: "mas-ann-nav__count-icon" }), "message-square-text");
+	badge.createSpan({ cls: "mas-ann-nav__count-number", text: String(count) });
 }
 
 /**
@@ -108,16 +114,19 @@ export class AnnotationSidebarView extends ItemView {
 			cls: "mas-ann-sidebar__tabs",
 			attr: { role: "tablist" },
 		});
-		const annotationTab = tabs.createEl("button", {
-			cls: "mas-ann-sidebar__tab",
-			text: `Annotations (${data.annotations.length})`,
-			attr: { type: "button", role: "tab" },
-		});
 		const navigationTab = tabs.createEl("button", {
 			cls: "mas-ann-sidebar__tab",
 			text: "Navigation",
 			attr: { type: "button", role: "tab" },
 		});
+		const hasAnnotationTab = data.target !== null;
+		const annotationTab = hasAnnotationTab
+			? tabs.createEl("button", {
+				cls: "mas-ann-sidebar__tab",
+				text: `Annotations (${data.annotations.length})`,
+				attr: { type: "button", role: "tab" },
+			})
+			: null;
 		const panels = root.createDiv({ cls: "mas-ann-sidebar__panels" });
 		const annotationsPanel = panels.createDiv({
 			cls: "mas-ann-sidebar__panel mas-ann-sidebar__panel--annotations",
@@ -127,13 +136,16 @@ export class AnnotationSidebarView extends ItemView {
 			cls: "mas-ann-sidebar__panel mas-ann-sidebar__panel--navigation",
 			attr: { role: "tabpanel" },
 		});
+		if (!hasAnnotationTab || !data.annotations.length) this.activeTab = "navigation";
 
 		const showTab = (tab: SidebarTab, scrollToCurrent = false): void => {
+			if (tab === "annotations" && !annotationTab) tab = "navigation";
 			this.activeTab = tab;
-			for (const [button, name] of [
-				[annotationTab, "annotations"],
-				[navigationTab, "navigation"],
-			] as const) {
+			const buttons: Array<{ button: HTMLButtonElement; tab: SidebarTab }> = [
+				{ button: navigationTab, tab: "navigation" },
+			];
+			if (annotationTab) buttons.push({ button: annotationTab, tab: "annotations" });
+			for (const { button, tab: name } of buttons) {
 				const active = name === tab;
 				button.toggleClass("is-active", active);
 				button.setAttribute("aria-selected", String(active));
@@ -142,8 +154,8 @@ export class AnnotationSidebarView extends ItemView {
 			navigationPanel.toggleClass("is-active", tab === "navigation");
 			if (tab === "navigation" && scrollToCurrent) this.scrollCurrentIntoView(navigationPanel);
 		};
-		annotationTab.addEventListener("click", () => showTab("annotations"));
 		navigationTab.addEventListener("click", () => showTab("navigation", true));
+		annotationTab?.addEventListener("click", () => showTab("annotations"));
 
 		await this.renderAnnotations(annotationsPanel, data, component, token);
 		if (token !== this.renderToken) return;
@@ -242,12 +254,7 @@ export class AnnotationSidebarView extends ItemView {
 			} else {
 				this.renderNavigationLink(heading, item, "mas-ann-nav__title");
 			}
-			if (item.annotationCount > 0) {
-				heading.createSpan({
-					cls: "mas-ann-nav__count",
-					text: annotationCountLabel(item.annotationCount),
-				});
-			}
+			if (item.annotationCount > 0) renderAnnotationCount(heading, item.annotationCount);
 			if (item.current && item.children.length) {
 				children = row.createEl("ul", { cls: "mas-ann-nav__children" });
 				const folded = this.foldedNavigation.has(item.path);
@@ -256,12 +263,7 @@ export class AnnotationSidebarView extends ItemView {
 					const childRow = children.createEl("li", { cls: "mas-ann-nav__child" });
 					const line = childRow.createDiv({ cls: "mas-ann-nav__row" });
 					this.renderNavigationLink(line, child, "mas-ann-nav__child-link");
-					if (child.annotationCount > 0) {
-						line.createSpan({
-							cls: "mas-ann-nav__count",
-							text: annotationCountLabel(child.annotationCount),
-						});
-					}
+					if (child.annotationCount > 0) renderAnnotationCount(line, child.annotationCount);
 				}
 			}
 		}

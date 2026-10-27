@@ -1349,10 +1349,23 @@ body.mas-ann-resizing .cm-content * {
 }
 
 .mas-ann-nav__count {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
     color: var(--text-muted);
     font-size: var(--font-ui-smaller);
     font-weight: var(--font-normal);
     white-space: nowrap;
+}
+
+.mas-ann-nav__count-icon {
+    display: inline-flex;
+    --icon-size: var(--icon-xs);
+}
+
+.mas-ann-nav__count-icon svg {
+    width: var(--icon-xs);
+    height: var(--icon-xs);
 }
 
 .mas-ann-sidebar__empty {
