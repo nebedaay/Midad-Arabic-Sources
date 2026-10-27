@@ -32,21 +32,29 @@ function calloutLines(markdown: string, prefix: string): string[] {
 		.map((line) => (line.trim() ? `${prefix} ${line}` : prefix.replace(/\s+$/, "")));
 }
 
+function annotationBlockId(id: string): string {
+	// Obsidian block IDs are alphanumeric; the store id keeps its readable
+	// `ann_` prefix, but the note's target must be `ann...` with no underscore.
+	return id.replace(/[^A-Za-z0-9]/g, "") || "annotation";
+}
+
 function annotationBlock(annotation: SourceAnnotation, unitNote: string, sectionLabel?: string): string {
 	const lines: string[] = [];
 	const link = noteHeadingLink(unitNote, annotation.section, sectionLabel);
 	lines.push(`> [!mas-annotation-${annotation.color}] ${annotationLabel(annotation.color)} · ${link}`);
-	const quote = calloutLines(annotation.quoteMarkdown || annotation.quote, "> >");
-	lines.push(...quote);
 	if (annotation.comment?.trim()) {
 		lines.push(">");
-		lines.push(...calloutLines(annotation.comment.trim(), ">"));
+		lines.push(`> > [!mas-annotation-comment-${annotation.color}]`);
+		lines.push(...calloutLines(annotation.comment.trim(), "> >"));
 	}
+	lines.push(">");
+	lines.push(...calloutLines(annotation.quoteMarkdown || annotation.quote, "> >"));
 	lines.push(">");
 	const modified = annotation.modified && annotation.modified !== annotation.created
 		? ` · updated ${annotation.modified.slice(0, 10)}`
 		: "";
-	lines.push(`> <sub>added ${annotation.created.slice(0, 10)}${modified} · ^${annotation.id}</sub>`);
+	lines.push(`> <sub>added ${annotation.created.slice(0, 10)}${modified}</sub>`);
+	lines.push(`^${annotationBlockId(annotation.id)}`);
 	return lines.join("\n");
 }
 

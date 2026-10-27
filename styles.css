@@ -320,7 +320,7 @@ Displaying Qur'an sūras in the Qur'an vault
     text-decoration:none!important;
     font-size: 3rem; 
     z-index: -1; 
-    background: linear-gradient(to bottom, --bright(var(--gold)), --dark(var(--gold)));
+    background: linear-gradient(to bottom, --mas-bright(var(--mas-gold)), --mas-dark(var(--mas-gold)));
     background-clip: text;
     color: transparent;
 }
@@ -350,7 +350,7 @@ Displaying Qur'an sūras in the Qur'an vault
 .markdown-preview-view .quran-quote, .markdown-rendered .quran-quote,
 .markdown-source-view.mod-cm6 .quran-quote {
     font-family: var(--quran-font);
-    background-image: repeating-linear-gradient(to bottom, hsla(var(--gold), 100%, 35%, 100%) 0em, hsla(var(--gold), 100%, 35%, 100%) 0.3em, hsla(var(--gold), 100%, 18%, 100%) 1.8em)!important;
+    background-image: repeating-linear-gradient(to bottom, hsla(var(--mas-gold), 100%, 35%, 100%) 0em, hsla(var(--mas-gold), 100%, 35%, 100%) 0.3em, hsla(var(--mas-gold), 100%, 18%, 100%) 1.8em)!important;
     box-decoration-break: clone!important;
     background-clip: text!important;
     color: transparent;
@@ -390,24 +390,23 @@ Displaying Qur'an sūras in the Qur'an vault
    works for any genre, not just .quran. Covers reading view (p/.el-p) and
    live preview (.cm-line). No font-size here — see the note above. */
 .mas-managed {
-    background: #ddc7 !important;
+    background: #8878 !important;
     background-image: none !important;
     font-family: sans-serif;
-    font-size: 70%;
+    font-size: 65%;
     padding: 3px;
-    border-radius: 3px !important;
-    color: #06a9 !important;
+    border-radius: 5px !important;
+    color: #eede !important;
+    line-height: 100%;
+    max-width: 100px;
+    text-align: center;
+    direction: ltr;
+    background-image: none;
 }
-   p:has(> .mas-managed),
+p:has(> .mas-managed),
 .el-p:has(.mas-managed),
 .cm-line:has(.mas-managed) {
-    color: #6669 !important;
-    background: none !important;
-    background-image: none !important;
-    margin-right: 0 !important;
-    padding-right: 0 !important;
     text-align: left !important;
-    line-height: 1 !important;
 }
 
 
@@ -777,6 +776,10 @@ Displaying Qur'an sūras in the Qur'an vault
     result: hsla(var(--hue), var(--mas-annot-sat), var(--mas-annot-lt), var(--mas-annot-hl-opac));
 }
 
+@function --mas-dark(--hue) {
+    result: hsla(var(--hue), var(--mas-annot-sat), var(--mas-annot-dk), var(--mas-annot-dk-opac));
+}
+
 @function --mas-hl-gradient(--hue) {
     result: linear-gradient(180deg, transparent 0%, --mas-hl(var(--hue)) 0%, --mas-light(var(--hue)) 80%, --mas-bright(var(--hue)) 195%);
 }
@@ -790,6 +793,7 @@ body {
     --mas-magenta: 300;
     --mas-blue: 205;
     --mas-gray: 100;
+    --mas-gold: 48;
 
     --mas-annot-sat: 100%;
     --mas-annot-lt: 87%;
@@ -797,6 +801,8 @@ body {
     --mas-annot-lt-opac: 95%;
     --mas-annot-br-opac: 100%;
     --mas-annot-hl-opac: 60%;
+    --mas-annot-dk: 23%;
+    --mas-annot-dk-opac: 100%;
     --mas-annot-band-opac: 0.72;
 }
 
@@ -1521,7 +1527,7 @@ body.mas-ann-resizing .cm-content * {
     white-space: normal;
 }
 
-.callout[data-callout^="mas-annotation"] {
+.callout[data-callout^="mas-annotation"]:not([data-callout^="mas-annotation-comment"]) {
     --callout-blend-mode: normal;
     --mas-hue: var(--mas-gray);
     --mas-annotation-box: #ffffff;
@@ -1549,7 +1555,7 @@ body.mas-ann-resizing .cm-content * {
     color: #68685d;
 }
 
-.callout[data-callout^="mas-annotation"] blockquote {
+.callout[data-callout^="mas-annotation"] > .callout-content > blockquote {
     display: block;
     margin: 0.25em 0.1em 0.65em;
     padding: 0.55em 0.7em;
@@ -1561,8 +1567,8 @@ body.mas-ann-resizing .cm-content * {
     unicode-bidi: plaintext;
 }
 
-.callout[data-callout^="mas-annotation"] blockquote p,
-.callout[data-callout^="mas-annotation"] blockquote li {
+.callout[data-callout^="mas-annotation"] > .callout-content > blockquote p,
+.callout[data-callout^="mas-annotation"] > .callout-content > blockquote li {
     display: block;
     width: fit-content;
     max-width: 100%;
@@ -1576,20 +1582,54 @@ body.mas-ann-resizing .cm-content * {
     color: var(--mas-annotation-ink);
 }
 
-.callout[data-callout^="mas-annotation"] blockquote ul,
-.callout[data-callout^="mas-annotation"] blockquote ol {
+.callout[data-callout^="mas-annotation"] > .callout-content > blockquote ul,
+.callout[data-callout^="mas-annotation"] > .callout-content > blockquote ol {
     margin: 0;
     padding: 0;
 }
 
-.callout[data-callout^="mas-annotation"] blockquote li {
+.callout[data-callout^="mas-annotation"] > .callout-content > blockquote li {
     list-style: none;
 }
 
-.callout[data-callout^="mas-annotation"] blockquote li p {
+.callout[data-callout^="mas-annotation"] > .callout-content > blockquote li p {
     margin: 0;
     padding: 0;
     background: none;
+}
+
+.callout[data-callout^="mas-annotation-comment"] {
+    --callout-blend-mode: normal;
+    margin: 0.25em 0 0.55em;
+    padding: 0.32em 0.5em;
+    border: 1px solid hsla(var(--mas-hue), 45%, 68%, 0.3);
+    border-radius: 5px;
+    background-color: transparent;
+    background-image: --mas-hl-gradient(var(--mas-hue));
+    box-shadow: none;
+}
+
+.callout[data-callout^="mas-annotation-comment"] .callout-title {
+    display: none;
+}
+
+.callout[data-callout^="mas-annotation-comment"] .callout-content {
+    padding: 0;
+    background: transparent;
+    color: var(--mas-annotation-ink);
+}
+
+.callout[data-callout^="mas-annotation-comment"] .callout-content p {
+    margin: 0 0 0.35em;
+    color: var(--mas-annotation-ink);
+}
+
+.callout[data-callout^="mas-annotation-comment"] .callout-content p:last-child {
+    margin-bottom: 0;
+}
+
+.callout[data-callout^="mas-annotation-comment"] .callout-content li {
+    color: var(--mas-annotation-ink);
 }
 
 .callout[data-callout="mas-annotation-yellow"] { --mas-hue: var(--mas-yellow); }
