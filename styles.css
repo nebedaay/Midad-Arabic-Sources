@@ -819,7 +819,7 @@ body {
     --mas-annot-dk: 23%;
     --mas-annot-dk-opac: 100%;
     --mas-annot-band-opac: 0.72;
-    --mas-comment-radius: 90% 15px / 15px 20px;
+    --mas-comment-radius: 50% 15px / 15px 20px;
 
 }
 
@@ -1581,17 +1581,20 @@ body.mas-ann-resizing .cm-content * {
     box-shadow: 0 0 0 1px hsla(var(--mas-hue), 40%, 80%, 0.3), 0 1px 3px rgba(0, 0, 0, 0.08);
     color: var(--mas-annotation-ink);
     unicode-bidi: plaintext;
+    overflow: visible;
 }
 
 .callout[data-callout^="mas-annotation"] > .callout-content > blockquote p,
 .callout[data-callout^="mas-annotation"] > .callout-content > blockquote li {
     display: block;
+    box-sizing: border-box;
     width: fit-content;
-    max-width: 100%;
-    margin: 0 0 0.2em;
-    padding: 0.1em 0.32em;
-    border-radius: 4px;
+    max-width: calc(100% - 0.4em);
+    margin: 0.2em;
+    padding: 0.2em .5em;
     background-image: --mas-hl-gradient(var(--mas-hue));
+    border-radius: 20px 3px;
+    overflow: visible;
     box-decoration-break: clone;
     -webkit-box-decoration-break: clone;
     line-height: 1.55;
@@ -1616,10 +1619,10 @@ body.mas-ann-resizing .cm-content * {
 
 .callout[data-callout^="mas-annotation-comment"] {
     --callout-blend-mode: normal;
-    width: 60%;
+    width: 70%;
     border-radius: var(--mas-comment-radius) !important;
-    margin: 0.25em 0 0.55em;
-    padding: 0.5em 0.5em;
+    margin: 0.25em 0 0.25em;
+    padding: 0.75em 0.5em;
     border: 1px solid hsla(var(--mas-hue), 45%, 68%, 0.3);
     background-image: radial-gradient(circle at 80% 50%, --mas-muted-lt(var(--mas-hue)) 0%, --mas-muted-dk(var(--mas-hue)) 100%);
     box-shadow: none;
