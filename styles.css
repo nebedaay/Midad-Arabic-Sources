@@ -1511,10 +1511,10 @@ body.mas-ann-resizing .cm-content * {
 .callout[data-callout^="mas-annotation"] {
     --callout-blend-mode: normal;
     --mas-hue: var(--mas-gray);
-    --mas-annotation-paper: #fbfbf0;
+    --mas-annotation-box: #fffefa;
     --mas-annotation-ink: #26261f;
     border-left: 3px solid hsla(var(--mas-hue), 75%, 55%, 0.8);
-    background: var(--mas-annotation-paper);
+    background-color: hsl(var(--mas-hue), var(--mas-annot-sat), 92%);
     color: var(--mas-annotation-ink);
 }
 
@@ -1538,10 +1538,11 @@ body.mas-ann-resizing .cm-content * {
 
 .callout[data-callout^="mas-annotation"] blockquote {
     display: block;
-    margin: 0.15em 0 0.55em;
-    padding: 0;
-    border: 0;
-    background: transparent;
+    margin: 0.2em 0 0.6em;
+    padding: 0.32em 0.48em;
+    border: 1px solid hsla(var(--mas-hue), 45%, 72%, 0.32);
+    border-radius: 5px;
+    background: var(--mas-annotation-box);
     color: var(--mas-annotation-ink);
     unicode-bidi: plaintext;
 }
