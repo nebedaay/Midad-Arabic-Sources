@@ -1318,11 +1318,23 @@ body.mas-ann-resizing .cm-content * {
 .mas-ann-nav__parent-link,
 .mas-ann-nav__child-link {
     overflow-wrap: anywhere;
+    font-size: var(--font-ui-small);
+    line-height: 1.35;
 }
 
-.mas-ann-nav__row > .mas-ann-nav__title,
-.mas-ann-nav__row > a.mas-ann-nav__title {
-    font-weight: var(--font-medium);
+.mas-ann-nav__parent-link,
+.mas-ann-nav__row > a.mas-ann-nav__title,
+.mas-ann-nav__child-link {
+    color: var(--text-muted);
+    font-weight: var(--font-normal);
+    text-decoration: none;
+}
+
+.mas-ann-nav__parent-link:hover,
+.mas-ann-nav__row > a.mas-ann-nav__title:hover,
+.mas-ann-nav__child-link:hover {
+    color: var(--text-normal);
+    text-decoration: none;
 }
 
 .mas-ann-nav__row.is-current > .mas-ann-nav__title {
@@ -1334,16 +1346,6 @@ body.mas-ann-resizing .cm-content * {
     margin: 0 0 4px 0.9em;
     padding-left: 0.5em;
     border-left: 1px solid var(--background-modifier-border);
-}
-
-.mas-ann-nav__child-link {
-    color: var(--text-muted);
-    font-size: var(--font-ui-smaller);
-    font-weight: var(--font-normal);
-}
-
-.mas-ann-nav__child-link:hover {
-    color: var(--text-normal);
 }
 
 .mas-ann-nav__count {
