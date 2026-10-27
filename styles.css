@@ -784,6 +784,16 @@ p:has(> .mas-managed),
     result: linear-gradient(180deg, transparent 0%, --mas-hl(var(--hue)) 0%, --mas-light(var(--hue)) 80%, --mas-bright(var(--hue)) 195%);
 }
 
+@function --mas-muted-lt(--hue) {
+  result: hsla(var(--hue), var(--mas-muted-sat), var(--mas-muted-lt), var(--mas-annot-dk-opac));
+}
+
+@function --mas-muted-dk(--hue) {
+  result: hsla(var(--hue), var(--mas-muted-sat), var(--mas-muted-dk), var(--mas-annot-dk-opac));
+}
+
+
+
 body {
     --mas-yellow: 55;
     --mas-purple: 265;
@@ -795,6 +805,11 @@ body {
     --mas-gray: 100;
     --mas-gold: 48;
 
+    --mas-muted-sat: 55%;
+    --mas-muted-lt: 90%;
+    --mas-muted-dk: 65%;
+
+
     --mas-annot-sat: 100%;
     --mas-annot-lt: 87%;
     --mas-annot-br: 60%;
@@ -804,6 +819,8 @@ body {
     --mas-annot-dk: 23%;
     --mas-annot-dk-opac: 100%;
     --mas-annot-band-opac: 0.72;
+    --mas-comment-radius: 90% 15px / 15px 20px;
+
 }
 
 body.theme-dark {
@@ -1527,7 +1544,7 @@ body.mas-ann-resizing .cm-content * {
     white-space: normal;
 }
 
-.callout[data-callout^="mas-annotation"]:not([data-callout^="mas-annotation-comment"]) {
+.callout[data-callout^="mas-annotation-"] {
     --callout-blend-mode: normal;
     --mas-annotation-box: #ffffff;
     --mas-annotation-ink: #26261f;
@@ -1536,11 +1553,11 @@ body.mas-ann-resizing .cm-content * {
     color: var(--mas-annotation-ink);
 }
 
-.callout[data-callout^="mas-annotation"] .callout-title {
+.callout[data-callout^="mas-annotation-"] .callout-title {
     color: var(--mas-annotation-ink);
 }
 
-.callout[data-callout^="mas-annotation"] .callout-content {
+.callout[data-callout^="mas-annotation-"] .callout-content {
     display: block;
     background: transparent;
     color: var(--mas-annotation-ink);
@@ -1599,12 +1616,12 @@ body.mas-ann-resizing .cm-content * {
 
 .callout[data-callout^="mas-annotation-comment"] {
     --callout-blend-mode: normal;
+    width: 60%;
+    border-radius: var(--mas-comment-radius) !important;
     margin: 0.25em 0 0.55em;
-    padding: 0.32em 0.5em;
+    padding: 0.5em 0.5em;
     border: 1px solid hsla(var(--mas-hue), 45%, 68%, 0.3);
-    border-radius: 5px;
-    background-color: transparent;
-    background-image: --mas-hl-gradient(var(--mas-hue));
+    background-image: radial-gradient(circle at 80% 50%, --mas-muted-lt(var(--mas-hue)) 0%, --mas-muted-dk(var(--mas-hue)) 100%);
     box-shadow: none;
 }
 
@@ -1638,7 +1655,7 @@ body.mas-ann-resizing .cm-content * {
 .callout[data-callout="mas-annotation-magenta"] { --mas-hue: var(--mas-magenta); }
 .callout[data-callout="mas-annotation-blue"] { --mas-hue: var(--mas-blue); }
 .callout[data-callout="mas-annotation-green"] { --mas-hue: var(--mas-green); }
-.callout[data-callout="mas-annotation-gray"] { --mas-hue: var(--mas-gray); --mas-annot-sat: 0%; }
+.callout[data-callout="mas-annotation-gray"] { --mas-hue: var(--mas-gray); --mas-annot-sat: 0%; --mas-muted-sat: 0%; }
 
 /* ── Manage-sources annotation indicators and trash ───────────────────────── */
 
