@@ -2157,7 +2157,6 @@ export class AnnotationService {
 		const base = file.path.replace(/\.md$/i, "");
 		const link = heading ? `${base}#${heading}` : base;
 		await this.app.workspace.openLinkText(link, file.path, false);
-		window.setTimeout(() => this.refreshSidebar(), 80);
 	}
 
 	async openNamedNote(names: string[]): Promise<void> {

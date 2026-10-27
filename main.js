@@ -12988,10 +12988,18 @@ var AnnotationSidebarView = class extends import_obsidian11.ItemView {
   }
   async onOpen() {
     this.contentEl.addClass("mas-ann-sidebar");
-    this.registerEvent(this.app.workspace.on("active-leaf-change", () => {
-      if (this.leaf.view === this)
+    this.registerEvent(this.app.workspace.on("active-leaf-change", (leaf) => {
+      if ((leaf == null ? void 0 : leaf.view) instanceof import_obsidian11.MarkdownView)
         void this.refresh();
     }));
+    this.registerEvent(this.app.workspace.on("file-open", () => {
+      void this.refresh();
+    }));
+    this.registerDomEvent(this.contentEl, "pointerdown", (event) => {
+      if (event.button !== 0)
+        return;
+      this.app.workspace.setActiveLeaf(this.leaf, { focus: true });
+    });
     await this.refresh();
   }
   async onClose() {
@@ -15713,7 +15721,6 @@ ${MANAGED_CLOSE}
     const base = file.path.replace(/\.md$/i, "");
     const link = heading ? `${base}#${heading}` : base;
     await this.app.workspace.openLinkText(link, file.path, false);
-    window.setTimeout(() => this.refreshSidebar(), 80);
   }
   async openNamedNote(names) {
     for (const name of names) {

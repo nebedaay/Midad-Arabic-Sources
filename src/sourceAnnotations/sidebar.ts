@@ -1,4 +1,4 @@
-import { Component, ItemView, WorkspaceLeaf, setIcon } from "obsidian";
+import { Component, ItemView, MarkdownView, WorkspaceLeaf, setIcon } from "obsidian";
 import { renderAnnotationCard } from "./cards";
 import type { AnnotationService } from "./service";
 import type { NavigationData, NavigationLink } from "./navigation";
@@ -52,9 +52,22 @@ export class AnnotationSidebarView extends ItemView {
 
 	async onOpen(): Promise<void> {
 		this.contentEl.addClass("mas-ann-sidebar");
-		this.registerEvent(this.app.workspace.on("active-leaf-change", () => {
-			if (this.leaf.view === this) void this.refresh();
+		this.registerEvent(this.app.workspace.on("active-leaf-change", (leaf) => {
+			// Refresh when a note becomes active, never merely because this
+			// sidebar leaf was focused by the first click on a control. The old
+			// check refreshed on sidebar activation, replacing the clicked node
+			// before its click handler could run.
+			if (leaf?.view instanceof MarkdownView) void this.refresh();
 		}));
+		// A link can replace the file in the already-active leaf without an
+		// active-leaf-change event; file-open covers that same-leaf navigation.
+		this.registerEvent(this.app.workspace.on("file-open", () => { void this.refresh(); }));
+		// Activate the sidebar on pointer-down, before the click lands. Some
+		// pointer devices otherwise spend the first click only focusing the leaf.
+		this.registerDomEvent(this.contentEl, "pointerdown", (event) => {
+			if (event.button !== 0) return;
+			this.app.workspace.setActiveLeaf(this.leaf, { focus: true });
+		});
 		await this.refresh();
 	}
 
