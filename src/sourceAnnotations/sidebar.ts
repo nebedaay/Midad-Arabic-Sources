@@ -52,12 +52,13 @@ export class AnnotationSidebarView extends ItemView {
 
 	async onOpen(): Promise<void> {
 		this.contentEl.addClass("mas-ann-sidebar");
-		this.registerEvent(this.app.workspace.on("active-leaf-change", (leaf) => {
-			// Refresh when a note becomes active, never merely because this
+		this.registerEvent(this.app.workspace.on("active-leaf-change", () => {
+			// Refresh when a note is the active view, never merely because this
 			// sidebar leaf was focused by the first click on a control. The old
 			// check refreshed on sidebar activation, replacing the clicked node
 			// before its click handler could run.
-			if (leaf?.view instanceof MarkdownView) void this.refresh();
+			const active = this.app.workspace.getActiveViewOfType(MarkdownView);
+			if (active?.file) void this.refresh();
 		}));
 		// A link can replace the file in the already-active leaf without an
 		// active-leaf-change event; file-open covers that same-leaf navigation.

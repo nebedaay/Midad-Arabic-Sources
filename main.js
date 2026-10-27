@@ -12988,8 +12988,9 @@ var AnnotationSidebarView = class extends import_obsidian11.ItemView {
   }
   async onOpen() {
     this.contentEl.addClass("mas-ann-sidebar");
-    this.registerEvent(this.app.workspace.on("active-leaf-change", (leaf) => {
-      if ((leaf == null ? void 0 : leaf.view) instanceof import_obsidian11.MarkdownView)
+    this.registerEvent(this.app.workspace.on("active-leaf-change", () => {
+      const active = this.app.workspace.getActiveViewOfType(import_obsidian11.MarkdownView);
+      if (active == null ? void 0 : active.file)
         void this.refresh();
     }));
     this.registerEvent(this.app.workspace.on("file-open", () => {
