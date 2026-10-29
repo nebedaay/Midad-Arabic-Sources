@@ -855,7 +855,7 @@ body .mas-managed {
 }
 .mas-manage__head {
     display: grid;
-    column-gap: 8px;
+    gap: 8px;
     padding: 4px;
     position: sticky;
     top: 0;
@@ -872,7 +872,7 @@ body .mas-managed {
 }
 .mas-manage__row {
     display: grid;
-    column-gap: 8px;
+    gap: 8px;
     align-items: center;
     padding: 3px 4px;
     border-radius: var(--radius-s);
