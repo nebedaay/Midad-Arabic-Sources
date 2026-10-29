@@ -27,8 +27,10 @@ from pathlib import Path
 VAULT = Path(os.environ.get("OBSIDIAN_VAULT", os.path.expanduser("~/Documents/Obsidian Vault")))
 DEFAULT_MANIFEST = ".midad-arabic-sources/source-imports.json"
 DEFAULT_ADOPTED = ".midad-arabic-sources/annotations/adopted.json"
-OLD_TRANSCRIPTIONS = "_2 Bibliographic notes/Arabic transcriptions"
-OLD_TRANSLATIONS = "_2 Bibliographic notes/Arabic translations"
+# No vault-specific layout is assumed; the previous paths come from the CLI
+# (the plugin passes them from its saved settings).
+OLD_TRANSCRIPTIONS = ""
+OLD_TRANSLATIONS = ""
 
 
 def norm(value: str) -> str:
@@ -79,14 +81,17 @@ def update_adopted(source_root: str, old_transcriptions: str, old_translations: 
     except Exception as e:
         print(f"  WARNING: could not read adopted registry: {e}")
         return
-    old_pairs = [
-        (f"{old_transcriptions}/", f"{source_root}/Transcriptions/"),
-        (f"{old_translations}/", f"{source_root}/Translations/"),
-        (f"{norm(old_transcriptions)}/", f"{source_root}/Transcriptions/"),
-        (f"{norm(old_translations)}/", f"{source_root}/Translations/"),
-        (f"{OLD_TRANSCRIPTIONS}/", f"{source_root}/Transcriptions/"),
-        (f"{OLD_TRANSLATIONS}/", f"{source_root}/Translations/"),
-    ]
+    old_pairs = []
+    if old_transcriptions:
+        old_pairs += [
+            (f"{old_transcriptions}/", f"{source_root}/Transcriptions/"),
+            (f"{norm(old_transcriptions)}/", f"{source_root}/Transcriptions/"),
+        ]
+    if old_translations:
+        old_pairs += [
+            (f"{old_translations}/", f"{source_root}/Translations/"),
+            (f"{norm(old_translations)}/", f"{source_root}/Translations/"),
+        ]
     notes = data.get("notes")
     if not isinstance(notes, dict):
         return
@@ -115,13 +120,11 @@ def update_annotation_store(source_root: str, old_annotation: str, old_transcrip
     root = VAULT / ".midad-arabic-sources" / "annotations"
     if not root.exists():
         return
-    pairs = [
-        (f"{norm(old_transcriptions)}/", f"{source_root}/Transcriptions/"),
-        (f"{norm(old_translations)}/", f"{source_root}/Translations/"),
-        (f"{norm(old_annotation)}/", f"{source_root}/Annotation Notes/"),
-        (f"{OLD_TRANSCRIPTIONS}/", f"{source_root}/Transcriptions/"),
-        (f"{OLD_TRANSLATIONS}/", f"{source_root}/Translations/"),
-    ]
+    pairs = [(f"{norm(old_annotation)}/", f"{source_root}/Annotation Notes/")]
+    if old_transcriptions:
+        pairs.append((f"{norm(old_transcriptions)}/", f"{source_root}/Transcriptions/"))
+    if old_translations:
+        pairs.append((f"{norm(old_translations)}/", f"{source_root}/Translations/"))
     changed = 0
     for path in root.rglob("*.json"):
         try:
@@ -214,8 +217,8 @@ def main() -> int:
     parser.add_argument("--old-installed-root", required=True)
     parser.add_argument("--old-source-root", default="")
     parser.add_argument("--old-annotation-notes", required=True)
-    parser.add_argument("--old-transcriptions", default=OLD_TRANSCRIPTIONS)
-    parser.add_argument("--old-translations", default=OLD_TRANSLATIONS)
+    parser.add_argument("--old-transcriptions", default="")
+    parser.add_argument("--old-translations", default="")
     parser.add_argument("--manifest", default=DEFAULT_MANIFEST)
     parser.add_argument("--update-settings", default="")
     parser.add_argument("--dry-run", action="store_true")

@@ -21,12 +21,13 @@ from pathlib import Path
 from datetime import datetime
 
 VAULT = Path(os.environ.get("OBSIDIAN_VAULT", os.path.expanduser("~/Documents/Obsidian Vault")))
-BIB = VAULT / "_2 Bibliographic notes"
+_LITERATURE_DIR = os.environ.get("MIDAD_LITERATURE_DIR", "").strip()
+BIB = VAULT / _LITERATURE_DIR if _LITERATURE_DIR else None
 
 # Destination folder for each document type.
 DEST_FOLDERS = {
-    "transcription": os.environ.get("MIDAD_TRANSCRIPTIONS_DIR", "_2 Bibliographic notes/Arabic transcriptions"),
-    "translation": os.environ.get("MIDAD_TRANSLATIONS_DIR", "_2 Bibliographic notes/Arabic translations"),
+    "transcription": os.environ.get("MIDAD_TRANSCRIPTIONS_DIR", "Transcriptions"),
+    "translation": os.environ.get("MIDAD_TRANSLATIONS_DIR", "Translations"),
 }
 
 # A trailing "(transcription...)" / "(translation...)" or "- transcription".
@@ -37,9 +38,21 @@ TYPE_SUFFIX = re.compile(
 )
 
 
+def _literature_notes():
+    """Candidate @notes: the configured folder, else a vault-wide search."""
+    if BIB and BIB.exists():
+        yield from BIB.glob("*.md")
+        return
+    for f in VAULT.rglob("@*.md"):
+        if any(part.startswith(".") for part in f.relative_to(VAULT).parts):
+            continue
+        yield f
+
+
 def find_zotero(citekey: str) -> Path | None:
     """Find the Zotero import note for a citekey."""
-    for f in BIB.glob("*.md"):
+    candidates = list(_literature_notes())
+    for f in candidates:
         if not f.name.startswith("@"):
             continue
         c = f.read_text(encoding="utf-8")
@@ -47,8 +60,9 @@ def find_zotero(citekey: str) -> Path | None:
         if f.stem == f"@{citekey}" or re.search(rf'^citekey:\s*"?{re.escape(citekey)}"?\s*$', c, re.M):
             return f
     # Try partial match
-    for f in BIB.glob(f"@{citekey}*.md"):
-        return f
+    for f in candidates:
+        if f.stem.startswith(f"@{citekey}"):
+            return f
     return None
 
 
@@ -300,8 +314,8 @@ def _collection_notes(citekey: str, doc_type: str, standalone: bool = False):
 
 def _write_list_property(citekey: str, prop: str, items: list) -> bool:
     """Replace the `prop:` YAML list on @citekey.md with `items`."""
-    ref = BIB / f"@{citekey}.md"
-    if not ref.exists():
+    ref = find_zotero(citekey)
+    if ref is None:
         return False
     text = ref.read_text(encoding="utf-8")
     if not text.startswith("---"):

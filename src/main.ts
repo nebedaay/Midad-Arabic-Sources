@@ -169,6 +169,7 @@ interface MidadArabicSourcesSettings {
 	// Gemini transcription/translation pipeline
 	pythonPath: string;
 	pipelineScript: string;
+	literatureNoteFolder: string;
 	geminiApiKey: string;
 	// General
 	sourceRoot: string;
@@ -543,6 +544,7 @@ const DEFAULT_SETTINGS: MidadArabicSourcesSettings = {
 	llmAssignments: { transliteration: "", transcription: "", translation: "" },
 	pythonPath: "",
 	pipelineScript: "scripts/midad-arabic-sources-pipeline.py",
+	literatureNoteFolder: "",
 	geminiApiKey: "",
 	sourceImportScript: "scripts/text-source-import.py",
 	sourceRoot: "Midad Arabic Sources",
@@ -1248,6 +1250,29 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		return `${vault}/${rel}`;
 	}
 
+	/**
+	 * Folder holding the `@citekey` literature notes. The explicit setting wins;
+	 * otherwise use ScholarWeft's own `literatureNoteFolder`, and failing that
+	 * leave it empty so the pipeline finds an `@citekey` note by name anywhere
+	 * in the vault. No vault-specific folder name is assumed.
+	 */
+	resolveLiteratureNotesFolder(): string {
+		const configured = (this.settings.literatureNoteFolder || "").trim();
+		if (configured) return normalizePath(configured);
+		const env = (process.env.MIDAD_LITERATURE_DIR || "").trim();
+		if (env) return normalizePath(env);
+		const vault = this.vaultPath();
+		if (!vault) return "";
+		const dataPath = `${vault}/${this.app.vault.configDir}/plugins/scholar-weft/data.json`;
+		try {
+			const data = JSON.parse(fs.readFileSync(dataPath, "utf8")) as { literatureNoteFolder?: unknown };
+			const value = data.literatureNoteFolder;
+			return typeof value === "string" ? normalizePath(value.trim()) : "";
+		} catch {
+			return "";
+		}
+	}
+
 	async runScript(scriptRel: string, args: string[], onEvent: (ev: PipelineEvent) => void): Promise<{ code: number; lines: string[] }> {
 		const vault = this.vaultPath();
 		const python = await this.resolvePython();
@@ -1275,6 +1300,9 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 					MIDAD_INSTALLED_ROOT: this.installedSourcesRoot(),
 					MIDAD_TRANSCRIPTIONS_DIR: this.transcriptionsFolder(),
 					MIDAD_TRANSLATIONS_DIR: this.translationsFolder(),
+					...(this.resolveLiteratureNotesFolder()
+						? { MIDAD_LITERATURE_DIR: this.resolveLiteratureNotesFolder() }
+						: {}),
 					MIDAD_CANONICAL_QURAN_DIR: this.canonicalQuranFolder(),
 					...(taskKey ? { GEMINI_API_KEY: taskKey } : {}),
 				},
@@ -5334,6 +5362,11 @@ class MidadArabicSourcesSettingTab extends PluginSettingTab {
 						name: "Pipeline script",
 						desc: "Path (relative to the vault) of the Midad Arabic Sources pipeline orchestrator.",
 						control: { type: "text", key: "pipelineScript" },
+					},
+					{
+						name: "Literature notes folder",
+						desc: "Folder containing the `@citekey` notes that the item route reads. Leave blank to use ScholarWeft's literatureNoteFolder, or to find the note by its @citekey name anywhere in the vault.",
+						control: { type: "text", key: "literatureNoteFolder", placeholder: "ScholarWeft setting / search the vault" },
 					},
 					{
 						name: "Gemini API key",

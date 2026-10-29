@@ -76,6 +76,7 @@ If a face is missing, rendering continues with the next one; nothing breaks. To 
 2. Start the transliteration server if you will romanize Arabic: run **Transliteration server…** from the command palette; it shows whether the service is running and gives one **Start** / **Stop** button. Restarting is only needed when the engine code changes — see [Transliteration](./transliteration.md).
 3. **Install some texts**: run **Manage text sources…** and pick works from a repository. See [Document import](./document-import.md).
 4. **Set the sources folder** under **General** if `Midad Arabic Sources` is not where you want the corpus. Every installed work goes into `<sources folder>/Installed Sources`.
+5. **Set the literature notes folder** under **Transcription and translation** if your `@citekey` notes are not in ScholarWeft’s folder. Leave it blank to use ScholarWeft’s own setting; with neither, the pipeline finds an `@citekey` note by name anywhere in the vault.
 
 ## The folder layout
 

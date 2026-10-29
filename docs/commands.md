@@ -66,3 +66,66 @@ See [Zotero export](./zotero.md).
 - **Send all installed sources to Zotero**
 - **Send selected sources to Zotero…**
 - **Send this source to Zotero**
+
+## From the command line
+
+The Python scripts behind the plugin can be run from a terminal — useful for batch work, a machine without Obsidian, or debugging a pipeline. Run them with the Python that has the dependencies (see [Dependencies](./dependencies.md)), either from the repository or from the deployed plugin folder:
+
+```shell
+cd "<vault>/<config folder>/plugins/midad-arabic-sources"
+export OBSIDIAN_VAULT="<vault>"
+export GEMINI_API_KEY="…"                 # transcription and translation
+export MIDAD_LITERATURE_DIR="<folder>"    # optional; otherwise ScholarWeft's folder, then a vault-wide @citekey search
+```
+
+`OBSIDIAN_VAULT` is only needed when the scripts are not inside the vault. Every command accepts `--help` for its full options.
+
+### Transliteration
+
+```shell
+python3 scripts/arabic-bw-transliterate.py -text "بسم الله الرحمن الرحيم" --engine bert
+python3 scripts/arabic-bw-transliterate.py -text "…" --engine bert --keep-case --name --sun-letters
+python3 scripts/arabic-bw-transliterate.py --llm --provider gemini --model gemini-3.5-flash-lite
+```
+
+`-text` takes the passage; omit it to read interactively. `--engine` is `bert` (default), `mle`, or `none`; `--keep-case`, `--name`, `--sun-letters`, and `--dotless-ya maqsura|ya` match the settings. `--llm` uses a provider directly (`gemini`, `deepseek`, or `openai`, with `--model`, `--base-url`, `--api-key`), or the resident server with `--server-url`. The resident service and its browser interface are started with `python3 scripts/transliterate-server.py --port 8756`.
+
+### Transcription
+
+```shell
+python3 scripts/midad-arabic-sources-pipeline.py transcribe --citekey KEY
+python3 scripts/midad-arabic-sources-pipeline.py transcribe --citekey pdf-my-book --standalone --pdf "/path/to/book.pdf"
+python3 scripts/midad-arabic-sources-pipeline.py transcribe --citekey KEY --pdf "/path/to/vol2.pdf::2" --volume 2
+```
+
+The first form resolves the item’s PDFs through the `@KEY` literature note, in the same way as **Transcribe this item’s PDF file(s)**. `--standalone` skips Zotero and takes `--pdf`; repeat `--pdf` for more files, and append `::N` to a path to mark its volume. `--model` overrides the Gemini model and `--prompt-file` a text-specific prompt.
+
+### Translation
+
+```shell
+python3 scripts/midad-arabic-sources-pipeline.py translate --citekey KEY
+python3 scripts/midad-arabic-sources-pipeline.py translate --citekey KEY --source "…/@KEY - transcription - vol. 2.md" --volume 2
+```
+
+With no `--source`, it translates the transcriptions it finds for the citekey. `--volume`, `--model`, and `--prompt-file` behave as in the dialog.
+
+### Inspection and reprocessing
+
+```shell
+python3 scripts/midad-arabic-sources-pipeline.py list-pdfs "…/@KEY.md"
+python3 scripts/midad-arabic-sources-pipeline.py list-transcriptions "…/@KEY.md"
+python3 scripts/midad-arabic-sources-pipeline.py list-archive
+python3 scripts/midad-arabic-sources-pipeline.py default-prompts
+python3 scripts/midad-arabic-sources-pipeline.py reprocess --zip "…/archive/@KEY - transcription files.zip"
+python3 scripts/midad-arabic-sources-pipeline.py resume --state ".midad-arabic-sources/jobs/….json"
+```
+
+### Text-source import
+
+```shell
+python3 scripts/text-source-import.py list
+python3 scripts/text-source-import.py fetch --key tafsir:ar-tafsir-al-jalalayn
+python3 scripts/text-source-import.py list --collection turath --language ar
+```
+
+`fetch` downloads the work and writes its render model under `.midad-arabic-sources/source-models/`; open Obsidian and run **Re-render imported sources** (or **Manage text sources…**) to render the notes.

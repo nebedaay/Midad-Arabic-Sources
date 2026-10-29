@@ -1,36 +1,34 @@
-# 0.1.2
+# 0.1.3
 
-**Midad Arabic Sources** is now submitted for the Obsidian community directory. Install it from **Settings → Community plugins → Browse** once the listing is live; **BRAT** remains the beta channel while the submission is reviewed.
+This patch makes the Zotero literature-notes folder configurable instead of assuming a vault-specific path, and adds a command-line guide for transcription, translation, transliteration, and text-source import. It supersedes 0.1.2; install it the same way.
 
-### Install
+### Literature notes folder
 
-- **Community plugins (recommended):** Settings → Community plugins → Browse → search **Midad Arabic Sources** → Install → Enable.
-- **BRAT (latest beta):** add `nebedaay/Midad-Arabic-Sources` to BRAT’s beta plugin list.
-- **Manual:** download `main.js`, `manifest.json`, and `styles.css` from this release into `<config folder>/plugins/midad-arabic-sources/`.
+- **Transcription and translation → Literature notes folder** sets where the item route looks for `@citekey` notes.
+- Leave it blank and Midad uses **ScholarWeft’s `literatureNoteFolder`**. If that is unavailable, it finds the `@<citekey>` note by name anywhere in the vault instead of falling back to a hard-coded folder.
+- The pipeline scripts accept `MIDAD_LITERATURE_DIR` and no longer assume `_2 Bibliographic notes`. The transcription and translation guides now describe the setting rather than a personal folder.
+- **Transcribe this item’s PDF file(s)** and **Translate this item’s transcription(s)** still require a literature note; **Transcribe a PDF…** remains the route without Zotero.
 
-The plugin is desktop-only and requires Obsidian 1.13 or later. Python 3 is needed for importing, transcription, translation, and transliteration; CAMeL Tools and a Gemini key are needed only for those features. The automatic transcription/translation route expects a `@citekey` Zotero literature note created by **ScholarWeft** or **ZotLit**; **Transcribe a PDF…** works without one.
+### Command line
 
-### Qur'ān presentation
+The **Commands** guide now has a **From the command line** section covering:
 
-- Qur'ān notes now use two explicit classes, **`quran-ar`** (Arabic, RTL) and **`quran-en`** (translations, LTR). Direction, face, size, and leading no longer leak between them.
-- English translations have their own template and layout: the emblem is on the left, the Arabic reference sits under it without the extra heading or “ : ”, and the translation runs beside it at normal English size. Single-line verses reserve just enough height for the link.
-- The gilded fill is shared by Arabic verses, English translations, and `.quran-quote` spans; only RTL quotes get the larger Qur'ān size and leading.
-- The verse marker is one fixed box per verse, with the number and ۝ emblem flex-centred. `--quran-number-size`, `--quran-ar-marker-shift`, `--quran-en-marker-shift`, and `--quran-number-shift` control size and vertical alignment. Heading fold chevrons and aliased-link indicators are suppressed in Qur'ān notes.
-- Fonts are **local-only**, with per-platform fallback chains (Noto Serif, Scheherazade New / Noto Naskh Arabic, KFGQPC HAFS / Amiri Quran). No font is downloaded.
+- transliteration (`arabic-bw-transliterate.py`, the server, and the browser interface);
+- transcription (`midad-arabic-sources-pipeline.py transcribe`, item and standalone);
+- translation (`… translate`);
+- listing, reprocessing, resuming, prompt inspection, and text-source import.
 
-### Sidebar
+It lists the required `OBSIDIAN_VAULT`, `GEMINI_API_KEY`, and optional `MIDAD_LITERATURE_DIR` environment variables.
 
-- The Midad sidebar follows the active note: a Midad note selects its tab; any other note restores the last non-Midad right-sidebar tab — remembered across plugin reloads — or another open right tab.
-- The right split is collapsed only when this plugin expanded it and there is no other tab. An already-open sidebar is never collapsed, and a manually opened Midad sidebar stays until the next Midad note.
-- Switching tabs no longer steals editor focus, and same-tab note navigation (`file-open`) is handled as well as tab changes.
+### Documentation and installation
 
-### Sources and templates
+- Installation in the README and Setup guide now presents **Settings → Community plugins → Browse** as the default route, with **BRAT** as the alternative for the latest beta and manual installation last.
+- The transcription and translation guides explain that the automatic route expects a ScholarWeft or ZotLit `@citekey` literature note; Midad does not create those notes.
+- The Zotero guide gains a short **Literature notes** section, and the release notes and in-app documentation were rebuilt.
 
-- `midad-source` and `midad-key` are retired; a note’s source is derived from `midad-id` / `midad-kind` / `midad-work`, and a new `remove` merge strategy deletes the old properties on re-render.
-- Qur'ān translations use a new `translation-note.eta.md`; `source-note.eta.md` remains the tafsīr template, so editing one no longer re-renders the other.
-- Template auto-update is fixed: the translation template is hashed and attributed to the correct unit kind (`surah`), so a reload applies changes without a manual re-render. Registry/MOC rebuilds and the adopted-note scan were moved off the startup hot path.
+### Also in 0.1.2
 
-### Review and maintenance
-
-- Cleared the directory review’s high-severity findings (remote font URLs) and its `!important`, `:has()`, hard-coded config-folder, and `builtin-modules` warnings; the remaining warnings are the deliberate `JsonObject` `any` and the desktop pipeline’s filesystem/shell access.
-- Annotation fixes carried in this release include comment/callout colour and radius treatment, block IDs, and sidebar navigation/index refresh.
+- `quran-ar` / `quran-en` styling, the English translation layout, the shared gilded fill, local-only fonts, and the verse-marker controls.
+- The note-following Midad sidebar, with the last right-sidebar tab remembered across reloads.
+- Retired `midad-source` / `midad-key`, the separate translation template, and the template auto-update repair.
+- The Obsidian review fixes: no remote font URLs, no `!important` / `:has()` in the plugin CSS, `Vault.configDir` for the plugin folder, and no `builtin-modules` dependency.

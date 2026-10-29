@@ -52,9 +52,10 @@ def _find_vault() -> Path:
 VAULT = _find_vault()
 # The plugin's scripts live together, wherever they are deployed.
 SCRIPTS = Path(__file__).resolve().parent
-BIB = VAULT / "_2 Bibliographic notes"
-TRANSC_DIR = VAULT / os.environ.get("MIDAD_TRANSCRIPTIONS_DIR", "_2 Bibliographic notes/Arabic transcriptions")
-TRANS_DIR = VAULT / os.environ.get("MIDAD_TRANSLATIONS_DIR", "_2 Bibliographic notes/Arabic translations")
+_LITERATURE_DIR = os.environ.get("MIDAD_LITERATURE_DIR", "").strip()
+BIB = VAULT / _LITERATURE_DIR if _LITERATURE_DIR else None
+TRANSC_DIR = VAULT / os.environ.get("MIDAD_TRANSCRIPTIONS_DIR", "Transcriptions")
+TRANS_DIR = VAULT / os.environ.get("MIDAD_TRANSLATIONS_DIR", "Translations")
 CACHE = VAULT / ".midad-arabic-sources"
 ARCHIVE_DIR = CACHE / "archive"
 OLD_ARCHIVE = VAULT / "AI OS/Arabic Transcriptions/Arabic OCR archive"
@@ -67,6 +68,20 @@ POLL_SECONDS = 30
 
 WORK_DIR = CACHE / "work"
 JOBS_DIR = CACHE / "jobs"
+
+
+def find_literature_note(citekey: str) -> Path | None:
+    """The @citekey literature note: the configured folder, else anywhere."""
+    name = f"@{citekey}.md"
+    if BIB:
+        direct = BIB / name
+        if direct.exists():
+            return direct
+    for candidate in VAULT.rglob(name):
+        if any(part.startswith(".") for part in candidate.relative_to(VAULT).parts):
+            continue
+        return candidate
+    return None
 
 _LOG_PATH = None
 _STATE_PATH = None
@@ -472,9 +487,9 @@ def cmd_transcribe(args) -> int:
         if standalone:
             fail("No PDF file supplied for standalone transcription.")
             return 1
-        note = BIB / f"@{citekey}.md"
-        if not note.exists():
-            fail(f"Literature note not found: {note}")
+        note = find_literature_note(citekey)
+        if note is None:
+            fail(f"Literature note not found: @{citekey}.md (set the literature-notes folder, or use Transcribe a PDF)")
             return 1
         _, items = resolve_pdfs(note)
         specs = [(i["path"], i.get("volume")) for i in items if i["exists"]]

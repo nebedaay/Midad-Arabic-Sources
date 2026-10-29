@@ -1,4 +1,9 @@
+
 # Zotero export
+
+## Literature notes
+
+This plugin is optimized for **[ScholarWeft](https://community.obsidian.md/plugins/scholar-weft)**’s imported Zotero literature notes using the standard ScholarWeft template. To associate transcriptions and translations with a Zotero item, import its literature note into Obsidian with ScholarWeft, then run the commands to transcribe and translate its PDF attachments (see [Transcription](./transcription.md)).
 
 Installed works can be sent to Zotero as `book` items, each tagged **Midad Arabic Sources** and filed in a collection of that name. Only new or changed items are sent; an item the plugin sent before is **updated in place**, never duplicated.
 

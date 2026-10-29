@@ -6,7 +6,7 @@
 
 ## Literature notes and Zotero
 
-The automated item route assumes a **literature note** for the Zotero item: a Markdown note named `@<citekey>` in `_2 Bibliographic notes`, carrying the item’s `citekey`/`zotero-key` and its `attachments:` (or a cached Zotero path). Normally **[ScholarWeft](https://community.obsidian.md/plugins/scholar-weft)** or **[ZotLit](https://github.com/aidenlx/zotlit)** creates it from Zotero. ScholarWeft’s default template creates exactly the metadata the plugin needs. Midad does not import references or create these notes itself, and it does not create a Zotero item for a PDF; it only finds the PDFs described by an existing note.
+The automated item route assumes a **literature note** for the Zotero item: a Markdown note named `@<citekey>`, carrying the item’s `citekey`/`zotero-key` and its `attachments:` (or a cached Zotero path). Midad looks for it in the folder set under **Transcription and translation → Literature notes folder**; when that setting is blank it uses ScholarWeft’s own `literatureNoteFolder`, and if neither is available it finds the `@<citekey>` note by name anywhere in the vault. Normally **[ScholarWeft](https://community.obsidian.md/plugins/scholar-weft)** or **[ZotLit](https://github.com/aidenlx/zotlit)** creates it from Zotero. ScholarWeft’s default template creates exactly the metadata the plugin needs. Midad does not import references or create these notes itself, and it does not create a Zotero item for a PDF; it only finds the PDFs described by an existing note.
 
 PDF resolution for that route tries the Zotero local API, the ScholarWeft `zlinks` cache, and `~/Zotero/storage` in that order. If you have no literature note (or no Zotero), use **Transcribe a PDF…**, which needs no citekey and writes a `mas-` note instead.
 
@@ -79,4 +79,4 @@ Each job writes a log and a state file under `.midad-arabic-sources/jobs/`. The 
 - Python 3 with `pymupdf`, `requests`, and `google-genai`.
 - The PDFs themselves: for **Transcribe this item’s PDF file(s)**, a `@citekey` literature note (from ScholarWeft or ZotLit) and the item’s Zotero attachments, resolved via the local Zotero API, the ScholarWeft `zlinks` cache, or the Zotero storage folder; for **Transcribe a PDF…**, a PDF chosen directly from disk.
 
-See [Dependencies](./dependencies.md) for the install lines, and [Translation](./translation.md) for translating a finished transcription.
+See [Dependencies](./dependencies.md) for the install lines, [Translation](./translation.md) for translating a finished transcription, and [Commands → From the command line](./commands.md#from-the-command-line) to run the pipeline from a terminal.

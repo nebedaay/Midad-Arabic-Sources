@@ -82,4 +82,4 @@ Turn it on per call with **Use LLM** in the transliteration dialog. The LLM path
 
 ## The browser interface
 
-The server serves a self-contained interface at `http://127.0.0.1:8756/`. Arabic goes on the right, the result on the left, with route (rule engine or LLM) and the same options as the commands. Unknown terms are listed below the result with an editable romanization and an **Add** button that writes to the lexicon and refreshes the result in place. It is handy for working outside Obsidian, or for testing after an engine change.
+The server serves a self-contained interface at `http://127.0.0.1:8756/`. Arabic goes on the right, the result on the left, with route (rule engine or LLM) and the same options as the commands. Unknown terms are listed below the result with an editable romanization and an **Add** button that writes to the lexicon and refreshes the result in place. It is handy for working outside Obsidian, or for testing after an engine change. The same script also has a command-line interface; see [Commands → From the command line](./commands.md#from-the-command-line).
