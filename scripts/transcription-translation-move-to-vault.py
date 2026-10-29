@@ -195,7 +195,6 @@ midad-up:
 {chr(10).join(mas_up_items)}
 midad-id: "{_yaml_quote(mas_id)}"
 midad-kind: "{doc_type}"
-midad-source: "{_yaml_quote(source_id)}"
 midad-work: "{_yaml_quote(mas_work)}"
 midad-unit: "{("vol." + str(volume)) if volume else "note"}"
 title: "{_yaml_quote(title)}"

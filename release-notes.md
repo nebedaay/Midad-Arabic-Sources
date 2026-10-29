@@ -1,27 +1,36 @@
-This release refreshes the documentation and release notes that ship with **Midad Arabic Sources**. Plugin behavior is unchanged from 0.1.0; the bundled in-app documentation and repository guides now match the current sidebar, annotation, navigation, and annotation-note behavior.
+# 0.1.2
 
-### Documentation
+**Midad Arabic Sources** is now submitted for the Obsidian community directory. Install it from **Settings → Community plugins → Browse** once the listing is live; **BRAT** remains the beta channel while the submission is reviewed.
 
-- The README and the Annotations, Commands, and Templates guides now describe the Navigation/Annotations sidebar tabs, compact annotation counts, foldable child lists, Live Preview resize handles, atomic wikilink selections, and the white-page quote layout in annotation notes.
-- The release notes now cover the annotation-note presentation and the current navigation model.
-- The bundled documentation embedded in `main.js` has been rebuilt from the revised pages.
+### Install
 
-### 0.1.0 feature set
+- **Community plugins (recommended):** Settings → Community plugins → Browse → search **Midad Arabic Sources** → Install → Enable.
+- **BRAT (latest beta):** add `nebedaay/Midad-Arabic-Sources` to BRAT’s beta plugin list.
+- **Manual:** download `main.js`, `manifest.json`, and `styles.css` from this release into `<config folder>/plugins/midad-arabic-sources/`.
 
-- **Text-source import:** catalog-driven acquisition and rendering for tafsīr, Qurʾān translations and riwāyāt, ḥadīth collections, Hans Wehr, Lane, and Turath.io books. Generated content lives in a managed region, so re-rendering preserves your edits.
-- **Hierarchy and MOCs:** Arabic-first source MOCs, topic and repository indexes, a configurable source root, and a sidebar Navigation tab built from `midad-up` parents, siblings, sections, and child notes.
-- **Annotations:** select text in Live Preview or Reading view, choose a colour and comment, and keep annotations separate from the generated source. Margin icons, comment tooltips, annotation notes, source-annotation MOCs, orphan detection and re-anchoring, archive/restore, and copy-with-annotations are included.
-- **Annotation editing:** caret/context-menu commands, selection-based resizing, and draggable oval handles in Live Preview. Wikilinks are treated as atomic selections, and legacy partial-link annotations are widened automatically.
-- **Sidebar:** annotation cards with rendered Markdown quotes and links, `midad-up` navigation for every note, Navigation and Annotations tabs, per-note annotation counts with comment icons, and a foldable current-note child list.
-- **Annotation notes:** light blue callouts with the comment first in a colour-gradient inset, each quote on a white inset page with highlighted text, plus dates, a valid block ID, and a user-maintained notes area.
-- **Transcription and translation:** Gemini OCR for Zotero PDFs or standalone PDFs, page-separated Arabic output, poetry and Qurʾān post-processing, reusable prompts, and translation of finished transcriptions.
-- **Transliteration:** CAMeL-backed selection and note romanization through a resident local service, with optional LLM configurations.
-- **Zotero export:** Local API, Web API, or CSL-JSON export with update-in-place support.
+The plugin is desktop-only and requires Obsidian 1.13 or later. Python 3 is needed for importing, transcription, translation, and transliteration; CAMeL Tools and a Gemini key are needed only for those features. The automatic transcription/translation route expects a `@citekey` Zotero literature note created by **ScholarWeft** or **ZotLit**; **Transcribe a PDF…** works without one.
 
-### Install or update
+### Qur'ān presentation
 
-Use [BRAT](https://github.com/TfTHacker/obsidian42-brat) with `nebedaay/Midad-Arabic-Sources`, or download `main.js`, `manifest.json`, and `styles.css` from this release and place them in `.obsidian/plugins/midad-arabic-sources/`.
+- Qur'ān notes now use two explicit classes, **`quran-ar`** (Arabic, RTL) and **`quran-en`** (translations, LTR). Direction, face, size, and leading no longer leak between them.
+- English translations have their own template and layout: the emblem is on the left, the Arabic reference sits under it without the extra heading or “ : ”, and the translation runs beside it at normal English size. Single-line verses reserve just enough height for the link.
+- The gilded fill is shared by Arabic verses, English translations, and `.quran-quote` spans; only RTL quotes get the larger Qur'ān size and leading.
+- The verse marker is one fixed box per verse, with the number and ۝ emblem flex-centred. `--quran-number-size`, `--quran-ar-marker-shift`, `--quran-en-marker-shift`, and `--quran-number-shift` control size and vertical alignment. Heading fold chevrons and aliased-link indicators are suppressed in Qur'ān notes.
+- Fonts are **local-only**, with per-platform fallback chains (Noto Serif, Scheherazade New / Noto Naskh Arabic, KFGQPC HAFS / Amiri Quran). No font is downloaded.
 
-The plugin is desktop-only and requires Obsidian 1.13 or later. Python 3 is required for local import, transcription, and transliteration support; CAMeL Tools and a Gemini API key are needed only for those features.
+### Sidebar
 
-See the [README](https://github.com/nebedaay/Midad-Arabic-Sources#readme) and the bundled documentation for setup details.
+- The Midad sidebar follows the active note: a Midad note selects its tab; any other note restores the last non-Midad right-sidebar tab — remembered across plugin reloads — or another open right tab.
+- The right split is collapsed only when this plugin expanded it and there is no other tab. An already-open sidebar is never collapsed, and a manually opened Midad sidebar stays until the next Midad note.
+- Switching tabs no longer steals editor focus, and same-tab note navigation (`file-open`) is handled as well as tab changes.
+
+### Sources and templates
+
+- `midad-source` and `midad-key` are retired; a note’s source is derived from `midad-id` / `midad-kind` / `midad-work`, and a new `remove` merge strategy deletes the old properties on re-render.
+- Qur'ān translations use a new `translation-note.eta.md`; `source-note.eta.md` remains the tafsīr template, so editing one no longer re-renders the other.
+- Template auto-update is fixed: the translation template is hashed and attributed to the correct unit kind (`surah`), so a reload applies changes without a manual re-render. Registry/MOC rebuilds and the adopted-note scan were moved off the startup hot path.
+
+### Review and maintenance
+
+- Cleared the directory review’s high-severity findings (remote font URLs) and its `!important`, `:has()`, hard-coded config-folder, and `builtin-modules` warnings; the remaining warnings are the deliberate `JsonObject` `any` and the desktop pipeline’s filesystem/shell access.
+- Annotation fixes carried in this release include comment/callout colour and radius treatment, block IDs, and sidebar navigation/index refresh.

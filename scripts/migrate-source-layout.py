@@ -165,7 +165,10 @@ def update_markdown_links(source_root: str, old_source_root: str, old_installed:
     changed = 0
     for path in VAULT.rglob("*.md"):
         rel = path.relative_to(VAULT).as_posix()
-        if rel.startswith((".obsidian/", ".midad-arabic-sources/", "tmp/", "src/", "AI OS/")):
+        # Skip every dot-folder (Obsidian's config folder can have any name)
+        # and the vault's own working folders.
+        first = rel.split("/", 1)[0]
+        if first.startswith(".") or first in {"tmp", "src", "AI OS"}:
             continue
         try:
             text = path.read_text(encoding="utf-8")

@@ -38,13 +38,13 @@ from pathlib import Path
 from urllib.parse import unquote, urlparse
 
 def _find_vault() -> Path:
-    """Vault root: the OBSIDIAN_VAULT env var, else the nearest ancestor with .obsidian."""
+    """Vault root: the OBSIDIAN_VAULT env var, else the nearest ancestor with Midad state."""
     env = os.environ.get("OBSIDIAN_VAULT")
     if env:
         return Path(env)
     here = Path(__file__).resolve()
     for parent in [here.parent, *here.parents]:
-        if (parent / ".obsidian").is_dir():
+        if (parent / ".midad-arabic-sources").is_dir():
             return parent
     return here.parent.parent
 

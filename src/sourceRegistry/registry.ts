@@ -1,5 +1,5 @@
 import { App, normalizePath, TFile } from "obsidian";
-import { sourceIdFromYaml } from "../sourceIds";
+import { sourceIdFromYaml, sourceOfFrontmatter } from "../sourceIds";
 
 export const SOURCE_REGISTRY = ".midad-arabic-sources/sources.json";
 
@@ -92,7 +92,7 @@ export async function buildSourceRegistry(app: App, paths: RegistryPaths): Promi
 			kind: sourceKind(stringField(frontmatter, "midad-kind")),
 			title: stringField(frontmatter, "title") || file.basename,
 			path: file.path,
-			source: sourceIdFromYaml(stringField(frontmatter, "midad-source")),
+			source: sourceOfFrontmatter(frontmatter),
 			workKey: sourceIdFromYaml(stringField(frontmatter, "midad-work")) || undefined,
 			unitKey: stringField(frontmatter, "midad-unit") || undefined,
 			status: stringField(frontmatter, "status") || undefined,

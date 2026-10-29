@@ -13,7 +13,8 @@ Because the model is cached, editing a template and running **“Re-render impor
 
 1. In Midad Arabic Sources settings, set a **Template folder** (for example `Templates`).
 2. Run the command **“Copy import templates to vault”**. This copies these files into `<Template folder>/midad-arabic-sources-import-templates/`:
-   - `source-note.eta.md` — one note per sūrah (tafsīr, Qur’ān translations)
+   - `source-note.eta.md` — one note per sūrah of a commentary (tafsīr)
+   - `translation-note.eta.md` — one note per sūrah of a Qur’ān translation
    - `hadith-note.eta.md` — one note per chapter (kitāb) of a ḥadīth collection
    - `quran-note.eta.md` — one note per sūrah of a Qur’ān riwāya (Qur’ān text)
    - `dictionary-note.eta.md` — one note per dictionary root (lexicons)
@@ -33,7 +34,7 @@ Every category MOC points up to one **parent note** (the setting **“Sources pa
 
 Top-level source notes (work hubs, MOCs, and transcription/translation parents) carry `[[Midad Arabic Sources]]` in `midad-up`, so the corpus is traceable without giving every individual sūra, chapter, root, or volume note a backlink to the parent.
 
-All plugin-managed frontmatter properties use the `midad-` prefix and are written together at the start of the generated property block (`midad-up`, `midad-id`, `midad-kind`, `midad-source`, `midad-work`, `midad-unit`, `midad-key`, `midad-note`). The plain `up` property is never generated, so it remains available for the user.
+All plugin-managed frontmatter properties use the `midad-` prefix and are written together at the start of the generated property block (`midad-up`, `midad-id`, `midad-kind`, `midad-note`; transcriptions and translations add `midad-work` and `midad-unit`). The plain `up` property is never generated, so it remains available for the user. `midad-source` and `midad-key` were retired: the source a note belongs to is derived from `midad-id` / `midad-kind` / `midad-work`, and the raw work key is the `midad-id` without its `repo/` prefix.
 
 Language sections in every category and repository MOC use one shared order: **Arabic Texts** first, then any other languages alphabetically, then **English Texts**. This keeps bilingual works and the consolidated Qurʾān MOC consistent.
 
@@ -42,7 +43,7 @@ A work with a single unit — for example a one-chapter ḥadīth book such as a
 ## Heading convention
 
 - **A numbered unit is an H1.** A Qur’ān verse or a ḥadīth number is always `# <number>` — in sūrah notes, riwāya notes, and the single-unit hub alike.
-- **The link to the canonical Qur’ān is an H2.** Sūrah notes use `## [[002 Al-Baqarah#2|البقرة : ٢]]`; riwāya notes use the Ḥafṣ correspondence `## [[002 Al-Baqarah#3|Ḥafṣ 3]]`.
+- **The link to the canonical Qur’ān is an H2 in Arabic notes.** Sūrah notes use `## [[002 Al-Baqarah#2|البقرة : ٢]]`; riwāya notes use the Ḥafṣ correspondence `## [[002 Al-Baqarah#3|Ḥafṣ 3]]`. **English translations** put the reference in the verse H1 (`# 2 [[…|البقرة ٢]]`) so CSS can place it under the emblem in the left gutter without adding a separate heading block or the “ : ”.
 - **A content note’s `title` is its own title, not its file name.** A file name must be unique across the vault, so it carries the work (`Hans Wehr Dictionary - ز z`, `Tafsīr al-Jalālayn - 002 Al-Baqarah`) and the work’s folder/hub carries its **repository qualifier** (`Tafsīr al-Ṭabarī (tafsir_api)`), so two editions of one work can be installed side by side; a work known to exist only once across the imported repositories (the two dictionaries, for now) is flagged `unique` and keeps its bare folder name. `title:` and the hub/MOC link aliases stay clean (the book title for a work, the chapter heading for a chapter); the work is already named by `midad-up`, so `title` is what a table of contents would print — the chapter (`title: ز z`, `title: 2 Al-Baqarah`, `title: 1 Revelation`), never `<work> - <unit>`. A title is for viewing, so a numeric prefix drops its leading zeros (`2 Al-Baqarah`); the *file name* keeps them, because that is what makes the sūra notes sort. A letter-index page is labelled with the letter and its romanized equivalent (`ز z`), the same way a definition page carries both.
 - **A link that points into a work names the note’s own title, not its file name.** An MOC or hub is outside the context of the notes it lists, so its links carry an alias that drops the work title and any other classifying prefix: the hub lists `- [[Lane's Lexicon - ا ā|ا ā]] — 182`, and a letter index lists `- [[LL 3 اب abba|اب abba]]`. A dictionary entry’s link also drops the `LL`/`HW` id, which the digitisation added rather than the book. The file name stays unique across the vault; only the *display* is the title proper. (The `title` property follows the same rule from the other side: a note’s own `title` is its chapter, never `<work> - <chapter>`.)
 - **A content note carries no title/chapter heading.** The work (or ḥadīth chapter) name lives in the `title` property, the file name, and `midad-up` — so it is not repeated as an H1. Ḥadīth chapter notes therefore title as just the chapter (`title: 1 Revelation`) and their `#` headings are the ḥadīth numbers.
@@ -74,7 +75,7 @@ Every template receives a data object. The engine destructures it for you, so yo
 
 | Field | Example | Notes |
 | --- | --- | --- |
-| `key` | `tafsir:ar-tafsir-al-jalalayn` | internal `<collection>:<id>`; written to YAML as `midad-key: tafsir/ar-tafsir-al-jalalayn` |
+| `key` | `tafsir:ar-tafsir-al-jalalayn` | internal `<collection>:<id>`; the hub's `midad-id` writes it as `repo/tafsir/ar-tafsir-al-jalalayn` |
 | `collection` | `tafsir` | `tafsir`, `tafsir-qul`, `quran`, `hadith`, `quran-text`, `dictionary`, `turath` |
 | `collection_label` | `Qurʾān commentaries (tafsīr)` | for the import modal |
 | `id` | `ar-tafsir-al-jalalayn` | source id/slug |
@@ -92,7 +93,7 @@ Every template receives a data object. The engine destructures it for you, so yo
 | `language` | `ar` | primary language code |
 | `languages` | `["ar", "en"]` | every language the work contains (ḥadīth are bilingual) |
 | `language_links` | `["Arabic", "English"]` | the `language:` property (`[[Arabic]]` alone, or a list) |
-| `cssclass` | `tafsir` | drives CSS (`quran`, `tafsir`, `hadith`, …) |
+| `cssclass` | `tafsir` | drives CSS (`tafsir`, `hadith`, …); Qur'ān notes use `quran-ar` (Arabic, RTL) or `quran-en` (translation, LTR), so each direction, face, size, and leading is set independently |
 | `moc` | `Tafsīr Sources` | category MOC note name |
 | `moc_sections` | `["Arabic Texts", …]` | MOC headings, derived from `languages` |
 | `up` | `["[[Tafsīr Sources]]"]` | internal model field; rendered as `midad-up` |
@@ -240,7 +241,7 @@ Re-rendering is non-destructive:
 - **`related:`** is declared with `merge: 'keep'`: the template inserts it once (empty), then your value always wins. Use it for topics you want linked.
 - **`updated:`** is the volatile render timestamp; it is ignored when deciding whether a re-render actually changed anything.
 
-Per-property merge strategies: `replace` (default — the template wins), `append` (union with your list), `keep` (write once, then never touch), and `subtract` (migration only).
+Per-property merge strategies: `replace` (default — the template wins), `append` (union with your list), `keep` (write once, then never touch), `subtract` (migration only), and `remove` (retirement only — declare a retired property with an empty value and it is deleted on the next re-render).
 
 ## Auto-update when a template changes
 

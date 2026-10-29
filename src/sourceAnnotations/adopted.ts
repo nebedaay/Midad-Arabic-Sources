@@ -43,6 +43,10 @@ function baseName(path: string): string {
 }
 
 /** `@citekey - transcription - v. 4 - Gemini` → its parts. */
+/** Filenames Midad's pipeline can have produced; anything else is skipped
+ *  before the metadata cache is consulted. */
+const KNOWN_NOTE_NAME = /^(@[^ ]+|mas-[^ ]+)\s+-\s+(?:transcription|translation)(?:\s|$)/i;
+
 function parseKnownNote(path: string, title?: string): {
 	kind: AdoptedKind;
 	sourceKey: string;
@@ -139,9 +143,12 @@ export class AdoptedNotesRegistry {
 			: null;
 	}
 
-	private async registerFile(file: TFile): Promise<boolean> {
+	private registerFile(file: TFile): boolean {
 		const path = normalizePath(file.path);
 		if (this.entries.has(path)) return false;
+		// Cheap filename gate before touching the metadata cache: on a large vault
+		// this scan sees tens of thousands of notes and almost none are ours.
+		if (!KNOWN_NOTE_NAME.test(file.basename)) return false;
 		const frontmatter = this.app.metadataCache.getFileCache(file)?.frontmatter as Record<string, unknown> | undefined;
 		const title = typeof frontmatter?.title === "string" ? frontmatter.title : "";
 		const parsed = parseKnownNote(path, title);
@@ -224,8 +231,10 @@ export class AdoptedNotesRegistry {
 		for (const file of this.app.vault.getMarkdownFiles()) {
 			// Scan the whole vault, not only the pipeline's usual folder, so a note
 			// moved while Obsidian was closed is still recognised by its filename.
+			// `registerFile` is synchronous and gates on the name first, so this is
+			// one regex per file rather than a metadata lookup for all 20k+ notes.
 			try {
-				if (await this.registerFile(file)) changed = true;
+				if (this.registerFile(file)) changed = true;
 			} catch { /* skip unreadable notes */ }
 		}
 		if (changed) await this.save();
@@ -233,7 +242,7 @@ export class AdoptedNotesRegistry {
 	}
 
 	async registerNewFile(file: TFile): Promise<boolean> {
-		const changed = await this.registerFile(file);
+		const changed = this.registerFile(file);
 		if (changed) await this.save();
 		return changed;
 	}

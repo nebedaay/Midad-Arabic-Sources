@@ -1,59 +1,125 @@
 /* Midad Arabic Sources — merged styles.
-   Consolidates .obsidian/snippets/Arabic and Quran.css into the plugin so it
+   Consolidates the old "Arabic and Quran" CSS snippet into the plugin so it
    ships with the plugin. Retire the snippet once you have verified this. */
 
-/* FONTS — loaded online (Fontsource on jsDelivr) so every user gets the same
-   faces without installing anything. Each import declares `unicode-range`
-   subsets, so a Latin family placed first leaves the Arabic codepoints to the
-   Arabic family after it — no custom @font-face plumbing needed.
-   (@import must precede every other rule in the file.) */
-@import url("https://cdn.jsdelivr.net/npm/@fontsource/noto-serif/400.css");
-@import url("https://cdn.jsdelivr.net/npm/@fontsource/noto-serif/700.css");
-@import url("https://cdn.jsdelivr.net/npm/@fontsource/amiri-quran/400.css");
-@import url("https://cdn.jsdelivr.net/npm/@fontsource/scheherazade-new/400.css");
-@import url("https://cdn.jsdelivr.net/npm/@fontsource/scheherazade-new/700.css");
-@import url("https://cdn.jsdelivr.net/npm/@fontsource/noto-naskh-arabic/400.css");
-@import url("https://cdn.jsdelivr.net/npm/@fontsource/noto-naskh-arabic/700.css");
+/* FONTS — nothing is downloaded. The plugin names the faces it was designed
+   with, then a long per-platform fallback chain, so a vault whose user has
+   installed none of them still renders Latin, Arabic, and Qur'ānic text in a
+   system face. Install the recommended fonts for the intended look; see
+   docs/setup.md → Fonts. */
 
 /* Qur'ān text and the ۝ end-of-āya glyph. Each face is range-scoped, so Latin
-   (transliteration, digits) renders in Noto Serif while the Arabic stays in the
-   Qur'ān face. The Arabic face is a fallback chain:
-     1. a locally installed KFGQPC Uthmanic Script HAFS (the vault's default);
-     2. the same face online, from a pinned npm package on jsDelivr;
-     3. the online Amiri Quran.
-   A `src` list is a fallback chain — the browser takes the first entry that
-   resolves — so every machine gets the KFGQPC hand, and one with no network
-   still falls back cleanly. (The npm package's own CSS is deliberately NOT
-   imported: it declares `font-family: Arabic`, which would hijack the Arabic
-   family used for RTL text.) */
+   (transliteration, digits) renders in a Latin face while the Arabic stays in
+   the Qur'ān face. `local()` never touches the network: if no listed face is
+   installed, this @font-face simply has no source and the next family in
+   --quran-font is used. */
 @font-face {
     font-family: 'mas-quran';
     src: local("Noto Serif"), local("NotoSerif-Regular"),
-         url("https://cdn.jsdelivr.net/npm/@fontsource/noto-serif/files/noto-serif-latin-400-normal.woff2") format("woff2");
+         local("Charter"), local("Georgia"), local("Times New Roman");
     unicode-range: U+0000-024F, U+1E00-1EFF, U+0250-02AF; /* Latin / transliteration */
 }
 @font-face {
     font-family: 'mas-quran';
-    src: local("KFGQPC Uthmanic Script HAFS"), local("KFGQPCUthmanicScriptHAFS"),
-         url("https://cdn.jsdelivr.net/npm/kfgqpc-uthmanic-script-hafs-regular@1.0.0/arabic.otf") format("opentype"),
-         url("https://cdn.jsdelivr.net/npm/@fontsource/amiri-quran/files/amiri-quran-arabic-400-normal.woff2") format("woff2");
+    src: local("KFGQPC Uthmanic Script HAFS"),
+         local("KFGQPC Uthmanic Script HAFS Regular"),
+         local("KFGQPCUthmanicScriptHAFS"),
+         local("Amiri Quran"), local("AmiriQuran"),
+         local("Scheherazade New"), local("ScheherazadeNew"),
+         local("Noto Naskh Arabic"), local("NotoNaskhArabic"),
+         local("Traditional Arabic"), local("Al Bayan"), local("Geeza Pro");
     unicode-range: U+0600-06FF, U+0750-077F, U+08A0-08FF, U+FB50-FDFF, U+FE70-FEFF;
+}
+
+/* One face per emblem candidate, so its ascent/descent can be overridden
+   individually. The overrides put the ۝ ink at the centre of its line box;
+   without them KFGQPC, Amiri Quran and Scheherazade each draw the glyph at a
+   different height, and the number no longer sits in the middle. */
+@font-face {
+    font-family: 'mas-emblem-kfgqpc';
+    src: local("KFGQPC Uthmanic Script HAFS"),
+         local("KFGQPC Uthmanic Script HAFS Regular"),
+         local("KFGQPCUthmanicScriptHAFS");
+    ascent-override: 100%;
+    descent-override: 51.8%;
+    line-gap-override: 0%;
+}
+@font-face {
+    font-family: 'mas-emblem-amiri';
+    src: local("Amiri Quran"), local("AmiriQuran");
+    ascent-override: 100%;
+    descent-override: 66.8%;
+    line-gap-override: 0%;
+}
+@font-face {
+    font-family: 'mas-emblem-scheherazade';
+    src: local("Scheherazade New"), local("ScheherazadeNew");
+    ascent-override: 100%;
+    descent-override: 36.9%;
+    line-gap-override: 0%;
+}
+@font-face {
+    font-family: 'mas-emblem-naskh';
+    src: local("Noto Naskh Arabic"), local("NotoNaskhArabic");
+    ascent-override: 100%;
+    descent-override: 21.5%;
+    line-gap-override: 0%;
 }
 
 
 :root {
 
-    /* RTL script font — online, first match wins:
-         "Scheherazade New"   or   "Noto Naskh Arabic" */
-    --arabic-font: "Scheherazade New", "Noto Naskh Arabic", serif;
+    /* Latin and transliteration. No generic `serif` here: these lists are
+       concatenated with --arabic-font, and a generic family would swallow the
+       Arabic codepoints before the Arabic faces were tried. */
+    --latin-font: "Noto Serif", "NotoSerif", "Charter", "Georgia",
+        "Times New Roman", "Liberation Serif";
+    /* RTL script font — first installed match wins:
+         "Scheherazade New", "Noto Naskh Arabic", "Amiri", then the system faces
+         (Traditional Arabic / Arabic Typesetting / Simplified Arabic on Windows;
+         Al Bayan / Geeza Pro / Baghdad on macOS). */
+    --arabic-font: "Scheherazade New", "ScheherazadeNew",
+        "Noto Naskh Arabic", "NotoNaskhArabic", "Amiri",
+        "Traditional Arabic", "Arabic Typesetting", "Simplified Arabic",
+        "Sakkal Majalla", "Al Bayan", "Geeza Pro", "Baghdad";
     /* Qur'ān text and end-of-āya glyph (۝ is U+06DD, present in KFGQPC HAFS and
        in Amiri Quran). See the `mas-quran` @font-face above: KFGQPC HAFS local,
-       else KFGQPC HAFS online, else Amiri Quran. */
-    --quran-font: "mas-quran", "Amiri Quran", "Scheherazade New", "Noto Naskh Arabic", serif;
+       else Amiri Quran, else the same Arabic chain. */
+    --quran-font: "mas-quran", "KFGQPC Uthmanic Script HAFS", "Amiri Quran",
+        "Scheherazade New", "Noto Naskh Arabic", "Traditional Arabic",
+        "Al Bayan", "Geeza Pro", serif;
+    /* The emblem uses the metric-overridden faces above, not --quran-font. */
+    --quran-emblem-font: "mas-emblem-kfgqpc", "mas-emblem-amiri",
+        "mas-emblem-scheherazade", "mas-emblem-naskh", "Noto Naskh Arabic";
     --arabic-font-size: 1.3rem;
     --arabic-line-height: 170%;
+    /* Qur'ān verse text, independent of other Arabic notes. */
+    --quran-text-size: 1.3rem;
     --quran-font-size: 1.40rem;
     --quran-line-height: 190%;
+    /* Verse marker. `--quran-number-size` is the base: the box and the emblem
+       are multiples of it, so changing this one value scales the whole marker.
+       Change only the box or the emblem to alter the proportions. The number
+       shift is an optical nudge (in number-em) and applies to every verse. */
+    --quran-number-size: .75rem;
+    --quran-marker-size: 4.5em;
+    --quran-emblem-size: 4em;
+    /* Vertical positioning. These move the whole marker box (emblem, number,
+       and — in English — the reference below it) without affecting the text
+       flow; use a positive `rem` value to move it down, negative to move it up.
+       `--quran-number-shift` is a separate, smaller nudge for the number alone
+       inside the emblem (in `em` of the number size). */
+    --quran-ar-marker-shift: -.2rem;
+    --quran-en-marker-shift: -.9rem;
+    --quran-number-shift: 0em;
+    /* English translation: the left gutter clears the marker, and the Arabic
+       reference sits under the emblem at this smaller size. */
+    --quran-en-gutter: 3.75em;
+    --quran-en-link-size: .62rem;
+    /* Minimum height of an English verse that follows its marker, so a
+       single-line verse still leaves room for the reference link below the
+       emblem. Longer verses are unaffected. */
+    --quran-en-verse-min: 4.3rem;
 
 }
 
@@ -63,17 +129,49 @@
    Live Preview: Obsidian writes a literal dir="rtl" on each .cm-line.
    Reading view: Obsidian writes dir="auto" on each block, which only :dir()
    can see; there is no literal dir attribute to match there. */
-[dir="rtl"],
-[dir="rtl"] *,
-.mod-rtl,
-.markdown-source-view.mod-cm6 .cm-line:dir(rtl),
-.markdown-preview-view :dir(rtl),
-.markdown-rendered :dir(rtl),
-.callout[data-callout*="arabic"] {
-    font-family: "Noto Serif", var(--arabic-font), serif;
+body [dir="rtl"],
+body [dir="rtl"] *,
+body .mod-rtl,
+body .markdown-source-view.mod-cm6:not(.quran-ar):not(.quran-en) .cm-line:dir(rtl),
+body .markdown-preview-view:not(.quran-ar):not(.quran-en) :dir(rtl),
+body .markdown-rendered :dir(rtl),
+body .callout[data-callout*="arabic"] {
+    font-family: var(--latin-font), var(--arabic-font), serif;
     font-size: var(--arabic-font-size);
-    line-height: var(--arabic-line-height) !important;
-    direction: rtl !important;
+    line-height: var(--arabic-line-height);
+}
+
+/* An element marked RTL by the plugin itself (not by a `dir` attribute) still
+   has to be told the direction. */
+body .mod-rtl,
+body .callout[data-callout*="arabic"] {
+    direction: rtl;
+}
+
+/* Qur'ān notes carry exactly one of two classes, written by the templates:
+     quran-ar  Arabic text (canonical, riwāyāt)
+     quran-en  English translation
+   Direction, face, size and leading are set per class, so nothing intended for
+   Arabic leaks into the English notes (or vice versa). The Arabic class is
+   explicit rather than inferred from `dir`, because a verse-number line holds
+   only digits and Obsidian's per-line heuristic marks the first one `ltr`. */
+body .quran-ar .cm-line,
+body .quran-ar p,
+body .quran-ar h1 {
+    direction: rtl;
+    font-family: var(--latin-font), var(--arabic-font), serif;
+    font-size: var(--quran-text-size);
+    line-height: var(--arabic-line-height);
+}
+
+body .quran-en .cm-line,
+body .quran-en p,
+body .quran-en h1 {
+    direction: ltr;
+    font-family: var(--font-text, var(--latin-font));
+    font-size: var(--font-text-size);
+    line-height: var(--line-height-normal);
+    text-align: left;
 }
 
 /* CALLOUTS */
@@ -81,33 +179,30 @@
 .callout[data-callout*="arabic-"] {
     font-size: var(--arabic-font-size);
     * {
-        direction: rtl !important;    
+        direction: rtl;
     }
 }
 
-/* Qur'an quotes: enlarge and space only the RTL/Arabic ones, not the English
-   translation that happens to use the same class. :dir(rtl) follows the
-   resolved/inherited direction in both modes; [dir="rtl"] covers the editor,
-   .markdown-preview-view covers the reading view. */
-.callout[data-callout="quran"],
-.quran[dir="rtl"], .quran:dir(rtl),
-.quran-quote:dir(rtl), [class*="quran-quote"]:dir(rtl),
-[dir="rtl"] .quran-quote, [dir="rtl"] [class*="quran-quote"],
-.markdown-preview-view .quran-quote:dir(rtl),
-.markdown-rendered .quran-quote:dir(rtl),
-.markdown-source-view.mod-cm6 .cm-line:dir(rtl) .quran-quote {
-    font-size: var(--quran-font-size) !important;
+/* Qur'an quotes: only the RTL/Arabic ones get the larger Qur'ān size; an
+   English `*text{.quran-quote}*` in an LTR note keeps normal text size (and is
+   still gilded by the shared rule further down). Testing the span itself with
+   `:dir(rtl)` avoids enlarging an English quote merely because an RTL ancestor
+   (or the line) is RTL. */
+body .callout[data-callout="quran"],
+body .quran-quote:dir(rtl),
+body [class*="quran-quote"]:dir(rtl) {
+    font-size: var(--quran-font-size);
 }
 
 /* Give Arabic callouts the selected script font even in LTR notes, where the
    [dir="rtl"] rule above does not reach. (Quran callouts get their own font.) */
 .callout[data-callout^="arabic-"] {
-    font-family: "Noto Serif", var(--arabic-font), serif;
+    font-family: var(--latin-font), var(--arabic-font), serif;
 }
 
 
 /* The dictionary definition callout. */
-.callout[data-callout="mas-dictionary-definition"] {
+body .callout[data-callout="mas-dictionary-definition"] {
     --callout-color: 150, 150, 120;
     border: none;
     .callout-title {
@@ -117,7 +212,8 @@
         ul {
             list-style-type: none;
             li.list-bullet::before, li.list-bullet::after {
-                display:none !important;
+                content: none;
+                display: none;
             }
             display: grid;
             grid-template-columns: 100px 1fr;
@@ -142,7 +238,8 @@
             padding: 7px 7px;
             list-style-type: none;
             .list-bullet::before, .list-bullet::after {
-                display:none !important;
+                content: none;
+                display: none;
             }
         }
         ul li *:not(sup) {
@@ -158,7 +255,7 @@
         /* The gloss column is Latin text even when it opens with an Arabic term. */
         li:nth-child(2n),
         li:nth-child(2n) * {
-            direction: ltr !important;
+            direction: ltr;
         }
     }
 }
@@ -170,22 +267,21 @@
    when it merely *starts* with Arabic (`حَرْبٌ War, battle …`) and the generic RTL
    rule then sizes the whole line as Arabic, right-aligns it, and gives it the
    Arabic leading — and that rule reaches the inner block Obsidian wraps the text
-   in, so the whole subtree is reset here, not just the paragraph. The
-   `.markdown-preview-view` / `.markdown-source-view` prefixes are what put the
-   `font-size` above `.markdown-rendered :dir(rtl)`; `direction` and `line-height`
-   need `!important` because that rule declares them that way. The marker's own
-   paragraph and the heading lines are left out: the first declares its own size
-   once, the second is handled below. The headword span then wins on class count. */
-.markdown-preview-view.mas-prose p:not(:has(.mas-managed)),
-.markdown-preview-view.mas-prose p:not(:has(.mas-managed)) *:not(sup),
-.markdown-source-view.mod-cm6.mas-prose .cm-line:not(:has(.mas-managed)):not(:has(.cm-header)),
-.markdown-source-view.mod-cm6.mas-prose .cm-line:not(:has(.mas-managed)):not(:has(.cm-header)) *:not(sup) {
+   in, so the whole subtree is reset here, not just the paragraph. The `body`
+   and `.markdown-preview-view` / `.markdown-source-view` prefixes are what put
+   these declarations above `.markdown-rendered :dir(rtl)`, by specificity.
+   Heading lines are excluded through Obsidian's own `HyperMD-header` class
+   rather than a parent selector. The headword span then wins on class count. */
+body .markdown-preview-view.mas-prose p,
+body .markdown-preview-view.mas-prose p *:not(sup),
+body .markdown-source-view.mod-cm6.mas-prose .cm-line:not(.HyperMD-header),
+body .markdown-source-view.mod-cm6.mas-prose .cm-line:not(.HyperMD-header) *:not(sup) {
     font-size: var(--font-text-size);
-    direction: ltr !important;
-    line-height: normal !important;
+    direction: ltr;
+    line-height: normal;
 }
-.markdown-preview-view.mas-prose p:not(:has(.mas-managed)) .mas-hw,
-.markdown-source-view.mod-cm6.mas-prose .cm-line:not(:has(.mas-managed)):not(:has(.cm-header)) .mas-hw {
+body .markdown-preview-view.mas-prose p .mas-hw,
+body .markdown-source-view.mod-cm6.mas-prose .cm-line:not(.HyperMD-header) .mas-hw {
     font-size: var(--arabic-font-size);
 }
 
@@ -194,27 +290,27 @@
    left alone. But the generic RTL rule would shrink it to the Arabic *text* size,
    below any heading, so restore a heading size and leading. (The root's `#`
    heading carries its transliteration and is Latin-led, so it is unaffected.) */
-.markdown-preview-view.mas-prose h2,
-.markdown-source-view.mod-cm6.mas-prose .cm-line:has(.cm-header-2) {
+body .markdown-preview-view.mas-prose h2,
+body .markdown-source-view.mod-cm6.mas-prose .cm-line.HyperMD-header-2 {
     font-size: 1.17em;
-    line-height: normal !important;
+    line-height: normal;
 }
 
 /* Lane's verses become `arabic-poetry` callouts, and they are Arabic: the prose
    reset above (which exists for Lane's *English*) must not force them left-to-
    right or down to the Latin size. This is scoped to `.mas-prose`, so Wehr's
    dictionary callouts — whose notes carry no such class — are untouched. */
-.markdown-preview-view.mas-prose .callout[data-callout="arabic-poetry"] p,
-.markdown-preview-view.mas-prose .callout[data-callout="arabic-poetry"] li,
-.markdown-source-view.mod-cm6.mas-prose .callout[data-callout="arabic-poetry"] .cm-line {
-    direction: rtl !important;
+body .markdown-preview-view.mas-prose .callout[data-callout="arabic-poetry"] p,
+body .markdown-preview-view.mas-prose .callout[data-callout="arabic-poetry"] li,
+body .markdown-source-view.mod-cm6.mas-prose .callout[data-callout="arabic-poetry"] .cm-line {
+    direction: rtl;
     font-size: var(--arabic-font-size);
-    line-height: var(--arabic-line-height) !important;
+    line-height: var(--arabic-line-height);
 }
 
 
 /* The plugin's own list callout on the top-level Sources note. */
-.callout[data-callout="mas-sources-list"] {
+body .callout[data-callout="mas-sources-list"] {
     --callout-color: 120, 135, 150;
     .callout-title {
         display: none;
@@ -230,7 +326,8 @@
             padding: 0;
             margin: 0;
             .list-bullet::before, .list-bullet::after {
-                display: none !important;
+                content: none;
+                display: none;
             }
             li {
                 grid-column: span 4;
@@ -241,7 +338,7 @@
                     margin: 5px;
                     background-color: #6a6;
                     color: #ff4;
-                    padding:8px !important;
+                    padding: 8px;
                     border-radius: 3px;
                     display:block;
                     vertical-align: middle;
@@ -261,80 +358,211 @@
 }
 
 
-/* 
+/* ── QUR'AN SŪRAHS ─────────────────────────────────────────────────────────
+   Arabic and English share the verse emblem and the absolute marker box, but
+   not direction, face, size, or side. `quran-ar` (canonical text and riwāyāt)
+   puts the marker on the right and pads the text on the right; `quran-en`
+   (translations) puts the marker on the left, the Arabic reference below the
+   emblem in the left gutter, and the translation beside it. The templates write
+   exactly one of the two classes. */
 
-Displaying Qur'an sūras in the Qur'an vault
-
-*/
-.quran .cm-content * {
-    direction: rtl !important;
+/* Arabic Qur'ān: inline-block line boxes, RTL throughout. */
+body .quran-ar .cm-content * {
+    direction: rtl;
     display: inline-block;
 }
 
-.quran .cm-content {
-    direction: rtl !important;
+/* Both: the absolute marker anchors to the text column. */
+body [class*="quran-"] .cm-content {
     position: relative;
 }
 
-.quran .cm-line:has(.cm-header-1), .quran h1 {
-    position: absolute !important;
-    right: 0 !important;
-    width: 3.5em !important;     /* Locks the box width to your column size */
+body .quran-ar .cm-content {
+    direction: rtl;
+}
+
+/* --- THE VERSE MARKER: SHARED BOX, DIFFERENT SIDE -------------------------- */
+/* One fixed box per verse holds the number and the emblem, both flex-centred,
+   so no hand-tuned offsets can drift when the font size or theme changes. The
+   box and emblem are `em` of --quran-number-size. */
+body .quran-ar .cm-line.HyperMD-header-1,
+body .quran-en .cm-line.HyperMD-header-1 {
+    position: absolute;
+    /* Never smaller than the emblem itself, so shrinking the box cannot push
+       the emblem outside the content or shift its centre. */
+    width: max(var(--quran-marker-size), var(--quran-emblem-size));
+    height: max(var(--quran-marker-size), var(--quran-emblem-size));
+    font-size: var(--quran-number-size);
+    margin: 0;
+    padding: 0;
     z-index: 10;
-    pointer-events: none;       /* Allows you to click "through" the symbol to edit text */
-    text-align: center;
-    margin: 0 !important;
-    padding: 0 !important;
+    pointer-events: none;       /* click through the emblem to the text */
 }
 
-/* --- STEP 2: STYLES FOR THE NUMBER & AYAH GLYPH --- */
-.quran .cm-line {
-    border: 0px !important;
+body .quran-ar .cm-line.HyperMD-header-1 {
+    right: 0;
+    direction: rtl;
+    transform: translateY(var(--quran-ar-marker-shift));
 }
 
-.quran .cm-header-1, .quran h1 {
-    display: inline-flex !important;
+body .quran-en .cm-line.HyperMD-header-1 {
+    left: 0;
+    direction: ltr;
+    transform: translateY(var(--quran-en-marker-shift));
+}
+
+/* The number fills the box (so a visible `#` formatting span cannot push it to
+   one side) and is centred in it. */
+body .quran-ar .cm-line.HyperMD-header-1 .cm-header-1:not(.cm-hmd-internal-link):not(.internal-link):not(.cm-link-alias),
+body .quran-en .cm-line.HyperMD-header-1 .cm-header-1:not(.cm-hmd-internal-link):not(.internal-link):not(.cm-link-alias) {
+    position: absolute;
+    inset: 0;
+    display: flex;
     align-items: center;
     justify-content: center;
-    text-decoration: none !important;
-    font-size: .8rem !important;
-    font-family: "Noto Serif", serif !important;
+    margin: 0;
+    padding: 0;
+    font-family: var(--latin-font), serif;
     font-weight: normal;
-    color: #008800 !important;
-    position: relative; 
-    top: 1.8rem;
-    left:0rem;
-    width: 2rem; 
-    height: 2rem;
-    margin: 0 !important;
-    line-height: 1 !important;
+    color: #008800;
+    line-height: 1;
+    text-decoration: none;
+    transform: translateY(var(--quran-number-shift));
+    z-index: 1;
 }
 
-.quran .cm-header-1::before, .quran h1::before {
+body .quran-ar .cm-line.HyperMD-header-1 .cm-header-1:not(.cm-hmd-internal-link):not(.internal-link):not(.cm-link-alias) {
+    direction: rtl;
+}
+
+body .quran-en .cm-line.HyperMD-header-1 .cm-header-1:not(.cm-hmd-internal-link):not(.internal-link):not(.cm-link-alias) {
+    direction: ltr;
+}
+
+/* Obsidian draws heading/list fold chevrons in the margin, in the heading's own
+   colour (the theme's red H1); in the narrow verse-marker box this reads as a
+   stray red dot, and it appears on hover even when the line is not collapsed.
+   A Qur'ān verse marker has nothing to fold, so suppress every fold/collapse
+   indicator throughout the note rather than guessing which wrapper class the
+   editor or reading view uses. */
+body .quran-ar .cm-fold-indicator,
+body .quran-en .cm-fold-indicator,
+body .quran-ar .cm-foldGutter,
+body .quran-en .cm-foldGutter,
+body .quran-ar .collapse-indicator,
+body .quran-en .collapse-indicator,
+body .quran-ar .heading-collapse-indicator,
+body .quran-en .heading-collapse-indicator,
+body .quran-ar .list-collapse-indicator,
+body .quran-en .list-collapse-indicator,
+body .quran-ar .fold-gutter,
+body .quran-en .fold-gutter {
+    display: none;
+}
+
+/* Obsidian also marks an aliased wikilink (`cm-link-alias`) with a pseudo-element
+   and puts the heading's `cm-header-1` class on the link itself. The emblem must
+   belong to the number, not to the link; this also clears any alias marker the
+   editor or theme draws before the alias text. */
+body .quran-en .cm-line.HyperMD-header-1 .cm-link-alias::before,
+body .quran-en .cm-line.HyperMD-header-1 .cm-link-alias .cm-underline::before {
+    content: none;
+    display: none;
+}
+
+/* The literal `#` is shown on the active line; hide it so it cannot shift the
+   centred number or make verse 1 look different while the cursor sits there. */
+body .quran-ar .cm-line.HyperMD-header-1 .cm-formatting-header,
+body .quran-en .cm-line.HyperMD-header-1 .cm-formatting-header {
+    display: none;
+}
+
+/* The emblem belongs to the heading line itself, not to `.cm-header-1` — that
+   class is also put on the wikilink span, which is how the link grew a second
+   emblem. One pseudo on the line serves every verse. */
+body .quran-ar .cm-line.HyperMD-header-1::before,
+body .quran-en .cm-line.HyperMD-header-1::before,
+body .quran-ar h1::before,
+body .quran-en h1::before {
     content: "۝";
-    font-family: var(--quran-font);
     position: absolute;
-    top: .35rem;
-    left: 1rem;
-    transform: translate(-50%, -35%);
-    text-decoration:none!important;
-    font-size: 3rem; 
-    z-index: -1; 
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: var(--quran-emblem-font);
+    font-size: var(--quran-emblem-size);
+    line-height: 1;
+    z-index: -1;
     background: linear-gradient(to bottom, --mas-bright(var(--mas-gold)), --mas-dark(var(--mas-gold)));
+    -webkit-background-clip: text;
     background-clip: text;
     color: transparent;
 }
 
-.callout[data-callout="quran"] h1 {
-    display:none;
+/* English translations: the Arabic reference travels inside the same H1 (the
+   template puts it there), and this places it under the emblem in the gutter.
+   It is removed from the heading's flex flow, so the number stays centred. */
+body .quran-en .cm-line.HyperMD-header-1 .cm-hmd-internal-link,
+body .quran-en .cm-line.HyperMD-header-1 .internal-link,
+body .quran-en h1 .internal-link {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    width: 100%;
+    padding-top: 2px;
+    font-family: var(--latin-font), var(--arabic-font), serif;
+    font-size: var(--quran-en-link-size);
+    font-weight: normal;
+    line-height: 1.15;
+    text-align: center;
+    white-space: normal;
+    direction: rtl;
+    color: var(--text-muted);
+    text-decoration: none;
+    pointer-events: auto;
 }
 
-/* --- STEP 3: INDENT ALL ĀYĀT, THE REGULAR TEXT LINES --- */
-/* Target every line <div> that does NOT contain a heading.
-   .cm-line = Live Preview, p/.el-p = Reading view. */
-.quran .cm-line:not(:has(.cm-header-1)), .quran p,
-.callout[data-callout="quran"] .el-p, .callout[data-callout="quran"] .cm-line {
-    margin-right: 3.5em !important; /* Matches the width allocated for the heading */
+/* Reading view has no inner span: the h1 itself is the number, so it uses the
+   same fixed box and the same centred emblem. */
+body .quran-ar h1,
+body .quran-en h1 {
+    position: absolute;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: max(var(--quran-marker-size), var(--quran-emblem-size));
+    height: max(var(--quran-marker-size), var(--quran-emblem-size));
+    margin: 0;
+    padding: 0;
+    font-size: var(--quran-number-size);
+    font-weight: normal;
+    color: #008800;
+    line-height: 1;
+    text-decoration: none;
+    text-align: center;
+    z-index: 10;
+}
+
+body .quran-ar h1 {
+    right: 0;
+    direction: rtl;
+    transform: translateY(var(--quran-ar-marker-shift));
+}
+
+body .quran-en h1 {
+    left: 0;
+    direction: ltr;
+    transform: translateY(var(--quran-en-marker-shift));
+}
+
+/* --- ARABIC VERSE TEXT ---------------------------------------------------- */
+/* Target every line that is not a verse marker. The gap is padding, not
+   margin: Obsidian's core declares `.markdown-source-view.mod-cm6
+   .cm-content > * { margin: 0 !important }`. */
+body .quran-ar .cm-line:not(.HyperMD-header-1), body .quran-ar p,
+body .callout[data-callout="quran"] .el-p, body .callout[data-callout="quran"] .cm-line {
+    padding-right: 3.5em; /* Matches the width allocated for the marker */
     text-align: justify;
     text-rendering: optimizeLegibility;
     font-feature-settings: "mark" on, "mkmk" on, "liga" on;
@@ -342,71 +570,108 @@ Displaying Qur'an sūras in the Qur'an vault
     font-kerning: normal;
 }
 
-/* Qur'an font + gilded text, both modes. The .markdown-preview-view /
-   .markdown-source-view selectors keep this above the generic RTL rule. */
-.quran .cm-line:not(:has(.cm-header-1)), .quran p,
-.callout[data-callout="quran"] .el-p, .callout[data-callout="quran"] .cm-line,
-.quran-quote, [class*="quran-quote"],
-.markdown-preview-view .quran-quote, .markdown-rendered .quran-quote,
-.markdown-source-view.mod-cm6 .quran-quote {
-    font-family: var(--quran-font);
-    background-image: repeating-linear-gradient(to bottom, hsla(var(--mas-gold), 100%, 35%, 100%) 0em, hsla(var(--mas-gold), 100%, 35%, 100%) 0.3em, hsla(var(--mas-gold), 100%, 18%, 100%) 1.8em)!important;
-    box-decoration-break: clone!important;
-    background-clip: text!important;
+/* Gilding is shared by Arabic verses, translated verses, and Qur'ān quotes.
+   The English translation keeps its own Latin face and text size; only the
+   fill is the same gold. */
+body .quran-ar .cm-line:not(.HyperMD-header-1), body .quran-ar p,
+body .quran-en .cm-line:not(.HyperMD-header-1), body .quran-en p,
+body .callout[data-callout="quran"] .el-p, body .callout[data-callout="quran"] .cm-line,
+body .quran-quote, body [class*="quran-quote"],
+body .markdown-preview-view .quran-quote, body .markdown-rendered .quran-quote,
+body .markdown-source-view.mod-cm6 .quran-quote {
+    background-image: repeating-linear-gradient(to bottom, hsla(var(--mas-gold), 100%, 35%, 100%) 0em, hsla(var(--mas-gold), 100%, 35%, 100%) 0.3em, hsla(var(--mas-gold), 100%, 18%, 100%) 1.8em);
+    box-decoration-break: clone;
+    -webkit-box-decoration-break: clone;
+    -webkit-background-clip: text;
+    background-clip: text;
     color: transparent;
 }
 
-/* Taller line spacing only for RTL/Arabic Qur'an text and quotes, both modes. */
-.quran .cm-line:not(:has(.cm-header-1)), .quran p,
-.callout[data-callout="quran"] .el-p, .callout[data-callout="quran"] .cm-line,
-.quran-quote:dir(rtl), [class*="quran-quote"]:dir(rtl),
-[dir="rtl"] .quran-quote, [dir="rtl"] [class*="quran-quote"],
-.markdown-preview-view .quran-quote:dir(rtl),
-.markdown-rendered .quran-quote:dir(rtl),
-.markdown-source-view.mod-cm6 .cm-line:dir(rtl) .quran-quote {
-    line-height: var(--quran-line-height) !important;
+/* The Arabic face belongs to Arabic verse text and to any Qur'ān quote; an
+   English translation in a quran-en note keeps the normal text face. */
+body .quran-ar .cm-line:not(.HyperMD-header-1), body .quran-ar p,
+body .callout[data-callout="quran"] .el-p, body .callout[data-callout="quran"] .cm-line,
+body .quran-quote, body [class*="quran-quote"],
+body .markdown-preview-view .quran-quote, body .markdown-rendered .quran-quote,
+body .markdown-source-view.mod-cm6 .quran-quote {
+    font-family: var(--quran-font);
 }
 
+/* Taller line spacing only for RTL/Arabic Qur'ān text and quotes; an English
+   quote in an LTR note keeps the normal text leading. */
+body .quran-ar .cm-line:not(.HyperMD-header-1), body .quran-ar p,
+body .callout[data-callout="quran"] .el-p, body .callout[data-callout="quran"] .cm-line,
+body .quran-quote:dir(rtl), body [class*="quran-quote"]:dir(rtl) {
+    line-height: var(--quran-line-height);
+}
+
+/* --- ENGLISH TRANSLATION TEXT -------------------------------------------- */
+/* Left margin clears the emblem and the reference link. The text is gilded by
+   the shared rule above but keeps its Latin face, normal size, and leading; the
+   H1 marker is absolute, so it adds no height and the translation begins on the
+   same line as the emblem. */
+body .quran-en .cm-line:not(.HyperMD-header-1), body .quran-en p {
+    padding-left: var(--quran-en-gutter);
+    padding-right: 0;
+    text-align: left;
+    text-rendering: optimizeLegibility;
+}
+
+/* The blank line between the verse heading and its text is a real empty editor
+   line in Live Preview, which would push the text below the absolute marker.
+   Collapse it (without removing it from the source) so the text sits beside the
+   emblem; the same blank line is not a block in Reading view. */
+body .quran-ar .cm-line.HyperMD-header-1 + .cm-line,
+body .quran-en .cm-line.HyperMD-header-1 + .cm-line {
+    height: 0;
+    min-height: 0;
+    line-height: 0;
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+}
+
+/* A single-line translation would otherwise let the link below the emblem run
+   into the next verse; longer verses already clear it. */
+body .quran-en .cm-line.HyperMD-header-1 + .cm-line + .cm-line,
+body .quran-en h1 + p {
+    margin-top: 0;
+    min-height: var(--quran-en-verse-min);
+}
 
 .quran-quote {
-    font-style:normal;
+    font-style: normal;
 }
-
 
 /* ── Managed-region marker ───────────────────────────────────────────────
    The generated region is bounded by <span class="mas-managed">. Keep it faint
    so it never competes with the text, in Qur'an notes and any other genre (the
    gilded Qur'an rule targets .quran p, so we override the text fill here).
 
-   The font-size is declared ONCE, on the span. Do not also set a font-size on
-   the :has() block below: percentage font-sizes multiply, so a 75% span inside
-   a 70% paragraph renders at ~52% — and inside a .quran h1 (50%) it collapses
-   to ~half of that again. That compounding is why the marker looked far
-   smaller than the number in the rule. */
+   The font-size is declared ONCE, on the span: percentage font-sizes multiply,
+   so a 75% span inside a 70% paragraph renders at ~52% — and inside a .quran h1
+   (50%) it collapses to ~half of that again. That compounding is why the marker
+   looked far smaller than the number in the rule. */
 
-/* The gilded Qur'an rule targets the paragraph (.quran p) itself, so styling
-   only the inner <span> leaves the paragraph's gradient in place. :has()
-   (Chromium, already used above) lets us neutralise that paragraph, and it
-   works for any genre, not just .quran. Covers reading view (p/.el-p) and
-   live preview (.cm-line). No font-size here — see the note above. */
-.mas-managed {
-    background: #8878 !important;
-    background-image: none !important;
+/* The marker paints itself and is placed at the left edge by its own box, so
+   the paragraph it sits in needs no parent exemption. No font-size here — see
+   the note above. */
+body .mas-managed {
+    display: block;
+    width: fit-content;
+    margin-left: 0;
+    margin-right: auto;
+    background: #8878;
+    background-image: none;
     font-family: sans-serif;
     font-size: 65%;
     padding: 3px;
-    border-radius: 5px !important;
-    color: #eede !important;
+    border-radius: 5px;
+    color: #eede;
     line-height: 100%;
     max-width: 100px;
     text-align: center;
     direction: ltr;
-    background-image: none;
-}
-p:has(> .mas-managed),
-.el-p:has(.mas-managed),
-.cm-line:has(.mas-managed) {
-    text-align: left !important;
 }
 
 
@@ -911,7 +1176,7 @@ body.theme-dark {
     padding-right: var(--mas-ann-gutter);
 }
 
-.mas-ann-margin {
+body .mas-ann-margin {
     --mas-ann-icon-size: 1.15rem;
     --mas-comment-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M22 17a2 2 0 0 1-2 2H6.828a2 2 0 0 0-1.414.586l-2.202 2.202A.71.71 0 0 1 2 21.286V5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2z'/%3E%3Cpath d='M7 11h10'/%3E%3Cpath d='M7 15h6'/%3E%3Cpath d='M7 7h8'/%3E%3C/svg%3E");
     position: absolute;
@@ -923,8 +1188,8 @@ body.theme-dark {
     padding: 0;
     border: 0;
     border-radius: 4px;
-    background: transparent !important;
-    box-shadow: none !important;
+    background: transparent;
+    box-shadow: none;
     cursor: pointer;
     pointer-events: auto;
     user-select: none;
@@ -946,10 +1211,10 @@ body.theme-dark {
     -webkit-mask-position: center;
 }
 
-.mas-ann-rail .mas-ann-margin {
-    background: transparent !important;
-    border: 0 !important;
-    box-shadow: none !important;
+body .mas-ann-rail .mas-ann-margin {
+    background: transparent;
+    border: 0;
+    box-shadow: none;
 }
 
 /* Resize handles: soft ovals that follow the rounded highlight edges. */
@@ -979,9 +1244,9 @@ body.mas-ann-resizing .cm-content * {
     cursor: ew-resize;
 }
 
-.mas-ann-margin:hover,
-.mas-ann-margin:focus-visible {
-    background: transparent !important;
+body .mas-ann-margin:hover,
+body .mas-ann-margin:focus-visible {
+    background: transparent;
     outline: none;
 }
 
@@ -1096,9 +1361,9 @@ body.mas-ann-resizing .cm-content * {
     -webkit-box-orient: vertical;
 }
 
-.mas-ann-card-quote ul,
-.mas-ann-card-quote ol {
-    padding-inline-start: 0.3cm !important;
+body .mas-ann-card-quote ul,
+body .mas-ann-card-quote ol {
+    padding-inline-start: 0.3cm;
     margin-block: 0;
 }
 
@@ -1589,11 +1854,11 @@ body.mas-ann-resizing .cm-content * {
     display: block;
     box-sizing: border-box;
     width: fit-content;
-    max-width: calc(100% - 0.4em);
+    max-width: calc(100% - 1em);
     margin: 0.2em;
     padding: 0.2em .5em;
     background-image: --mas-hl-gradient(var(--mas-hue));
-    border-radius: 20px 3px;
+    border-radius: 4em 2.5em / 1.5em 1em;
     overflow: visible;
     box-decoration-break: clone;
     -webkit-box-decoration-break: clone;
@@ -1617,10 +1882,10 @@ body.mas-ann-resizing .cm-content * {
     background: none;
 }
 
-.callout[data-callout^="mas-annotation-comment"] {
+body .callout[data-callout^="mas-annotation-comment"] {
     --callout-blend-mode: normal;
     width: 70%;
-    border-radius: var(--mas-comment-radius) !important;
+    border-radius: var(--mas-comment-radius);
     margin: 0.25em 0 0.25em;
     padding: 0.75em 0.5em;
     border: 1px solid hsla(var(--mas-hue), 45%, 68%, 0.3);

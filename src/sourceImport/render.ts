@@ -22,6 +22,7 @@ export interface SourceModel {
 
 export interface TemplateSet {
 	source: string;
+	translation: string;
 	hadith: string;
 	quran: string;
 	dictionary: string;
@@ -58,6 +59,7 @@ export interface MocSection {
 
 export const TEMPLATE_FILES: Record<keyof TemplateSet, string> = {
 	source: "source-note.eta.md",
+	translation: "translation-note.eta.md",
 	hadith: "hadith-note.eta.md",
 	quran: "quran-note.eta.md",
 	dictionary: "dictionary-note.eta.md",
@@ -114,6 +116,7 @@ function renderTemplate(engine: SourceTemplateEngine, tpl: string, data: Record<
 export function renderUnit(engine: SourceTemplateEngine, templates: TemplateSet, model: SourceModel, unit: JsonObject): RenderOutput {
 	const tpl = unit.kind === "hadith" ? templates.hadith
 		: unit.kind === "quran" ? templates.quran
+		: unit.kind === "surah" && model.work.collection === "quran" ? templates.translation
 		: unit.kind === "dict" ? templates.dictionary
 		: unit.kind === "dict-index" ? templates.dictionaryIndex
 		: unit.kind === "book" ? templates.book
@@ -151,6 +154,7 @@ function renderYamlTemplate(engine: SourceTemplateEngine, tpl: string, data: Rec
 export function renderUnitYaml(engine: SourceTemplateEngine, templates: TemplateSet, model: SourceModel, unit: JsonObject): RenderOutput {
 	const tpl = unit.kind === "hadith" ? templates.hadith
 		: unit.kind === "quran" ? templates.quran
+		: unit.kind === "surah" && model.work.collection === "quran" ? templates.translation
 		: unit.kind === "dict" ? templates.dictionary
 		: unit.kind === "dict-index" ? templates.dictionaryIndex
 		: unit.kind === "book" ? templates.book

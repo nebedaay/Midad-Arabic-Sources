@@ -1,8 +1,10 @@
 # Midad Arabic Sources
 
-**Midad Arabic Sources** brings classical Arabic texts into your Obsidian vault and turns them into a linkable, searchable, annotated part of your notes. It removes the manual labour between *there is an Arabic text I want to study* and *it is in my vault*: it locates and imports born-digital texts, transcribes scanned PDFs, transliterates Arabic, and keeps every generated note current as templates and upstream sources change.
+**Midad Arabic Sources** brings classical Arabic texts into your Obsidian vault and turns them into a linkable, searchable, annotated part of your notes. It removes the manual labour between *there is an Arabic text I want to study* and *it is integrated into my vault*: it **locates and imports** already digitized texts, **transcribes** (OCRs) scanned PDFs, translates those transcriptions into English, transliterates Arabic passages for integration into English writing, and keeps every generated note current as templates and upstream sources change.
 
-The plugin was built for research on Islam and Sufism — Qurʾān commentaries, ḥadīth, the Qurʾān in its riwāyāt, and the classical dictionaries — but the importer is catalog-driven, so more repositories can be wired in over time.
+The plugin was built for research on Islam and Arabic — Qurʾān commentaries, ḥadīth, the Qurʾān in its riwāyāt, and the classical dictionaries — but the importer is catalog-driven, so more repositories on any topic can be wired in over time.
+
+Midad is optimized for integration with [Zotero](https://www.zotero.org/) using the [ScholarWeft](https://github.com/nebedaay/ScholarWeft) plugin, although these two are not required.
 
 > [!note]
 > This plugin is **desktop only**. It runs local Python scripts and reads files outside the vault.
@@ -37,7 +39,7 @@ Settings cover the server URL and script, the engine (`bert` / `mle` / `none`), 
 
 ### Transcription and translation (scanned PDFs)
 
-A Gemini pipeline turns a literature item’s PDFs into page-separated Arabic markdown (and translations), with local post-processing for Qurʾān quotes, poetry callouts, footnotes, and tashkīl. Run it from a `@citekey` note, or transcribe any PDF on disk without a Zotero item.
+A Gemini pipeline turns a literature item’s PDFs into page-separated Arabic markdown (and translations), with local post-processing for Qurʾān quotes, poetry callouts, footnotes, and tashkīl. The Zotero route assumes a `@citekey` literature note with the item’s `zotero-key` and attachments, normally created by **[ScholarWeft](https://github.com/nebedaay/ScholarWeft)** or **[ZotLit](https://github.com/aidenlx/zotlit)**; Midad does not create those notes. Without one, use **Transcribe a PDF…**.
 
 - **Transcribe this item’s PDF file(s)** — burst to page PDFs, OCR via Gemini batch mode, post-process.
 - **Transcribe a PDF…** — pick any PDF on disk; Gemini guesses the title and author from the title page, and a verification dialog saves them into the new transcription’s bibliography.
@@ -79,11 +81,30 @@ Installed works can be sent to Zotero as `book` items, each tagged **Midad Arabi
 
 See [Dependencies](./docs/dependencies.md) for the exact install lines.
 
+## Fonts
+
+The plugin **downloads no fonts** and embeds none. It requests the faces it was designed with, then falls back through fonts that ship with macOS, Windows, and Linux, so Arabic, transliteration, and Qur'ānic text always render. For the intended typography, install these (all free):
+
+| Face | Used for | Licence |
+| --- | --- | --- |
+| **Noto Serif** | Latin text and transliteration | SIL OFL |
+| **Scheherazade New** | Arabic text | SIL OFL |
+| **Noto Naskh Arabic** | Arabic fallback | SIL OFL |
+| **Amiri Quran** | Qur'ānic text | SIL OFL |
+| **KFGQPC Uthmanic Script HAFS** | Qur'ānic text (preferred) | Free from the King Fahd Complex |
+
+The stacks live in `styles.css` as `--latin-font`, `--arabic-font`, and `--quran-font`; override those variables in a CSS snippet to use different faces. The fallback chains are documented in [Setup](./docs/setup.md#fonts).
+
 ## Install
 
-The plugin is not yet in the community directory.
+### Community plugins (recommended)
 
-### Via BRAT
+1. Open **Settings → Community plugins** and turn off **Restricted Mode**.
+2. Choose **Browse**, search for **Midad Arabic Sources**, then **Install** and **Enable**.
+
+If the listing is not visible yet — the plugin is submitted for review — use BRAT below.
+
+### BRAT (alternative, latest beta)
 
 1. Disable Restricted Mode, then install and enable [BRAT](https://github.com/TfTHacker/obsidian42-brat) from the Community Plugins list.
 2. In BRAT’s settings, add `nebedaay/Midad-Arabic-Sources` to the **Beta plugin list**.
@@ -91,7 +112,7 @@ The plugin is not yet in the community directory.
 
 ### Manual
 
-Download `main.js`, `manifest.json`, and `styles.css` from the [latest release](https://github.com/nebedaay/Midad-Arabic-Sources/releases) and copy them into `.obsidian/plugins/midad-arabic-sources/` in your vault, then enable the plugin in **Settings → Community plugins**. The plugin extracts its Python scripts and import templates into that folder on load.
+Download `main.js`, `manifest.json`, and `styles.css` from the [latest release](https://github.com/nebedaay/Midad-Arabic-Sources/releases) and copy them into your plugin folder (`<config folder>/plugins/midad-arabic-sources/`; see **Settings → Files and links → Override config folder**) and then enable the plugin in **Settings → Community plugins**. The plugin extracts its Python scripts and import templates into that folder on load.
 
 ## Network use and file access
 
@@ -103,7 +124,8 @@ Core importing and rendering use only the repositories you import from. The foll
 | Transliteration | `transliterate-server.py` on `127.0.0.1` | Romanizes Arabic. Optionally calls Gemini, DeepSeek, or an OpenAI-compatible endpoint when LLM mode is on. |
 | Transcription / translation | The Gemini API | OCRs and translates scanned PDFs you submit. |
 | Zotero export | Your local Zotero (`127.0.0.1:23119`) or `api.zotero.org` | Reads and writes the bibliographic items you export. |
-| Fonts | `cdn.jsdelivr.net` (Fontsource) | Loads the Arabic and Latin typefaces the generated notes expect. |
+
+Fonts are **not** fetched: the plugin uses locally installed faces with system fallbacks (see [Fonts](#fonts)).
 
 **Files outside your vault:** the transcription pipeline runs external programs and reads and writes the source PDFs and output files you choose, including absolute paths. This is required to OCR and translate documents.
 
@@ -120,7 +142,7 @@ npm run lint          # eslint (Obsidian community-plugin rules)
 npm run build         # esbuild → main.js
 ```
 
-Copy `main.js`, `manifest.json`, and `styles.css` into `.obsidian/plugins/midad-arabic-sources/`, or run `npm run deploy` from inside a vault. Restart Obsidian after every build — the plugin loads `main.js` only at startup.
+Copy `main.js`, `manifest.json`, and `styles.css` into your plugin folder (`<config folder>/plugins/midad-arabic-sources/`), or run `npm run deploy` from inside a vault. Restart Obsidian after every build — the plugin loads `main.js` only at startup.
 
 ## Credits
 

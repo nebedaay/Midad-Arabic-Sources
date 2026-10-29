@@ -53,7 +53,7 @@ import {
 } from "./sourceImport/history";
 import { BUNDLED_ASSETS } from "./assets.generated";
 import { localDate } from "./time";
-import { sourceIdFromYaml, sourceIdToYaml } from "./sourceIds";
+import { sourceIdToYaml, sourceOfFrontmatter } from "./sourceIds";
 import { sourceRoot as resolveSourceRoot, installedSourcesRoot as resolveInstalledSourcesRoot, transcriptionsFolder as resolveTranscriptionsFolder, translationsFolder as resolveTranslationsFolder, canonicalQuranFolder as resolveCanonicalQuranFolder, sourceNotePath as resolveSourceNotePath } from "./sourcePaths";
 import { openDocs, getDocs } from "./docs";
 import { registerAnnotations, AnnotationService } from "./sourceAnnotations/service";
@@ -472,7 +472,14 @@ const COLLECTION_MODEL_SCHEMA: Record<string, number> = {
  * drags the tafsīrs or ḥadīth along with it. Bump it only when the *rendered
  * output* changes, not for every edit.
  */
-const COLLECTION_RENDER_VERSION: Record<string, number> = {};
+const COLLECTION_RENDER_VERSION: Record<string, number> = {
+	// 2026-10-29: the verse-marker H1 no longer carries an HTML span, and the
+	// blank line after it is collapsed by CSS. A full render of these two
+	// collections guarantees existing notes lose the span even if the template
+	// history was already recorded by a manual re-render.
+	quran: 1,
+	"quran-text": 1,
+};
 
 /** The render version a work of this collection must have been rendered at. */
 function requiredRenderVersion(collection: string): number {
@@ -495,7 +502,11 @@ const BIB_PROVISIONAL = "Bibliographic details are provisional — verify agains
 
 /** Which unit `kind` each per-work template renders (the scoped re-render map). */
 const SOURCE_TEMPLATE_KIND: Record<string, string> = {
-	source: "source",
+	// Both templates render `surah` units; `renderUnit` picks the translation
+	// template for the `quran` collection. Mapping these to "source" silently
+	// filtered every unit out of a scoped render (only the hub was rewritten).
+	source: "surah",
+	translation: "surah",
 	hadith: "hadith",
 	quran: "quran",
 	dictionary: "dict",
@@ -606,8 +617,14 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			console.error("[midad-arabic-sources] annotations failed to start", error);
 			new Notice("The annotation layer could not start. See the developer console for details.");
 		}
-		await this.refreshSourceRegistry();
-		await this.refreshSourcesIndex();
+		// Neither scan is needed to paint the first note: defer both until the
+		// workspace is ready so startup (and the plugin's CSS) is not held behind
+		// a whole-vault registry pass and a MOC re-render. OnLayoutReady fires
+		// immediately if the layout is already up.
+		this.app.workspace.onLayoutReady(() => {
+			void this.refreshSourceRegistry();
+			void this.refreshSourcesIndex();
+		});
 
 		this.addCommand({
 			id: "transliterate-selection-to-clipboard",
@@ -1223,7 +1240,8 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 	/** Resolve a script path: bundled in the plugin dir first, then the vault. */
 	resolveScript(rel: string): string {
 		const vault = this.vaultPath();
-		const bundled = `${vault}/.obsidian/plugins/midad-arabic-sources/${rel}`;
+		const base = this.manifest.dir ?? `${this.app.vault.configDir}/plugins/${this.manifest.id}`;
+		const bundled = `${vault}/${base}/${rel}`;
 		try {
 			if (fs.existsSync(bundled)) return bundled;
 		} catch { /* ignore */ }
@@ -2823,9 +2841,14 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			const content = await adapter.read(hub);
 			if (!content.includes("text-source")) return;
 			// Only prune a folder this work used to own. Two editions can share a
-			// `title`, so a same-named hub may belong to another work.
+			// `title`, so a same-named hub may belong to another work. The hub's id
+			// is the identity now (`midad-key` is retired; both forms are checked so
+			// an older hub is still recognised).
 			const yamlKey = sourceIdToYaml(key);
-			if (!content.includes(`midad-key: ${yamlKey}`) && !content.includes(`midad-key: "${yamlKey}"`) && !content.includes(`midad-key: ${key}`) && !content.includes(`midad-key: "${key}"`)) return;
+			const yamlId = sourceIdToYaml(`repo:${key}`);
+			const has = (field: string, value: string) =>
+				content.includes(`${field}: ${value}`) || content.includes(`${field}: "${value}"`);
+			if (!has("midad-id", yamlId) && !has("midad-key", yamlKey) && !has("midad-key", key)) return;
 			await adapter.remove(hub);
 			const folder = normalizePath(`${outRoot}/${title}`);
 			if (await adapter.exists(folder)) await adapter.rmdir(folder, true);
@@ -3464,7 +3487,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			if (!inFolder(path) && !entry && !(match && /^(?:@|mas-)/.test(file.basename))) continue;
 			const fm = (this.app.metadataCache.getFileCache(file)?.frontmatter ?? {}) as Record<string, unknown>;
 			const entryString = (key: string): string => typeof entry?.[key] === "string" ? String(entry[key]) : "";
-			const source = sourceIdFromYaml(fm["midad-source"]);
+			const source = sourceOfFrontmatter(fm);
 			const kind = typeof fm["midad-kind"] === "string" ? String(fm["midad-kind"]) : "";
 			const rawBase = (match?.[1] ?? "").trim();
 			const baseVolume = /^(.*?)\s+(?:vol\.?|v\.?|volume)\s*(\d+)$/i.exec(rawBase);
@@ -4071,7 +4094,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		const unit: Record<string, string[]> = {
 			tafsir: ["source"],
 			"tafsir-qul": ["source"],
-			quran: ["source"],
+			quran: ["translation"],
 			hadith: ["hadith"],
 			"quran-text": ["quran"],
 			dictionary: ["dictionary", "dictionaryIndex"],
@@ -4086,6 +4109,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		const t = await loadTemplates(this.app, this.bundledTemplateDir(), userFolder);
 		const values: Record<string, string> = {
 			source: t.source,
+			translation: t.translation,
 			hadith: t.hadith,
 			quran: t.quran,
 			dictionary: t.dictionary,

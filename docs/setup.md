@@ -8,14 +8,23 @@ The plugin is **desktop only**: it runs local Python scripts and reads files out
 
 - **Obsidian 1.13 or later.** The settings use Obsidian’s declarative settings API.
 - **Python 3** and a few packages, for transcription, translation, and the transliteration engine — see [Dependencies](./dependencies.md).
-- A **Gemini API key** in an LLM configuration assigned to transcription and translation, if you want to transcribe or translate scanned PDFs.
-- **Zotero** (optional), if you want to send imported works to your library — see [Zotero export](./zotero.md).
+
+## Recommended
+
+- A **Gemini API key** in an LLM configuration used to transcribe scanned PDFs and translate and transcribe Arabic text.
+- **[Zotero](https://www.zotero.org/)** (optional), for an automated pipeline to transcribe and translate Zotero attachments, and to send imported works to your library — see [Zotero export](./zotero.md).
+- **[ScholarWeft](https://community.obsidian.md/plugins/scholar-weft)** or **[ZotLit](https://github.com/aidenlx/zotlit)** to create the `@citekey` Zotero literature notes used by the automatic transcription/translation route. Neither is required for importing texts or for **Transcribe a PDF…**.
 
 ## Install
 
-The plugin is not yet in the community directory.
+### Community plugins (recommended)
 
-### Via BRAT
+1. Open **Settings → Community plugins** and turn off **Restricted Mode**.
+2. Choose **Browse**, search for **Midad Arabic Sources**, then **Install** and **Enable**.
+
+If the listing is not visible yet — the plugin is submitted for review — use BRAT below.
+
+### Alternative: BRAT (latest beta)
 
 1. In Obsidian, enable **Community plugins** (turn off Restricted Mode), then install and enable [BRAT](https://github.com/TfTHacker/obsidian42-brat).
 2. In BRAT’s settings, add `nebedaay/Midad-Arabic-Sources` to the **Beta plugin list**.
@@ -23,16 +32,43 @@ The plugin is not yet in the community directory.
 
 ### Manually
 
-Download `main.js`, `manifest.json`, and `styles.css` from the [latest release](https://github.com/nebedaay/Midad-Arabic-Sources/releases) and copy them into `.obsidian/plugins/midad-arabic-sources/`, then enable the plugin. The plugin extracts its Python scripts and import templates into the same folder on load, so nothing else needs copying.
+Download `main.js`, `manifest.json`, and `styles.css` from the [latest release](https://github.com/nebedaay/Midad-Arabic-Sources/releases) and copy them into your plugin folder — `<config folder>/plugins/midad-arabic-sources/`, where `<config folder>` is the one set in **Settings → Files and links → Override config folder** — then enable the plugin. The plugin extracts its Python scripts and import templates into the same folder on load, so nothing else needs copying.
 
 ## What ships inside the plugin
 
-Everything the plugin needs is compiled into `main.js` and unpacked into `.obsidian/plugins/midad-arabic-sources/` on startup:
+Everything the plugin needs is compiled into `main.js` and unpacked into the plugin folder (`<config folder>/plugins/midad-arabic-sources/`) on startup:
 
 - `scripts/` — the Python pipeline, the catalog-driven importer, and the transliteration service.
 - `midad-arabic-sources-import-templates/` — the default ETA templates the importer renders notes with.
 
 A plugin update therefore carries the new scripts and templates, which is what lets a template change trigger a re-render. See [Templates](./templates.md).
+
+## Fonts
+
+The plugin **downloads no fonts and embeds none** — Obsidian's review rules forbid external resources, and bundling the Arabic faces would add several megabytes to `main.js`. It asks for the faces it was designed with and falls back through fonts that ship with the operating system, so Arabic, transliteration, and Qur'ānic text always render. For the intended typography, install these (all free):
+
+| Face | Used for | Where |
+| --- | --- | --- |
+| **Noto Serif** | Latin text and transliteration | Google Fonts (SIL OFL) |
+| **Scheherazade New** | Arabic text | Google Fonts (SIL OFL) |
+| **Noto Naskh Arabic** | Arabic fallback | Google Fonts (SIL OFL) |
+| **Amiri Quran** | Qur'ānic text | Google Fonts (SIL OFL) |
+| **KFGQPC Uthmanic Script HAFS** | Qur'ānic text (preferred) | King Fahd Complex (free download) |
+
+The stacks are defined once in `styles.css`:
+
+- `--latin-font`: Noto Serif, then Charter, Georgia, Times New Roman, Liberation Serif.
+- `--arabic-font`: Scheherazade New, Noto Naskh Arabic, Amiri, then the system faces (Traditional Arabic, Arabic Typesetting, Simplified Arabic, Sakkal Majalla on Windows; Al Bayan, Geeza Pro, Baghdad on macOS).
+- `--quran-font`: KFGQPC Uthmanic Script HAFS, Amiri Quran, then the Arabic stack. The ۝ end-of-āya glyph comes from the same face.
+
+If a face is missing, rendering continues with the next one; nothing breaks. To use a different typeface, override these variables in a CSS snippet:
+
+```css
+:root {
+  --arabic-font: "My Arabic Face";
+  --quran-font: "My Quran Face";
+}
+```
 
 ## First run
 
@@ -65,9 +101,9 @@ The plugin keeps everything under one **sources folder** (`Midad Arabic Sources`
 
 Existing installations are migrated once automatically on the first launch after the update. Changing **General → Sources folder** asks for confirmation when files exist, then moves the folders and rewrites explicit links in Markdown notes as well as the adopted-annotation registry. The MOCs stay at the source root. The parent **Midad Arabic Sources** note is the existing top-level note (or is created in the source root if missing).
 
-**Source MOCs.** **Midad Arabic Sources** is the parent note and the distinctive index for everything MAS manages. Its managed block groups the source hierarchy into **By Topic** (`Midad Arabic Sources - Topics`, which lists the genre/type MOCs) and **By Source** (`Midad Arabic Sources - By Source`, which lists repository MOCs plus the local transcription and translation MOCs), with **Annotations** alongside them. Repository MOCs list their works and are keyed by the acquisition repository (`repo_name`), not by the upstream text provider. A work’s `source:` property records that provider separately, so a Qurʾān translation fetched from `quran-api` but digitized from Tanzil appears under **Quran API** while its hub still carries `source: tanzil.net`. The transcription/translation MOCs are split into works from literature notes and works transcribed/translated directly from PDFs.
+**Source MOCs.** **Midad Arabic Sources** is the parent note and the distinctive index for everything MAS manages. Its managed block groups the source hierarchy into **By Topic** (`Midad Arabic Sources - Topics`, which lists the genre/type MOCs) and **By Source** (`Midad Arabic Sources - By Source`, which lists repository MOCs plus the local transcription and translation MOCs), with **Annotations** alongside them. Repository MOCs list their works and are keyed by the acquisition repository (`repo_name`), not by the upstream text provider. A work’s `source:` property records that provider when it differs, so a Qurʾān translation fetched from `quran-api` but digitized from Tanzil appears under **Quran API** while its hub also carries `source: tanzil.net`; when the two are the same, `source:` is omitted. The transcription/translation MOCs are split into works from literature notes and works transcribed/translated directly from PDFs.
 
-**Source identity.** MAS-created and adopted notes carry a `midad-id` (with `midad-kind`, `midad-source`, `midad-work`, and `midad-unit`). Repository works are identified at the hub (`repo/<collection>/<id>`) and tracked internally by work, so their individual sūra/chapter/root notes do not need their own ids. YAML values use `/` rather than `:` so Obsidian does not mistake them for URL schemes; the internal model and registry keys keep their `:` form. Zotero literature notes are indexed by their stable `sw-zotero-id`; a transcription or translation associated with a Zotero item keeps the `@<citekey>` filename, while a standalone PDF with no Zotero citekey uses a `mas-` filename. Arbitrary adopted notes use a generated `note/<uuid>`. `.midad-arabic-sources/sources.json` is the unified index of every source kind.
+**Source identity.** MAS-created and adopted notes carry a `midad-id` (with `midad-kind`, and `midad-work`/`midad-unit` on transcriptions and translations). The source a note belongs to is derived from those ids rather than stored in a separate property. Repository works are identified at the hub (`repo/<collection>/<id>`) and tracked internally by work, so their individual sūra/chapter/root notes do not need their own ids. YAML values use `/` rather than `:` so Obsidian does not mistake them for URL schemes; the internal model and registry keys keep their `:` form. Zotero literature notes are indexed by their stable `sw-zotero-id`; a transcription or translation associated with a Zotero item keeps the `@<citekey>` filename, while a standalone PDF with no Zotero citekey uses a `mas-` filename. Arbitrary adopted notes use a generated `note/<uuid>`. `.midad-arabic-sources/sources.json` is the unified index of every source kind.
 
 - **A work hub** carries the bibliographic properties and links every note in the work.
 - **A content note** is one sūra, ḥadīth chapter, book chapter, or dictionary root.

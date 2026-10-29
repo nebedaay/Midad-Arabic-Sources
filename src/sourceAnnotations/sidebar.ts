@@ -1,4 +1,11 @@
-import { Component, ItemView, MarkdownView, WorkspaceLeaf, setIcon } from "obsidian";
+import {
+	Component,
+	ItemView,
+	MarkdownView,
+	TFile,
+	WorkspaceLeaf,
+	setIcon,
+} from "obsidian";
 import { renderAnnotationCard } from "./cards";
 import type { AnnotationService } from "./service";
 import type { NavigationData, NavigationLink } from "./navigation";
@@ -58,17 +65,22 @@ export class AnnotationSidebarView extends ItemView {
 
 	async onOpen(): Promise<void> {
 		this.contentEl.addClass("mas-ann-sidebar");
-		this.registerEvent(this.app.workspace.on("active-leaf-change", () => {
-			// Refresh when a note is the active view, never merely because this
-			// sidebar leaf was focused by the first click on a control. The old
-			// check refreshed on sidebar activation, replacing the clicked node
-			// before its click handler could run.
-			const active = this.app.workspace.getActiveViewOfType(MarkdownView);
-			if (active?.file) void this.refresh();
+		this.registerEvent(this.app.workspace.on("active-leaf-change", (leaf) => {
+			// Refreshing when this sidebar itself gains focus would replace the
+			// clicked node before its click handler runs. Side docks keep the note
+			// context of the main area; any other leaf — a note tab, graph, canvas —
+			// changes it (and a non-Midad one empties the sidebar).
+			if (!leaf || leaf === this.leaf || this.isSideDockLeaf(leaf)) return;
+			void this.refresh();
 		}));
 		// A link can replace the file in the already-active leaf without an
 		// active-leaf-change event; file-open covers that same-leaf navigation.
-		this.registerEvent(this.app.workspace.on("file-open", () => { void this.refresh(); }));
+		// A link opened from this sidebar can leave focus here, so pass the opened
+		// file explicitly in that case.
+		this.registerEvent(this.app.workspace.on("file-open", (file) => {
+			const fromSidebar = this.app.workspace.getActiveViewOfType(AnnotationSidebarView) === this;
+			void this.refresh(fromSidebar ? file : undefined);
+		}));
 		// Activate the sidebar on pointer-down, before the click lands. Some
 		// pointer devices otherwise spend the first click only focusing the leaf.
 		this.registerDomEvent(this.contentEl, "pointerdown", (event) => {
@@ -78,14 +90,19 @@ export class AnnotationSidebarView extends ItemView {
 		await this.refresh();
 	}
 
+	/** Side docks (explorer, search, this sidebar) keep the note context. */
+	private isSideDockLeaf(leaf: WorkspaceLeaf): boolean {
+		return !!leaf.view.containerEl.closest(".mod-left-split, .mod-right-split, .workspace-drawer");
+	}
+
 	async onClose(): Promise<void> {
 		this.component?.unload();
 		this.component = null;
 	}
 
-	async refresh(): Promise<void> {
+	async refresh(file?: TFile | null): Promise<void> {
 		const token = ++this.renderToken;
-		const data = await this.service.sidebarData();
+		const data = await this.service.sidebarData(file);
 		if (token !== this.renderToken) return;
 		this.component?.unload();
 		const component = new Component();
@@ -101,11 +118,13 @@ export class AnnotationSidebarView extends ItemView {
 		const head = root.createDiv({ cls: "mas-ann-sidebar__head" });
 		if (!data) {
 			this.navigationPath = "";
+			const activeNote = this.app.workspace.getActiveViewOfType(MarkdownView)?.file;
 			head.createDiv({
 				cls: "mas-ann-sidebar__empty",
-				text: "Open a note to see its annotations and navigation.",
+				text: activeNote
+					? "This note is not part of Midad."
+					: "Open a note to see its annotations and navigation.",
 			});
-			this.renderBottomLinks(root);
 			return;
 		}
 

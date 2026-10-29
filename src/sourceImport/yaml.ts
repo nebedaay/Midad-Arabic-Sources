@@ -14,9 +14,12 @@ export type YamlValue = YamlScalar | YamlScalar[] | null | undefined;
  *     removes the property);
  *   - `append`: list items already present are kept and the new ones added;
  *   - `keep`: the existing value wins unless it is empty (write-once);
- *   - `subtract`: migration only (drop existing items another property owns).
+ *   - `subtract`: migration only (drop existing items another property owns);
+ *   - `remove`: retirement only — drop the property from an existing note. A
+ *     template declares it with an empty value, which emits no line, so the
+ *     property disappears on the next re-render and never appears on a new note.
  */
-export type FrontmatterMerge = "replace" | "append" | "keep" | "subtract";
+export type FrontmatterMerge = "replace" | "append" | "keep" | "subtract" | "remove";
 
 export interface YamlPropertyOptions {
 	force?: boolean;

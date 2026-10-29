@@ -60,7 +60,7 @@ Run **Check imported sources**. It compares the manifest against the vault and t
 
 ### A template edit does not take effect
 
-The bundled templates live in `.obsidian`, which Obsidian’s file watcher ignores, and the plugin polls for changes only every 45 seconds (and only when **Update notes when templates change** is on). Run **Apply template changes to imported sources** to apply it at once. Remember the edit must be in the *user* template folder (`Copy import templates to vault`) or in the bundled copy that `npm run deploy` writes; editing the deployed copy is overwritten by the next deploy.
+The bundled templates live in your Obsidian configuration folder, which the vault file watcher ignores, and the plugin polls for changes only every 45 seconds (and only when **Update notes when templates change** is on). Run **Apply template changes to imported sources** to apply it at once. Remember the edit must be in the *user* template folder (`Copy import templates to vault`) or in the bundled copy that `npm run deploy` writes; editing the deployed copy is overwritten by the next deploy.
 
 ### Editing a template re-rendered far more than expected
 

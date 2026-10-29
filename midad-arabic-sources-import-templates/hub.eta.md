@@ -7,8 +7,11 @@
 <% add_property('midad-up', [...work.up, '[[Midad Arabic Sources]]']); -%>
 <% add_property('midad-id', yamlId('repo:' + work.key)); -%>
 <% add_property('midad-kind', 'repo-work'); -%>
-<% add_property('midad-source', yamlId('repo:' + work.key)); -%>
-<% add_property('midad-key', yamlId(work.key)); -%>
+<% /* Retired properties. The source is derived from midad-id/midad-kind/midad-work,
+   and the raw key is midad-id without its `repo/` prefix. Declared empty with
+   `remove` so a re-render deletes either one from an older note. */ -%>
+<% add_property('midad-source', '', { merge: 'remove' }); -%>
+<% add_property('midad-key', '', { merge: 'remove' }); -%>
 <% if (pub.mas_note) { add_property('midad-note', pub.mas_note); } -%>
 <% add_property('related', [], { force: true, merge: 'keep' }); -%>
 <% add_property('title', work.title); -%>
@@ -26,7 +29,9 @@
 <% if (pub.edition) { add_property('edition', pub.edition); } -%>
 <% if (work.language_links.length > 1) { add_property('language', work.language_links.map(l => wikilink(l))); } else { add_property('language', wikilink(work.language_links[0])); } -%>
 <% if (work.repo) { add_property('repository', `[${work.repo_name || work.repo}](${work.repo})`); } -%>
-<% if (work.source) { const label = work.repo_name && work.source_name && work.repo_name !== work.source_name ? `${work.source_name} (upstream)` : (work.source_name || work.source); add_property('source', `[${label}](${work.source})`); } -%>
+<% const showSource = work.source && work.source !== work.repo; -%>
+<% const sourceLabel = work.repo_name && work.source_name && work.repo_name !== work.source_name ? `${work.source_name} (upstream)` : (work.source_name || work.source); -%>
+<% add_property('source', showSource ? `[${sourceLabel}](${work.source})` : undefined); -%>
 <% if (work.license_attribution) { add_property('license-attribution', work.license_attribution); } -%>
 <% if (work.repository_updated) { add_property('repository-updated', work.repository_updated); } -%>
 <% add_property('aliases', work.aliases); -%>

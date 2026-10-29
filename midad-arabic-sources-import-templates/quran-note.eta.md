@@ -13,7 +13,7 @@
 <% const aliasList = work.aliases.map(a => `${a} - ${unit.base}`); -%>
 <% if (work.canonical) { aliasList.push(unit.translit, unit.arabic); } -%>
 <% add_property('aliases', aliasList); -%>
-<% add_property('cssclasses', [work.cssclass], { quote: 'never' }); -%>
+<% add_property('cssclasses', [work.language === 'ar' ? 'quran-ar' : 'quran-en'], { quote: 'never' }); -%>
 <%~ end_YAML() %>
 <span class="mas-managed">mas-managed</span>
 

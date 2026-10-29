@@ -119,6 +119,9 @@ function reconcile(merge: FrontmatterMerge, existing: string[] | undefined, gene
 			if (!has) return existing ?? [];
 			if (isListBlock(existing) && isListBlock(generated)) return subtractListItems(existing, generated);
 			return existing;
+		case "remove":
+			// Retired property: declared empty so a re-render deletes it.
+			return [];
 		case "replace":
 		default:
 			return generated;

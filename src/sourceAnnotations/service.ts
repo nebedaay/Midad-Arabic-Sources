@@ -5,6 +5,7 @@ import {
 	Notice,
 	Plugin,
 	SuggestModal,
+	WorkspaceLeaf,
 	addIcon,
 	TFile,
 	normalizePath,
@@ -76,6 +77,11 @@ function cmOf(view: MarkdownView): EditorView | null {
 	return cm ?? null;
 }
 
+/** The leaf's outer element; `containerEl` exists at runtime but is not typed. */
+function leafEl(leaf: WorkspaceLeaf): HTMLElement {
+	return (leaf as unknown as { containerEl?: HTMLElement }).containerEl ?? leaf.view.containerEl;
+}
+
 function markdownViews(app: App): MarkdownView[] {
 	return app.workspace
 		.getLeavesOfType("markdown")
@@ -92,13 +98,40 @@ function activeMarkdownView(app: App): MarkdownView | null {
 	return markdownViews(app).find((view) => !!view.file) ?? null;
 }
 
+/**
+ * Is this note part of Midad at all? Used by the sidebar to decide whether it
+ * has anything to show. `buildNavigationData()` happily builds a one-item list
+ * for ANY markdown file, so without this every note in the vault looked like a
+ * Midad note.
+ *
+ * A Midad note carries one of Midad's `midad-*` frontmatter keys (imported
+ * sources, units, annotation notes and the hierarchy hubs), is a text source or
+ * annotation note, or is one of the "Midad Arabic Sources" hubs — those sit
+ * above the hierarchy and carry no `midad-*` key.
+ */
+function isMidadNote(app: App, file: TFile): boolean {
+	const frontmatter = app.metadataCache.getFileCache(file)?.frontmatter as
+		Record<string, unknown> | undefined;
+	if (frontmatter) {
+		for (const key of Object.keys(frontmatter)) {
+			if (!key.startsWith("midad-")) continue;
+			const value = frontmatter[key];
+			if (value !== null && value !== undefined && value !== "") return true;
+		}
+		const rawType = frontmatter["document-type"];
+		const type = typeof rawType === "string" ? rawType : "";
+		if (type.includes("text-source") || type.includes("source-annotation")) return true;
+	}
+	return /^Midad Arabic Sources\b/.test(file.basename);
+}
+
 function isSourceFrontmatter(frontmatter: Record<string, unknown> | undefined): boolean {
 	if (!frontmatter) return false;
 	const rawType = frontmatter["document-type"];
 	const type = typeof rawType === "string" ? rawType : "";
 	// Annotation notes and MOCs also carry midad-up; only text-source notes are
 	// annotatable. `midad-key` covers older hubs that predate document-type.
-	return type.includes("text-source") || !!frontmatter["midad-key"] || !!frontmatter["midad-work"];
+	return type.includes("text-source") || !!frontmatter["midad-id"] || !!frontmatter["midad-work"];
 }
 
 /**
@@ -128,6 +161,15 @@ export class AnnotationService {
 	private disposed = false;
 	private lastDraftIssue: SelectionExclusion = null;
 	private lastSidebarPath = "";
+	/** Last non-Midad tab the user worked in on the right sidebar. */
+	private lastOtherRightLeaf: WorkspaceLeaf | null = null;
+	private sidebarSyncTimer = 0;
+	/** Whether the right split was collapsed before this note selected Midad. */
+	private sidebarWasCollapsedBeforeMidad = false;
+	/** The user opened Midad by hand on a non-Midad note; leave it alone. */
+	private sidebarManuallyOpened = false;
+	/** View type of the last non-Midad right tab, persisted across reloads. */
+	private lastOtherRightViewType = "";
 
 	constructor(host: AnnotationHost) {
 		this.host = host;
@@ -137,6 +179,7 @@ export class AnnotationService {
 		this.store = new AnnotationStore(host.app);
 		this.adoption = new AdoptedNotesRegistry(host.app);
 		this.resolver = new AnnotationTargetResolver(host.app, host.settings, this.adoption);
+		this.lastOtherRightViewType = this.storedSidebarViewType();
 		this.tooltip = new AnnotationTooltip(this.app, {
 			onEdit: (annotation, target, anchor) => {
 				this.tooltip.hide();
@@ -652,10 +695,33 @@ export class AnnotationService {
 			this.onAnnotationOpen(event);
 		});
 
-		this.plugin.registerEvent(this.app.workspace.on("active-leaf-change", () => {
+		this.plugin.registerEvent(this.app.workspace.on("file-open", () => {
+			// Navigating within the same tab does not fire active-leaf-change.
+			if (this.sidebarSyncTimer) window.clearTimeout(this.sidebarSyncTimer);
+			this.sidebarSyncTimer = window.setTimeout(() => {
+				this.sidebarSyncTimer = 0;
+				if (!this.disposed) void this.syncSidebarToActiveNote();
+			}, 60);
+		}));
+		this.plugin.registerEvent(this.app.workspace.on("active-leaf-change", (leaf) => {
+			// Remember which non-Midad tab the user last used on the right, so a
+			// non-Midad note can give the sidebar back to it instead of hiding it.
+			if (leaf && leaf.view.getViewType() !== ANNOTATION_SIDEBAR_VIEW
+				&& leafEl(leaf).closest(".mod-right-split")) {
+				this.lastOtherRightLeaf = leaf;
+				this.rememberSidebarView(leaf.view.getViewType());
+			}
 			window.setTimeout(() => {
 				if (!this.disposed) void this.refreshViews();
 			}, 150);
+			if (this.sidebarSyncTimer) window.clearTimeout(this.sidebarSyncTimer);
+			// Switch before the sidebar's own 150ms refresh paints the empty state.
+			this.sidebarSyncTimer = window.setTimeout(() => {
+				this.sidebarSyncTimer = 0;
+				if (!this.disposed) {
+					void this.syncSidebarToActiveNote(leaf?.view instanceof MarkdownView ? leaf.view : undefined);
+				}
+			}, 60);
 		}));
 
 		this.plugin.registerEvent(this.app.workspace.on("editor-menu", (menu, editor, view) => {
@@ -1974,55 +2040,75 @@ export class AnnotationService {
 		}
 	}
 
-	async sidebarData(): Promise<AnnotationSidebarData | null> {
-		const candidates: MarkdownView[] = [];
-		const active = this.app.workspace.getActiveViewOfType(MarkdownView);
-		if (active) candidates.push(active);
-		const last = this.lastSidebarPath
-			? markdownViews(this.app).find((view) =>
-				view.file && normalizePath(view.file.path) === normalizePath(this.lastSidebarPath)
-			)
-			: null;
-		if (last) candidates.push(last);
-		const fallback = activeMarkdownView(this.app);
-		if (fallback) candidates.push(fallback);
+	/**
+	 * Data for the GIVEN note (a link opened from the sidebar may not have moved
+	 * focus yet), otherwise for the note in the active leaf. The sidebar has
+	 * focus when the user clicks it, so that case keeps the note it was showing;
+	 * any other non-markdown view means there is no note in context and the
+	 * sidebar goes empty rather than showing the previous note.
+	 */
+	async sidebarData(fileOverride?: TFile | null): Promise<AnnotationSidebarData | null> {
+		const sidebarView = this.app.workspace.getActiveViewOfType(AnnotationSidebarView);
+		const markdownView = this.app.workspace.getActiveViewOfType(MarkdownView);
+		const sidebarHasFocus = !!sidebarView;
+		// The service refreshes the sidebar on every active-leaf-change, including
+		// when the file explorer or another side dock gets focus. That is not a
+		// note change, so keep the note the sidebar was showing. Detect a side
+		// dock from the focused element rather than the deprecated activeLeaf.
+		const sideDockHasFocus = sidebarHasFocus || !!document.activeElement?.closest(
+			".mod-left-split, .mod-right-split, .workspace-drawer"
+		);
 
-		const seen = new Set<string>();
-		for (const view of candidates) {
-			if (!view.file) continue;
-			const path = normalizePath(view.file.path);
-			if (seen.has(path)) continue;
-			seen.add(path);
-			const navigation = buildNavigationData(this.app, path, (notePath) => this.annotationCountForPath(notePath));
-			if (!navigation) continue;
-			this.lastSidebarPath = path;
-			const target = await this.targetForPath(path);
-			const annotations = target ? await this.annotationsFor(target) : [];
-			annotations.sort((a, b) => {
-				const orphan = (a.anchorStatus === "orphaned" ? 1 : 0) - (b.anchorStatus === "orphaned" ? 1 : 0);
-				if (orphan) return orphan;
-				return (a.position?.start ?? Number.MAX_SAFE_INTEGER) - (b.position?.start ?? Number.MAX_SAFE_INTEGER);
-			});
-			const work = target ? await this.store.getWork(target.workKey) : null;
-			const frontmatter = this.app.metadataCache.getFileCache(view.file)?.frontmatter as
-				Record<string, unknown> | undefined;
-			const rawTitle = frontmatter?.["title"];
-			const noteName = typeof rawTitle === "string" && rawTitle.trim()
-				? rawTitle.trim()
-				: view.file.basename;
-			return {
-				notePath: path,
-				noteName,
-				workTitle: work?.title || target?.workTitle || noteName,
-				target,
-				annotations,
-				navigation,
-			};
+		let file: TFile | null = null;
+		if (fileOverride instanceof TFile) {
+			file = fileOverride;
+		} else if (markdownView) {
+			file = markdownView.file;
+		} else if (sidebarHasFocus || sideDockHasFocus) {
+			const last = this.lastSidebarPath
+				? this.app.vault.getAbstractFileByPath(normalizePath(this.lastSidebarPath))
+				: null;
+			file = last instanceof TFile ? last : activeMarkdownView(this.app)?.file ?? null;
+		} else {
+			// Settings, graph, canvas, another plugin's view: no note in context.
+			this.lastSidebarPath = "";
+			return null;
 		}
-		return null;
+
+		if (!(file instanceof TFile) || !isMidadNote(this.app, file)) {
+			this.lastSidebarPath = "";
+			return null;
+		}
+
+		const path = normalizePath(file.path);
+		const navigation = buildNavigationData(this.app, path, (notePath) => this.annotationCountForPath(notePath));
+		if (!navigation) return null;
+		this.lastSidebarPath = path;
+		const target = await this.targetForPath(path);
+		const annotations = target ? await this.annotationsFor(target) : [];
+		annotations.sort((a, b) => {
+			const orphan = (a.anchorStatus === "orphaned" ? 1 : 0) - (b.anchorStatus === "orphaned" ? 1 : 0);
+			if (orphan) return orphan;
+			return (a.position?.start ?? Number.MAX_SAFE_INTEGER) - (b.position?.start ?? Number.MAX_SAFE_INTEGER);
+		});
+		const work = target ? await this.store.getWork(target.workKey) : null;
+		const frontmatter = this.app.metadataCache.getFileCache(file)?.frontmatter as
+			Record<string, unknown> | undefined;
+		const rawTitle = frontmatter?.["title"];
+		const noteName = typeof rawTitle === "string" && rawTitle.trim()
+			? rawTitle.trim()
+			: file.basename;
+		return {
+			notePath: path,
+			noteName,
+			workTitle: work?.title || target?.workTitle || noteName,
+			target,
+			annotations,
+			navigation,
+		};
 	}
 
-	/** Open on startup, but never while a modal such as Settings is in the way. */
+	/** Open on startup only when the active note is a Midad note. */
 	private autoOpenSidebar(attempt = 0): void {
 		if (this.disposed) return;
 		if (this.anyModalOpen()) {
@@ -2031,20 +2117,146 @@ export class AnnotationService {
 			}
 			return;
 		}
-		void this.openSidebar();
+		const active = this.app.workspace.getActiveViewOfType(MarkdownView);
+		if (!active?.file || !isMidadNote(this.app, active.file)) return;
+		this.sidebarWasCollapsedBeforeMidad = this.app.workspace.rightSplit.collapsed;
+		void this.openSidebar(false);
 	}
 
-	async openSidebar(): Promise<void> {
+	private sidebarStorageKey(): string {
+		return `midad-arabic-sources:${this.app.vault.getName()}:last-right-sidebar-view`;
+	}
+
+	private storedSidebarViewType(): string {
+		try {
+			const value = this.app.loadLocalStorage(this.sidebarStorageKey()) as unknown;
+			return typeof value === "string" ? value : "";
+		} catch {
+			return "";
+		}
+	}
+
+	private rememberSidebarView(viewType: string): void {
+		if (!viewType || viewType === ANNOTATION_SIDEBAR_VIEW) return;
+		this.lastOtherRightViewType = viewType;
+		try {
+			this.app.saveLocalStorage(this.sidebarStorageKey(), viewType);
+		} catch { /* best effort */ }
+	}
+
+	/**
+	 * Is this leaf the visible tab of its (right) sidebar split? The `mod-active`
+	 * class tracks the workspace's active leaf, and handing the active leaf back
+	 * to the note (so editing keeps focus) clears it even though the sidebar tab
+	 * stays selected. Visibility is the reliable test: inactive tabs are
+	 * `display:none`, so they have no client rects.
+	 */
+	private sidebarTabIsActive(leaf: WorkspaceLeaf): boolean {
+		const viewEl = leaf.view.containerEl;
+		if (!viewEl.isConnected || viewEl.getClientRects().length === 0) return false;
+		return viewEl.offsetParent !== null || viewEl.getClientRects().length > 0;
+	}
+
+	/**
+	 * Select a right-sidebar tab without making it the workspace's active leaf:
+	 * activate it, then hand the active leaf back to the note. That keeps the
+	 * editor's focus and the note commands working while the sidebar follows.
+	 */
+	private async selectSidebarLeaf(leaf: WorkspaceLeaf, note: WorkspaceLeaf | null): Promise<void> {
+		const right = this.app.workspace.rightSplit;
+		right.expand();
+		// `revealLeaf` actually switches tab groups; `setActiveLeaf` alone can
+		// leave the old tab visible. Then hand focus back to the note so editing
+		// and note commands continue to work.
+		await this.app.workspace.revealLeaf(leaf);
+		if (note && note !== leaf) this.app.workspace.setActiveLeaf(note, { focus: true });
+	}
+
+	/**
+	 * Follow the active note: a Midad note brings the Midad sidebar forward; any
+	 * other note gives the right sidebar back to the last tab used there, or
+	 * collapses it when Midad was the only one.
+	 */
+	private async syncSidebarToActiveNote(view?: MarkdownView): Promise<void> {
+		if (this.disposed) return;
+		const active = view ?? this.app.workspace.getActiveViewOfType(MarkdownView);
+		if (!active?.file) return;
+		const midad = isMidadNote(this.app, active.file);
+		const noteLeaf = active.leaf;
+		let leaf = this.app.workspace.getLeavesOfType(ANNOTATION_SIDEBAR_VIEW)[0];
+		if (midad) {
+			this.sidebarManuallyOpened = false;
+			const wasCollapsed = this.app.workspace.rightSplit.collapsed;
+			// Remember provenance: once this plugin expanded the split, a later
+			// non-Midad note may restore it to collapsed. An already-expanded
+			// sidebar (the user's usual state) never sets this.
+			if (wasCollapsed) this.sidebarWasCollapsedBeforeMidad = true;
+			if (!leaf) {
+				await this.openSidebar(false);
+				leaf = this.app.workspace.getLeavesOfType(ANNOTATION_SIDEBAR_VIEW)[0];
+			}
+			if (leaf && (wasCollapsed || !this.sidebarTabIsActive(leaf))) {
+				await this.selectSidebarLeaf(leaf, noteLeaf);
+			}
+			return;
+		}
+		// A manually opened Midad sidebar stays until the next Midad note.
+		if (this.sidebarManuallyOpened) return;
+		if (!leaf || !this.sidebarTabIsActive(leaf)) return;
+		const other = this.otherRightLeaf(leaf);
+		if (other) {
+			await this.selectSidebarLeaf(other, noteLeaf);
+			this.sidebarWasCollapsedBeforeMidad = false;
+			return;
+		}
+		// Only restore a collapsed right split if this plugin opened it and there
+		// is no other tab to fall back to. An already-open sidebar is left alone.
+		if (this.sidebarWasCollapsedBeforeMidad) this.app.workspace.rightSplit.collapse();
+		this.sidebarWasCollapsedBeforeMidad = false;
+	}
+
+	/** The remembered right-sidebar tab, else any other right-sidebar tab. */
+	private otherRightLeaf(midadLeaf: WorkspaceLeaf): WorkspaceLeaf | null {
+		const usable = (leaf: WorkspaceLeaf): boolean =>
+			leaf !== midadLeaf
+			&& leaf.view.getViewType() !== ANNOTATION_SIDEBAR_VIEW
+			&& leafEl(leaf).isConnected
+			&& !!leafEl(leaf).closest(".mod-right-split");
+		const remembered = this.lastOtherRightLeaf;
+		if (remembered && usable(remembered)) return remembered;
+		if (this.lastOtherRightViewType) {
+			const byType = this.app.workspace.getLeavesOfType(this.lastOtherRightViewType)
+				.find((leaf) => usable(leaf));
+			if (byType) return byType;
+		}
+		let found: WorkspaceLeaf | null = null;
+		this.app.workspace.iterateAllLeaves((leaf) => {
+			if (!found && usable(leaf)) found = leaf;
+		});
+		return found;
+	}
+
+	async openSidebar(focus = true): Promise<void> {
+		if (focus) this.sidebarManuallyOpened = true;
+		const note = focus ? null : this.app.workspace.getActiveViewOfType(MarkdownView)?.leaf ?? null;
 		const existing = this.app.workspace.getLeavesOfType(ANNOTATION_SIDEBAR_VIEW)[0];
 		if (existing) {
-			void this.app.workspace.revealLeaf(existing);
+			if (focus) {
+				void this.app.workspace.revealLeaf(existing);
+			} else {
+				await this.selectSidebarLeaf(existing, note);
+			}
 			if (existing.view instanceof AnnotationSidebarView) await existing.view.refresh();
 			return;
 		}
 		const leaf = this.app.workspace.getRightLeaf(false) ?? this.app.workspace.getLeaf(true);
 		if (!leaf) return;
 		await leaf.setViewState({ type: ANNOTATION_SIDEBAR_VIEW, active: true });
-		void this.app.workspace.revealLeaf(leaf);
+		if (focus) {
+			void this.app.workspace.revealLeaf(leaf);
+		} else {
+			await this.selectSidebarLeaf(leaf, note);
+		}
 		if (leaf.view instanceof AnnotationSidebarView) await leaf.view.refresh();
 	}
 
