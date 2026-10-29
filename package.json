@@ -1,6 +1,6 @@
 {
   "name": "midad-arabic-sources",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "Import classical Arabic sources (tafsīrs, Qur'ān translations, ḥadīth, riwāyāt) into the vault, transliterate Arabic, and export references to Zotero.",
   "main": "main.js",
   "scripts": {
