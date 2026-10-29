@@ -1,10 +1,12 @@
 # Transcription (scanned PDFs)
 
-**Transcribe this item’s PDF file(s)** turns a literature item’s scanned PDFs into page-separated Arabic markdown, using a Gemini OCR pipeline with local post-processing. Run it from a `@citekey` note (the command reads that note’s Zotero attachments). . **Transcribe a PDF…** does the same for any PDF you choose, with no Zotero item or literature note.
+**Transcribe this item’s PDF file(s)** turns a literature item’s scanned PDFs into page-separated Arabic markdown, using a Gemini OCR pipeline with local post-processing. Run it from a `@citekey` note (the command reads that note’s Zotero attachments). For best results, import Zotero items using **[ScholarWeft](https://community.obsidian.md/plugins/scholar-weft)**, which creates the necessary properties.
+
+**Transcribe a PDF…** does the same for any PDF you choose, with no Zotero item or literature note.
 
 ## Literature notes and Zotero
 
-The automated item route assumes a **literature note** for the Zotero item: a Markdown note named `@<citekey>` in `_2 Bibliographic notes`, carrying the item’s `citekey`/`zotero-key` and its `attachments:` (or a cached Zotero path). Normally **[ScholarWeft](https://community.obsidian.md/plugins/scholar-weft)** or **[ZotLit](https://github.com/aidenlx/zotlit)** creates it from Zotero. Midad does not import references or create these notes itself, and it does not create a Zotero item for a PDF; it only finds the PDFs described by an existing note.
+The automated item route assumes a **literature note** for the Zotero item: a Markdown note named `@<citekey>` in `_2 Bibliographic notes`, carrying the item’s `citekey`/`zotero-key` and its `attachments:` (or a cached Zotero path). Normally **[ScholarWeft](https://community.obsidian.md/plugins/scholar-weft)** or **[ZotLit](https://github.com/aidenlx/zotlit)** creates it from Zotero. ScholarWeft’s default template creates exactly the metadata the plugin needs. Midad does not import references or create these notes itself, and it does not create a Zotero item for a PDF; it only finds the PDFs described by an existing note.
 
 PDF resolution for that route tries the Zotero local API, the ScholarWeft `zlinks` cache, and `~/Zotero/storage` in that order. If you have no literature note (or no Zotero), use **Transcribe a PDF…**, which needs no citekey and writes a `mas-` note instead.
 
