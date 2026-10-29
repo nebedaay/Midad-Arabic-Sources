@@ -21,6 +21,7 @@ The full guides are in [`docs/`](./docs/); this README is a summary. Every page 
 - [Document import](./docs/document-import.md) — collections, the Manage text sources dialogue, naming, and updates.
 - [Templates](./docs/templates.md) — the ETA templates and the render-model variable reference.
 - [Zotero](./docs/zotero.md) — Local / Web / CSL-JSON export, update-in-place, and auto-sync.
+- [Zotero Arabic fields](./docs/zotero-arabic-fields.md) — the optional Zotero 7 companion that romanizes an item's Arabic fields through the same server.
 - [Commands](./docs/commands.md) — every command, grouped by function.
 - [Troubleshooting](./docs/troubleshooting.md) — the common errors and how to fix them.
 
@@ -124,6 +125,7 @@ Core importing and rendering use only the repositories you import from. The foll
 | Transliteration | `transliterate-server.py` on `127.0.0.1` | Romanizes Arabic. Optionally calls Gemini, DeepSeek, or an OpenAI-compatible endpoint when LLM mode is on. |
 | Transcription / translation | The Gemini API | OCRs and translates scanned PDFs you submit. |
 | Zotero export | Your local Zotero (`127.0.0.1:23119`) or `api.zotero.org` | Reads and writes the bibliographic items you export. |
+| Zotero Arabic fields (optional companion) | The local transliteration server (`127.0.0.1:8756`) | Romanizes the Arabic fields of a Zotero item. |
 
 Fonts are **not** fetched: the plugin uses locally installed faces with system fallbacks (see [Fonts](#fonts)).
 

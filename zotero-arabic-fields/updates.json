@@ -1,0 +1,12 @@
+{
+  "addons": {
+    "arabic-fields-romanizer@nebedaay.github.io": {
+      "updates": [
+        {
+          "version": "0.2.2",
+          "update_link": "https://raw.githubusercontent.com/nebedaay/Midad-Arabic-Sources/main/zotero-arabic-fields/arabic-fields-romanizer.xpi"
+        }
+      ]
+    }
+  }
+}
