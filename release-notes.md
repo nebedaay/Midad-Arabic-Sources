@@ -2,10 +2,10 @@
 
 This release adds the optional **Arabic Fields Romanizer** Zotero companion to the repository and documents it, and includes the literature-notes-folder and command-line fixes from 0.1.3.
 
-### Zotero Arabic fields
+### Midad Arabic Transliteration
 
-- The Zotero 7 companion now lives under `zotero-arabic-fields/` with its source, `build.sh`, update manifest, and built `.xpi`. It is **not** bundled into `main.js` or the Obsidian plugin's release assets.
-- The new [Zotero Arabic fields](https://github.com/nebedaay/Midad-Arabic-Sources/blob/main/docs/zotero-arabic-fields.md) guide covers installation, the server requirement, the **Create romanized copy** action, Zotero Config Editor preferences, and updates.
+- The Zotero 7 companion now lives under `midad-arabic-transliteration/` with its source, `build.sh`, update manifest, and built `.xpi`. It is **not** bundled into `main.js` or the Obsidian plugin's release assets.
+- The new [Midad Arabic Transliteration](https://github.com/nebedaay/Midad-Arabic-Sources/blob/main/docs/midad-arabic-transliteration.md) guide covers installation, the server requirement, the **Midad: Create romanized copy** action, Zotero Config Editor preferences, and updates.
 - It uses the same resident transliteration server (`/transliterate`, `/place`, `/lexicon`) as the plugin, so start **Transliteration server…** first.
 
 ### Literature notes and CLI

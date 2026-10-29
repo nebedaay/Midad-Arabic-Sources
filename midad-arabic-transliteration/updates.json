@@ -1,0 +1,12 @@
+{
+  "addons": {
+    "midad-arabic-transliteration@nebedaay.github.io": {
+      "updates": [
+        {
+          "version": "0.3.0",
+          "update_link": "https://raw.githubusercontent.com/nebedaay/Midad-Arabic-Sources/main/midad-arabic-transliteration/midad-arabic-transliteration.xpi"
+        }
+      ]
+    }
+  }
+}

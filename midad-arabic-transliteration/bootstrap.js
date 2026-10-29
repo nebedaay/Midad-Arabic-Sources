@@ -1,6 +1,6 @@
-/* Arabic Fields Romanizer — Zotero 7 bootstrapped plugin
+/* Midad Arabic Transliteration — Zotero 7 bootstrapped plugin
  *
- * Adds an item context-menu action "Create romanized copy" that clones the
+ * Adds an item context-menu action "Midad: Create romanized copy" that clones the
  * selected item and transliterates its Arabic fields via the local
  * transliteration server (scripts/transliterate-server.py). The place field is
  * mapped to an accepted English city name by the server's /place endpoint, and
@@ -22,16 +22,16 @@ var AFR = {
 const ARABIC_RE = /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]/;
 
 function debug(msg) {
-	try { Zotero.debug("ArabicFieldsRomanizer: " + msg); } catch (e) {}
+	try { Zotero.debug("MidadArabicTransliteration: " + msg); } catch (e) {}
 }
 
 function serverUrl() {
-	try { return Zotero.Prefs.get("extensions.arabicFieldsRomanizer.serverUrl", true) || AFR.defaultServer; }
+	try { return Zotero.Prefs.get("extensions.midadArabicTransliteration.serverUrl", true) || AFR.defaultServer; }
 	catch (e) { return AFR.defaultServer; }
 }
 
 function engine() {
-	try { return Zotero.Prefs.get("extensions.arabicFieldsRomanizer.engine", true) || AFR.defaultEngine; }
+	try { return Zotero.Prefs.get("extensions.midadArabicTransliteration.engine", true) || AFR.defaultEngine; }
 	catch (e) { return AFR.defaultEngine; }
 }
 
@@ -54,7 +54,7 @@ function startup({ id, version, rootURI }, reason) {
 function registerMenus() {
 	const setLabel = (event, context) => {
 		try {
-			if (context.menuElem) context.menuElem.setAttribute("label", "Create romanized copy");
+			if (context.menuElem) context.menuElem.setAttribute("label", "Midad: Create romanized copy");
 		} catch (e) {}
 	};
 	const run = (event, context) => {
@@ -65,8 +65,8 @@ function registerMenus() {
 		createRomanizedCopy(items || []).catch(reportError);
 	};
 	const targets = [
-		["arabic-fields-romanizer-item", "main/library/item"],
-		["arabic-fields-romanizer-tools", "main/menubar/tools"],
+		["midad-arabic-transliteration-item", "main/library/item"],
+		["midad-arabic-transliteration-tools", "main/menubar/tools"],
 	];
 	for (const [menuID, target] of targets) {
 		try {
@@ -111,10 +111,10 @@ function addUI(win) {
 	try {
 		const doc = win.document;
 		const menu = doc.getElementById("zotero-itemmenu");
-		if (!menu || doc.getElementById("arabic-fields-romanizer")) return;
+		if (!menu || doc.getElementById("midad-arabic-transliteration")) return;
 		const mi = doc.createXULElement("menuitem");
-		mi.id = "arabic-fields-romanizer";
-		mi.setAttribute("label", "Create romanized copy");
+		mi.id = "midad-arabic-transliteration";
+		mi.setAttribute("label", "Midad: Create romanized copy");
 		mi.addEventListener("command", () => {
 			const items = win.ZoteroPane ? win.ZoteroPane.getSelectedItems() : [];
 			createRomanizedCopy(items).catch((e) => reportError(e));
@@ -127,7 +127,7 @@ function addUI(win) {
 
 function removeUI(win) {
 	try {
-		const el = win.document.getElementById("arabic-fields-romanizer");
+		const el = win.document.getElementById("midad-arabic-transliteration");
 		if (el) el.remove();
 	} catch (e) {}
 }
@@ -136,7 +136,7 @@ function reportError(e) {
 	debug("error: " + (e && e.message ? e.message : e));
 	try {
 		const pw = new Zotero.ProgressWindow();
-		pw.changeHeadline("Arabic Fields Romanizer");
+		pw.changeHeadline("Midad Arabic Transliteration");
 		pw.addDescription("Failed: " + (e && e.message ? e.message : e));
 		pw.show();
 		pw.startCloseTimer(5000);
@@ -171,7 +171,7 @@ async function promptForUnknown() {
 			const input = { value: guess || "" };
 			const ok = Services.prompt.prompt(
 				win,
-				"Arabic Fields Romanizer",
+				"Midad Arabic Transliteration",
 				`Transliteration for «${term}»:`,
 				input,
 				null,
@@ -228,7 +228,7 @@ async function createRomanizedCopy(items) {
 	const selected = (items || []).filter((i) => i.isRegularItem());
 	if (!selected.length) {
 		const pw = new Zotero.ProgressWindow();
-		pw.changeHeadline("Arabic Fields Romanizer");
+		pw.changeHeadline("Midad Arabic Transliteration");
 		pw.addDescription("Select a regular item first.");
 		pw.show();
 		pw.startCloseTimer(4000);
@@ -236,7 +236,7 @@ async function createRomanizedCopy(items) {
 	}
 
 	const pw = new Zotero.ProgressWindow();
-	pw.changeHeadline("Arabic Fields Romanizer");
+	pw.changeHeadline("Midad Arabic Transliteration");
 	pw.addDescription("Transliterating fields…");
 	pw.show();
 

@@ -30,7 +30,7 @@ const DOC_ORDER: [string, string][] = [
 	["document-import.md", "Document import"],
 	["templates.md", "Templates"],
 	["zotero.md", "Zotero"],
-	["zotero-arabic-fields.md", "Zotero Arabic fields"],
+	["midad-arabic-transliteration.md", "Midad Arabic Transliteration"],
 	["commands.md", "Commands"],
 	["troubleshooting.md", "Troubleshooting"],
 ];
