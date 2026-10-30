@@ -88,7 +88,7 @@ export class DocsModal extends Modal {
 		this.modalEl.addClass("mas-docs-modal");
 		const { contentEl } = this;
 		contentEl.addClass("mas-docs-modal");
-		contentEl.createEl("h3", { text: "Midad Arabic Sources documentation" });
+		this.setTitle("Midad Arabic Sources documentation");
 		const wrap = contentEl.createDiv({ cls: "mas-docs-wrap" });
 		const nav = wrap.createDiv({ cls: "mas-docs-nav" });
 		this.body = wrap.createDiv({ cls: "mas-docs-body" });

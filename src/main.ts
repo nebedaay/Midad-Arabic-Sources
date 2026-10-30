@@ -4796,7 +4796,7 @@ class TransliterationServerModal extends Modal {
 	}
 
 	onOpen(): void {
-		this.contentEl.createEl("h2", { text: "Transliteration server" });
+		this.setTitle("Transliteration server");
 		this.statusEl = this.contentEl.createEl("p", { text: "Checking…" });
 		new Setting(this.contentEl).addButton((button) => {
 			this.button = button;
@@ -4847,7 +4847,7 @@ class TransliterateModal extends Modal {
 
 	onOpen(): void {
 		const { contentEl } = this;
-		contentEl.createEl("h3", { text: "Transliterate" });
+		this.setTitle("Transliterate");
 
 		new Setting(contentEl)
 			.setName("Full vocalization")
@@ -4910,7 +4910,7 @@ class LexiconModal extends Modal {
 
 	onOpen(): void {
 		const { contentEl } = this;
-		contentEl.createEl("h3", { text: "Add to transliteration lexicon" });
+		this.setTitle("Add to transliteration lexicon");
 		contentEl.createEl("p", {
 			text: "These terms had no morphological analysis. Edit or confirm their romanization to remember them for next time.",
 		});
@@ -5728,7 +5728,7 @@ class LogModal extends Modal {
 
 	onOpen(): void {
 		const { contentEl } = this;
-		contentEl.createEl("h3", { text: this.title });
+		this.setTitle(this.title);
 		const pre = contentEl.createEl("pre");
 		pre.setText(this.text);
 		pre.setCssStyles({
@@ -5756,7 +5756,7 @@ class ApiKeyModal extends Modal {
 
 	onOpen(): void {
 		const { contentEl } = this;
-		contentEl.createEl("h3", { text: "LLM configuration required" });
+		this.setTitle("LLM configuration required");
 		contentEl.createEl("p", {
 			text: `The ${this.task} feature has no usable API key in its selected configuration.`,
 		});
@@ -5790,7 +5790,7 @@ class ResumeModal extends Modal {
 
 	onOpen(): void {
 		const { contentEl } = this;
-		contentEl.createEl("h3", { text: "Pipeline job" });
+		this.setTitle("Pipeline job");
 		const pdf = this.state.pdf ? basenameJS(this.state.pdf) : "";
 		contentEl.createEl("p", { text: `${this.state.stage ?? "unknown"}${pdf ? " — " + pdf : ""}` });
 		const pre = contentEl.createEl("pre");
@@ -5968,9 +5968,7 @@ class PromptEditorModal extends Modal {
 		this.modalEl.addClass("mas-prompt-editor-modal");
 		const { contentEl } = this;
 		const kindLabel = PROMPT_KIND_LABEL[this.kind];
-		contentEl.createEl("h3", {
-			text: this.mode === "new" ? `New ${kindLabel} prompt` : `Edit ${kindLabel} prompt`,
-		});
+		this.setTitle(this.mode === "new" ? `New ${kindLabel} prompt` : `Edit ${kindLabel} prompt`);
 		contentEl.createEl("p", {
 			text:
 				this.mode === "edit" && this.source.builtin
@@ -6084,7 +6082,7 @@ class TranscribeModal extends Modal {
 
 	onOpen(): void {
 		const { contentEl } = this;
-		contentEl.createEl("h3", { text: `Transcribe PDFs — @${this.citekey}` });
+		this.setTitle(`Transcribe PDFs — @${this.citekey}`);
 		contentEl.createEl("p", {
 			text: "Choose the PDF file(s) to transcribe. The volume is inferred from the filename and can be edited.",
 		});
@@ -6187,7 +6185,7 @@ class StandalonePdfModal extends Modal {
 	onOpen(): void {
 		this.modalEl.addClass("mas-standalone-pdf-modal");
 		const { contentEl } = this;
-		contentEl.createEl("h3", { text: "Transcribe a PDF" });
+		this.setTitle("Transcribe a PDF");
 		contentEl.createEl("p", {
 			text: `Choose a PDF that is not attached to a Zotero item. The transcription goes into ${this.plugin.transcriptionsFolder()}; Gemini will guess the title and author from the title page so you can check them afterwards.`,
 		});
@@ -6354,7 +6352,7 @@ class VerifyTranscriptionMetadataModal extends Modal {
 
 	onOpen(): void {
 		const { contentEl } = this;
-		contentEl.createEl("h3", { text: "Check the transcription's title and author" });
+		this.setTitle("Check the transcription's title and author");
 		contentEl.createEl("p", {
 			text: "Gemini guessed these from the title page. Correct them if needed, then save. They fill the same bibliography fields as a Zotero-derived transcription.",
 		});
@@ -6468,7 +6466,7 @@ class TranslateModal extends Modal {
 
 	onOpen(): void {
 		const { contentEl } = this;
-		contentEl.createEl("h3", { text: `Translate — @${this.citekey}` });
+		this.setTitle(`Translate — @${this.citekey}`);
 
 		const promptRow = contentEl.createDiv();
 		this.picker = new PromptPicker(this.plugin, "translation", promptRow, this.prompts, {
@@ -6554,7 +6552,7 @@ class SourceRootMoveModal extends Modal {
 
 	onOpen(): void {
 		const { contentEl } = this;
-		contentEl.createEl("h3", { text: "Move Midad source folders?" });
+		this.setTitle("Move Midad source folders?");
 		contentEl.createEl("p", {
 			text: `Move Installed Sources, Transcriptions, Translations, and Annotation Notes to “${this.root}”?`,
 		});
@@ -6607,7 +6605,7 @@ class ReRenderBatchScopeModal extends Modal {
 
 	onOpen(): void {
 		const { contentEl } = this;
-		contentEl.createEl("h3", { text: `Re-render @${this.citekey}` });
+		this.setTitle(`Re-render @${this.citekey}`);
 		contentEl.createEl("p", {
 			text: `This work has ${this.count} archived batch(es). Re-render only volume ${this.volume}, or every archived batch?`,
 		});
@@ -6643,7 +6641,7 @@ class ReprocessModal extends Modal {
 
 	onOpen(): void {
 		const { contentEl } = this;
-		contentEl.createEl("h3", { text: "Reprocess from archive" });
+		this.setTitle("Reprocess from archive");
 		if (!this.zips.length) {
 			contentEl.createEl("p", { text: "No archived batches found in .midad-arabic-sources/archive." });
 			return;
@@ -6688,7 +6686,7 @@ class SourceTemplateUpdateConsentModal extends Modal {
 
 	onOpen(): void {
 		const { contentEl } = this;
-		contentEl.createEl("h3", { text: "Update imported source notes?" });
+		this.setTitle("Update imported source notes?");
 		contentEl.createEl("p", {
 			text: `The import templates changed. ${this.count} note(s) were rendered with an older version. Re-render them now? Your own edits and out-of-template properties are preserved.`,
 		});
@@ -6733,7 +6731,7 @@ class ReconcileSourcesModal extends Modal {
 
 	onOpen(): void {
 		const { contentEl } = this;
-		contentEl.createEl("h3", { text: "Incomplete imported sources" });
+		this.setTitle("Incomplete imported sources");
 		contentEl.createEl("p", {
 			text: "Some files for the following work(s) are missing, or their cached source is gone (perhaps deleted outside the plugin). Restore them, or remove the work(s) completely.",
 		});
@@ -7706,7 +7704,7 @@ class ZoteroSendModal extends Modal {
 
 	onOpen(): void {
 		const { contentEl } = this;
-		contentEl.createEl("h3", { text: "Send sources to Zotero" });
+		this.setTitle("Send sources to Zotero");
 		contentEl.createEl("p", {
 			text: "Check the sources to send. New and changed entries are checked; those already in Zotero are left unchecked.",
 		});

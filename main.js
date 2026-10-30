@@ -9810,7 +9810,7 @@ var DocsModal = class extends import_obsidian3.Modal {
     this.modalEl.addClass("mas-docs-modal");
     const { contentEl } = this;
     contentEl.addClass("mas-docs-modal");
-    contentEl.createEl("h3", { text: "Midad Arabic Sources documentation" });
+    this.setTitle("Midad Arabic Sources documentation");
     const wrap = contentEl.createDiv({ cls: "mas-docs-wrap" });
     const nav = wrap.createDiv({ cls: "mas-docs-nav" });
     this.body = wrap.createDiv({ cls: "mas-docs-body" });
@@ -20078,7 +20078,7 @@ var TransliterationServerModal = class extends import_obsidian17.Modal {
     this.plugin = plugin;
   }
   onOpen() {
-    this.contentEl.createEl("h2", { text: "Transliteration server" });
+    this.setTitle("Transliteration server");
     this.statusEl = this.contentEl.createEl("p", { text: "Checking\u2026" });
     new import_obsidian17.Setting(this.contentEl).addButton((button) => {
       this.button = button;
@@ -20117,7 +20117,7 @@ var TransliterateModal = class extends import_obsidian17.Modal {
   }
   onOpen() {
     const { contentEl } = this;
-    contentEl.createEl("h3", { text: "Transliterate" });
+    this.setTitle("Transliterate");
     new import_obsidian17.Setting(contentEl).setName("Full vocalization").setDesc("Retain case endings and tanw\u012Bn (pausal shortening at the end of a passage).").addToggle((toggle) => toggle.setValue(this.fullVocalization).onChange((value) => {
       this.fullVocalization = value;
     }));
@@ -20152,7 +20152,7 @@ var LexiconModal = class extends import_obsidian17.Modal {
   }
   onOpen() {
     const { contentEl } = this;
-    contentEl.createEl("h3", { text: "Add to transliteration lexicon" });
+    this.setTitle("Add to transliteration lexicon");
     contentEl.createEl("p", {
       text: "These terms had no morphological analysis. Edit or confirm their romanization to remember them for next time."
     });
@@ -20927,7 +20927,7 @@ var LogModal = class extends import_obsidian17.Modal {
   }
   onOpen() {
     const { contentEl } = this;
-    contentEl.createEl("h3", { text: this.title });
+    this.setTitle(this.title);
     const pre = contentEl.createEl("pre");
     pre.setText(this.text);
     pre.setCssStyles({
@@ -20949,7 +20949,7 @@ var ApiKeyModal = class extends import_obsidian17.Modal {
   }
   onOpen() {
     const { contentEl } = this;
-    contentEl.createEl("h3", { text: "LLM configuration required" });
+    this.setTitle("LLM configuration required");
     contentEl.createEl("p", {
       text: `The ${this.task} feature has no usable API key in its selected configuration.`
     });
@@ -20974,7 +20974,7 @@ var ResumeModal = class extends import_obsidian17.Modal {
   onOpen() {
     var _a;
     const { contentEl } = this;
-    contentEl.createEl("h3", { text: "Pipeline job" });
+    this.setTitle("Pipeline job");
     const pdf = this.state.pdf ? basenameJS(this.state.pdf) : "";
     contentEl.createEl("p", { text: `${(_a = this.state.stage) != null ? _a : "unknown"}${pdf ? " \u2014 " + pdf : ""}` });
     const pre = contentEl.createEl("pre");
@@ -21122,9 +21122,7 @@ var PromptEditorModal = class extends import_obsidian17.Modal {
     this.modalEl.addClass("mas-prompt-editor-modal");
     const { contentEl } = this;
     const kindLabel = PROMPT_KIND_LABEL[this.kind];
-    contentEl.createEl("h3", {
-      text: this.mode === "new" ? `New ${kindLabel} prompt` : `Edit ${kindLabel} prompt`
-    });
+    this.setTitle(this.mode === "new" ? `New ${kindLabel} prompt` : `Edit ${kindLabel} prompt`);
     contentEl.createEl("p", {
       text: this.mode === "edit" && this.source.builtin ? "This is the built-in default. Save updates it in place (its name stays \u201CDefault prompt\u201D); Save as keeps it and adds a copy under the name above. It cannot be deleted." : "Save replaces this prompt; Save as adds a copy under the name above."
     });
@@ -21220,7 +21218,7 @@ var TranscribeModal = class extends import_obsidian17.Modal {
   }
   onOpen() {
     const { contentEl } = this;
-    contentEl.createEl("h3", { text: `Transcribe PDFs \u2014 @${this.citekey}` });
+    this.setTitle(`Transcribe PDFs \u2014 @${this.citekey}`);
     contentEl.createEl("p", {
       text: "Choose the PDF file(s) to transcribe. The volume is inferred from the filename and can be edited."
     });
@@ -21301,7 +21299,7 @@ var StandalonePdfModal = class extends import_obsidian17.Modal {
   onOpen() {
     this.modalEl.addClass("mas-standalone-pdf-modal");
     const { contentEl } = this;
-    contentEl.createEl("h3", { text: "Transcribe a PDF" });
+    this.setTitle("Transcribe a PDF");
     contentEl.createEl("p", {
       text: `Choose a PDF that is not attached to a Zotero item. The transcription goes into ${this.plugin.transcriptionsFolder()}; Gemini will guess the title and author from the title page so you can check them afterwards.`
     });
@@ -21453,7 +21451,7 @@ var VerifyTranscriptionMetadataModal = class extends import_obsidian17.Modal {
   }
   onOpen() {
     const { contentEl } = this;
-    contentEl.createEl("h3", { text: "Check the transcription's title and author" });
+    this.setTitle("Check the transcription's title and author");
     contentEl.createEl("p", {
       text: "Gemini guessed these from the title page. Correct them if needed, then save. They fill the same bibliography fields as a Zotero-derived transcription."
     });
@@ -21537,7 +21535,7 @@ var TranslateModal = class extends import_obsidian17.Modal {
   }
   onOpen() {
     const { contentEl } = this;
-    contentEl.createEl("h3", { text: `Translate \u2014 @${this.citekey}` });
+    this.setTitle(`Translate \u2014 @${this.citekey}`);
     const promptRow = contentEl.createDiv();
     this.picker = new PromptPicker(this.plugin, "translation", promptRow, this.prompts, {
       onSelectAll: () => this.checks.forEach((c) => c.el.checked = true),
@@ -21611,7 +21609,7 @@ var SourceRootMoveModal = class extends import_obsidian17.Modal {
   }
   onOpen() {
     const { contentEl } = this;
-    contentEl.createEl("h3", { text: "Move Midad source folders?" });
+    this.setTitle("Move Midad source folders?");
     contentEl.createEl("p", {
       text: `Move Installed Sources, Transcriptions, Translations, and Annotation Notes to \u201C${this.root}\u201D?`
     });
@@ -21648,7 +21646,7 @@ var ReRenderBatchScopeModal = class extends import_obsidian17.Modal {
   }
   onOpen() {
     const { contentEl } = this;
-    contentEl.createEl("h3", { text: `Re-render @${this.citekey}` });
+    this.setTitle(`Re-render @${this.citekey}`);
     contentEl.createEl("p", {
       text: `This work has ${this.count} archived batch(es). Re-render only volume ${this.volume}, or every archived batch?`
     });
@@ -21671,7 +21669,7 @@ var ReprocessModal = class extends import_obsidian17.Modal {
   }
   onOpen() {
     const { contentEl } = this;
-    contentEl.createEl("h3", { text: "Reprocess from archive" });
+    this.setTitle("Reprocess from archive");
     if (!this.zips.length) {
       contentEl.createEl("p", { text: "No archived batches found in .midad-arabic-sources/archive." });
       return;
@@ -21707,7 +21705,7 @@ var SourceTemplateUpdateConsentModal = class extends import_obsidian17.Modal {
   }
   onOpen() {
     const { contentEl } = this;
-    contentEl.createEl("h3", { text: "Update imported source notes?" });
+    this.setTitle("Update imported source notes?");
     contentEl.createEl("p", {
       text: `The import templates changed. ${this.count} note(s) were rendered with an older version. Re-render them now? Your own edits and out-of-template properties are preserved.`
     });
@@ -21735,7 +21733,7 @@ var ReconcileSourcesModal = class extends import_obsidian17.Modal {
   }
   onOpen() {
     const { contentEl } = this;
-    contentEl.createEl("h3", { text: "Incomplete imported sources" });
+    this.setTitle("Incomplete imported sources");
     contentEl.createEl("p", {
       text: "Some files for the following work(s) are missing, or their cached source is gone (perhaps deleted outside the plugin). Restore them, or remove the work(s) completely."
     });
@@ -22671,7 +22669,7 @@ var ZoteroSendModal = class extends import_obsidian17.Modal {
   }
   onOpen() {
     const { contentEl } = this;
-    contentEl.createEl("h3", { text: "Send sources to Zotero" });
+    this.setTitle("Send sources to Zotero");
     contentEl.createEl("p", {
       text: "Check the sources to send. New and changed entries are checked; those already in Zotero are left unchecked."
     });
