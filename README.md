@@ -1,10 +1,20 @@
 # Midad Arabic Sources
 
-**Midad Arabic Sources** brings classical Arabic texts into your Obsidian vault and turns them into a linkable, searchable, annotated part of your notes. It removes the manual labour between *there is an Arabic text I want to study* and *it is integrated into my vault*: it **locates and imports** already digitized texts, **transcribes** (OCRs) scanned PDFs, translates those transcriptions into English, transliterates Arabic passages for integration into English writing, and keeps every generated note current as templates and upstream sources change.
+**Midad Arabic Sources** brings classical Arabic texts into your Obsidian vault and turns them into a linkable, searchable, annotated part of your notes. It removes the manual labour between *there is an Arabic text I want to study* and *it is integrated into my vault*.
 
-The plugin was built for research on Islam and Arabic — Qurʾān commentaries, ḥadīth, the Qurʾān in its riwāyāt, and the classical dictionaries — but the importer is catalog-driven, so more repositories on any topic can be wired in over time.
+Some of its many features:
 
-Midad is optimized for integration with [Zotero](https://www.zotero.org/) using the [ScholarWeft](https://github.com/nebedaay/ScholarWeft) plugin, although these two are not required.
+- **locates and imports** already digitized texts using an extensive curated list of online repositories
+- **transcribes** (OCRs) your scanned PDFs, either directly or through fetching them as Zotero attachments
+- **translates** those transcriptions into English
+- **transliterates** Arabic passages for integration into English writing
+- **provides an annotation interface** similar to Zotero’s PDF annotation features, keeping them even if the source document is updated or removed from Obsidian
+- **auto-updates and re-renders** generated source notes when templates and upstream sources change
+- **exports sources** as auto-updated Zotero items
+
+The plugin was built for research on Islam and the Arabic language — Qurʾān commentaries, ḥadīth, the Qurʾān in its riwāyāt, and the classical dictionaries — but the importer is catalog-driven, so more repositories on any topic can be wired in over time, and users can add works by URL or PDF import that are not listed in the plugin.
+
+Midad is optimized for integration with [Zotero](https://www.zotero.org/) using the [ScholarWeft](https://github.com/nebedaay/ScholarWeft) Obsidian plugin, although these two are not required.
 
 > [!note]
 > This plugin is **desktop only**. It runs local Python scripts and reads files outside the vault.
@@ -15,14 +25,14 @@ The full guides are in [`docs/`](./docs/); this README is a summary. Every page 
 
 - [Setup](./docs/setup.md) — install, first run, the folder layout, and where state lives.
 - [Dependencies](./docs/dependencies.md) — Python, CAMeL Tools, a Gemini key, and the resident transliteration server.
-- [Transliteration](./docs/transliteration.md) — commands, engines, the romanization options, the lexicon, and LLM romanization.
+- [Transliteration](./docs/transliteration.md) — commands, the plugin’s local romanization server and its backend options (Python engines or LLM), romanization options, the user lexicon.
 - [Transcription](./docs/transcription.md) — the Gemini OCR pipeline, post-processing, status, and reprocessing.
 - [Translation](./docs/translation.md) — translating a finished transcription.
 - [Document import](./docs/document-import.md) — collections, the Manage text sources dialogue, naming, and updates.
 - [Templates](./docs/templates.md) — the ETA templates and the render-model variable reference.
 - [Zotero](./docs/zotero.md) — Local / Web / CSL-JSON export, update-in-place, and auto-sync.
-- [Midad Arabic Transliteration](./docs/midad-arabic-transliteration.md) — the optional Zotero 7 companion that romanizes an item's Arabic fields through the same server.
-- [Commands](./docs/commands.md) — every command, grouped by function.
+- [Midad Arabic Transliteration Zotero plugin](./docs/midad-arabic-transliteration.md) — the optional Zotero 7 companion (downloaded and installed separately from the Obsidian plugin) that romanizes an item's Arabic fields using Midad’s local transliteration server.
+- [Commands](./docs/commands.md) — every command, grouped by function, including command-line functions that work outside Obsidian.
 - [Troubleshooting](./docs/troubleshooting.md) — the common errors and how to fix them.
 
 ## What it does

@@ -1,6 +1,8 @@
 # Commands
 
-Every command is in the command palette under **Midad Arabic Sources**, grouped here by function. The guide for each group is linked from its heading.
+Obsidian commands are available in the command palette under **Midad Arabic Sources**, grouped here by function. The guide for each group is linked from its heading.
+
+The plugin scripts also provide a **command-line interface** for use outside Obsidian. See the [From the command line](#from-the-command-line) section below.
 
 ## Documentation
 
@@ -89,6 +91,8 @@ python3 scripts/arabic-bw-transliterate.py --llm --provider gemini --model gemin
 ```
 
 `-text` takes the passage; omit it to read interactively. `--engine` is `bert` (default), `mle`, or `none`; `--keep-case`, `--name`, `--sun-letters`, and `--dotless-ya maqsura|ya` match the settings. `--llm` uses a provider directly (`gemini`, `deepseek`, or `openai`, with `--model`, `--base-url`, `--api-key`), or the resident server with `--server-url`. The resident service and its browser interface are started with `python3 scripts/transliterate-server.py --port 8756`.
+
+Once started (whether through the command line or Obsidian), the transliteration server is also available through its local web interface at `http://127.0.0.1:8756/` (see [Transliteration](./transliteration.md)).
 
 ### Transcription
 

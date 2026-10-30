@@ -2,6 +2,8 @@
 
 Midad Arabic Sources romanizes Arabic from Obsidian. A resident Python service does the work, so the model loads once and Obsidian does not pay for it on every call.
 
+The romanization server also has a command-line interface for running it and invoking transliteration from a terminal (see the [Commands](./commands.md) documentation). It also provides a local web interface for use in a web browser (see below).
+
 ## Commands
 
 - **Transliterate selection to clipboard** — romanize the selection, or the current line if nothing is selected, and copy the result.
@@ -80,6 +82,6 @@ Add as many configurations as you need with **Add LLM configuration**; then choo
 
 Turn it on per call with **Use LLM** in the transliteration dialog. The LLM path lives in the server (`POST /romanize`), so it can also translate in the same call.
 
-## The browser interface
+## The web browser interface
 
 The server serves a self-contained interface at `http://127.0.0.1:8756/`. Arabic goes on the right, the result on the left, with route (rule engine or LLM) and the same options as the commands. Unknown terms are listed below the result with an editable romanization and an **Add** button that writes to the lexicon and refreshes the result in place. It is handy for working outside Obsidian, or for testing after an engine change. The same script also has a command-line interface; see [Commands → From the command line](./commands.md#from-the-command-line). For a Zotero item, the optional [Midad Arabic Transliteration](./midad-arabic-transliteration.md) companion uses the same server to create a romanized copy.

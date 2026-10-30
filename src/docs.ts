@@ -97,15 +97,19 @@ export class DocsModal extends Modal {
 			const item = nav.createEl("a", { text: doc.title, cls: "mas-docs-nav-item" });
 			item.addEventListener("click", (e) => {
 				e.preventDefault();
-				this.show(doc.name);
+				void this.show(doc.name);
 			});
 			this.navItems.set(doc.name, item);
 		}
-		this.show(this.initial);
+		void this.show(this.initial);
 	}
 
-	/** Render a doc; internal `./other.md` links navigate within the modal. */
-	private show(name: string): void {
+	/**
+	 * Render a doc; internal `./other.md` links navigate within the modal, and
+	 * GitHub-style `#heading` / `page.md#heading` fragments scroll to the
+	 * matching heading after the Markdown has rendered.
+	 */
+	private async show(name: string, anchor = ""): Promise<void> {
 		const docs = getDocs();
 		const doc = docs.find((d) => d.name === name) ?? docs[0];
 		if (!doc) return;
@@ -127,14 +131,41 @@ export class DocsModal extends Modal {
 			if (!a) return;
 			const href = a.getAttribute("href") ?? "";
 			if (/^https?:/i.test(href)) return;
-			const m = href.match(/([\w-]+\.md)(?:#.*)?$/);
+			const hash = href.indexOf("#");
+			const fragment = hash >= 0 ? href.slice(hash + 1) : "";
+			const base = hash >= 0 ? href.slice(0, hash) : href;
+			const m = base.match(/([\w-]+\.md)$/);
 			if (m && docs.some((d) => d.name === m[1])) {
 				e.preventDefault();
-				this.show(m[1]);
+				void this.show(m[1], fragment);
+				return;
+			}
+			if (hash >= 0) {
+				// A same-page fragment, or an Obsidian-rewritten internal href.
+				e.preventDefault();
+				this.scrollToAnchor(content, fragment);
 			}
 		});
-		void MarkdownRenderer.render(this.app, doc.markdown, content, "", this.component);
 		this.body.scrollTop = 0;
+		await MarkdownRenderer.render(this.app, doc.markdown, content, "", this.component);
+		if (anchor) this.scrollToAnchor(content, anchor);
+	}
+
+	/** Resolve a GitHub heading slug (or a literal heading) within this doc. */
+	private scrollToAnchor(content: HTMLElement, raw: string): void {
+		const wanted = decodeURIComponent(raw).replace(/^#/, "").trim();
+		if (!wanted) return;
+		const slug = (value: string): string => value
+			.trim()
+			.toLowerCase()
+			.replace(/[^\p{L}\p{N}\s-]/gu, "")
+			.replace(/\s+/g, "-");
+		const target = slug(wanted);
+		const headings = Array.from(content.querySelectorAll<HTMLElement>("h1,h2,h3,h4,h5,h6"));
+		const match = headings.find((heading) =>
+			heading.id === wanted
+			|| slug(heading.dataset.heading ?? heading.textContent ?? "") === target);
+		if (match) match.scrollIntoView({ block: "start" });
 	}
 
 	onClose(): void {
