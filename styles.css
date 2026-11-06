@@ -120,7 +120,7 @@
        single-line verse still leaves room for the reference link below the
        emblem. Longer verses are unaffected. */
     --quran-en-verse-min: 4.3rem;
-
+    --mas-yaml-up-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.75' stroke-linecap='round' stroke-linejoin='round' class='lucide lucide-arrow-up-from-dot-icon lucide-arrow-up-from-dot'%3E%3Cpath d='m5 9 7-7 7 7'/%3E%3Cpath d='M12 16V2'/%3E%3Ccircle cx='12' cy='21' r='1'/%3E%3C/svg%3E");
 }
 
 
@@ -174,7 +174,91 @@ body .quran-en h1 {
     text-align: left;
 }
 
+.metadata-property[data-property-key="midad-up"],
+.metadata-property[data-property-key="midad-related"] {
+     .multi-select-pill {
+        background-color: #585c;
+        color: #ffef;
+        padding: 5px;
+        border-radius: 5px;
+     }
+     .internal-link, a:link, a:hover, a:visited {
+        color: #ffae;
+     }
+}
+
+.metadata-property[data-property-key="midad-up"] .multi-select-pill-content::before,
+.metadata-property[data-property-key="midad-related"] .multi-select-pill-content::before {
+  content: "";
+  padding: 0;
+  display: inline-block;
+  width: 1rem;
+  height: 1rem;
+  margin-right: 0.2rem;
+  vertical-align: middle;
+  mask-image: var(--mas-yaml-up-icon);
+  mask-size: contain;
+  mask-repeat: no-repeat;
+  mask-position: center;
+}
+
+.metadata-property[data-property-key="midad-up"] .multi-select-pill-content::before {
+  background-image: --mas-arrow-gradient(var(--mas-yellow));
+}
+
+body.sw-yaml-formatting .metadata-property[data-property-key="related"] .multi-select-pill-content::before {
+  background-image: --mas-arrow-gradient(var(--sw-orange));
+  rotate: 90deg;
+}
+
+
 /* CALLOUTS */
+
+.callout[data-callout*="poetry"], .callout[data-callout*="quran"] {
+    --callout-color: rgb(150, 150, 100);
+    .callout-title {
+        display: none;
+    }
+    border:0px !important;
+}
+.callout[data-callout*="poetry"] {
+    padding: 0rem 0rem;
+    ul, li {
+        list-style-type: none;
+    }
+    li.list-bullet::before, li.list-bullet::after {
+        display:none !important;
+    }
+    & li>ul {
+        padding-inline-start: 1rem!important;
+    }
+}
+
+.callout[data-callout*="poetry"] {
+    ul, li {
+        margin-inline-start: unset;
+        margin: 0px !important;
+        margin-block: 0px;
+        border: 0px;
+        padding: .15rem 0rem!important;
+        list-style-type: none;
+    }
+    ul {
+        >li>ul {
+            display: flex;
+            gap: 0.25rem 1.5rem;
+            margin-block: 0;
+            padding-inline-start: 0;
+            column-gap: 1rem;
+            margin-block: 0em;
+            li {
+                flex: 2 2 0%;
+                white-space: normal;
+            }
+        }
+    }
+}
+
 
 .callout[data-callout*="arabic-"] {
     font-size: var(--arabic-font-size);
@@ -198,6 +282,26 @@ body [class*="quran-quote"]:dir(rtl) {
    [dir="rtl"] rule above does not reach. (Quran callouts get their own font.) */
 .callout[data-callout^="arabic-"] {
     font-family: var(--latin-font), var(--arabic-font), serif;
+}
+
+/* Footnote and TOC callouts emitted by the transcription/translation pipeline.
+   Kept here so the generated notes look the same without a vault snippet:
+   transparent, no title/icon, no bullets, and the muted link colour. */
+body .callout[data-callout*="footnotes" i],
+body .callout[data-callout="toc" i] {
+    background-color: transparent !important;
+    .callout-icon, .callout-title {
+        display: none !important;
+    }
+    ul, li {
+        list-style-type: none;
+    }
+    li > ul > li {
+        margin-left: 1rem;
+    }
+    a:link, a:hover, a:visited {
+        color: #876;
+    }
 }
 
 
@@ -1057,7 +1161,9 @@ body .mas-managed {
   result: hsla(var(--hue), var(--mas-muted-sat), var(--mas-muted-dk), var(--mas-annot-dk-opac));
 }
 
-
+@function --mas-arrow-gradient(--hue) {
+  result: linear-gradient(0deg, --mas-bright(var(--mas-yellow)) 10%, --mas-light(var(--hue)) 25%, --sw-bright(var(--hue)) 80%, --sw-dark(var(--hue)) 100%);
+}
 
 body {
     --mas-yellow: 55;
