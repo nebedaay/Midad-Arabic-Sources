@@ -500,6 +500,8 @@ export async function renderMocs(
 export interface SourcesMocItem {
 	name: string;
 	label: string;
+	/** Number of resources the entry represents, shown in the parent note. */
+	count?: number;
 }
 
 export interface SourcesMocGroup {

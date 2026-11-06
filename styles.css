@@ -1625,6 +1625,14 @@ body .mas-ann-card-quote ol {
     text-decoration: none;
 }
 
+/* The resource browser's category rows (Topics, Repositories, My Midad Content)
+   read as headings; their children keep the normal child-row style. */
+.mas-ann-nav__row.is-section > a.mas-ann-nav__title,
+.mas-ann-nav__row.is-section > .mas-ann-nav__title {
+    color: var(--text-normal);
+    font-weight: var(--font-semibold);
+}
+
 .mas-ann-nav__row.is-current > .mas-ann-nav__title {
     color: var(--text-normal);
     font-weight: var(--font-semibold);

@@ -1,7 +1,6 @@
 import {
 	Component,
 	ItemView,
-	MarkdownView,
 	TFile,
 	WorkspaceLeaf,
 	setIcon,
@@ -20,6 +19,8 @@ export interface AnnotationSidebarData {
 	target: AnnotationTarget | null;
 	annotations: SourceAnnotation[];
 	navigation: NavigationData;
+	/** True when the note in context is not a Midad note (the collection index). */
+	collection?: boolean;
 }
 
 type SidebarTab = "annotations" | "navigation";
@@ -32,6 +33,11 @@ function renderAnnotationCount(parent: HTMLElement, count: number): void {
 	});
 	setIcon(badge.createSpan({ cls: "mas-ann-nav__count-icon" }), "message-square-text");
 	badge.createSpan({ cls: "mas-ann-nav__count-number", text: String(count) });
+}
+
+/** The cached resource count shown beside a category or entry. */
+function linkText(link: NavigationLink): string {
+	return link.count != null ? `${link.title} (${link.count})` : link.title;
 }
 
 /**
@@ -116,18 +122,6 @@ export class AnnotationSidebarView extends ItemView {
 		brand.createSpan({ text: "Midad" });
 
 		const head = root.createDiv({ cls: "mas-ann-sidebar__head" });
-		if (!data) {
-			this.navigationPath = "";
-			const activeNote = this.app.workspace.getActiveViewOfType(MarkdownView)?.file;
-			head.createDiv({
-				cls: "mas-ann-sidebar__empty",
-				text: activeNote
-					? "This note is not part of Midad."
-					: "Open a note to see its annotations and navigation.",
-			});
-			return;
-		}
-
 		head.createDiv({ cls: "mas-ann-sidebar__title", text: data.noteName });
 		const tabs = root.createDiv({
 			cls: "mas-ann-sidebar__tabs",
@@ -237,21 +231,31 @@ export class AnnotationSidebarView extends ItemView {
 			}
 		}
 
+		if (!data.items.length) {
+			navigation.createDiv({
+				cls: "mas-ann-sidebar__empty",
+				text: "No Midad sources are indexed yet.",
+			});
+			return;
+		}
+
 		const scroller = navigation.createDiv({ cls: "mas-ann-nav__scroll" });
 		const list = scroller.createEl("ul", { cls: "mas-ann-nav__list" });
 		for (const item of data.items) {
 			const row = list.createEl("li", { cls: "mas-ann-nav__item" });
 			const heading = row.createDiv({
-				cls: `mas-ann-nav__row${item.current ? " is-current" : ""}`,
+				cls: `mas-ann-nav__row${item.current ? " is-current" : ""}${data.collection ? " is-section" : ""}`,
 			});
+			const hasChildren = item.children.length > 0;
 			let children: HTMLUListElement | null = null;
-			if (item.current && item.children.length) {
+			if (hasChildren) {
 				const folded = this.foldedNavigation.has(item.path);
+				const name = item.current ? "current note" : item.title;
 				const fold = heading.createEl("button", {
 					cls: "mas-ann-nav__fold",
 					attr: {
 						type: "button",
-						"aria-label": folded ? "Expand current note" : "Collapse current note",
+						"aria-label": folded ? `Expand ${name}` : `Collapse ${name}`,
 						"aria-expanded": String(!folded),
 					},
 				});
@@ -264,17 +268,17 @@ export class AnnotationSidebarView extends ItemView {
 					else this.foldedNavigation.delete(item.path);
 					setIcon(fold, next ? "chevron-right" : "chevron-down");
 					fold.setAttribute("aria-expanded", String(!next));
-					fold.setAttribute("aria-label", next ? "Expand current note" : "Collapse current note");
+					fold.setAttribute("aria-label", next ? `Expand ${name}` : `Collapse ${name}`);
 					children?.toggleClass("is-collapsed", next);
 				});
 			}
 			if (item.current) {
-				heading.createSpan({ cls: "mas-ann-nav__title", text: item.title });
+				heading.createSpan({ cls: "mas-ann-nav__title", text: linkText(item) });
 			} else {
 				this.renderNavigationLink(heading, item, "mas-ann-nav__title");
 			}
 			if (item.annotationCount > 0) renderAnnotationCount(heading, item.annotationCount);
-			if (item.current && item.children.length) {
+			if (hasChildren) {
 				children = row.createEl("ul", { cls: "mas-ann-nav__children" });
 				const folded = this.foldedNavigation.has(item.path);
 				children.toggleClass("is-collapsed", folded);
@@ -289,9 +293,15 @@ export class AnnotationSidebarView extends ItemView {
 	}
 
 	private renderNavigationLink(parent: HTMLElement, link: NavigationLink, cls: string): void {
+		const text = linkText(link);
+		if (!link.path) {
+			// A category without an index note: a plain label, not a link.
+			parent.createSpan({ cls, text });
+			return;
+		}
 		const anchor = parent.createEl("a", {
 			cls: `internal-link ${cls}`,
-			text: link.title,
+			text,
 			href: "#",
 		});
 		anchor.dataset.href = link.path;

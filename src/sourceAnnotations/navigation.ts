@@ -1,10 +1,14 @@
 import { App, TFile, normalizePath } from "obsidian";
+import { isChildEntry, parseSourceIndex } from "./sourceIndex";
+import type { ResourceModelFile } from "../resourceModel";
 
 export interface NavigationLink {
 	title: string;
 	path: string;
 	annotationCount: number;
 	heading?: string;
+	/** Resources represented (resource-model entries only). */
+	count?: number;
 }
 
 export interface NavigationItem extends NavigationLink {
@@ -15,6 +19,12 @@ export interface NavigationItem extends NavigationLink {
 export interface NavigationData {
 	parents: NavigationLink[];
 	items: NavigationItem[];
+	/**
+	 * True when the tree is the collection index shown in the absence of a Midad
+	 * note, rather than the active note's place in the hierarchy. In that mode
+	 * every top-level item may carry children.
+	 */
+	collection?: boolean;
 }
 
 type CountForPath = (path: string) => number;
@@ -161,4 +171,78 @@ export function buildNavigationData(
 	}
 	if (!found) items.unshift(current);
 	return { parents, items };
+}
+
+/**
+ * The collection index shown when no Midad note is in context: the groups and
+ * entries of the parent note's managed `mas-sources-list` callout. Reading the
+ * note itself keeps the sidebar in step with what the note displays. The groups
+ * (By Topic, By Source, Annotations) are siblings; their MOC entries are
+ * children.
+ */
+export async function buildCollectionNavigation(
+	app: App,
+	parentName: string,
+	countForPath: CountForPath
+): Promise<NavigationData | null> {
+	const parent = app.metadataCache.getFirstLinkpathDest(parentName, "");
+	if (!(parent instanceof TFile)) return null;
+	const text = await app.vault.cachedRead(parent);
+
+	const items: NavigationItem[] = [];
+	let group: NavigationItem | null = null;
+	for (const entry of parseSourceIndex(text)) {
+		const file = resolveLink(app, entry.target, parent.path);
+		if (!file) continue;
+		const link: NavigationLink = {
+			...linkFor(app, file, countForPath),
+			title: entry.label || fileTitle(app, file),
+		};
+		if (isChildEntry(entry)) {
+			group?.children.push(link);
+			continue;
+		}
+		group = { ...link, current: false, children: [] };
+		items.push(group);
+	}
+	if (!items.length) return null;
+	return { parents: [], items, collection: true };
+}
+
+/**
+ * The resource browser built from the persisted model: the three categories,
+ * their entries, and the cached counts. The rendered MOC is only a fallback for
+ * when the model JSON is absent.
+ */
+export function buildResourceNavigation(
+	app: App,
+	model: ResourceModelFile,
+	countForPath: CountForPath
+): NavigationData | null {
+	const items: NavigationItem[] = [];
+	for (const category of model.categories) {
+		const categoryFile = app.metadataCache.getFirstLinkpathDest(category.note, "");
+		const base = categoryFile instanceof TFile
+			? linkFor(app, categoryFile, countForPath)
+			: { title: category.label, path: "", annotationCount: 0 };
+		const item: NavigationItem = {
+			...base,
+			title: category.label,
+			count: category.count,
+			current: false,
+			children: [],
+		};
+		for (const entry of category.entries) {
+			const file = app.metadataCache.getFirstLinkpathDest(entry.note, "");
+			if (!(file instanceof TFile)) continue;
+			item.children.push({
+				...linkFor(app, file, countForPath),
+				title: entry.label,
+				count: entry.count,
+			});
+		}
+		items.push(item);
+	}
+	if (!items.length) return null;
+	return { parents: [], items, collection: true };
 }

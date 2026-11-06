@@ -34,12 +34,12 @@ import {
 	RenderProgress,
 	expectedNotePaths,
 	loadTemplates,
-	renderMocs,
 	renderModelToVault,
 	buildMocSections,
 	canonicalMocName,
 	renderMocIndex,
 	renderSourcesNote,
+	SourcesMocGroup,
 	vaultRelative,
 	writeMerged,
 } from "./sourceImport/render";
@@ -54,6 +54,22 @@ import {
 import { BUNDLED_ASSETS } from "./assets.generated";
 import { localDate } from "./time";
 import { sourceIdToYaml, sourceOfFrontmatter } from "./sourceIds";
+import {
+	ANNOTATIONS_NOTE,
+	MY_CONTENT_LABEL,
+	MY_CONTENT_NOTE,
+	REPOSITORIES_NOTE,
+	TOPICS_NOTE,
+	TRANSCRIPTIONS_LABEL,
+	TRANSCRIPTIONS_NOTE,
+	TRANSLATIONS_LABEL,
+	TRANSLATIONS_NOTE,
+	buildResourceModel,
+	saveResourceModel,
+	type LocalResource,
+	type RepositoryGroup,
+	type ResourceCategory,
+} from "./resourceModel";
 import { sourceRoot as resolveSourceRoot, installedSourcesRoot as resolveInstalledSourcesRoot, transcriptionsFolder as resolveTranscriptionsFolder, translationsFolder as resolveTranslationsFolder, canonicalQuranFolder as resolveCanonicalQuranFolder, sourceNotePath as resolveSourceNotePath } from "./sourcePaths";
 import { openDocs, getDocs } from "./docs";
 import { registerAnnotations, AnnotationService } from "./sourceAnnotations/service";
@@ -496,7 +512,6 @@ function requiredModelSchema(collection: string): number {
 
 /** Tag and collection every Zotero export carries, so its origin is traceable. */
 const ZOTERO_MARK = "Midad Arabic Sources";
-const SOURCE_INDEX_NOTE = "Midad Arabic Sources - By Source";
 
 /** Appended to an item whose bibliographic details are still unverified. */
 const BIB_PROVISIONAL = "Bibliographic details are provisional — verify against the edition you used before citing.";
@@ -569,6 +584,18 @@ const DEFAULT_SETTINGS: MidadArabicSourcesSettings = {
 	zoteroAutoCreate: false,
 	sourceUpdateCheckDays: 7,
 };
+
+/** A group of transcription/translation notes for one work (and its volumes). */
+interface LocalGroup {
+	docType: "transcription" | "translation";
+	route: "lit" | "pdf" | "adopted";
+	title: string;
+	parentStem: string;
+	parentTitle: string;
+	volumes: Array<{ stem: string; label: string }>;
+	/** Canonical topic-MOC names carried by the group's notes. */
+	topics: string[];
+}
 
 export default class MidadArabicSourcesPlugin extends Plugin {
 	settings: MidadArabicSourcesSettings;
@@ -2884,33 +2911,34 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 	}
 
 	/**
-	 * Rebuild the category MOCs and the parent note from what is currently
-	 * installed. Unlike a full re-render this never touches work notes, so it
-	 * cannot resurrect a just-removed source.
+	 * Rebuild the resource model, the MOCs, and the parent note from what is
+	 * currently installed. Unlike a full re-render this never touches work notes,
+	 * so it cannot resurrect a just-removed source.
 	 */
-	/** Rename the old “Midad Sources” index to its unambiguous name. */
+
+	/** Rename the legacy repository index notes to their current name. */
 	async renameLegacySourceIndex(): Promise<void> {
-		const legacy = this.sourceNotePath("Midad Sources");
-		const canonical = this.sourceNotePath(SOURCE_INDEX_NOTE);
-		const old = this.app.vault.getAbstractFileByPath(legacy);
-		if (old instanceof TFile && !this.app.vault.getAbstractFileByPath(canonical)) {
-			try {
-				await this.app.fileManager.renameFile(old, canonical);
-			} catch (error) {
-				console.error("[midad-arabic-sources] source index rename", error);
-			}
+		await this.renameIndexNote("Midad Sources", REPOSITORIES_NOTE);
+		await this.renameIndexNote("Midad Arabic Sources - By Source", REPOSITORIES_NOTE);
+	}
+
+	private async renameIndexNote(oldName: string, newName: string): Promise<void> {
+		if (oldName === newName) return;
+		const oldPath = this.sourceNotePath(oldName);
+		const newPath = this.sourceNotePath(newName);
+		const old = this.app.vault.getAbstractFileByPath(oldPath);
+		if (!(old instanceof TFile) || this.app.vault.getAbstractFileByPath(newPath)) return;
+		try {
+			await this.app.fileManager.renameFile(old, newPath);
+		} catch (error) {
+			console.error("[midad-arabic-sources] index rename", error);
 		}
 	}
 
 	async refreshSourcesIndex(): Promise<string[]> {
 		await this.renameLegacySourceIndex();
-		const userFolder = this.settings.sourceTemplateFolder.trim() || null;
-		let templates: TemplateSet;
-		try {
-			templates = await loadTemplates(this.app, this.bundledTemplateDir(), userFolder);
-		} catch {
-			return [];
-		}
+		const templates = await this.loadIndexTemplates();
+		if (!templates) return [];
 		const manifest = await this.loadSourceManifest();
 		// Keep every entry — including ones still being removed — in the manifest
 		// (the status list), but only list live, non-deleting works in the index.
@@ -2933,53 +2961,150 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		// authoritative, so a work with missing files still belongs (it will be
 		// restored); a work being removed does not.
 		const installed = works.filter((w) => this.workStatus(w) === "installed");
-		const today = localDate();
-		const written = await renderMocs(this.app, templates, installed, this.sourcesRoot(), today, this.settings.sourceMocParent.trim() || "Midad Arabic Sources", true);
-		const repositoryGroups = new Map<string, { label: string; works: JsonObject[] }>();
-		const repositoryNames = new Map<string, string>();
+		const repositories = this.buildRepositoryGroups(installed);
+		const { groups, local } = await this.collectTranscriptionResources();
+		const written = await this.renderResourceIndex(templates, installed, repositories, groups, local);
+		void this.refreshSourceRegistry();
+		return written;
+	}
+
+	/** Load the bundled (or user-copied) templates, or null when they are unusable. */
+	private async loadIndexTemplates(): Promise<TemplateSet | null> {
+		const userFolder = this.settings.sourceTemplateFolder.trim() || null;
+		try {
+			return await loadTemplates(this.app, this.bundledTemplateDir(), userFolder);
+		} catch {
+			return null;
+		}
+	}
+
+	/** Rebuild just the model and the MOCs it drives (local content changed). */
+	async refreshResourceIndex(): Promise<string[]> {
+		const templates = await this.loadIndexTemplates();
+		if (!templates) return [];
+		const manifest = await this.loadSourceManifest();
+		const installed = manifest.filter((w) => this.workStatus(w) === "installed");
+		const repositories = this.buildRepositoryGroups(installed);
+		const { groups, local } = await this.collectTranscriptionResources();
+		return this.renderResourceIndex(templates, installed, repositories, groups, local);
+	}
+
+	/** Repository MOC groups from the installed works, with their labels cached. */
+	buildRepositoryGroups(installed: JsonObject[]): RepositoryGroup[] {
+		const groups = new Map<string, RepositoryGroup>();
+		const names = new Map<string, string>();
 		for (const work of installed) {
 			const repo = this.repositoryMoc(work);
 			if (!repo) continue;
 			let name = repo.name;
-			const existing = repositoryNames.get(name);
-			if (existing && existing !== repo.label) {
-				name = `${repo.name} (${repo.label})`;
-			}
-			repositoryNames.set(name, repo.label);
-			let group = repositoryGroups.get(name);
+			const existing = names.get(name);
+			if (existing && existing !== repo.label) name = `${repo.name} (${repo.label})`;
+			names.set(name, repo.label);
+			let group = groups.get(name);
 			if (!group) {
-				group = { label: repo.label, works: [] };
-				repositoryGroups.set(name, group);
+				group = { name, label: repo.label, works: [] };
+				groups.set(name, group);
 			}
 			group.works.push(work);
 		}
-		this.repositoryMocNames = [...repositoryGroups.keys()];
+		this.repositoryMocNames = [...groups.keys()];
 		this.repositoryMocLabels = {};
-		for (const [name, group] of repositoryGroups) {
-			this.repositoryMocLabels[name] = group.label;
-			const sections = buildMocSections(group.works);
+		for (const [name, group] of groups) this.repositoryMocLabels[name] = group.label;
+		return [...groups.values()];
+	}
+
+	/** Canonical topic MOC names for a repository work (never a repository MOC). */
+	topicsForWork(work: JsonObject): string[] {
+		const names = Array.isArray(work.mocs) ? (work.mocs as string[]) : (typeof work.moc === "string" ? [work.moc] : []);
+		const repositories = new Set(this.repositoryMocNames);
+		return names.map(canonicalMocName).filter((name) => name && name !== ANNOTATIONS_NOTE && !repositories.has(name));
+	}
+
+	/** A short display label for a category MOC. */
+	mocLabel(name: string): string {
+		return this.repositoryMocLabels[name] ?? (
+			name === "Tafsīr Sources" ? "Tafsīr"
+				: name === "Ḥadīth Sources" ? "Ḥadīth"
+					: name === "Language Sources" ? "Language"
+						: name
+		);
+	}
+
+	/**
+	 * Build and save the model, then render every MOC and index from it. The
+	 * model is the authority: no renderer reads a rendered MOC.
+	 */
+	async renderResourceIndex(
+		templates: TemplateSet,
+		installed: JsonObject[],
+		repositories: RepositoryGroup[],
+		groups: LocalGroup[],
+		local: LocalResource[]
+	): Promise<string[]> {
+		const today = localDate();
+		const summary = this.annotations?.annotationSummary() ?? {};
+		const annotations = {
+			count: Object.values(summary).reduce((total, entry) => total + entry.count, 0),
+			works: Object.values(summary).filter((entry) => entry.count > 0).length,
+		};
+		const model = buildResourceModel({
+			installed,
+			repositories,
+			local,
+			annotations,
+			generated: today,
+			topicsForWork: (work) => this.topicsForWork(work),
+			topicLabel: (name) => this.mocLabel(name),
+			repositoryLabel: (name) => this.repositoryMocLabels[name] ?? name,
+		});
+		const written: string[] = [];
+
+		for (const topic of model.topics) {
+			const sections = buildMocSections(topic.works);
+			for (const kind of ["transcription", "translation"] as const) {
+				const entries = topic.local.filter((entry) => entry.kind === kind);
+				if (!entries.length) continue;
+				sections.push({
+					name: kind === "transcription" ? TRANSCRIPTIONS_LABEL : TRANSLATIONS_LABEL,
+					works: entries.map((entry) => ({ dir: entry.name, title: entry.title })),
+				});
+			}
+			written.push(await renderMocIndex(this.app, templates, topic.entry.note, sections, this.sourcesRoot(), TOPICS_NOTE, today, true));
+		}
+		for (const repository of model.repositories) {
+			const sections = buildMocSections(repository.works);
 			written.push(await renderMocIndex(
-				this.app, templates, name,
-				sections.length ? sections : [{ name: "Works", works: group.works }],
-				this.sourcesRoot(), SOURCE_INDEX_NOTE, today, true
+				this.app, templates, repository.entry.note,
+				sections.length ? sections : [{ name: "Works", works: repository.works }],
+				this.sourcesRoot(), REPOSITORIES_NOTE, today, true
 			));
 		}
-		try {
-			written.push(...await this.refreshTranscriptionMocs());
-		} catch (error) {
-			console.error("[midad-arabic-sources] transcription MOCs", error);
-		}
-		const mocNames = [...new Set(installed.flatMap((w): string[] => {
-			const names = Array.isArray(w.mocs) ? (w.mocs as string[]) : (typeof w.moc === "string" ? [w.moc] : []);
-			return names.map(canonicalMocName);
-		}))].filter(Boolean).sort();
-		if (this.annotations?.hasAnnotatedWorks() || this.annotations?.mocExists()) {
-			if (!mocNames.includes("source-annotation")) mocNames.push("source-annotation");
-		}
-		const parentPath = await this.updateSourceParent(templates, mocNames, today);
+		written.push(...await this.renderTranscriptionMocs(groups));
+
+		written.push(await this.renderIndexNote(templates, TOPICS_NOTE, "Topics", model.file.categories[0], today));
+		written.push(await this.renderIndexNote(templates, REPOSITORIES_NOTE, "Repositories", model.file.categories[1], today));
+		written.push(await this.renderIndexNote(templates, MY_CONTENT_NOTE, MY_CONTENT_LABEL, model.file.categories[2], today));
+
+		const parentPath = await this.updateSourceParent(templates, model.file.categories, today);
 		if (parentPath) written.push(parentPath);
-		void this.refreshSourceRegistry();
+		await saveResourceModel(this.app, model.file);
+		this.annotations?.refreshSidebarOnly();
 		return written;
+	}
+
+	/** Render one category index note (Topics, Repositories, My Midad Content). */
+	private async renderIndexNote(
+		templates: TemplateSet,
+		name: string,
+		section: string,
+		category: ResourceCategory,
+		generated: string
+	): Promise<string> {
+		return renderMocIndex(
+			this.app, templates, name,
+			[{ name: section, works: category.entries.map((entry) => ({ dir: entry.note, title: entry.label })) }],
+			this.sourcesRoot(), "Midad Arabic Sources", generated, true
+		);
 	}
 
 	/** Works whose notes are partially or wholly missing in the vault. */
@@ -3380,30 +3505,12 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 	 * so hand-written content is never lost.
 	 */
 	/**
-	 * Refresh only the top-level parent note after an annotation change, so the
-	 * Source Annotations MOC appears there without re-rendering every category MOC.
+	 * Refresh the resource model and the indexes after an annotation change, so
+	 * the Annotations count and the Source Annotations MOC stay current.
 	 */
 	async refreshAnnotationParent(): Promise<void> {
-		const userFolder = this.settings.sourceTemplateFolder.trim() || null;
-		let templates: TemplateSet;
 		try {
-			templates = await loadTemplates(this.app, this.bundledTemplateDir(), userFolder);
-		} catch {
-			return;
-		}
-		try {
-			const manifest = await this.loadSourceManifest();
-			const installed = manifest.filter((w) => this.workStatus(w) === "installed");
-			const mocNames = [...new Set(installed.flatMap((w) => (
-				Array.isArray(w.mocs) ? (w.mocs as string[]) : (typeof w.moc === "string" ? [w.moc] : [])
-			)))].filter(Boolean).sort();
-			if (this.annotations?.hasAnnotatedWorks() || this.annotations?.mocExists()) {
-				if (!mocNames.includes("source-annotation")) mocNames.push("source-annotation");
-			}
-			if (!mocNames.length) return;
-			const today = localDate();
-			await this.updateSourceParent(templates, mocNames, today);
-			try { await this.refreshTranscriptionMocs(); } catch (error) { console.error("[midad-arabic-sources] transcription MOCs", error); }
+			await this.refreshResourceIndex();
 		} catch (error) {
 			console.error("[midad-arabic-sources] annotation parent", error);
 		}
@@ -3455,13 +3562,17 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		if (this.transcriptionMocTimer !== null) window.clearTimeout(this.transcriptionMocTimer);
 		this.transcriptionMocTimer = window.setTimeout(() => {
 			this.transcriptionMocTimer = null;
-			void this.refreshTranscriptionMocs().catch((error) => console.error("[midad-arabic-sources] transcription MOCs", error));
+			void this.refreshResourceIndex().catch((error) => console.error("[midad-arabic-sources] resource index", error));
 		}, 1500);
 	}
 
-	/** Render the transcription/translation category MOCs. */
-	async refreshTranscriptionMocs(): Promise<string[]> {
-		const written: string[] = [];
+	/**
+	 * Scan the vault for transcription/translation notes and group them by work.
+	 * A group's `topics` are the canonical topic-MOC names carried by its notes'
+	 * `topics` property; the model counts local content under a topic without
+	 * reading any rendered MOC.
+	 */
+	private async collectTranscriptionResources(): Promise<{ groups: LocalGroup[]; local: LocalResource[] }> {
 		const notePattern = /^(.*?)\s+[-–—]\s+(?:(?:[A-Za-z]+\s+)*)(transcription|translation)(?:\s+[-–—]\s+(?:v(?:ol)?\.?|volume)\s*(\d+))?(?:\s*[,–—]\s*(.+))?(?:\s+(\([^)]+\)))?$/i;
 		const cleanLabel = (value: string): string => value
 			.replace(/^\s*(?:transcription|translation)\s*[-–—]\s*/i, "")
@@ -3499,14 +3610,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			.map((folder) => normalizePath(folder).replace(/\/+$/, ""))
 			.filter(Boolean);
 		const inFolder = (path: string): boolean => folders.some((folder) => path.startsWith(`${folder}/`));
-		const groups = new Map<string, {
-			docType: "transcription" | "translation";
-			route: "lit" | "pdf" | "adopted";
-			title: string;
-			parentStem: string;
-			parentTitle: string;
-			volumes: Array<{ stem: string; label: string }>;
-		}>();
+		const groups = new Map<string, LocalGroup>();
 		for (const file of this.app.vault.getMarkdownFiles()) {
 			const path = normalizePath(file.path);
 			if (path.startsWith("tmp/") || path.startsWith(".midad-") || path.startsWith(".trash/") || path.includes("/tmp/")) continue;
@@ -3563,10 +3667,24 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 				: entryString("workKey")
 					? `adopted:${docType}:${entryString("workKey")}:${unitKey}`
 					: `path:${docType}:${path}`;
+			const topicValues = Array.isArray(fm["topics"])
+				? (fm["topics"] as unknown[]).map((value) => (typeof value === "string" ? value : ""))
+				: typeof fm["topics"] === "string"
+					? [String(fm["topics"])]
+					: [];
+			const topics = topicValues
+				.map((value) => {
+					const wikilink = /\[\[([^\]|]+)/.exec(value);
+					return canonicalMocName((wikilink ? wikilink[1] : value).trim());
+				})
+				.filter(Boolean);
 			let group = groups.get(key);
 			if (!group) {
-				group = { docType, route, title, parentStem: "", parentTitle: "", volumes: [] };
+				group = { docType, route, title, parentStem: "", parentTitle: "", volumes: [], topics: [] };
 				groups.set(key, group);
+			}
+			for (const topic of topics) {
+				if (!group.topics.includes(topic)) group.topics.push(topic);
 			}
 			if (route === "lit") group.route = "lit";
 			else if (route === "pdf" && group.route !== "lit") group.route = "pdf";
@@ -3581,6 +3699,42 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		const sorted = [...groups.values()].sort((a, b) =>
 			(a.parentTitle || a.title).localeCompare(b.parentTitle || b.title, undefined, { sensitivity: "base", numeric: true })
 		);
+		const local: LocalResource[] = [];
+		for (const group of sorted) {
+			const name = group.parentStem || group.volumes[0]?.stem;
+			if (!name) continue;
+			local.push({
+				kind: group.docType,
+				name,
+				title: group.parentTitle || group.title || group.volumes[0]?.label || name,
+				topics: group.topics,
+			});
+		}
+		return { groups: sorted, local };
+	}
+
+	/** Render the My Transcriptions / My Translations MOCs from the scanned groups. */
+	private async renderTranscriptionMocs(sorted: LocalGroup[]): Promise<string[]> {
+		const written: string[] = [];
+		const indexPath = async (name: string): Promise<string> => {
+			const canonical = this.sourceNotePath(name);
+			const existing = this.app.vault.getAbstractFileByPath(canonical);
+			if (existing instanceof TFile) return existing.path;
+			const first = this.app.metadataCache.getFirstLinkpathDest(name, "");
+			if (first instanceof TFile && first.path !== canonical) {
+				try {
+					await this.app.fileManager.renameFile(first, canonical);
+					const moved = this.app.vault.getAbstractFileByPath(canonical);
+					if (moved instanceof TFile) return moved.path;
+				} catch { /* fall through */ }
+			}
+			try {
+				await this.app.vault.create(canonical, "");
+				return canonical;
+			} catch {
+				return canonical;
+			}
+		};
 		const render = async (name: string, docType: "transcription" | "translation"): Promise<void> => {
 			const path = await indexPath(name);
 			const noun = docType === "transcription" ? "Transcriptions" : "Translations";
@@ -3616,21 +3770,31 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			const yaml = new YamlBuilder();
 			yaml.start();
 			yaml.add("created", today, { merge: "keep" });
-			yaml.add("midad-up", [`[[${SOURCE_INDEX_NOTE}]]`, "[[Midad Arabic Sources]]"]);
+			yaml.add("midad-up", [`[[${MY_CONTENT_NOTE}]]`, "[[Midad Arabic Sources]]"]);
 			const specs = yaml.fieldSpecs();
 			const content = `${yaml.end()}\n${lines.join("\n")}`;
 			await writeMerged(this.app, path, { content, specs }, true, false);
 			written.push(path);
 		};
-		await render("Arabic transcriptions", "transcription");
-		await render("Arabic translations", "translation");
+		await render(TRANSCRIPTIONS_NOTE, "transcription");
+		await render(TRANSLATIONS_NOTE, "translation");
 		return written;
 	}
 
 
-	async updateSourceParent(templates: TemplateSet, mocs: string[], generated: string): Promise<string | null> {
+	/**
+	 * Maintain the top-level parent note from the resource model: the categories
+	 * and their entries, with per-entry counts. Reuses the user's existing note
+	 * (found by name anywhere in the vault) or creates one; only its managed
+	 * region and merge-keep properties are written.
+	 */
+	async updateSourceParent(
+		templates: TemplateSet,
+		categories: ResourceCategory[],
+		generated: string
+	): Promise<string | null> {
 		const name = (this.settings.sourceMocParent || "").trim() || "Midad Arabic Sources";
-		if (!mocs.length) return null;
+		if (!categories.length) return null;
 		const isMidadParent = name === "Midad Arabic Sources";
 		const canonicalPath = this.sourceNotePath(name);
 		const existingCanonical = this.app.vault.getAbstractFileByPath(canonicalPath);
@@ -3668,41 +3832,17 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 				return null;
 			}
 		}
-		const repositoryMocs = this.repositoryMocNames.filter(Boolean);
-		const sourceMocs = new Set([...repositoryMocs, "Arabic transcriptions", "Arabic translations"]);
-		const topicMocs = mocs.filter((m) => m !== "source-annotation" && !sourceMocs.has(m));
-		const sourceList = [...new Set([...repositoryMocs, "Arabic transcriptions", "Arabic translations"])]
-			.filter((m) => m === "Turath" || m === "Arabic transcriptions" || m === "Arabic translations" || mocs.includes(m) || repositoryMocs.includes(m));
-		const label = (name: string) => (
-			this.repositoryMocLabels[name] ??
-			(name === "Tafsīr Sources" ? "Tafsīr"
-				: name === "Ḥadīth Sources" ? "Ḥadīth"
-					: name === "Language Sources" ? "Language"
-						: name === "Arabic transcriptions" ? "My transcriptions"
-							: name === "Arabic translations" ? "My translations"
-								: name)
-		);
-		await renderMocIndex(this.app, templates, "Midad Arabic Sources - Topics",
-			[{ name: "Topics", works: topicMocs.map((m) => ({ dir: m, title: label(m) })) }],
-			this.sourcesRoot(), "Midad Arabic Sources", generated);
-		const repoItems = repositoryMocs.map((m) => ({ dir: m, title: label(m) }));
-		await renderMocIndex(this.app, templates, SOURCE_INDEX_NOTE,
-			[
-				{ name: "Repositories", works: repoItems },
-				{ name: "Local transcriptions", works: [{ dir: "Arabic transcriptions", title: "My transcriptions" }] },
-				{ name: "Local translations", works: [{ dir: "Arabic translations", title: "My translations" }] },
-			].filter((section) => section.works.length > 0),
-			this.sourcesRoot(), "Midad Arabic Sources", generated);
-		const groups = [
-			{ name: "Midad Arabic Sources - Topics", label: "By Topic", items: topicMocs.map((m) => ({ name: m, label: label(m) })) },
-			{ name: SOURCE_INDEX_NOTE, label: "By Source", items: sourceList.map((m) => ({ name: m, label: label(m) })) },
-			{ name: "source-annotation", label: "Annotations", items: [] },
-		];
+		const groups: SourcesMocGroup[] = categories.map((category) => ({
+			name: category.note,
+			label: category.label,
+			items: category.entries.map((entry) => ({ name: entry.note, label: entry.label, count: entry.count })),
+		}));
 		const out = renderSourcesNote(templates, groups, generated);
 		// append (not replace) so a user-written note keeps its own content.
 		await writeMerged(this.app, file.path, out, false, false);
 		return file.path;
 	}
+
 
 	async loadSourceManifest(): Promise<Array<JsonObject>> {
 		try {

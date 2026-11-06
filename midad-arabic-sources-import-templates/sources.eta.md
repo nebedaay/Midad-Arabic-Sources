@@ -8,7 +8,7 @@
 <% for (const g of groups) { -%>
 >- <%= wikilink(g.name, g.label) %>
 <% for (const item of g.items) { -%>
->	- <%= wikilink(item.name, item.label) %>
+>	- <%= wikilink(item.name, item.count != null ? `${item.label} (${item.count})` : item.label) %>
 <% } -%>
 <% } -%>
 

@@ -34,7 +34,8 @@ import { refreshReadingViews, registerReadingAnnotations } from "./reading";
 import { reanchorAnnotation } from "./reanchor";
 import { annotationLabel, findNormalized, resolveAnnotations, visibleSegments } from "./resolve";
 import { AnnotationSidebarView, ANNOTATION_SIDEBAR_VIEW, type AnnotationSidebarData } from "./sidebar";
-import { buildNavigationData } from "./navigation";
+import { buildCollectionNavigation, buildNavigationData, buildResourceNavigation, type NavigationData } from "./navigation";
+import { loadResourceModel } from "../resourceModel";
 import { AnnotationStore, annotationNow, newAnnotationId, type AnnotationTrashBatch } from "./store";
 import { AnnotationTargetResolver } from "./target";
 import { AnnotationTooltip } from "./tooltip";
@@ -99,10 +100,10 @@ function activeMarkdownView(app: App): MarkdownView | null {
 }
 
 /**
- * Is this note part of Midad at all? Used by the sidebar to decide whether it
- * has anything to show. `buildNavigationData()` happily builds a one-item list
- * for ANY markdown file, so without this every note in the vault looked like a
- * Midad note.
+ * Is this note part of Midad at all? Used by the sidebar to choose the note's
+ * place in the hierarchy instead of the collection index. `buildNavigationData()`
+ * happily builds a one-item list for ANY markdown file, so without this every
+ * note in the vault looked like a Midad note.
  *
  * A Midad note carries one of Midad's `midad-*` frontmatter keys (imported
  * sources, units, annotation notes and the hierarchy hubs), is a text source or
@@ -130,7 +131,7 @@ function isSourceFrontmatter(frontmatter: Record<string, unknown> | undefined): 
 	const rawType = frontmatter["document-type"];
 	const type = typeof rawType === "string" ? rawType : "";
 	// Annotation notes and MOCs also carry midad-up; only text-source notes are
-	// annotatable. `midad-key` covers older hubs that predate document-type.
+	// annotatable. `midad-id` covers hubs that predate document-type.
 	return type.includes("text-source") || !!frontmatter["midad-id"] || !!frontmatter["midad-work"];
 }
 
@@ -2044,10 +2045,10 @@ export class AnnotationService {
 	 * Data for the GIVEN note (a link opened from the sidebar may not have moved
 	 * focus yet), otherwise for the note in the active leaf. The sidebar has
 	 * focus when the user clicks it, so that case keeps the note it was showing;
-	 * any other non-markdown view means there is no note in context and the
-	 * sidebar goes empty rather than showing the previous note.
+	 * any other non-markdown view means there is no note in context, and the
+	 * sidebar shows the collection index rather than the previous note.
 	 */
-	async sidebarData(fileOverride?: TFile | null): Promise<AnnotationSidebarData | null> {
+	async sidebarData(fileOverride?: TFile | null): Promise<AnnotationSidebarData> {
 		const sidebarView = this.app.workspace.getActiveViewOfType(AnnotationSidebarView);
 		const markdownView = this.app.workspace.getActiveViewOfType(MarkdownView);
 		const sidebarHasFocus = !!sidebarView;
@@ -2071,18 +2072,23 @@ export class AnnotationService {
 			file = last instanceof TFile ? last : activeMarkdownView(this.app)?.file ?? null;
 		} else {
 			// Settings, graph, canvas, another plugin's view: no note in context.
-			this.lastSidebarPath = "";
-			return null;
+			// The sidebar still offers the collection index as an entry point.
+			return this.collectionSidebarData();
 		}
 
 		if (!(file instanceof TFile) || !isMidadNote(this.app, file)) {
-			this.lastSidebarPath = "";
-			return null;
+			return this.collectionSidebarData();
+		}
+		// The MAS parent note represents the whole collection, so it shows the
+		// resource browser (its own categories and their children) rather than the
+		// flattened outgoing-link list a normal container would produce.
+		if (file.basename === this.sourceParentName()) {
+			return this.collectionSidebarData();
 		}
 
 		const path = normalizePath(file.path);
 		const navigation = buildNavigationData(this.app, path, (notePath) => this.annotationCountForPath(notePath));
-		if (!navigation) return null;
+		if (!navigation) return this.collectionSidebarData();
 		this.lastSidebarPath = path;
 		const target = await this.targetForPath(path);
 		const annotations = target ? await this.annotationsFor(target) : [];
@@ -2105,10 +2111,50 @@ export class AnnotationService {
 			target,
 			annotations,
 			navigation,
+			collection: false,
 		};
 	}
 
-	/** Open on startup only when the active note is a Midad note. */
+	/**
+	 * The collection index for a sidebar with no Midad note in context. It shows
+	 * the same groups and entries as the parent note, so the sidebar remains an
+	 * entry point into the collection without changing when the sidebar is
+	 * brought forward (that logic is in syncSidebarToActiveNote).
+	 */
+	private async collectionSidebarData(): Promise<AnnotationSidebarData> {
+		this.lastSidebarPath = "";
+		const parentName = this.sourceParentName();
+		const countForPath = (notePath: string): number => this.annotationCountForPath(notePath);
+		// The persisted model is the authority; the rendered MOC is only a fallback
+		// when the JSON is absent (or unreadable).
+		let navigation: NavigationData | null = null;
+		const model = await loadResourceModel(this.app);
+		if (model) navigation = buildResourceNavigation(this.app, model, countForPath);
+		if (!navigation) {
+			navigation = await buildCollectionNavigation(this.app, parentName, countForPath);
+		}
+		return {
+			notePath: "",
+			noteName: parentName,
+			workTitle: "",
+			target: null,
+			annotations: [],
+			navigation: navigation ?? { parents: [], items: [], collection: true },
+			collection: true,
+		};
+	}
+
+	/** The configured parent note's name — the collection's entry point. */
+	private sourceParentName(): string {
+		const plugin = this.plugin as unknown as { settings?: { sourceMocParent?: string } };
+		const name = plugin.settings?.sourceMocParent;
+		return typeof name === "string" && name.trim() ? name.trim() : "Midad Arabic Sources";
+	}
+
+	/**
+	 * Start on a Midad note with the sidebar in front; on any other note (or no
+	 * note) add it as a background tab without selecting it.
+	 */
 	private autoOpenSidebar(attempt = 0): void {
 		if (this.disposed) return;
 		if (this.anyModalOpen()) {
@@ -2118,7 +2164,16 @@ export class AnnotationService {
 			return;
 		}
 		const active = this.app.workspace.getActiveViewOfType(MarkdownView);
-		if (!active?.file || !isMidadNote(this.app, active.file)) return;
+		if (!active?.file) {
+			// No note yet (graph, settings, empty workspace): add the sidebar in the
+			// background so it is available, but do not reveal it.
+			void this.ensureSidebarInBackground();
+			return;
+		}
+		if (!isMidadNote(this.app, active.file)) {
+			void this.ensureSidebarInBackground();
+			return;
+		}
 		this.sidebarWasCollapsedBeforeMidad = this.app.workspace.rightSplit.collapsed;
 		void this.openSidebar(false);
 	}
@@ -2200,9 +2255,16 @@ export class AnnotationService {
 			}
 			return;
 		}
+		// Non-Midad note: make sure the view exists as a background tab, but never
+		// bring it to the front.
+		if (!leaf) {
+			await this.ensureSidebarInBackground();
+			leaf = this.app.workspace.getLeavesOfType(ANNOTATION_SIDEBAR_VIEW)[0];
+		}
+		if (!leaf) return;
 		// A manually opened Midad sidebar stays until the next Midad note.
 		if (this.sidebarManuallyOpened) return;
-		if (!leaf || !this.sidebarTabIsActive(leaf)) return;
+		if (!this.sidebarTabIsActive(leaf)) return;
 		const other = this.otherRightLeaf(leaf);
 		if (other) {
 			await this.selectSidebarLeaf(other, noteLeaf);
@@ -2236,6 +2298,51 @@ export class AnnotationService {
 		return found;
 	}
 
+	/**
+	 * A normal right-sidebar leaf. Deliberately use Obsidian's standard
+	 * getRightLeaf path rather than createLeafInParent(rightSplit, ...): the
+	 * latter adds a child leaf to the split itself, which renders as a separate
+	 * pane with no tab header (the "unmovable lower box"). getRightLeaf returns
+	 * an existing tab-group leaf, so setViewState opens the view as an ordinary
+	 * sidebar tab that can be closed, dragged, and moved.
+	 */
+	private createSidebarLeaf(): WorkspaceLeaf | null {
+		return this.app.workspace.getRightLeaf(false);
+	}
+
+	/**
+	 * Make the Midad view available as a background right-sidebar tab without
+	 * selecting, revealing, or expanding the split. Non-Midad notes use this so
+	 * the sidebar is reachable while editing, without taking over the tab that is
+	 * on top.
+	 */
+	private async ensureSidebarInBackground(): Promise<void> {
+		if (this.disposed) return;
+		if (this.app.workspace.getLeavesOfType(ANNOTATION_SIDEBAR_VIEW).length) return;
+		const rightDock = this.app.workspace.rightSplit;
+		const wasCollapsed = rightDock.collapsed;
+		try {
+			const leaf = this.createSidebarLeaf();
+			if (!leaf) return;
+			await leaf.setViewState({ type: ANNOTATION_SIDEBAR_VIEW, active: false });
+			// Adding a tab to a collapsed dock can expand it; leave the user's
+			// collapsed state exactly as it was.
+			if (wasCollapsed && !rightDock.collapsed) rightDock.collapse();
+			// If creating the tab made it the visible one, put the previously used
+			// right-sidebar tab back on top (without expanding a collapsed split).
+			if (!wasCollapsed && this.sidebarTabIsActive(leaf)) {
+				const other = this.otherRightLeaf(leaf);
+				if (other) {
+					const note = this.app.workspace.getActiveViewOfType(MarkdownView)?.leaf ?? null;
+					await this.app.workspace.revealLeaf(other);
+					if (note && note !== other) this.app.workspace.setActiveLeaf(note, { focus: true });
+				}
+			}
+		} catch (error) {
+			console.error("[midad-arabic-sources] background sidebar", error);
+		}
+	}
+
 	async openSidebar(focus = true): Promise<void> {
 		if (focus) this.sidebarManuallyOpened = true;
 		const note = focus ? null : this.app.workspace.getActiveViewOfType(MarkdownView)?.leaf ?? null;
@@ -2249,7 +2356,7 @@ export class AnnotationService {
 			if (existing.view instanceof AnnotationSidebarView) await existing.view.refresh();
 			return;
 		}
-		const leaf = this.app.workspace.getRightLeaf(false) ?? this.app.workspace.getLeaf(true);
+		const leaf = this.createSidebarLeaf() ?? this.app.workspace.getLeaf(true);
 		if (!leaf) return;
 		await leaf.setViewState({ type: ANNOTATION_SIDEBAR_VIEW, active: true });
 		if (focus) {
@@ -2264,6 +2371,11 @@ export class AnnotationService {
 		for (const leaf of this.app.workspace.getLeavesOfType(ANNOTATION_SIDEBAR_VIEW)) {
 			if (leaf.view instanceof AnnotationSidebarView) void leaf.view.refresh();
 		}
+	}
+
+	/** Re-render the open sidebar without touching the notes (model changed). */
+	refreshSidebarOnly(): void {
+		this.refreshSidebar();
 	}
 
 	async revealAnnotation(target: AnnotationTarget, annotation: SourceAnnotation): Promise<void> {
