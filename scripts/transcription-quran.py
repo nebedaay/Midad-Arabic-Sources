@@ -783,6 +783,73 @@ def discover_and_mark_quotes(content: str, tafsir: bool = False) -> tuple[str, l
     return new_content, found
 
 
+def fix_cross_page_guillemets(content: str) -> tuple[str, int]:
+    """Complete a quotation opened on one page and closed at the start of the next.
+
+    This is the guillemet/straight/curly counterpart of `fix_cross_page_quotes`.
+    It deliberately preserves the source's opening and closing marks instead of
+    wrapping the continuation in a second pair of ornate brackets. The opening
+    fragment gets the `.quran-quote` class, the closing fragment gets the class
+    and the citation link.
+    """
+    LF, LE = '\ufd3f', '\ufd3e'
+    changed = 0
+    # Work backwards so earlier offsets stay valid.
+    opens = list(re.finditer(r'([«“"])([^»”"\n]{1,80})[ \t]*$', content, re.M))
+    seen_closes: set[int] = set()
+    for m in reversed(opens):
+        if '{.quran-quote}' in content[m.start():m.end()] or LF in content[m.start():m.end()]:
+            continue
+        partial = m.group(2).strip()
+        if not partial:
+            continue
+        sep = re.search(r'\n\n---\n\n', content[m.end():])
+        if not sep:
+            continue
+        page_start = m.end() + sep.end()
+        raw_page = content[page_start:]
+        head = re.match(r'^\s*####\s+p\.[^\n]*\n+', raw_page)
+        page_offset = len(head.group(0)) if head else 0
+        page = raw_page[page_offset:]
+        cont = re.match(r'\s*([^»”"\n]{1,200})([»”"])', page)
+        if not cont:
+            continue
+        continuation = cont.group(1).strip()
+        if not continuation:
+            continue
+        result = (find_verse_in_text(partial + ' ' + continuation)
+                  or find_verse_in_text(continuation))
+        if not result:
+            continue
+        surah, verse, _, _ = result[0]
+        wikilink = build_wikilink(surah, verse)
+        # Opening fragment: add the class, preserving its guillemet/quote mark.
+        content = (content[:m.start(1) + 1] + partial + '{.quran-quote}'
+                   + content[m.end():])
+        # The page offsets moved by the opening replacement; find the closing
+        # quote again from the page boundary after the reopening.
+        search_from = m.end() + len('{.quran-quote}')
+        sep = re.search(r'\n\n---\n\n', content[search_from:])
+        if not sep:
+            continue
+        page_start = search_from + sep.end()
+        raw_page = content[page_start:]
+        head = re.match(r'^\s*####\s+p\.[^\n]*\n+', raw_page)
+        page_offset = len(head.group(0)) if head else 0
+        page = raw_page[page_offset:]
+        cont = re.match(r'\s*([^»”"\n]{1,200})([»”"])', page)
+        if not cont:
+            continue
+        lead = len(page) - len(page.lstrip())
+        close_end = page_start + page_offset + lead + cont.end()
+        if content[close_end:close_end + len('{.quran-quote}')] == '{.quran-quote}':
+            continue
+        # `cont.end()` includes the closing mark; insert class+link after it.
+        content = content[:close_end] + '{.quran-quote}' + wikilink + content[close_end:]
+        changed += 1
+    return content, changed
+
+
 def link_open_fragments(content: str, tafsir: bool = False) -> tuple[str, int]:
     """In tafsīr mode, link a short open-ended quotation at a line end.
 
@@ -795,6 +862,8 @@ def link_open_fragments(content: str, tafsir: bool = False) -> tuple[str, int]:
     lines = content.split("\n")
     added = 0
     for index, line in enumerate(lines):
+        if '.quran-quote' in line:
+            continue
         match = re.search(r'(?<![*﴿])([«“"])([^»”"\n]{1,40})\s*$', line)
         if not match:
             continue

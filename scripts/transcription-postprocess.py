@@ -126,7 +126,10 @@ def run(input_path, out_path=None, metadata=False, tafsir=False):
     print("Step 2: Qur'an tashkīl...")
     tfq = SourceFileLoader("tfq", str(SCRIPTS / "transcription-quran.py")).load_module()
     LF = '\ufd3f'; LE = '\ufd3e'
-    
+
+    content, cross_guillemets = tfq.fix_cross_page_guillemets(content)
+    print(f"  Cross-page quoted continuations: {cross_guillemets}")
+
     content, discovered = tfq.discover_and_mark_quotes(content, tafsir=tafsir)
     print(f"  Discovered: {len(discovered)}")
 
