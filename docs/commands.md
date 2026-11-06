@@ -42,7 +42,7 @@ See [Document import](./document-import.md) and [Templates](./templates.md).
 - **Migrate imported sources to the current naming scheme** — rename installed works to `Author - Title (repository)`, updating notes, models, MOCs, and annotation paths.
 - **Check imported sources** — find works whose notes or cached model are missing.
 - **Check for source updates** — ask each repository whether a text changed upstream.
-- **Archive this source…** — compress a work's model, remove its notes, and keep its annotations.
+- **Archive this source…** — zip the work's model and rendered notes, remove the live notes, and keep its annotations.
 
 ## Annotations
 

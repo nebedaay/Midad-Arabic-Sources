@@ -122,7 +122,7 @@ The plugin keeps its cache and bookkeeping in `.midad-arabic-sources/` at the va
 | --- | --- |
 | `cache/text-sources/` | The raw source JSON downloaded from each repository. |
 | `source-models/<collection>/<id>.json` | The language-neutral **render model** each work is rendered from. |
-| `source-archives/<collection>/<id>.json.gz` | The compressed model of an archived work. |
+| `source-archives/<collection>/<id>.zip` | The archived work: its render model plus the rendered markdown notes. Legacy `.json.gz` model-only archives are still readable. |
 | `annotations/<collection>/<id>/` | The sharded annotation store and its derived indexes. |
 | `annotations/adopted.json` | The registry of automatically adopted transcriptions, translations, and known notes. |
 | `source-imports.json` | The manifest: every work and its status (`installed`, `deleting`, `archived`). |
@@ -132,7 +132,7 @@ The plugin keeps its cache and bookkeeping in `.midad-arabic-sources/` at the va
 | `archive/` | Archived transcription batches. |
 | `jobs/` | The persisted state of running pipeline jobs. |
 
-Deleting a work from the plugin removes its cached model and its notes (a hard delete, not a trash move); its source JSON stays cached, so re-installing is quick. Archiving instead writes a compressed model, removes the notes, and keeps the annotations; restore re-renders from that archive without downloading.
+Deleting a work from the plugin removes its cached model and its notes (a hard delete, not a trash move); its source JSON stays cached, so re-installing is quick. Archiving instead writes a zip containing the model and the rendered markdown, removes the live notes, and keeps the annotations; restore unzips the notes directly when the template hashes still match, and otherwise re-renders from the model without downloading.
 
 ## Updating and state
 

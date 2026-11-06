@@ -5,6 +5,7 @@ import * as http from "http";
 import * as os from "os";
 import { promisify } from "util";
 import * as zlib from "zlib";
+import { strFromU8, strToU8, unzipSync, zipSync } from "fflate";
 import {
 	App,
 	ButtonComponent,
@@ -70,7 +71,7 @@ import {
 	type RepositoryGroup,
 	type ResourceCategory,
 } from "./resourceModel";
-import { sourceRoot as resolveSourceRoot, installedSourcesRoot as resolveInstalledSourcesRoot, transcriptionsFolder as resolveTranscriptionsFolder, translationsFolder as resolveTranslationsFolder, canonicalQuranFolder as resolveCanonicalQuranFolder, sourceNotePath as resolveSourceNotePath } from "./sourcePaths";
+import { ensureFolder, sourceRoot as resolveSourceRoot, installedSourcesRoot as resolveInstalledSourcesRoot, transcriptionsFolder as resolveTranscriptionsFolder, translationsFolder as resolveTranslationsFolder, canonicalQuranFolder as resolveCanonicalQuranFolder, sourceNotePath as resolveSourceNotePath } from "./sourcePaths";
 import { openDocs, getDocs } from "./docs";
 import { registerAnnotations, AnnotationService } from "./sourceAnnotations/service";
 import { buildSourceRegistry, writeSourceRegistry } from "./sourceRegistry/registry";
@@ -206,6 +207,8 @@ interface MidadArabicSourcesSettings {
 	manageGenreFilter?: string[];
 	sourceUpdateCheckDays?: number;
 	autoUpdateSourceTemplates?: boolean;
+	/** Include rendered notes in a source archive zip (default true). */
+	archiveMarkdown?: boolean;
 	/** Warn when a generated source note exceeds this many MiB. */
 	sourceNoteSizeWarnMB?: number;
 	// Zotero export
@@ -259,6 +262,25 @@ interface PipelineNote {
 interface ArchiveZip {
 	name: string;
 	path: string;
+}
+
+/** The manifest inside a `.zip` source archive. */
+interface SourceArchiveManifest {
+	version: 1;
+	kind: "midad-source-archive";
+	archivedAt: string;
+	work: {
+		key: string;
+		collection: string;
+		id: string;
+		dir: string;
+		title: string;
+	};
+	sourceRoot: string;
+	/** Vault-relative paths of the rendered notes in the `notes/` entries. */
+	notes: Array<{ path: string; size: number }>;
+	/** Template hashes used for this render; a mismatch triggers a re-render. */
+	templates?: Record<string, TemplateHashValue>;
 }
 
 type ArchivedDocType = "transcription" | "translation";
@@ -586,6 +608,7 @@ const DEFAULT_SETTINGS: MidadArabicSourcesSettings = {
 	zoteroAutoUpdate: false,
 	zoteroAutoCreate: false,
 	sourceUpdateCheckDays: 7,
+	archiveMarkdown: true,
 	sourceNoteSizeWarnMB: 3,
 };
 
@@ -782,7 +805,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 				}
 				new ConfirmModal(this.app, {
 					title: "Archive source",
-					message: `Archive “${work.title || work.dir}”? Its notes will be removed, but its annotations and a compressed model are kept.`,
+					message: `Archive “${work.title || work.dir}”? Its model and rendered notes will be saved in a zip, then the notes will be removed; its annotations are kept.`,
 					confirmText: "Archive",
 					onConfirm: () => { void this.archiveSourceWithProgress(work); },
 				}).open();
@@ -2686,8 +2709,9 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 					manifest.filter((w) => !(w.collection === work.collection && w.id === work.id) && w.dir !== dir)
 				);
 				try {
-					const archive = this.sourceArchivePath(work);
-					if (fs.existsSync(archive)) fs.unlinkSync(archive);
+					for (const archive of [this.sourceArchivePath(work), this.legacySourceArchivePath(work)]) {
+						if (fs.existsSync(archive)) fs.unlinkSync(archive);
+					}
 				} catch { /* leave a stale archive rather than failing the removal */ }
 			}
 
@@ -2715,44 +2739,61 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		return true;
 	}
 
-	/** The gzipped model that backs an archived work. */
+	/** The zip bundle that backs an archived work. */
 	sourceArchivePath(work: JsonObject): string {
+		const collection = String(work.collection ?? "work").replace(/[^\w.-]+/g, "_");
+		const id = String(work.id ?? "work").replace(/[^\w.-]+/g, "_");
+		return `${this.vaultPath()}/.midad-arabic-sources/source-archives/${collection}/${id}.zip`;
+	}
+
+	/** The pre-zip archive format, still readable for existing archives. */
+	legacySourceArchivePath(work: JsonObject): string {
 		const collection = String(work.collection ?? "work").replace(/[^\w.-]+/g, "_");
 		const id = String(work.id ?? "work").replace(/[^\w.-]+/g, "_");
 		return `${this.vaultPath()}/.midad-arabic-sources/source-archives/${collection}/${id}.json.gz`;
 	}
 
-	/** Remove a work's rendered notes, returning any per-file errors. */
-	async deleteRenderedNotes(work: JsonObject, model?: SourceModel): Promise<string[]> {
+	/** Every file that belongs to a rendered work (hub, folder contents, canonical notes). */
+	async renderedNoteFilePaths(work: JsonObject, model?: SourceModel): Promise<string[]> {
 		const outRoot = this.installedSourcesRoot();
 		const dir = String(work.dir ?? "");
 		const adapter = this.app.vault.adapter;
-		const problems: string[] = [];
 		const canonicalRoot = this.settings.canonicalQuranFolder.trim() || `${outRoot}/Quran`;
 		const canonicalId = this.resolveCanonicalQuran();
-		const paths = model
+		const paths = new Set<string>();
+		const expected = model
 			? expectedNotePaths(model, outRoot, canonicalRoot, canonicalId)
 			: [`${outRoot}/${dir}.md`];
-		for (const path of paths) {
+		for (const path of expected) {
+			const rel = normalizePath(path);
+			if (await adapter.exists(rel)) paths.add(rel);
+		}
+		// The folder walk also catches old-style names the model no longer lists.
+		// Canonical Qur'ān notes live outside it and are added by path above.
+		const folder = normalizePath(`${outRoot}/${dir}`);
+		if (await adapter.exists(folder)) {
+			for (const file of await this.listFilesUnder(folder)) {
+				paths.add(normalizePath(file));
+			}
+		}
+		return [...paths].sort();
+	}
+
+	/** Remove a work's rendered notes, returning any per-file errors. */
+	async deleteRenderedNotes(work: JsonObject, model?: SourceModel): Promise<string[]> {
+		const dir = String(work.dir ?? "");
+		const adapter = this.app.vault.adapter;
+		const problems: string[] = [];
+		for (const path of await this.renderedNoteFilePaths(work, model)) {
 			try {
-				const rel = normalizePath(path);
-				if (await adapter.exists(rel)) await adapter.remove(rel);
+				await adapter.remove(path);
 			} catch (e) {
 				problems.push(`${path}: ${e instanceof Error ? e.message : e}`);
 			}
 		}
-		// Clean the work folder, including any old-style names the model no longer
-		// lists. Canonical Qur'ān notes live outside it and were removed by path.
-		const folder = normalizePath(`${outRoot}/${dir}`);
+		const folder = normalizePath(`${this.installedSourcesRoot()}/${dir}`);
 		try {
 			if (await adapter.exists(folder)) {
-				for (const file of await this.listFilesUnder(folder)) {
-					try {
-						await adapter.remove(file);
-					} catch (e) {
-						problems.push(`${file}: ${e instanceof Error ? e.message : e}`);
-					}
-				}
 				await adapter.rmdir(folder, true);
 			}
 		} catch (e) {
@@ -2762,9 +2803,9 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 	}
 
 	/**
-	 * Compress a work's model and remove its rendered notes. The manifest keeps
-	 * the work as `archived`, so maintenance leaves it alone and the Manage filter
-	 * can offer it for restore. Annotations are deliberately untouched.
+	 * Zip a work's model and rendered notes, then remove the live notes. The
+	 * manifest keeps the work as `archived`, so maintenance leaves it alone and
+	 * the Manage filter can offer it for restore. Annotations are left untouched.
 	 */
 	async archiveSourceWithProgress(work: JsonObject): Promise<boolean> {
 		const key = this.workKey(work);
@@ -2802,8 +2843,48 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		try {
 			const text = fs.readFileSync(modelAbs, "utf8");
 			model = JSON.parse(text) as SourceModel;
+			const includeNotes = this.settings.archiveMarkdown !== false;
+			const notePaths = includeNotes
+				? await this.renderedNoteFilePaths(work, model)
+				: [];
+			const manifest: SourceArchiveManifest = {
+				version: 1,
+				kind: "midad-source-archive",
+				archivedAt: new Date().toISOString(),
+				work: {
+					key,
+					collection: String(work.collection ?? ""),
+					id: String(work.id ?? ""),
+					dir: String(work.dir ?? ""),
+					title: String(work.title ?? ""),
+				},
+				sourceRoot: this.installedSourcesRoot(),
+				notes: [],
+			};
+			if (includeNotes) {
+				try {
+					manifest.templates = await this.sourceTemplateHashes();
+				} catch {
+					// A missing template only affects the restore path: without
+					// hashes, restore re-renders from the model.
+				}
+			}
+			const entries: Record<string, Uint8Array> = {
+				"model.json": strToU8(text),
+			};
+			for (const path of notePaths) {
+				const bytes = new Uint8Array(await this.app.vault.adapter.readBinary(path));
+				entries[`notes/${path}`] = bytes;
+				manifest.notes.push({ path, size: bytes.byteLength });
+			}
+			entries["manifest.json"] = strToU8(JSON.stringify(manifest, null, 1));
 			fs.mkdirSync(archive.slice(0, archive.lastIndexOf("/")), { recursive: true });
-			fs.writeFileSync(archive, zlib.gzipSync(Buffer.from(text, "utf8")));
+			fs.writeFileSync(archive, Buffer.from(zipSync(entries, { level: 6 })));
+			// A successful re-archive supersedes the old model-only format.
+			try {
+				const legacy = this.legacySourceArchivePath(work);
+				if (fs.existsSync(legacy)) fs.unlinkSync(legacy);
+			} catch { /* leave a stale legacy archive rather than failing */ }
 		} catch (e) {
 			new Notice(`Could not archive the source: ${e instanceof Error ? e.message : e}`);
 			return false;
@@ -2829,7 +2910,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		return true;
 	}
 
-	/** Expand an archived model, render its notes, and mark it installed again. */
+	/** Restore a zip (or a legacy model-only archive) and mark the work installed. */
 	async restoreArchivedSource(work: JsonObject): Promise<boolean> {
 		if (this.sourceOperationActive) {
 			new Notice("Wait for the current source operation to finish before restoring.");
@@ -2837,22 +2918,72 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		}
 		const key = this.workKey(work);
 		const archive = this.sourceArchivePath(work);
-		if (!fs.existsSync(archive)) {
+		const legacy = this.legacySourceArchivePath(work);
+		const hasZip = fs.existsSync(archive);
+		const hasLegacy = !hasZip && fs.existsSync(legacy);
+		if (!hasZip && !hasLegacy) {
 			new Notice("No archive was found for that source.");
 			return false;
 		}
 		const modelRel = normalizePath(`.midad-arabic-sources/source-models/${work.collection}/${work.id}.json`);
 		const modelAbs = `${this.vaultPath()}/${modelRel}`;
+		let restoredNotes = false;
 		try {
-			const text = zlib.gunzipSync(fs.readFileSync(archive)).toString("utf8");
-			JSON.parse(text);
-			fs.mkdirSync(modelAbs.slice(0, modelAbs.lastIndexOf("/")), { recursive: true });
-			fs.writeFileSync(modelAbs, text);
+			let text: string;
+			let manifest: SourceArchiveManifest | null = null;
+			if (hasZip) {
+				const files = unzipSync(new Uint8Array(fs.readFileSync(archive)));
+				const modelBytes = files["model.json"];
+				if (!modelBytes) throw new Error("model.json is missing from the archive");
+				text = strFromU8(modelBytes);
+				JSON.parse(text);
+				const manifestBytes = files["manifest.json"];
+				if (manifestBytes) manifest = JSON.parse(strFromU8(manifestBytes)) as SourceArchiveManifest;
+				fs.mkdirSync(modelAbs.slice(0, modelAbs.lastIndexOf("/")), { recursive: true });
+				fs.writeFileSync(modelAbs, text);
+				const noteEntries = manifest?.notes ?? [];
+				const existing = noteEntries
+					.map((note) => note.path)
+					.filter((path) => this.app.vault.getAbstractFileByPath(path));
+				if (noteEntries.length && !existing.length) {
+					for (const note of noteEntries) {
+						const bytes = files[`notes/${note.path}`];
+						if (!bytes) throw new Error(`notes/${note.path} is missing from the archive`);
+						const parent = note.path.split("/").slice(0, -1).join("/");
+						if (parent) await ensureFolder(this.app, parent);
+						const current = this.app.vault.getAbstractFileByPath(note.path);
+						const data = new Uint8Array(bytes).buffer;
+						if (current instanceof TFile) await this.app.vault.modifyBinary(current, data);
+						else await this.app.vault.createBinary(note.path, data);
+					}
+					restoredNotes = true;
+				}
+				const currentTemplates = await this.sourceTemplateHashes().catch(
+					(): Record<string, TemplateHashValue> | null => null
+				);
+				const archivedTemplates = manifest?.templates;
+				const sameTemplates = !!currentTemplates && !!archivedTemplates
+					&& Object.keys(currentTemplates).every(
+						(k) => archivedTemplates[k]?.hash === currentTemplates[k]?.hash
+					);
+				if (restoredNotes && sameTemplates) {
+					// Fast path: the archived markdown is current for this template.
+				} else {
+					restoredNotes = false;
+				}
+			} else {
+				text = zlib.gunzipSync(fs.readFileSync(legacy)).toString("utf8");
+				JSON.parse(text);
+				fs.mkdirSync(modelAbs.slice(0, modelAbs.lastIndexOf("/")), { recursive: true });
+				fs.writeFileSync(modelAbs, text);
+			}
 		} catch (e) {
 			new Notice(`Could not restore the archive: ${e instanceof Error ? e.message : e}`);
 			return false;
 		}
-		await this.renderWithProgress([modelAbs], true, `Restoring ${work.title || work.dir}`);
+		if (!restoredNotes) {
+			await this.renderWithProgress([modelAbs], true, `Restoring ${work.title || work.dir}`);
+		}
 		const outRoot = this.installedSourcesRoot();
 		const hub = normalizePath(`${outRoot}/${work.dir}.md`);
 		if (!this.app.vault.getAbstractFileByPath(hub)) {
@@ -2867,6 +2998,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			console.error("[midad-arabic-sources] annotation status after restore", e);
 		}
 		try { fs.unlinkSync(archive); } catch { /* keep the backup if it cannot be removed */ }
+		try { fs.unlinkSync(legacy); } catch { /* no legacy archive, or it could not be removed */ }
 		new Notice(`Restored “${work.title || work.dir}”.`);
 		return true;
 	}
@@ -5471,6 +5603,11 @@ class MidadArabicSourcesSettingTab extends PluginSettingTab {
 								}));
 						},
 					},
+					{
+						name: "Archive rendered notes",
+						desc: "Include the rendered markdown in a source archive zip, so restoring is a fast unzip. Turn this off to store only the model; restoring then re-renders the notes (saves archive space).",
+						control: { type: "toggle", key: "archiveMarkdown" },
+					},
 				],
 			},
 			{
@@ -7625,7 +7762,7 @@ class ManageSourcesModal extends Modal {
 						.onClick(() => {
 							new ConfirmModal(this.app, {
 								title: "Archive source",
-								message: `Archive “${w.title || w.dir}”? Its notes will be removed, but its annotations and a compressed model are kept.`,
+								message: `Archive “${w.title || w.dir}”? Its model and rendered notes will be saved in a zip, then the notes will be removed; its annotations are kept.`,
 								confirmText: "Archive",
 								onConfirm: () => {
 									this.markArchiving(w);
@@ -7654,7 +7791,7 @@ class ManageSourcesModal extends Modal {
 						.onClick(() => {
 							new ConfirmModal(this.app, {
 								title: "Remove archived source",
-								message: `Remove “${w.title || w.dir}” completely? Its compressed model will be deleted; its annotations are kept.`,
+								message: `Remove “${w.title || w.dir}” completely? Its archive (model and rendered notes) will be deleted; its annotations are kept.`,
 								confirmText: "Remove",
 								onConfirm: () => {
 									this.close();
