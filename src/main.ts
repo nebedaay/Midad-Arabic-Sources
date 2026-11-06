@@ -206,6 +206,8 @@ interface MidadArabicSourcesSettings {
 	manageGenreFilter?: string[];
 	sourceUpdateCheckDays?: number;
 	autoUpdateSourceTemplates?: boolean;
+	/** Warn when a generated source note exceeds this many MiB. */
+	sourceNoteSizeWarnMB?: number;
 	// Zotero export
 	zoteroExport: boolean;
 	zoteroMethod: "local" | "web" | "csl";
@@ -584,6 +586,7 @@ const DEFAULT_SETTINGS: MidadArabicSourcesSettings = {
 	zoteroAutoUpdate: false,
 	zoteroAutoCreate: false,
 	sourceUpdateCheckDays: 7,
+	sourceNoteSizeWarnMB: 3,
 };
 
 /** A group of transcription/translation notes for one work (and its volumes). */
@@ -862,6 +865,12 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 				}
 				new ReconcileSourcesModal(this.app, this, incomplete).open();
 			},
+		});
+
+		this.addCommand({
+			id: "check-source-note-sizes",
+			name: "Check imported source note sizes",
+			callback: async () => { await this.reportLargeSourceNotes(true); },
 		});
 
 		this.addCommand({
@@ -3206,6 +3215,53 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		new ReconcileSourcesModal(this.app, this, incomplete).open();
 	}
 
+	/** Imported source notes above the configured size, largest first. */
+	largeSourceNotes(thresholdBytes: number): TFile[] {
+		const roots = [...new Set([
+			this.installedSourcesRoot(),
+			this.canonicalQuranFolder(),
+		].map((root) => normalizePath(String(root ?? "").trim())).filter(Boolean))];
+		return this.app.vault.getFiles()
+			.filter((file) => {
+				if (file.extension !== "md" || file.stat.size <= thresholdBytes) return false;
+				return roots.some((root) => file.path === root || file.path.startsWith(`${root}/`));
+			})
+			.sort((a, b) => b.stat.size - a.stat.size);
+	}
+
+	/**
+	 * Report abnormally large imported source notes. A multi-megabyte generated
+	 * note is almost always a parsing/chunking defect (an image payload included
+	 * as text, an unsplit volume), not a real entry. A render calls this silently;
+	 * the command opens the clickable report.
+	 */
+	async reportLargeSourceNotes(openModal: boolean): Promise<void> {
+		const thresholdMB = Math.max(1, Math.round(Number(this.settings.sourceNoteSizeWarnMB) || 3));
+		const threshold = thresholdMB * 1024 * 1024;
+		const files = this.largeSourceNotes(threshold);
+		if (!files.length) {
+			if (openModal) new Notice(`No imported source notes exceed ${thresholdMB} MB.`);
+			return;
+		}
+		console.warn(
+			`[midad-arabic-sources] ${files.length} imported source note(s) exceed ${thresholdMB} MB`,
+			files.slice(0, 20).map((file) => `${file.path} (${(file.stat.size / (1024 * 1024)).toFixed(2)} MB)`),
+		);
+		if (openModal) {
+			new SourceSizeReportModal(this.app, files, thresholdMB).open();
+			return;
+		}
+		const notice = new Notice(
+			`${files.length} imported source note${files.length === 1 ? "" : "s"} exceed${files.length === 1 ? "s" : ""} ${thresholdMB} MB.`,
+			15000,
+		);
+		const button = notice.messageEl.createEl("button", { text: "Show" });
+		button.addEventListener("click", () => {
+			notice.hide();
+			new SourceSizeReportModal(this.app, files, thresholdMB).open();
+		});
+	}
+
 	/** Reinstall a work by re-fetching (cached) and re-rendering it. */
 	async reinstallSource(work: JsonObject, kind: "explicit" | "auto" = "explicit"): Promise<void> {
 		await this.importSources([`${work.collection}:${work.id}`], false, undefined, kind);
@@ -3514,6 +3570,10 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			await this.pruneRenamedFolder(model.work);
 		}
 		await this.saveSourceStats(stats);
+		// Surface any generated note that crossed the size threshold. This is a
+		// health check, not a failure: a huge note usually means a parser/chunker
+		// defect (see the FODT image payload and the pre-letter Lisān volumes).
+		void this.reportLargeSourceNotes(false);
 		// A stopped render leaves the MOCs and Zotero as they were; the next pass
 		// finishes the work. Rebuilding them now would be more writes after a stop.
 		if (shouldCancel?.()) return written;
@@ -4536,6 +4596,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		} finally {
 			notice.hide();
 			await this.saveSourceStats(stats);
+			void this.reportLargeSourceNotes(false);
 			const cancelled = this.isSourceCancelled(op);
 			this.endSourceOperation(op);
 			if (cancelled) new Notice("Stopped updating sources.");
@@ -5576,6 +5637,11 @@ class MidadArabicSourcesSettingTab extends PluginSettingTab {
 						name: "Check repositories every … days",
 						desc: "How often to ask the repositories whether an imported text changed (0 = only on the command).",
 						control: { type: "number", key: "sourceUpdateCheckDays", defaultValue: 7, placeholder: "7", min: 0 },
+					},
+					{
+						name: "Large source-note warning (MB)",
+						desc: "After a render, and from “Check imported source note sizes”, report imported source notes larger than this. A single multi-megabyte note usually means a parser or chunking problem.",
+						control: { type: "number", key: "sourceNoteSizeWarnMB", defaultValue: 3, placeholder: "3", min: 1, max: 100 },
 					},
 					doc("Document import guide", "document-import.md", "Collections, the Manage text sources dialogue, naming, and updates."),
 					doc("Templates guide", "templates.md", "The ETA templates and the render-model reference."),
@@ -6924,6 +6990,46 @@ class ReconcileSourcesModal extends Modal {
 				})
 			)
 			.addButton((b) => b.setButtonText("Decide later").onClick(() => this.close()));
+	}
+
+	onClose(): void {
+		this.contentEl.empty();
+	}
+}
+
+// ── Large imported-source report ────────────────────────────────────────────
+
+class SourceSizeReportModal extends Modal {
+	private readonly files: TFile[];
+	private readonly thresholdMB: number;
+
+	constructor(app: App, files: TFile[], thresholdMB: number) {
+		super(app);
+		this.files = files;
+		this.thresholdMB = thresholdMB;
+	}
+
+	onOpen(): void {
+		const { contentEl } = this;
+		this.setTitle("Large imported source notes");
+		contentEl.createEl("p", {
+			text: `${this.files.length} imported source note${this.files.length === 1 ? "" : "s"} exceed ${this.thresholdMB} MB. A single multi-megabyte note usually means a parsing or chunking problem — an embedded image, an unsplit volume, or a broken source model — rather than a real entry.`,
+		});
+		const list = contentEl.createDiv({ cls: "mas-size-report" });
+		for (const file of this.files.slice(0, 100)) {
+			const row = list.createDiv({ cls: "mas-size-report__row" });
+			const link = row.createEl("a", { text: file.path, href: "#" });
+			link.addEventListener("click", (event) => {
+				event.preventDefault();
+				this.close();
+				void this.app.workspace.getLeaf(false).openFile(file);
+			});
+			row.createSpan({ text: ` — ${(file.stat.size / (1024 * 1024)).toFixed(2)} MB` });
+		}
+		if (this.files.length > 100) {
+			contentEl.createEl("p", { text: `… and ${this.files.length - 100} more.` });
+		}
+		new Setting(contentEl).addButton((button) => button.setButtonText("Close").onClick(() => this.close()));
 	}
 
 	onClose(): void {

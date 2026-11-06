@@ -2030,3 +2030,14 @@ body .callout[data-callout^="mas-annotation-comment"] {
 .mas-llm-config-card > .setting-item + .setting-item {
     border-top: 1px solid var(--background-modifier-border);
 }
+
+/* Large imported-source note report */
+.mas-size-report {
+    max-height: 60vh;
+    overflow: auto;
+    margin: 0.5em 0;
+}
+.mas-size-report__row {
+    padding: 0.15em 0;
+    overflow-wrap: anywhere;
+}
