@@ -182,6 +182,8 @@ def run(input_path, out_path=None, metadata=False, tafsir=False):
     # headings) and collapse any excess.
     content = pp.normalize_spacing(content)
     content = tfq.strip_orphan_quote_classes(content)
+    content, repeated_links = tfq.dedupe_same_verse_links(content)
+    print(f"  Repeated same-verse links removed: {repeated_links}")
     
     # Save
     if out_path is None:

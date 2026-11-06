@@ -501,8 +501,24 @@ def ensure_parent(citekey: str, doc_type: str, related: list[str], volume: int,
 
     content = parent.read_text(encoding="utf-8")
     prefix = _note_prefix(standalone)
-    entry = f"[[{prefix}{citekey} - {doc_type} - vol. {volume}]]"
-    if entry not in content:
+    target = f"{prefix}{citekey} - {doc_type} - vol. {volume}"
+    link = re.compile(r"\[\[\s*" + re.escape(target) + r"\s*(?:[|#][^\]]*)?\]\]")
+    # Keep the first link to this volume, whether or not it has a display
+    # alias, and drop any duplicate that an older parent accumulated.
+    lines = content.split("\n")
+    seen = False
+    deduped: list[str] = []
+    for line in lines:
+        if link.search(line):
+            if seen:
+                continue
+            seen = True
+        deduped.append(line)
+    if seen:
+        content = "\n".join(deduped)
+        parent.write_text(content, encoding="utf-8")
+    else:
+        entry = f"[[{target}]]"
         new_lines = []
         inserted = False
         for line in content.split("\n"):

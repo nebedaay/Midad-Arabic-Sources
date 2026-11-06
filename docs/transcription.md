@@ -49,6 +49,8 @@ A transcription made by an older version of the plugin (or before it) may have n
 
 **Assign topic and post-process this transcription…** writes a topic to the parent note. A parent topic containing “tafsīr” enables commentary mode: short quote fragments are checked first against the verse under discussion and the nearest previous match, rather than only against the whole Qur’ān. This is the right setting for a tafsīr such as Fī Riyāḍ al-Tafsīr; a general work leaves it off.
 
+In commentary mode, consecutive segments of the same verse form one citation run. The first and last segments keep the link; intermediate segments keep the quote formatting but omit the repeated link. A switch to another verse or range starts a new run, so the first quote after the switch is cited. Quote runs inside footnote callouts are left alone.
+
 If a same-named legacy/adopted parent exists elsewhere, the native parent absorbs its author-created YAML fields and body, fixes a clearly broken volume link, backs up both notes, and removes the duplicate. Native identity and citation fields win; author fields such as `up`, `shorttitle`, `related`, and aliases are merged. If the legacy parent is referenced by annotations, or if more than one candidate exists, it is left untouched rather than guessed at.
 
 ## Prompts

@@ -187,6 +187,44 @@ def get_surah_name(surah_num: int) -> tuple[str, str]:
     arabic = aliases[2] if len(aliases) > 2 else str(surah_num)
     return (stem, arabic)
 
+def dedupe_same_verse_links(content: str) -> tuple[str, int]:
+    """Keep a citation only on the first and last quote of a same-verse run.
+
+    All segments still carry the quote formatting. In a commentary a verse is
+    quoted repeatedly; a link on every fragment is noise. A group is a run of
+    adjacent quote spans with the same link; first and last keep the link, the
+    middle links are removed. A change of link starts a new group, so the first
+    quote after a switch is always cited.
+    """
+    quote = re.compile(
+        r'(\*[^*\n]*\{\.quran-quote\}\*)'
+        r'([ \t]*)'
+        r'(\(\[\[[^\]]+\]\](?:[–-]\[\[[^\]]+\]\])?\))?'
+    )
+    matches = []
+    for found in quote.finditer(content):
+        line_start = content.rfind('\n', 0, found.start()) + 1
+        if content[line_start:found.start()].lstrip().startswith('>'):
+            continue  # footnote/poetry callout, not the running commentary
+        matches.append(found)
+    edits: list[tuple[int, int, str]] = []
+    index = 0
+    while index < len(matches):
+        link = matches[index].group(3)
+        if not link:
+            index += 1
+            continue
+        end = index
+        while end + 1 < len(matches) and matches[end + 1].group(3) == link:
+            end += 1
+        for middle in range(index + 1, end):
+            edits.append((matches[middle].start(3), matches[middle].end(3), ""))
+        index = end + 1
+    for start, end, replacement in sorted(edits, key=lambda edit: edit[0], reverse=True):
+        content = content[:start] + replacement + content[end:]
+    return content, len(edits)
+
+
 def strip_orphan_quote_classes(content: str) -> str:
     """Delete `{.quran-quote}` markers that are not the class of an italic span."""
     return re.sub(r'\{\.quran-quote\}(?!\*)', '', content)
