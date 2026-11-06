@@ -71,6 +71,8 @@ export interface AnnotationHost {
 	settings: AnnotationSettings;
 	refreshParent: () => Promise<void>;
 	refreshRegistry?: () => Promise<void>;
+	/** Upgrade a transcription/translation note's metadata to the native form. */
+	upgradeTranscription?: (file: TFile) => Promise<void>;
 }
 
 function cmOf(view: MarkdownView): EditorView | null {
@@ -376,6 +378,21 @@ export class AnnotationService {
 		const type = typeof rawType === "string" ? rawType : "";
 		if (type.includes("source-annotation") || isSourceFrontmatter(frontmatter)) {
 			new Notice("This note is already managed by Midad.");
+			return;
+		}
+		// A transcription already has a native identity. Do not wrap it as a
+		// generic adopted note; upgrade its metadata (and the literature note's
+		// transcriptions list) instead. This keeps legacy notes looking like the
+		// notes the current pipeline writes.
+		const masKind = frontmatter?.["midad-kind"];
+		const legacyTranscription = /^(?:@|mas-).+?\s+-\s+(?:transcription|translation)(?:\s+-\s+(?:vol|v)\.\s*\d+)?$/i.test(file.basename);
+		if (masKind === "transcription" || masKind === "translation" || legacyTranscription) {
+			if (this.host.upgradeTranscription) {
+				new Notice("Upgrading transcription metadata…");
+				await this.host.upgradeTranscription(file);
+			} else {
+				new Notice("This is a Midad transcription/translation; use post-process or re-render to update it.");
+			}
 			return;
 		}
 		const key = newAdoptedNoteKey();

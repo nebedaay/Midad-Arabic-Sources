@@ -256,6 +256,7 @@ interface PipelineNote {
 	type: string;
 	path: string;
 	name?: string;
+	volume?: number | null;
 }
 
 /** One archived batch, as the reprocess dialogue reports it. */
@@ -670,6 +671,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 				settings: this.settings,
 				refreshParent: () => this.refreshAnnotationParent(),
 				refreshRegistry: () => this.refreshSourceRegistry(),
+				upgradeTranscription: (file) => this.postprocessTranscriptionNote(file, undefined, true),
 			});
 			await this.refreshAnnotationParent();
 		} catch (error) {
@@ -754,6 +756,22 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			id: "reprocess-from-archive",
 			name: "Reprocess from archive…",
 			callback: async () => { await this.openReprocess(); },
+		});
+
+		this.addCommand({
+			id: "postprocess-transcription-note",
+			name: "Post-process this transcription/translation",
+			callback: async () => {
+				await this.postprocessTranscriptionNote(this.app.workspace.getActiveFile());
+			},
+		});
+
+		this.addCommand({
+			id: "rerender-item-transcriptions",
+			name: "Re-render transcriptions of this item's attachments",
+			callback: async () => {
+				await this.rerenderItemTranscriptions(this.app.workspace.getActiveFile());
+			},
 		});
 
 		this.addCommand({
@@ -852,10 +870,23 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 				const work = await this.workForPath(file.path);
 				const archived = work ? null : archivedNoteInfo(file.path);
 				if (!work && (!archived || !(file instanceof TFile) || file.extension !== "md")) return;
-				menu.addItem((item) => item
-					.setTitle("Re-render this source")
-					.setIcon("refresh-cw")
-					.onClick(() => { void this.rerenderCurrentSource(file); }));
+				if (work || archived?.type) {
+					menu.addItem((item) => item
+						.setTitle("Re-render this source")
+						.setIcon("refresh-cw")
+						.onClick(() => { void this.rerenderCurrentSource(file); }));
+				}
+				if (file instanceof TFile && archived?.type) {
+					menu.addItem((item) => item
+						.setTitle("Post-process this transcription/translation")
+						.setIcon("file-search")
+						.onClick(() => { void this.postprocessTranscriptionNote(file, archived); }));
+				} else if (file instanceof TFile && archived && archived.type === null) {
+					menu.addItem((item) => item
+						.setTitle("Re-render transcriptions of this item's attachments")
+						.setIcon("refresh-cw")
+						.onClick(() => { void this.rerenderItemTranscriptions(file); }));
+				}
 			})();
 		}));
 
@@ -4377,6 +4408,121 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		new Notice(`Re-rendered ${label}.`);
 	}
 
+	/** Whether a multi-volume work has any volume note on disk. */
+	private noteHasVolumes(citekey: string, type: string): boolean {
+		const folder = type === "translation" ? this.translationsFolder() : this.transcriptionsFolder();
+		for (const prefix of ["@", "mas-"]) {
+			for (let volume = 1; volume <= 200; volume++) {
+				const path = normalizePath(`${folder}/${prefix}${citekey} - ${type} - vol. ${volume}.md`);
+				if (this.app.vault.getAbstractFileByPath(path) instanceof TFile) return true;
+			}
+		}
+		return false;
+	}
+
+	/**
+	 * Run the current local post-processing scripts over an existing
+	 * transcription/translation note. This is the no-archive path: it does not
+	 * submit anything to Gemini and works on notes produced by an older plugin
+	 * version. `write_note` rebuilds the native YAML, creates/updates the native
+	 * volume parent, and refreshes the literature note's
+	 * `transcriptions`/`translations` list.
+	 */
+	async postprocessTranscriptionNote(
+		file?: TAbstractFile | null,
+		infoOverride?: ArchivedNoteInfo,
+		metadataOnly = false
+	): Promise<void> {
+		const target = file ?? this.app.workspace.getActiveFile();
+		if (!(target instanceof TFile) || target.extension !== "md") {
+			new Notice("Open a transcription or translation note first.");
+			return;
+		}
+		const info = infoOverride ?? archivedNoteInfo(target.path);
+		if (!info?.type) {
+			new Notice("That note is not recognised as a transcription or translation.");
+			return;
+		}
+		if (info.volume == null && this.noteHasVolumes(info.citekey, info.type)) {
+			new Notice("That is a volume index; open the volume note you want to post-process.");
+			return;
+		}
+		const args = [
+			"postprocess-note", target.path,
+			"--citekey", info.citekey,
+			"--type", info.type,
+		];
+		if (info.volume != null) args.push("--volume", String(info.volume));
+		if (target.basename.startsWith("mas-")) args.push("--standalone");
+		if (metadataOnly) args.push("--metadata-only");
+		const result = await this.runWithProgress(
+			metadataOnly ? `Upgrading ${target.basename}` : `Post-processing ${target.basename}`,
+			args,
+		);
+		if (result?.notes?.length && !metadataOnly) {
+			new Notice(`Post-processed ${target.basename}.`);
+		}
+	}
+
+	/**
+	 * Re-render every transcription/translation associated with a literature
+	 * note. Notes with an archived batch use the archive; legacy notes without
+	 * one are post-processed in place with the current scripts.
+	 */
+	async rerenderItemTranscriptions(file?: TAbstractFile | null): Promise<void> {
+		const target = file ?? this.app.workspace.getActiveFile();
+		if (!(target instanceof TFile) || target.extension !== "md") {
+			new Notice("Open a literature note (@citekey) first.");
+			return;
+		}
+		const base = target.basename;
+		if (!base.startsWith("@") || base.includes(" - ")) {
+			new Notice("Open a literature note (@citekey) first.");
+			return;
+		}
+		const citekey = base.replace(/^@/, "");
+		const notes = ((await this.pipelineResult(["list-transcriptions", target.path]))?.notes ?? []) as unknown as PipelineNote[];
+		if (!notes.length) {
+			new Notice(`No transcription or translation notes found for @${citekey}.`);
+			return;
+		}
+		const infos = notes.map((note) => {
+			// Only clean native/legacy names. A user variant such as
+			// “translation - vol. 1 (modified)” must not be post-processed into
+			// the canonical note and overwrite it.
+			const found = archivedNoteInfo(note.path);
+			if (!found?.type) return null;
+			return { note, info: found };
+		}).filter((entry): entry is { note: PipelineNote; info: ArchivedNoteInfo } => !!entry);
+		// In a multi-volume work the parent note is a volume index, not a text;
+		// re-render its volumes instead. A single-volume work has no volume note,
+		// so its parent is the text and is included.
+		const typesWithVolumes = new Set(infos.filter((entry) => entry.info.volume != null).map((entry) => entry.info.type));
+		const chosen = infos.filter((entry) => !(entry.info.volume == null && typesWithVolumes.has(entry.info.type)));
+		const zips = (await this.pipelineResult(["list-archive"]))?.zips ?? [];
+		let done = 0;
+		for (const entry of chosen) {
+			const archive = zips.find((zip) => {
+				const batch = archivedBatchInfo(zip.name);
+				return !!batch
+					&& batch.citekey === entry.info.citekey
+					&& batch.type === entry.info.type
+					&& (entry.info.volume == null || batch.volume === entry.info.volume);
+			});
+			if (archive) {
+				await this.runWithProgress(`Re-rendering ${entry.note.name ?? citekey}`, ["reprocess", "--zip", archive.path]);
+			} else {
+				const noteFile = this.app.vault.getAbstractFileByPath(entry.note.path);
+				if (!(noteFile instanceof TFile)) continue;
+				await this.postprocessTranscriptionNote(noteFile, entry.info);
+			}
+			done++;
+		}
+		new Notice(done
+			? `Re-rendered ${done} transcription/translation note${done === 1 ? "" : "s"} for @${citekey}.`
+			: `No re-renderable notes found for @${citekey}.`);
+	}
+
 	/**
 	 * Re-render a transcribed note from its archived batch. Covers standalone
 	 * PDF transcriptions, literature-note transcriptions/translations, and
@@ -4400,8 +4546,13 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			.sort((a, b) => (a.info.volume ?? -1) - (b.info.volume ?? -1));
 
 		if (!batches.length) {
-			const kind = info.type ? ` ${info.type}` : "";
-			new Notice(`No archived${kind} batch found for @${info.citekey}.`);
+			if (info.type) {
+				// Legacy notes predate the archive format; the current local
+				// post-processor can still improve them in place.
+				await this.postprocessTranscriptionNote(file, info);
+				return;
+			}
+			new Notice(`No archived batch found for @${info.citekey}.`);
 			return;
 		}
 

@@ -19,6 +19,8 @@ Subcommands:
     transcribe --citekey CK [--pdf PATH ...] [--volume N] [--pages N] [--prompt-file PATH]
     translate  --citekey CK [--source PATH ...] [--volume N] [--prompt-file PATH]
     reprocess  --zip PATH
+    postprocess-note <note.md> [--citekey CK] [--type transcription|translation]
+                     [--volume N] [--standalone] [--metadata-only]
 
 PDF resolution order (per the vault's ScholarWeft integration):
   2. Zotero local API (http://127.0.0.1:23119) children of the item
@@ -26,12 +28,15 @@ PDF resolution order (per the vault's ScholarWeft integration):
   3. ~/Zotero/storage/<ATTACHMENT_KEY>/<filename>
 """
 import argparse
+import contextlib
+import io
 import json
 import os
 import re
 import shutil
 import subprocess
 import sys
+import tempfile
 from datetime import datetime
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
@@ -678,6 +683,96 @@ def cmd_reprocess(args) -> int:
     return rc
 
 
+def _note_identity(note: Path, citekey: str | None, doc_type: str | None,
+                   volume: int | None, standalone: bool):
+    """Resolve a legacy/native transcription note's citekey, type, and volume."""
+    stem = note.stem
+    match = re.match(
+        r"^(?:@|mas-)(.+?)\s+-\s+(transcription|translation)"
+        r"(?:\s+-\s+(?:vol|v)\.\s*(\d+))?$",
+        stem, re.I)
+    inferred_citekey = match.group(1) if match else ""
+    inferred_type = match.group(2).lower() if match else ""
+    inferred_volume = int(match.group(3)) if match and match.group(3) else None
+    key = (citekey or inferred_citekey).strip()
+    kind = (doc_type or inferred_type or "transcription").strip().lower()
+    vol = inferred_volume if volume is None else volume
+    if kind not in ("transcription", "translation"):
+        raise ValueError(f"Unknown note type: {kind}")
+    if not key:
+        raise ValueError("Could not determine the note's citekey; pass --citekey.")
+    return key, kind, vol, standalone or stem.startswith("mas-")
+
+
+def cmd_postprocess_note(args) -> int:
+    """Re-run local post-processing on an existing note, without an archive.
+
+    The note keeps its place if it is already in the native transcriptions
+    folder. `write_note` rebuilds the native YAML and, for a volume, the native
+    parent and the literature note's `transcriptions`/`translations` list.
+    `--metadata-only` skips the body pass and only upgrades that metadata.
+    """
+    note = Path(args.note).resolve()
+    if not note.exists():
+        fail(f"Note not found: {note}")
+        return 1
+    citekey, doc_type, volume, standalone = _note_identity(
+        note, args.citekey, args.type, args.volume, args.standalone)
+    text = note.read_text(encoding="utf-8")
+    body = text
+    if text.startswith("---"):
+        end = text.find("\n---", 3)
+        if end != -1:
+            body = text[end + 4:]
+    body = body.lstrip("\n")
+
+    mv = load_module("transcription-translation-move-to-vault.py")
+    related = mv._existing_list(note, "related")
+
+    title = authors = None
+    if standalone:
+        # `write_note(standalone=True)` re-adds the type suffix; pass the bare title.
+        title = mv._existing_scalar(note, "title")
+        origin = note.stem.replace("mas-", "", 1)
+        title = re.sub(r"\s*\((?:transcription|translation)(?:,\s*vol\.\s*\d+)?\)\s*$",
+                       "", title, flags=re.I).strip() or None
+        authors = mv._existing_list(note, "authors") or None
+        if not title:
+            title = origin
+
+    if args.metadata_only:
+        processed_body = body
+    else:
+        work = VAULT / ".tmp"
+        work.mkdir(parents=True, exist_ok=True)
+        workdir = Path(tempfile.mkdtemp(prefix="midad-postprocess-", dir=str(work)))
+        try:
+            raw = workdir / "raw.md"
+            raw.write_text(body, encoding="utf-8")
+            processed = workdir / "processed.md"
+            tpp = load_module("transcription-postprocess.py")
+            # The post-processor is chatty; its messages are not pipeline JSON.
+            with contextlib.redirect_stdout(io.StringIO()):
+                tpp.run(raw, out_path=processed, metadata=False)
+            processed_body = processed.read_text(encoding="utf-8")
+        finally:
+            shutil.rmtree(workdir, ignore_errors=True)
+
+    backup_dir = CACHE / "backups"
+    backup_dir.mkdir(parents=True, exist_ok=True)
+    backup = backup_dir / f"{datetime.now().strftime('%Y%m%d-%H%M%S')}-{note.name}"
+    shutil.copy2(note, backup)
+    with contextlib.redirect_stdout(io.StringIO()):
+        dest = mv.write_note(
+            processed_body, citekey, doc_type, related=related,
+            volume=volume, standalone=standalone, title=title, authors=authors)
+    emit("result", result={
+        "notes": [str(dest)], "backup": str(backup),
+        "metadata_only": bool(args.metadata_only),
+    })
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(prog="midad-arabic-sources-pipeline")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -709,6 +804,15 @@ def main() -> int:
     p.set_defaults(func=cmd_translate)
 
     p = sub.add_parser("reprocess"); p.add_argument("--zip", required=True); p.set_defaults(func=cmd_reprocess)
+
+    p = sub.add_parser("postprocess-note")
+    p.add_argument("note")
+    p.add_argument("--citekey")
+    p.add_argument("--type", choices=("transcription", "translation"))
+    p.add_argument("--volume", type=int)
+    p.add_argument("--standalone", action="store_true")
+    p.add_argument("--metadata-only", action="store_true")
+    p.set_defaults(func=cmd_postprocess_note)
 
     p = sub.add_parser("resume"); p.add_argument("--state", required=True); p.set_defaults(func=cmd_resume)
 

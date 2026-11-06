@@ -24,6 +24,8 @@ See [Transcription](./transcription.md) and [Translation](./translation.md).
 - **Transcribe a PDF…** — choose any PDF on disk, without a Zotero item, and verify Gemini’s title/author guess afterwards.
 - **Translate this item’s transcription(s)** — translate an existing transcription.
 - **Reprocess from archive…** — re-run post-processing from an archived batch, without resubmitting.
+- **Post-process this transcription/translation** — run the current local post-processing scripts over the open note, without an archive or Gemini. Also rebuilds the native YAML, volume parent, and literature-note list.
+- **Re-render transcriptions of this item’s attachments** — run the same re-render for every transcription/translation attached to the open literature note, using archives where present and in-place post-processing for legacy notes.
 - **Check transcription pipeline** — list archived batches.
 - **Show pipeline status** — reveal the status panel, resume an interrupted job, or open the last log.
 - **Open last pipeline log** — open the newest job log.
@@ -36,7 +38,7 @@ See [Document import](./document-import.md) and [Templates](./templates.md).
 - **Add Turath work by URL…** — add a Turath book to your personal list (see [Adding a work by URL](./document-import.md#adding-a-work-by-url)).
 - **Copy import templates to vault** — copy the editable ETA templates into your vault.
 - **Re-render imported sources** — regenerate every note from its cached model.
-- **Re-render this source** — regenerate an imported work, or re-run a transcription/translation from its archived JSON (also on the note’s right-click menu). On a volume transcription, choose only that volume or all volumes.
+- **Re-render this source** — regenerate an imported work, or re-run a transcription/translation from its archived JSON (also on the note’s right-click menu). On a volume transcription, choose only that volume or all volumes. A legacy transcription with no archive is post-processed in place with the current local scripts.
 - **Apply template changes to imported sources** — apply a detected template change on demand.
 - **Re-download imported sources (rebuild models)** — re-fetch the source JSON and rebuild every model.
 - **Migrate imported sources to the current naming scheme** — rename installed works to `Author - Title (repository)`, updating notes, models, MOCs, and annotation paths.
@@ -56,7 +58,7 @@ See [Document import](./document-import.md#annotations).
 - **Delete annotations for this source…** — move a work's annotation store and note to the plugin trash.
 - **Open Midad sidebar** — open the Midad sidebar. Navigation is available for every note; annotatable notes also show the Annotations tab, MOC links, and Manage sources.
 - **Copy source with annotations** — copy the managed source text plus a colour-callout annotation section.
-- **Adopt note for annotations** — make an arbitrary Markdown note annotatable by adding a stable work/unit identity and a managed body region. Known Midad transcriptions/translations are adopted automatically.
+- **Adopt note for annotations** — make an arbitrary Markdown note annotatable by adding a stable work/unit identity and a managed body region. Known Midad transcriptions/translations are recognised without wrapping; a legacy one has its native metadata and literature-note list upgraded instead.
 - **Open source annotations** — open the generated per-work annotation note.
 - **Open annotation trash** — restore or permanently delete annotation batches.
 - **Reload annotations** — reload the store and repaint open source notes.
@@ -121,6 +123,7 @@ python3 scripts/midad-arabic-sources-pipeline.py list-transcriptions "…/@KEY.m
 python3 scripts/midad-arabic-sources-pipeline.py list-archive
 python3 scripts/midad-arabic-sources-pipeline.py default-prompts
 python3 scripts/midad-arabic-sources-pipeline.py reprocess --zip "…/archive/@KEY - transcription files.zip"
+python3 scripts/midad-arabic-sources-pipeline.py postprocess-note "…/@KEY - transcription - vol. 2.md" --citekey KEY --type transcription --volume 2
 python3 scripts/midad-arabic-sources-pipeline.py resume --state ".midad-arabic-sources/jobs/….json"
 ```
 

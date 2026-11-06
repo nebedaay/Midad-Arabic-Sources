@@ -45,6 +45,8 @@ Local scripts run after OCR and never call Gemini:
 
 `transcription-format.py` and `transcription-quran.py` are the two scripts behind this step; the orchestrator runs them in order.
 
+A transcription made by an older version of the plugin (or before it) may have no archive. **Post-process this transcription/translation** runs the same current scripts over the note body in place, without Gemini. It writes a backup under `.midad-arabic-sources/backups/`, rebuilds the native YAML and volume parent, and adds the note to the literature note’s `transcriptions:`/`translations:` list. The previous text is left in the backup if the result needs to be compared or restored.
+
 ## Prompts
 
 The dialog has a **Prompt** dropdown to the left of **Select all** / **Select none**, listing the available transcription prompts. **Default prompt** is the built-in OCR instruction; it can be edited but not deleted.
@@ -61,7 +63,9 @@ The editor holds only the **text-specific** part. The pipeline appends it to a s
 
 - **Transcribe this item’s PDF file(s)** — the full pipeline above.
 - **Transcribe a PDF…** — choose any PDF on disk, with no Zotero item, then verify the guessed title and author.
-- **Re-render this source** — re-run post-processing for the active transcription/translation from its archived JSON. On a volume note, choose only that volume or all volumes.
+- **Re-render this source** — re-run post-processing for the active transcription/translation from its archived JSON. On a volume note, choose only that volume or all volumes. If there is no archive, it falls back to in-place post-processing.
+- **Post-process this transcription/translation** — run the current local post-processing scripts over the open note, without an archive or Gemini.
+- **Re-render transcriptions of this item’s attachments** — from a literature note, re-render all of its transcription/translation notes, using archives where present and in-place post-processing for legacy notes.
 - **Check transcription pipeline** — list the archived batches on disk.
 - **Show pipeline status** — reveal the live status panel while a job runs, resume a job that was interrupted, or open the last log when nothing is running.
 - **Open last pipeline log** — open the most recent job log.
