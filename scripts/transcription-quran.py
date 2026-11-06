@@ -45,28 +45,24 @@ def build_wikilink(surah: int, verse: int | str, end_verse: int = None, ar_verse
 
 
 def fix_wikilinks(content: str) -> tuple[str, int]:
-    """Fix all [[NNN SurahName#N|ref]] wikilinks to match actual sura filenames."""
+    """Fix [[NNN SurahName#N|ref]] links, including a stale display alias."""
     pattern = re.compile(r'\[\[(\d{3})\s+([^#\]]+)#(\d+(?:-\d+)?)\|([^\]]+)\]\]')
     fixed = 0
     new_content = content
+    w_to_a = str.maketrans('0123456789', '\u0660\u0661\u0662\u0663\u0664\u0665\u0666\u0667\u0668\u0669')
     for m in reversed(list(pattern.finditer(content))):
         surah_num = int(m.group(1))
         verse_part = m.group(3)
         display = m.group(4)
-        stem, _ = get_surah_name(surah_num)
-        correct = f"[[{stem}#{verse_part}|{display}]]"
-        if m.group(0) != correct:
-            new_content = new_content[:m.start()] + correct + new_content[m.end():]
-            fixed += 1
-    return new_content, fixed
-    pattern = re.compile(r'\[\[(\d{3})\s+([^#\]]+)#(\d+(?:-\d+)?)\|([^\]]+)\]\]')
-    fixed = 0
-    new_content = content
-    for m in reversed(list(pattern.finditer(content))):
-        surah_num = int(m.group(1))
-        verse_part = m.group(3)
-        display = m.group(4)
-        stem, _ = get_surah_name(surah_num)
+        stem, arabic = get_surah_name(surah_num)
+        # Older notes recorded the canonical work title as the link alias
+        # (`Qurʾān (riwāyat Ḥafṣ) - 004 An-Nisa : ١٠٥`). The sūra name is the
+        # stable display; keep the numeral the source had.
+        if re.match(r'^Qurʾān\b', display):
+            stamp = display.rsplit(" : ", 1)[-1].strip()
+            if not re.fullmatch(r'[\u0660-\u0669]+', stamp):
+                stamp = verse_part.split("-")[0].translate(w_to_a)
+            display = f"{arabic} : {stamp}"
         correct = f"[[{stem}#{verse_part}|{display}]]"
         if m.group(0) != correct:
             new_content = new_content[:m.start()] + correct + new_content[m.end():]
@@ -146,10 +142,22 @@ def get_surah_name(surah_num: int) -> tuple[str, str]:
     path = matches[0]
     # Use exact filename stem (minus .md) for the wikilink — no guessing
     stem = path.stem  # e.g. "003 Al 'Imran"
-    # Get Arabic name from aliases
+    # Get the Arabic name from the aliases property, not every YAML list item
+    # (`tags`, `midad-up`, and other properties also use `  -`).
     text = path.read_text(encoding="utf-8")
-    aliases = re.findall(r'^  - (.+)$', text, re.MULTILINE)
-    # Aliases: [tag, english, arabic, padded_arabic]
+    block = re.search(r'^aliases:[ \t]*\n((?:[ \t]+-[ \t]*.+\n?)+)', text, re.M)
+    aliases: list[str] = []
+    if block:
+        for line in block.group(1).splitlines():
+            value = line.strip()
+            if value.startswith("- "):
+                value = value[2:].strip()
+            if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+                value = value[1:-1]
+            if value:
+                aliases.append(value)
+    # Aliases: [romanized, short romanized, Arabic, padded Arabic] in the
+    # canonical notes; index 2 is the Arabic form.
     arabic = aliases[2] if len(aliases) > 2 else str(surah_num)
     return (stem, arabic)
 
@@ -604,13 +612,21 @@ def discover_and_mark_quotes(content: str) -> tuple[str, list[dict]]:
         surah, verse_num, _, score = matches[0]
         print(f"\n    ({surah}:{verse_num}) {text_clean[:60]}", flush=True, end="")
         fragment = get_tashkil_fragment(text_clean, surah, verse_num)
+        verse_range = None
         if not fragment:
-            continue
-        
+            # A quotation can span two or more consecutive verses. Keep the
+            # source text and cite the range rather than dropping the quote.
+            verse_range = find_verse_range(text_clean, surah, verse_num)
+            if verse_range:
+                fragment = text_clean
+            else:
+                continue
+
         english, arabic = get_surah_name(surah)
         surah_ref = f"{surah:03d} {english}#{verse_num}"
         display_ref = f"{arabic} : {verse_num}"
-        wikilink = build_wikilink(surah, verse_num)
+        wikilink = (build_wikilink(surah, verse_range[0], end_verse=verse_range[1])
+                    if verse_range else build_wikilink(surah, verse_num))
         
         # Replace only the (text) portion — preserve citation prefix
         replacement = f"*{LF}{fragment}{LE}{{.quran-quote}}*{wikilink}"
@@ -623,16 +639,14 @@ def discover_and_mark_quotes(content: str) -> tuple[str, list[dict]]:
             "tashkil_text": fragment[:80],
         })
     
-    # Fallback: bare parenthesized/guillemet Arabic
-    openers = r'[\(\u00AB]'
-    closers = r'[\)\u00BB]'
-    MIN_LEN = 15
-    AR = r'[\u0600-\u06FF\s\u064B-\u0652\u0670\uFB50-\uFDFF\uFE70-\uFEFF]'
-    
+    # Fallback: bare quoted Arabic. Sources use straight quotes, curly quotes,
+    # guillemets, and parentheses interchangeably; check all of them for a
+    # Qur'ānic match even when no `قال`/`قوله` cue precedes the span.
     bare_patterns = [
-        re.compile(openers + r'(' + AR + r'{' + str(MIN_LEN) + r',})' + closers),
-        re.compile(openers + r'(' + AR + r'{' + str(MIN_LEN) + r',})(?=\s*$|\s*\n)'),
-        re.compile(r'(' + AR + r'{' + str(MIN_LEN) + r',})' + closers),
+        re.compile(r'"([^"\n]{15,})"'),
+        re.compile(r'“([^”\n]{15,})”'),
+        re.compile(r'«([^»\n]{15,})»'),
+        re.compile(r'\(([^()\n]{15,})\)'),
     ]
     
     for pat in bare_patterns:
@@ -640,10 +654,11 @@ def discover_and_mark_quotes(content: str) -> tuple[str, list[dict]]:
                 text = m.group(1).strip()
                 text_clean = re.sub(r'\s+', ' ', text)
                 pos = m.start()
+                if len(text_clean.split()) < 3 or re.search(r'\d', text_clean):
+                    continue
                 
-                if closers in m.group(0)[:1]: continue
                 if m.group(0).startswith(text[0]):
-                    if pos > 0 and new_content[pos-1] in AR: continue
+                    if pos > 0 and re.match(r'[\u0600-\u06FF]', new_content[pos-1]): continue
                 
                 if any(w in text_clean for w in HADITH_FLAGS): continue
                 if is_inside_marked(pos): continue
@@ -668,9 +683,15 @@ def discover_and_mark_quotes(content: str) -> tuple[str, list[dict]]:
                 
                 surah, verse_num, _, score = matches[0]
                 fragment = get_tashkil_fragment(text_clean, surah, verse_num)
-                if not fragment: continue
-                
-                wikilink = build_wikilink(surah, verse_num)
+                verse_range = None
+                if not fragment:
+                    verse_range = find_verse_range(text_clean, surah, verse_num)
+                    if verse_range:
+                        fragment = text_clean
+                    else:
+                        continue
+                wikilink = (build_wikilink(surah, verse_range[0], end_verse=verse_range[1])
+                            if verse_range else build_wikilink(surah, verse_num))
                 
                 replacement = f"*{LF}{fragment}{LE}{{.quran-quote}}*{wikilink}"
                 new_content = new_content[:m.start()] + replacement + new_content[m.end():]

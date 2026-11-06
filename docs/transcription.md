@@ -37,7 +37,7 @@ When the note is written, a second dialog shows the guessed title and author for
 
 Local scripts run after OCR and never call Gemini:
 
-- **Qurʾān quotes** — `﴿ … ﴾` spans are detected and rendered as the vault’s `quran-quote` callout, with tashkīl reconciled against the canonical Qurʾān notes.
+- **Qurʾān quotes** — `﴿ … ﴾` spans and Arabic text inside straight or curly double quotes, guillemets, and parentheses are checked against the canonical Qurʾān; matches get tashkīl and a citation. A quotation spanning consecutive verses gets a range link, and old links whose alias is the canonical work title are rewritten to the sūra name.
 - **Poetry** — verse is wrapped in the `>[!arabic-poetry]` callout, one hemistich per `>- ` line. The OCR prompt asks for a `§§§` line marker and `%%` between hemistiches; post-processing also accepts the older `*` forms, including a marker stuck to the first word, and splits multiple couplets that were returned on one line.
 - **Footnotes** — the source’s footnote markers and bodies are reconstructed as markdown footnotes.
 - **TOC** — a fihris/contents page (recognized by a `فهرس`/`محتويات` heading or a `صحيفة` column header) is kept one entry per line and formatted as a `>[!TOC]` callout with `>-` list items. `#### Title page` is renamed `#### TOC` when the page’s content is a table of contents.
