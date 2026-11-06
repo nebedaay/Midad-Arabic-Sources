@@ -69,7 +69,7 @@ def extract_metadata(body: str) -> tuple[str, dict[str, str]]:
     return "\n".join(keep), meta
 
 
-def run(input_path, out_path=None, metadata=False):
+def run(input_path, out_path=None, metadata=False, tafsir=False):
     """Format and Qur'an-process a raw transcription. Returns the output Path."""
     filepath = Path(input_path)
     if not filepath.exists():
@@ -127,7 +127,7 @@ def run(input_path, out_path=None, metadata=False):
     tfq = SourceFileLoader("tfq", str(SCRIPTS / "transcription-quran.py")).load_module()
     LF = '\ufd3f'; LE = '\ufd3e'
     
-    content, discovered = tfq.discover_and_mark_quotes(content)
+    content, discovered = tfq.discover_and_mark_quotes(content, tafsir=tafsir)
     print(f"  Discovered: {len(discovered)}")
 
     # Discard Gemini's own citations; every verse is located locally.
@@ -139,6 +139,9 @@ def run(input_path, out_path=None, metadata=False):
 
     content, links_fixed = tfq.fix_wikilinks(content)
     print(f"  Links fixed: {links_fixed}")
+
+    content, open_links = tfq.link_open_fragments(content, tafsir=tafsir)
+    print(f"  Open-fragment links: {open_links}")
 
     content, stripped = tfq.strip_false_quran(content)
     print(f"  False Qur'an stripped: {stripped}")
@@ -196,7 +199,7 @@ def main():
         print("Usage: python3 transcription-postprocess.py <raw.md> [out.md] [--metadata]")
         sys.exit(1)
     out = sys.argv[2] if len(sys.argv) > 2 and not sys.argv[2].startswith("--") else None
-    run(sys.argv[1], out, metadata="--metadata" in sys.argv)
+    run(sys.argv[1], out, metadata="--metadata" in sys.argv, tafsir="--tafsir" in sys.argv)
 
 
 if __name__ == "__main__":

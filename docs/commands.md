@@ -25,6 +25,7 @@ See [Transcription](./transcription.md) and [Translation](./translation.md).
 - **Translate this item’s transcription(s)** — translate an existing transcription.
 - **Reprocess from archive…** — re-run post-processing from an archived batch, without resubmitting.
 - **Post-process this transcription/translation** — run the current local post-processing scripts over the open note, without an archive or Gemini. Also rebuilds the native YAML, volume parent, and literature-note list.
+- **Assign topic and post-process this transcription…** — write a topic onto the parent transcription note and re-process it. A topic containing “tafsīr” switches quote discovery to commentary mode, where short fragments are checked against the verse under discussion.
 - **Re-render transcriptions of this item’s attachments** — run the same re-render for every transcription/translation attached to the open literature note, using archives where present and in-place post-processing for legacy notes.
 - **Check transcription pipeline** — list archived batches.
 - **Show pipeline status** — reveal the status panel, resume an interrupted job, or open the last log.

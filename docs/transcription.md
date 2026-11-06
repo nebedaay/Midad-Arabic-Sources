@@ -47,6 +47,8 @@ Local scripts run after OCR and never call Gemini:
 
 A transcription made by an older version of the plugin (or before it) may have no archive. **Post-process this transcription/translation** runs the same current scripts over the note body in place, without Gemini. It writes a backup under `.midad-arabic-sources/backups/`, rebuilds the native YAML and volume parent, and adds the note to the literature note’s `transcriptions:`/`translations:` list. The previous text is left in the backup if the result needs to be compared or restored.
 
+**Assign topic and post-process this transcription…** writes a topic to the parent note. A parent topic containing “tafsīr” enables commentary mode: short quote fragments are checked first against the verse under discussion and the nearest previous match, rather than only against the whole Qur’ān. This is the right setting for a tafsīr such as Fī Riyāḍ al-Tafsīr; a general work leaves it off.
+
 If a same-named legacy/adopted parent exists elsewhere, the native parent absorbs its author-created YAML fields and body, fixes a clearly broken volume link, backs up both notes, and removes the duplicate. Native identity and citation fields win; author fields such as `up`, `shorttitle`, `related`, and aliases are merged. If the legacy parent is referenced by annotations, or if more than one candidate exists, it is left untouched rather than guessed at.
 
 ## Prompts

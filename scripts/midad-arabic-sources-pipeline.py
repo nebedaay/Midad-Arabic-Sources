@@ -912,6 +912,15 @@ def cmd_postprocess_note(args) -> int:
 
     mv = load_module("transcription-translation-move-to-vault.py")
     related = mv._existing_list(note, "related")
+    parent = mv.dest_path(citekey, doc_type, None, standalone)
+    tafsir = bool(getattr(args, "tafsir", False))
+    if parent.exists():
+        mode = mv._existing_scalar(parent, "midad-transcription-mode").strip().lower()
+        topics = mv._existing_list(parent, "topics")
+        tafsir = tafsir or mode == "tafsir" or any(
+            "tafsir" in topic.lower().replace("ī", "i").replace("ā", "a")
+            for topic in topics
+        )
 
     title = authors = None
     if standalone:
@@ -937,7 +946,7 @@ def cmd_postprocess_note(args) -> int:
             tpp = load_module("transcription-postprocess.py")
             # The post-processor is chatty; its messages are not pipeline JSON.
             with contextlib.redirect_stdout(io.StringIO()):
-                tpp.run(raw, out_path=processed, metadata=False)
+                tpp.run(raw, out_path=processed, metadata=False, tafsir=tafsir)
             processed_body = processed.read_text(encoding="utf-8")
         finally:
             shutil.rmtree(workdir, ignore_errors=True)
@@ -956,7 +965,7 @@ def cmd_postprocess_note(args) -> int:
             mv.dest_path(citekey, doc_type, None, standalone), mv)
     result = {
         "notes": [str(dest)], "backup": str(backup),
-        "metadata_only": bool(args.metadata_only),
+        "metadata_only": bool(args.metadata_only), "tafsir": tafsir,
     }
     if consolidated:
         result["consolidated"] = consolidated
@@ -1003,6 +1012,8 @@ def main() -> int:
     p.add_argument("--volume", type=int)
     p.add_argument("--standalone", action="store_true")
     p.add_argument("--metadata-only", action="store_true")
+    p.add_argument("--tafsir", action="store_true",
+                   help="Treat quotes as continuous with the verse under discussion.")
     p.set_defaults(func=cmd_postprocess_note)
 
     p = sub.add_parser("resume"); p.add_argument("--state", required=True); p.set_defaults(func=cmd_resume)

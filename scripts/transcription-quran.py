@@ -119,6 +119,32 @@ def _search_sqlite(normalized_text: str, surah: int = None) -> list[tuple[int, i
     for row in rows:
         results.append((row[0], row[1], row[2]))
     return results
+
+
+def _search_sqlite_loose(loose_text: str, surah: int = None) -> list[tuple[int, int, str]]:
+    """Search with yāʾ removed from both sides.
+
+    Source orthography can differ from the canonical text by a final alif /
+    alif maqṣūra / yāʾ (`أراك` vs `أرىك`). This is a fallback after the exact
+    search, so the looser comparison cannot displace a real match.
+    """
+    conn = _build_sqlite_db()
+    results = []
+    if surah is not None:
+        rows = conn.execute(
+            "SELECT surah, verse, tashkil FROM verses "
+            "WHERE surah = ? AND REPLACE(norm, 'ي', '') LIKE ? LIMIT 10",
+            (surah, f"%{loose_text}%")
+        )
+    else:
+        rows = conn.execute(
+            "SELECT surah, verse, tashkil FROM verses "
+            "WHERE REPLACE(norm, 'ي', '') LIKE ? LIMIT 5",
+            (f"%{loose_text}%",)
+        )
+    for row in rows:
+        results.append((row[0], row[1], row[2]))
+    return results
     """Load a single verse with tashkīl from the sura file."""
     # Find matching file by number prefix
     prefix = f"{surah_num:03d} "
@@ -260,6 +286,33 @@ def find_verse_in_text(arabic_text: str, possible_suras: list[int] = None,
             return [(s, v, t, 1.0) for s, v, t in sql_results[:5]]
     except Exception:
         pass
+
+    # 4. Orthographic variant: source editions often write a final alef where
+    # the canonical text has alif maqṣūra (`أراك` / `أرىك`). Try the two
+    # directions only after the exact search fails.
+    for variant in (arabic_text.replace("ا", "ى"), arabic_text.replace("ى", "ا")):
+        variant_norm = normalize_arabic(variant)
+        if not variant_norm or variant_norm == normalized_input:
+            continue
+        try:
+            sql_results = _search_sqlite(variant_norm)
+            if sql_results:
+                return [(s, v, t, 1.0) for s, v, t in sql_results[:5]]
+        except Exception:
+            pass
+
+    # 5. Loose yāʾ-insensitive fallback, again only after exact attempts.
+    loose_input = normalized_input.replace("ي", "")
+    if loose_input:
+        try:
+            loose = _search_sqlite_loose(loose_input, surah=hint_surah)
+            if loose:
+                return [(s, v, t, 1.0) for s, v, t in loose[:5]]
+            loose = _search_sqlite_loose(loose_input)
+            if loose:
+                return [(s, v, t, 1.0) for s, v, t in loose[:5]]
+        except Exception:
+            pass
 
     return []
 
@@ -509,9 +562,14 @@ def process_markdown_file(filepath: str, dry_run: bool = False) -> dict:
     }
 
 
-def discover_and_mark_quotes(content: str) -> tuple[str, list[dict]]:
+def discover_and_mark_quotes(content: str, tafsir: bool = False) -> tuple[str, list[dict]]:
     """Discover unmarked Quran quotes and mark them with *﴿...﴾{quran}* ([[ref]]).
-    
+
+    In `tafsir` mode, a short quotation is looked up first against the verse
+    under discussion/nearest to the previous match, matching the continuity
+    assumption of a commentary. `add_missing_refs` already uses the same focus
+    for marked spans.
+
     Returns (new_content, found_list)."""
     HADITH_FLAGS = ["صلى الله", "رضي الله", "اخرجه", "رواه", "\ufdfa",
                     "رسول الله", "النبي", "عليه السلام",
@@ -595,6 +653,7 @@ def discover_and_mark_quotes(content: str) -> tuple[str, list[dict]]:
     new_content = content
     offset = 0
     checked = 0
+    focus_s = focus_v = None
     
     for paren_start, paren_end, text_clean in all_matches:
         checked += 1
@@ -604,12 +663,25 @@ def discover_and_mark_quotes(content: str) -> tuple[str, list[dict]]:
         adj_start = paren_start + offset
         adj_end = paren_end + offset
         
-        results = find_verse_in_text(text_clean)
+        results = find_verse_in_text(
+            text_clean,
+            hint_surah=focus_s if tafsir else None,
+            hint_verse=focus_v if tafsir else None,
+        )
+        if not results and tafsir and focus_s and len(text_clean.split()) <= 4:
+            # In a commentary a very short fragment is usually the next words
+            # of the verse already under discussion.
+            after = find_verse_after(normalize_arabic(text_clean), focus_s, focus_v, 0)
+            if after:
+                verse_no = after[0]
+                verse_text = load_verse(focus_s, verse_no) or ""
+                results = [(focus_s, verse_no, verse_text, 1.0)]
         matches = [(s, v, t, sc) for s, v, t, sc in results if sc > 0.7]
         if not matches:
             continue
         
         surah, verse_num, _, score = matches[0]
+        focus_s, focus_v = surah, verse_num
         print(f"\n    ({surah}:{verse_num}) {text_clean[:60]}", flush=True, end="")
         fragment = get_tashkil_fragment(text_clean, surah, verse_num)
         verse_range = None
@@ -618,6 +690,11 @@ def discover_and_mark_quotes(content: str) -> tuple[str, list[dict]]:
             # source text and cite the range rather than dropping the quote.
             verse_range = find_verse_range(text_clean, surah, verse_num)
             if verse_range:
+                fragment = text_clean
+            elif len(text_clean.split()) <= 12:
+                # The spelling-variant match found the verse even though the
+                # source text cannot be mapped back to its tashkīl. Keep the
+                # source wording rather than dropping an identified quote.
                 fragment = text_clean
             else:
                 continue
@@ -688,6 +765,8 @@ def discover_and_mark_quotes(content: str) -> tuple[str, list[dict]]:
                     verse_range = find_verse_range(text_clean, surah, verse_num)
                     if verse_range:
                         fragment = text_clean
+                    elif len(text_clean.split()) <= 12:
+                        fragment = text_clean
                     else:
                         continue
                 wikilink = (build_wikilink(surah, verse_range[0], end_verse=verse_range[1])
@@ -702,6 +781,41 @@ def discover_and_mark_quotes(content: str) -> tuple[str, list[dict]]:
                     "tashkil_text": fragment[:80],
                 })
     return new_content, found
+
+
+def link_open_fragments(content: str, tafsir: bool = False) -> tuple[str, int]:
+    """In tafsīr mode, link a short open-ended quotation at a line end.
+
+    A quote can be split by a page/footnote boundary, leaving only its opening
+    words on the first page (`… وحي «ولا`). If the preceding marked quote names
+    the verse, the open fragment is checked as the next words of that verse.
+    """
+    if not tafsir:
+        return content, 0
+    lines = content.split("\n")
+    added = 0
+    for index, line in enumerate(lines):
+        match = re.search(r'(?<![*﴿])([«“"])([^»”"\n]{1,40})\s*$', line)
+        if not match:
+            continue
+        fragment = match.group(2).strip()
+        if len(fragment) < 2 or len(fragment.split()) > 4:
+            continue
+        before = "\n".join(lines[:index]) + "\n" + line[:match.start()]
+        prior = None
+        for found in re.finditer(
+            r'\*﴿[^﴾]+﴾\{\.quran-quote\}\*\s*'
+            r'\(\[\[(\d{3})\s+[^#\]]+#(\d+)\|', before):
+            prior = (int(found.group(1)), int(found.group(2)))
+        if not prior:
+            continue
+        after = find_verse_after(normalize_arabic(fragment), prior[0], prior[1], 0)
+        if not after:
+            continue
+        verse_no = after[0]
+        lines[index] = line + build_wikilink(prior[0], verse_no)
+        added += 1
+    return "\n".join(lines), added
 
 
 def add_missing_refs(content: str) -> tuple[str, int]:

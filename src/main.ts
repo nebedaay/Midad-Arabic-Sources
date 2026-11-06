@@ -767,6 +767,14 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		});
 
 		this.addCommand({
+			id: "assign-transcription-topic",
+			name: "Assign topic and post-process this transcription…",
+			callback: async () => {
+				await this.assignTranscriptionTopic(this.app.workspace.getActiveFile());
+			},
+		});
+
+		this.addCommand({
 			id: "rerender-item-transcriptions",
 			name: "Re-render transcriptions of this item's attachments",
 			callback: async () => {
@@ -881,6 +889,10 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 						.setTitle("Post-process this transcription/translation")
 						.setIcon("file-search")
 						.onClick(() => { void this.postprocessTranscriptionNote(file, archived); }));
+					menu.addItem((item) => item
+						.setTitle("Assign topic and post-process…")
+						.setIcon("tag")
+						.onClick(() => { void this.assignTranscriptionTopic(file, archived); }));
 				} else if (file instanceof TFile && archived && archived.type === null) {
 					menu.addItem((item) => item
 						.setTitle("Re-render transcriptions of this item's attachments")
@@ -4420,6 +4432,58 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		return false;
 	}
 
+	/** The native parent note for a transcription/translation, or the note itself. */
+	private transcriptionParentFile(note: TFile, info: ArchivedNoteInfo): TFile {
+		const folder = info.type === "translation" ? this.translationsFolder() : this.transcriptionsFolder();
+		const prefix = note.basename.startsWith("mas-") ? "mas-" : "@";
+		const parent = this.app.vault.getAbstractFileByPath(
+			normalizePath(`${folder}/${prefix}${info.citekey} - ${info.type}.md`));
+		return parent instanceof TFile ? parent : note;
+	}
+
+	/**
+	 * Assign a topic to a transcription parent and re-process its body. The
+	 * topic is the durable hint for a genre-specific mode: a topic containing
+	 * “tafsīr” turns on continuous-verse quote matching.
+	 */
+	async assignTranscriptionTopic(
+		file?: TAbstractFile | null,
+		infoOverride?: ArchivedNoteInfo
+	): Promise<void> {
+		const target = file ?? this.app.workspace.getActiveFile();
+		if (!(target instanceof TFile) || target.extension !== "md") {
+			new Notice("Open a transcription or translation note first.");
+			return;
+		}
+		const info = infoOverride ?? archivedNoteInfo(target.path);
+		if (!info?.type) {
+			new Notice("That note is not recognised as a transcription or translation.");
+			return;
+		}
+		const parent = this.transcriptionParentFile(target, info);
+		const frontmatter = this.app.metadataCache.getFileCache(parent)?.frontmatter as Record<string, unknown> | undefined;
+		const rawTopics = frontmatter?.["topics"];
+		const topics = Array.isArray(rawTopics)
+			? rawTopics.filter((value): value is string => typeof value === "string")
+			: typeof rawTopics === "string" ? [rawTopics] : [];
+		new TranscriptionTopicModal(this.app, topics[0] ?? "", (topic) => {
+			void (async () => {
+				await this.app.fileManager.processFrontMatter(parent, (fm: Record<string, unknown>) => {
+					const existing = Array.isArray(fm["topics"])
+						? (fm["topics"] as unknown[]).filter((value): value is string => typeof value === "string")
+						: typeof fm["topics"] === "string" ? [String(fm["topics"])] : [];
+					if (topic && !existing.includes(topic)) existing.push(topic);
+					fm["topics"] = existing;
+				});
+				if (info.volume != null || !this.noteHasVolumes(info.citekey, info.type)) {
+					await this.postprocessTranscriptionNote(target, info);
+				} else {
+					new Notice("Topic saved. Open a volume note to post-process it.");
+				}
+			})();
+		}).open();
+	}
+
 	/**
 	 * Run the current local post-processing scripts over an existing
 	 * transcription/translation note. This is the no-archive path: it does not
@@ -7301,6 +7365,48 @@ class ReconcileSourcesModal extends Modal {
 }
 
 // ── Large imported-source report ────────────────────────────────────────────
+
+class TranscriptionTopicModal extends Modal {
+	value: string;
+	onSubmit: (topic: string) => void;
+
+	constructor(app: App, value: string, onSubmit: (topic: string) => void) {
+		super(app);
+		this.value = value;
+		this.onSubmit = onSubmit;
+	}
+
+	onOpen(): void {
+		const { contentEl } = this;
+		this.setTitle("Transcription topic");
+		contentEl.createEl("p", {
+			text: "The topic is written to the parent transcription note. A topic containing “tafsīr” also uses continuous-verse quote matching when the note is post-processed.",
+		});
+		let value = this.value;
+		new Setting(contentEl)
+			.setName("Topic")
+			.setDesc("For example, tafsīr sources.")
+			.addText((text) => text
+				.setPlaceholder("Tafsīr sources")
+				.setValue(value)
+				.onChange((next) => { value = next; }));
+		new Setting(contentEl)
+			.addButton((button) => button
+				.setButtonText("Save and post-process")
+				.setCta()
+				.onClick(() => {
+					this.close();
+					this.onSubmit(value.trim());
+				}))
+			.addButton((button) => button
+				.setButtonText("Cancel")
+				.onClick(() => this.close()));
+	}
+
+	onClose(): void {
+		this.contentEl.empty();
+	}
+}
 
 class SourceSizeReportModal extends Modal {
 	private readonly files: TFile[];
