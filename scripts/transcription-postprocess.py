@@ -182,6 +182,12 @@ def run(input_path, out_path=None, metadata=False, tafsir=False):
     # headings) and collapse any excess.
     content = pp.normalize_spacing(content)
     content = tfq.strip_orphan_quote_classes(content)
+    content, raw_citations = tfq.strip_raw_quran_citations(content)
+    print(f"  Raw Qur'an citations removed: {raw_citations}")
+    content, redundant_citations = tfq.strip_redundant_raw_citations(content)
+    print(f"  Redundant raw citations removed: {redundant_citations}")
+    content, display_fixed = tfq.normalize_quran_link_display(content)
+    print(f"  Qur'an link displays normalised: {display_fixed}")
     content, repeated_links = tfq.dedupe_same_verse_links(content)
     print(f"  Repeated same-verse links removed: {repeated_links}")
     

@@ -187,6 +187,79 @@ def get_surah_name(surah_num: int) -> tuple[str, str]:
     arabic = aliases[2] if len(aliases) > 2 else str(surah_num)
     return (stem, arabic)
 
+def strip_raw_quran_citations(content: str) -> tuple[str, int]:
+    """Remove every remaining source citation that names a Qur'ānic verse.
+
+    Our own quote links are authoritative; keeping the source's square or
+    parenthetical citation alongside them duplicates and mixes numbering styles.
+    Wikilinks, markdown links, footnote marks, and ordinary numbered prose are
+    not citations and are left alone.
+    """
+    lookup = _build_surah_lookup()
+    pattern = re.compile(r'\[[^\[\]\n]{1,120}\]|\([^()\n]{1,120}\)')
+    removed = 0
+
+    def repl(m: re.Match) -> str:
+        nonlocal removed
+        value = m.group(0)
+        inner = value[1:-1].strip()
+        if not inner or '[[' in value or ']]' in value or '(' in inner or ')' in inner:
+            return value
+        if parse_gemini_ref(value, lookup):
+            removed += 1
+            return ''
+        return value
+
+    return pattern.sub(repl, content), removed
+
+
+def strip_redundant_raw_citations(content: str) -> tuple[str, int]:
+    """Remove a source citation still sitting after our own quote link."""
+    pattern = re.compile(
+        r'(\*[^*\n]*\{\.quran-quote\}\*\s*'
+        r'\(\[\[[^\]]+\]\](?:[–-]\[\[[^\]]+\]\])?\))'
+        r'\s*([\[\(][^\]\)\n]*[\d\u0660-\u0669][^\]\)\n]*[\]\)])'
+    )
+    stripped = 0
+    while True:
+        content, count = pattern.subn(r'\1', content)
+        stripped += count
+        if not count:
+            break
+    return content, stripped
+
+
+def normalize_quran_link_display(content: str) -> tuple[str, int]:
+    """Use the sūra name and Arabic-Indic numerals in every Qur'ān link."""
+    w_to_a = str.maketrans('0123456789', '\u0660\u0661\u0662\u0663\u0664\u0665\u0666\u0667\u0668\u0669')
+    pattern = re.compile(r'\[\[(\d{3})\s+([^#\]]+)#(\d+)(?:-(\d+))?\|([^\]]+)\]\]')
+    changed = 0
+
+    def repl(m: re.Match) -> str:
+        nonlocal changed
+        surah = int(m.group(1))
+        verse = m.group(3)
+        end_verse = m.group(4)
+        display = m.group(5)
+        stem, arabic = get_surah_name(surah)
+        verse_label = str(verse).translate(w_to_a)
+        if end_verse:
+            display = f"{arabic} : {verse_label}–{str(end_verse).translate(w_to_a)}"
+        elif re.match(r'^Qurʾān\b', display) or re.match(r'^[^:]+ - \d{3}\s', display):
+            display = f"{arabic} : {verse_label}"
+        else:
+            normalized = display.translate(w_to_a)
+            if normalized != display:
+                display = normalized
+        suffix = f"-{end_verse}" if end_verse else ""
+        replacement = f"[[{stem}#{verse}{suffix}|{display}]]"
+        if replacement != m.group(0):
+            changed += 1
+        return replacement
+
+    return pattern.sub(repl, content), changed
+
+
 def dedupe_same_verse_links(content: str) -> tuple[str, int]:
     """Keep a citation only on the first and last quote of a same-verse run.
 
