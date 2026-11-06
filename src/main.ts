@@ -3599,25 +3599,6 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			.replace(/\s*[-–—]\s*(?:transcription|translation)\s*$/i, "")
 			.replace(/\s+v(?:ol)?\.?\s*\d+\s*$/i, "")
 			.trim();
-		const indexPath = async (name: string): Promise<string> => {
-			const canonical = this.sourceNotePath(name);
-			const existing = this.app.vault.getAbstractFileByPath(canonical);
-			if (existing instanceof TFile) return existing.path;
-			const first = this.app.metadataCache.getFirstLinkpathDest(name, "");
-			if (first instanceof TFile && first.path !== canonical) {
-				try {
-					await this.app.fileManager.renameFile(first, canonical);
-					const moved = this.app.vault.getAbstractFileByPath(canonical);
-					if (moved instanceof TFile) return moved.path;
-				} catch { /* fall through */ }
-			}
-			try {
-				await this.app.vault.create(canonical, "");
-				return canonical;
-			} catch {
-				return canonical;
-			}
-		};
 		const adopted = new Map<string, Record<string, unknown>>();
 		try {
 			const raw = JSON.parse(await this.app.vault.adapter.read(".midad-arabic-sources/annotations/adopted.json")) as { notes?: Record<string, Record<string, unknown>> };
