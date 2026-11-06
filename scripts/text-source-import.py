@@ -184,47 +184,31 @@ COLLECTIONS: dict[str, dict] = {
     },
 }
 
-# Static catalogue for lexicons distributed as SQLite. The importer downloads
-# the file and reads it with Python's own sqlite3 — no scraping, no JSON needed.
+# Static catalogue for lexicons. Wehr is read from its FODT origin (the app's
+# SQLite supplies the alignment/supplement rows); Lane from its SQLite file.
 DICTIONARIES: list[dict] = [
     {
+        # The only Hans Wehr work, read from the FODT origin rather than the
+        # app's SQLite conversion: it keeps Wehr's homonym numbers and diptote
+        # markers, which the conversion dropped. The app's SQLite is still
+        # downloaded by the FODT converter as its alignment/supplement source
+        # (the 62 rows the FODT lost are marked `source: "app-supplement"`);
+        # it is not a separate installable work. The id is the historical
+        # SQLite id, so an existing install is replaced in place.
         "id": "hanswehr",
         "title": "Hans Wehr Dictionary",
         "arabic": "معجم هانس ڤير",
-        "author": "Hans Wehr",
-        "editor": "J Milton Cowan",
-        "source": "https://github.com/GibreelAbdullah/HansWehrDictionary",
-        "db": "https://github.com/GibreelAbdullah/HansWehrDictionary/releases/latest/download/hanswehr.sqlite",
-        "db_path": "assets/hanswehr.sqlite",
-        # `grid` = Wehr's label/content senses (a two-column callout); `prose` =
-        # Lane's English paragraphs. `note_prefix` labels a root note's file name
-        # and its `aliases:` — one per dictionary, so the two never collide.
-        "body": "grid",
-        "note_prefix": "HW",
-        # This work exists only once across the imported repositories, so it does
-        # not need a repo qualifier in its folder/file name (see `unique`).
-        "unique": True,
-        # Wehr's own transliteration — the European Orientalist system its text
-        # uses (š, ṯ, ḵ, …) — so an engine reading still matches the note's text.
-        "convention": "wehr",
-    },
-    {
-        # The same dictionary from the FODT origin rather than the app's SQLite.
-        # It keeps Wehr's homonym numbers and diptote markers, which the app's
-        # conversion dropped. A separate work (folder, `HWF` prefix) so the two
-        # can be compared side by side; the 62 entries the FODT lost are carried
-        # from the app's SQLite and marked `source: "app-supplement"`.
-        "id": "hanswehr-fodt",
-        "title": "Hans Wehr Dictionary (FODT)",
-        "arabic": "معجم هانس ڤير",
-        "author": "Hans Wehr",
+        # Wehr's published title and definitions are English; `title-ar` is
+        # reserved for an Arabic-language work's own title.
+        "title_language": "en",
+        "author": "Wehr, Hans",
         "editor": "J Milton Cowan",
         "source": "https://github.com/muhammad-abdurrahman/hans-wehr-fodt-parser",
         "db": "https://raw.githubusercontent.com/muhammad-abdurrahman/"
               "hans-wehr-fodt-parser/master/hanswehr.xml",
         "db_path": "hanswehr.xml",
         "body": "grid",
-        "note_prefix": "HWF",
+        "note_prefix": "HW",
         "unique": True,
         "convention": "wehr",
         "shape": "fodt",
@@ -238,7 +222,9 @@ DICTIONARIES: list[dict] = [
         "id": "lanelexicon",
         "title": "Lane's Lexicon",
         "arabic": "معجم لين",
-        "author": "Edward William Lane",
+        # An English-language work; `title-ar` is not a translation of it.
+        "title_language": "en",
+        "author": "Lane, Edward William",
         "editor": "",
         "source": "https://github.com/GibreelAbdullah/LaneLexicon",
         "db": "https://github.com/GibreelAbdullah/LaneLexicon/releases/latest/download/lanelexicon.sqlite",
@@ -326,6 +312,7 @@ TURATH_TYPES: dict[str, str] = {
     "aqida": "ʿAqīda Sources",
     "tarikh": "Tārīkh Sources",
     "language": "Language Sources",
+    "dictionary": "Dictionaries",
     "quran-sciences": "ʿUlūm al-Qurʾān Sources",
 }
 
@@ -400,8 +387,8 @@ TURATH_BOOKS: list[dict] = [
     {"id": "146", "title": "al-Ṭabaqāt al-Kubrā", "arabic": "الطبقات الكبرى", "author": "Ibn Saʿd", "type": "tarikh"},
     {"id": "12286", "title": "al-Aʿlām", "arabic": "الأعلام", "author": "Khayr al-Dīn al-Ziriklī", "type": "tarikh"},
     # ── Language and adab ────────────────────────────────────────────────────
-    {"id": "1687", "title": "Lisān al-ʿArab", "arabic": "لسان العرب", "author": "Ibn Manẓūr", "type": "language"},
-    {"id": "7283", "title": "al-Qāmūs al-Muḥīṭ", "arabic": "القاموس المحيط", "author": "al-Fīrūzābādī", "type": "language"},
+    {"id": "1687", "title": "Lisān al-ʿArab", "arabic": "لسان العرب", "author": "Ibn Manẓūr", "author_ar": "ابن منظور", "type": "language", "types": ["language", "dictionary"], "section_level": 2, "letter_index": True},
+    {"id": "7283", "title": "al-Qāmūs al-Muḥīṭ", "arabic": "القاموس المحيط", "author": "al-Fīrūzābādī", "author_ar": "الفيروزآبادي", "type": "language", "types": ["language", "dictionary"], "section_level": 2, "letter_index": True},
     {"id": "23235", "title": "al-Ṣiḥāḥ", "arabic": "الصحاح", "author": "al-Jawharī", "type": "language"},
     {"id": "21710", "title": "Maqāyīs al-Lugha", "arabic": "مقاييس اللغة", "author": "Ibn Fāris", "type": "language"},
     {"id": "23018", "title": "al-Kitāb", "arabic": "الكتاب", "author": "Sībawayh", "type": "language"},
@@ -486,7 +473,7 @@ TURATH_BOOKS: list[dict] = [
     {"id": "9757", "title": "al-Muḥkam wa-l-Muḥīṭ al-Aʿẓam", "arabic": "المحكم والمحيط الأعظم", "author": "Ibn Sīda", "type": "language", "genres": ["language", "lexicography", "dictionary"]},
     {"id": "3590", "title": "al-Mukhaṣṣaṣ", "arabic": "المخصص", "author": "Ibn Sīda", "type": "language", "genres": ["language", "lexicography", "dictionary"]},
     {"id": "761", "title": "al-ʿUbāb al-Zākhir", "arabic": "العباب الزاخر", "author": "al-Ṣaghānī", "type": "language", "genres": ["language", "lexicography", "dictionary"]},
-    {"id": "7030", "title": "Tāj al-ʿArūs Min Jawāhir al-Qāmūs", "arabic": "تاج العروس من جواهر القاموس", "author": "Murtaḍā al-Zabīdī", "type": "language", "genres": ["language", "lexicography", "dictionary"]},
+    {"id": "7030", "title": "Tāj al-ʿArūs Min Jawāhir al-Qāmūs", "arabic": "تاج العروس من جواهر القاموس", "author": "Murtaḍā al-Zabīdī", "author_ar": "مرتضى الزبيدي", "type": "language", "types": ["language", "dictionary"], "genres": ["language", "lexicography", "dictionary"], "section_level": 2, "letter_index": True},
     {"id": "12145", "title": "al-Miṣbāḥ al-Munīr Fī Gharīb al-Sharḥ al-Kabīr", "arabic": "المصباح المنير في غريب الشرح الكبير", "author": "al-Fayyūmī", "type": "language", "genres": ["language", "lexicography", "dictionary"]},
     {"id": "7028", "title": "al-Muʿjam al-Wasīṭ", "arabic": "المعجم الوسيط", "author": "Majmūʿa Min al-Muʾallifīn", "type": "language", "genres": ["language", "lexicography", "dictionary"]},
     {"id": "6965", "title": "al-Muqtaḍab", "arabic": "المقتضب", "author": "al-Mubarrad", "type": "language", "genres": ["language", "grammar"]},
@@ -1345,6 +1332,11 @@ def load_catalog(collection: str, *, use_cache: bool = True) -> list[dict]:
                 "name": b["title"],
                 "arabic": b.get("arabic", ""),
                 "author": b.get("author", ""),
+                "author_ar": b.get("author_ar", ""),
+                "authors_ar": b.get("authors_ar", []),
+                # The language the published work/title is in. A dictionary of
+                # Arabic may be an English-language publication (Wehr, Lane).
+                "title_language": b.get("title_language", b.get("language", "ar")),
                 "source": b["source"],
                 "db_url": b["db"],
                 "db_path": b.get("db_path", ""),
@@ -1380,7 +1372,16 @@ def load_catalog(collection: str, *, use_cache: bool = True) -> list[dict]:
         for b in entries:
             detail = TURATH_DETAILS.get(str(b["id"]), {})
             type_key = str(b.get("type") or detail.get("type") or "other")
-            genres = b.get("genres") or detail.get("genres") or [type_key]
+            # A work may belong to more than one type MOC (Lisān al-ʿArab is
+            # both Language and Dictionaries). `type` stays the primary kind.
+            raw_types = b.get("types") or detail.get("types") or [type_key]
+            if isinstance(raw_types, str):
+                raw_types = [raw_types]
+            type_keys = [str(t) for t in raw_types if str(t).strip()]
+            raw_genres = b.get("genres") or detail.get("genres") or []
+            if isinstance(raw_genres, str):
+                raw_genres = [raw_genres]
+            genres = list(dict.fromkeys([*raw_genres, *type_keys])) or type_keys
             works.append({
                 "collection": collection,
                 "id": str(b["id"]),
@@ -1392,15 +1393,25 @@ def load_catalog(collection: str, *, use_cache: bool = True) -> list[dict]:
                 "arabic": b.get("arabic", ""),
                 "author": b.get("author", ""),
                 "authors": b.get("authors", []),
+                "author_ar": b.get("author_ar", ""),
+                "authors_ar": b.get("authors_ar", []),
                 "source": b.get("url") or f"https://app.turath.io/book/{b['id']}",
-                # Both a repository MOC and a work-type MOC (see TURATH_TYPES).
+                # A repository MOC plus one or more work-type MOCs (see TURATH_TYPES).
                 "kind_type": type_key,
+                "kind_types": type_keys,
                 "genre": type_key,
                 # Finer disciplines for the modal's Kinds (a work may sit in
                 # several) and a longer title for the list.
                 "genres": genres,
                 "subtitle": b.get("subtitle") or detail.get("subtitle", ""),
                 "section_level": int(b.get("section_level", 1)),
+                # The classical dictionaries use a work → letter → fasl index;
+                # the volume is a heading inside the letter page, not a level.
+                "letter_index": bool(b.get("letter_index")),
+                # Put the printed volume in a multi-volume dictionary's note
+                # names (`<volume> - <letter>`), and cap each generated note.
+                "volume_in_name": bool(b.get("volume_in_name")),
+                "max_note_bytes": int(b.get("max_note_bytes", 0)),
                 # A Turath work duplicated in another collection keeps its repo
                 # qualifier; a work found only here can opt out with `unique`.
                 "unique": bool(b.get("unique")),
@@ -1609,7 +1620,9 @@ def apply_overrides(work: dict, overrides: dict[str, dict]) -> dict:
         title = f"Qurʾān - {label}" + (f" ({variant})" if variant else "")
         merged["title"] = title
         merged["dir"] = slug_to_dir(title)
-        merged["title_ar"] = "القرآن الكريم"
+        # A translation's published title is English; `title-ar` is reserved for
+        # an Arabic work's original title, not a translation of it.
+        merged["title_ar"] = ""
     elif work["collection"] == "hadith":
         merged["title"] = work["name"]
         merged["dir"] = slug_to_dir(author_title_dir(work, work["name"]))
@@ -1624,15 +1637,27 @@ def apply_overrides(work: dict, overrides: dict[str, dict]) -> dict:
     elif work["collection"] == "dictionary":
         merged["title"] = work["name"]
         merged["dir"] = slug_to_dir(work["name"])
-        merged["title_ar"] = work.get("arabic", "")
+        # The rule is the language of the published work, not the genre: an
+        # Arabic dictionary (Lisān al-ʿArab, al-Qāmūs al-Muḥīṭ) keeps its
+        # Arabic title, while Wehr and Lane are English-language works whose
+        # `title-ar` would be only a translation.
+        merged["title_ar"] = (work.get("arabic", "")
+                              if (work.get("title_language") or work.get("language")) == "ar"
+                              else "")
     elif work["collection"] == "turath":
         merged["title"] = work["name"]
         merged["dir"] = slug_to_dir(author_title_dir(work, work["name"]))
-        merged["title_ar"] = work.get("arabic", "")
+        merged["title_ar"] = (work.get("arabic", "")
+                              if (work.get("title_language") or work.get("language")) == "ar"
+                              else "")
     elif work["collection"] in ("tafsir", "tafsir-qul"):
         merged["title"] = work["name"]
         merged["dir"] = slug_to_dir(author_title_dir(work, work["name"]))
-        merged["title_ar"] = work.get("arabic", "")
+        # An English edition's published title is English; only an Arabic
+        # edition's title is the original.
+        merged["title_ar"] = (work.get("arabic", "")
+                              if (work.get("title_language") or work.get("language")) == "ar"
+                              else "")
     else:
         merged["title"] = work["name"]
         merged["dir"] = slug_to_dir(work["name"])
@@ -1655,11 +1680,18 @@ def apply_overrides(work: dict, overrides: dict[str, dict]) -> dict:
     # Languages the work actually contains (ḥadīth are bilingual).
     merged["languages"] = ["ar", "en"] if work["collection"] == "hadith" else [work["language"]]
     if work["collection"] == "turath":
-        # Two axes: the repository (Turath) and the work type (e.g. Fiqh Sources).
-        type_moc = TURATH_TYPES.get(work.get("kind_type", ""), "Turath")
-        merged["moc"] = type_moc
-        merged["mocs"] = ["Turath", type_moc]
-        merged["up"] = [f"[[Turath]]", f"[[{type_moc}]]"]
+        # Two axes: the repository (Turath) and one or more work types (e.g.
+        # Language Sources + Dictionaries for Lisān al-ʿArab). The first type is
+        # the primary `moc`; all of them go in `mocs` and `up`.
+        type_keys = [str(t) for t in (work.get("kind_types") or [work.get("kind_type") or "other"])]
+        type_mocs: list[str] = []
+        for type_key in type_keys:
+            type_moc = TURATH_TYPES.get(type_key)
+            if type_moc and type_moc != "Turath" and type_moc not in type_mocs:
+                type_mocs.append(type_moc)
+        merged["moc"] = type_mocs[0] if type_mocs else "Turath"
+        merged["mocs"] = ["Turath", *type_mocs]
+        merged["up"] = ["[[Turath]]", *[f"[[{moc}]]" for moc in type_mocs]]
     else:
         merged["moc"] = spec["moc"]
         merged["mocs"] = [spec["moc"]]
@@ -2083,7 +2115,7 @@ def build_qul_units(work: dict, table: list[dict], wanted: set[int] | None,
             keys = rec.get("verses") or []
             if isinstance(keys, str):
                 keys = [keys]
-            text = rec.get("text", "")
+            text = rec.get("text") or ""
             for k in keys:
                 try:
                     s, a = (int(x) for x in str(k).split(":", 1))
@@ -2183,12 +2215,19 @@ def build_quran_text_units(work: dict, table: list[dict], wanted: set[int] | Non
             continue
         blocks: list[dict] = []
         for v in data.get("verses", []):
-            text = clean_text(v.get("text", ""), english=False)
+            text = clean_text(v.get("text") or "", english=False)
             if text:
+                # `number_in_hafs` is a list in the riwāyāt files but null in the
+                # Uthmani edition; a null must not reach the template's loop.
+                hafs = v.get("number_in_hafs")
+                if hafs is None:
+                    hafs = []
+                elif not isinstance(hafs, list):
+                    hafs = [hafs]
                 blocks.append({
                     "number": v.get("id"),
                     "body": text,
-                    "hafs": v.get("number_in_hafs", []),
+                    "hafs": hafs,
                 })
         units.append({
             "kind": "quran",
@@ -4014,11 +4053,63 @@ _TURATH_TITLE = re.compile(
 # A chapter file name is capped at a word boundary; the full heading stays in the
 # note's `title` (and the hub link's alias), so nothing is lost.
 _TURATH_MAX_BASE = 60
+# A source note can be huge (Lisān al-ʿArab's combined و-ي letter reached
+# ~5.5 MB and crashed Obsidian). Keep every generated book note below this
+# rendered-body budget; pages are the safe split boundary.
+_TURATH_MAX_NOTE_BYTES = 4 * 1024 * 1024
+# The last-radical letters used by the classical dictionaries' `باب` level.
+_TURATH_LETTERS = set(
+    "أبتثجحخدذرزسشصضطظعغفقكلمنهويةءآإؤئىا"
+) | {"هـ", "و- ي"}
+
+
+def _int_or(value, default: int = 0) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _natural_key(value) -> tuple:
+    return tuple(int(part) if part.isdigit() else str(part).lower()
+                 for part in re.split(r"(\d+)", str(value)))
+
+
+def _turath_volume_list(declared, pages: list[dict]) -> list[str]:
+    """The declared volumes plus any volume the pages actually use.
+
+    Some Turath files under-report `volumes` (Ṣaḥīḥ Muslim 1727 declares one
+    volume but its pages carry four); iterating the declared list alone would
+    silently drop the rest of the book.
+    """
+    out: list[str] = []
+    for value in declared or []:
+        text = str(value).strip()
+        if text and text not in out:
+            out.append(text)
+    for page in pages:
+        text = str(page.get("vol") or "1").strip()
+        if text and text not in out:
+            out.append(text)
+    if not out:
+        out = ["1"]
+    out.sort(key=_natural_key)
+    return out
+
+
+def _turath_page_label(value) -> str:
+    """A printed page number, or an explicit marker when the source has none."""
+    if value is None or str(value).strip() == "":
+        return "[unnumbered]"
+    return str(value)
 
 
 def _turath_decode(raw: dict) -> dict:
     meta = raw.get(_TURATH_META, {}) or {}
     idx = raw.get(_TURATH_INDEXES, {}) or {}
+    pages = [{"vol": str(p.get("vol") or "1"), "page": p.get("page"),
+              "text": p.get("text") or ""}
+             for p in (raw.get("pages") or []) if isinstance(p, dict)]
     return {
         "meta": {
             "id": meta.get("\u064C"),
@@ -4028,12 +4119,10 @@ def _turath_decode(raw: dict) -> dict:
             "details": meta.get("\u0651", ""),
             "date_built": meta.get("\u0656"),
         },
-        "volumes": [str(v) for v in (idx.get(_TURATH_VOLUMES) or ["1"])],
-        "headings": idx.get(_TURATH_HEADINGS) or [],
+        "volumes": _turath_volume_list(idx.get(_TURATH_VOLUMES) or [], pages),
+        "headings": [h for h in (idx.get(_TURATH_HEADINGS) or []) if isinstance(h, dict)],
         "page_map": idx.get(_TURATH_PAGE_MAP) or [],
-        "pages": [{"vol": str(p.get("vol", "1")), "page": p.get("page"),
-                   "text": p.get("text", "")}
-                  for p in raw.get("pages", [])],
+        "pages": pages,
     }
 
 
@@ -4064,7 +4153,7 @@ def _turath_page(text: str, headings: list[dict], section_level: int,
             continue
         if idx in drop:
             continue
-        level = int(headings[idx]["level"]) if 0 <= idx < len(headings) else section_level + 1
+        level = _int_or(headings[idx].get("level"), section_level + 1) if 0 <= idx < len(headings) else section_level + 1
         hashes = "#" * min(max(level - section_level + 1, 2), 3)
         out.append(f"\n\n{hashes} {m.group(2).strip()}\n\n")
     out.append(text[pos:])
@@ -4083,11 +4172,148 @@ def _turath_span(blocks: list[dict], multi: bool) -> str:
     if not blocks:
         return ""
     a, b = blocks[0], blocks[-1]
+    a_label = a.get("page_label", a.get("page"))
+    b_label = b.get("page_label", b.get("page"))
     if multi:
-        left, right = f"{a['vol']}:{a['page']}", f"{b['vol']}:{b['page']}"
+        left, right = f"{a['vol']}:{a_label}", f"{b['vol']}:{b_label}"
     else:
-        left, right = str(a["page"]), str(b["page"])
+        left, right = str(a_label), str(b_label)
     return f"p. {left}" if left == right else f"p. {left}–{right}"
+
+
+def _turath_page_location(page_map: list, pages: list, j: int) -> tuple[str, int | None]:
+    """The printed volume/page of page `j`.
+
+    `page_map[j]` is `<vol>,<printed page>` when Turath supplies one, but the
+    entry may be null (Lisān al-ʿArab does this for its early pages), in which
+    case the page's own `vol`/`page` fields are the fallback.
+    """
+    mapped = page_map[j] if j < len(page_map) else None
+    if isinstance(mapped, str) and "," in mapped:
+        vol, pg = mapped.split(",", 1)
+        return vol, int(pg)
+    page = pages[j]
+    return page["vol"], page["page"]
+
+
+def _turath_page_bytes(page: dict) -> int:
+    """The rendered body size of one page, plus its page-heading allowance."""
+    return len((page.get("body") or "").encode("utf-8")) + 64
+
+
+def _turath_split_pages(pages: list[dict], max_bytes: int) -> list[list[dict]]:
+    """Greedy page chunks, each at or below `max_bytes` (one oversized page stands alone)."""
+    chunks: list[list[dict]] = []
+    current: list[dict] = []
+    size = 0
+    for page in pages:
+        page_size = _turath_page_bytes(page)
+        if current and size + page_size > max_bytes:
+            chunks.append(current)
+            current = []
+            size = 0
+        current.append(page)
+        size += page_size
+    if current:
+        chunks.append(current)
+    return chunks or [pages]
+
+
+def _turath_chunk_chapters(chapters: list[dict], work: dict, multi: bool) -> list[dict]:
+    """Keep book notes small and, for a dictionary, put the volume in the name.
+
+    A multi-volume letter may run across volumes, and a single letter can still
+    be several megabytes. With `volume_in_name` (Lisān, al-Qāmūs, Tāj), split it
+    by volume first and name each note `<volume> - <letter>`; oversized pages are
+    then chunked with a `(1/2)` suffix. Other works keep their existing names and
+    only gain the suffix when a note is genuinely oversized.
+    """
+    letter_index = bool(work.get("letter_index"))
+    volume_in_name = bool(work.get("volume_in_name")) and not letter_index
+    max_bytes = int(work.get("max_note_bytes") or _TURATH_MAX_NOTE_BYTES)
+    out: list[dict] = []
+    for chapter in chapters:
+        pages = chapter.get("pages") or []
+        if not pages:
+            out.append(chapter)
+            continue
+        groups: list[tuple[str, list[dict]]] = []
+        for page in pages:
+            vol = str(page.get("vol") or "")
+            if not groups or groups[-1][0] != vol:
+                groups.append((vol, []))
+            groups[-1][1].append(page)
+        if letter_index:
+            # The letter page carries the volume headings; the fasl note keeps
+            # a clean `<letter> - <fasl>` name and its own page/volume span.
+            chunks = _turath_split_pages(pages, max_bytes)
+            total = len(chunks)
+            for index, chunk in enumerate(chunks, start=1):
+                suffix = f" ({index}/{total})" if total > 1 else ""
+                title = f"{chapter['title']}{suffix}"
+                # Dictionary letters use the clean `<letter> - <fasl>` name.
+                # The front matter/introductions keep their ordinal-prefixed
+                # base so they cannot collide with the `Front matter` letter
+                # page itself.
+                if str(chapter.get("letter") or "") in _TURATH_LETTERS:
+                    base = f"{_turath_trim(chapter['title'])}{suffix}"
+                else:
+                    base = f"{chapter['base']}{suffix}"
+                out.append({
+                    **chapter,
+                    "id": chapter["id"] + (f"-{index}" if total > 1 else ""),
+                    "base": base,
+                    "title": title,
+                    "arabic": title,
+                    "fasl": f"{chapter.get('fasl') or chapter['title']}{suffix}",
+                    "volume": chunk[0].get("vol"),
+                    "volume_end": chunk[-1].get("vol"),
+                    "page_from": chunk[0].get("page"),
+                    "page_to": chunk[-1].get("page"),
+                    "span": _turath_span(chunk, multi),
+                    "pages": chunk,
+                })
+            continue
+        if volume_in_name:
+            for vol, group in groups:
+                chunks = _turath_split_pages(group, max_bytes)
+                total = len(chunks)
+                for index, chunk in enumerate(chunks, start=1):
+                    suffix = f" ({index}/{total})" if total > 1 else ""
+                    title = f"{chapter['title']}{suffix}"
+                    base = f"{vol} - {_turath_trim(chapter['title'])}{suffix}"
+                    out.append({
+                        **chapter,
+                        "id": f"{chapter['id']}-{vol}" + (f"-{index}" if total > 1 else ""),
+                        "base": base,
+                        "title": title,
+                        "arabic": title,
+                        "volume": vol,
+                        "volume_end": vol,
+                        "page_from": chunk[0].get("page"),
+                        "page_to": chunk[-1].get("page"),
+                        "span": _turath_span(chunk, multi),
+                        "pages": chunk,
+                    })
+            continue
+        chunks = _turath_split_pages(pages, max_bytes)
+        total = len(chunks)
+        for index, chunk in enumerate(chunks, start=1):
+            suffix = f" ({index}/{total})" if total > 1 else ""
+            out.append({
+                **chapter,
+                "id": chapter["id"] + (f"-{index}" if total > 1 else ""),
+                "base": chapter["base"] + suffix,
+                "title": f"{chapter['title']}{suffix}",
+                "arabic": f"{chapter['arabic']}{suffix}",
+                "volume": chunk[0].get("vol"),
+                "volume_end": chunk[-1].get("vol"),
+                "page_from": chunk[0].get("page"),
+                "page_to": chunk[-1].get("page"),
+                "span": _turath_span(chunk, multi),
+                "pages": chunk,
+            })
+    return out
 
 
 def build_turath_units(work: dict, args: argparse.Namespace) -> list[dict]:
@@ -4104,42 +4330,132 @@ def build_turath_units(work: dict, args: argparse.Namespace) -> list[dict]:
     multi = len(volumes) > 1
 
     def loc(j: int) -> dict:
-        if j < len(page_map) and "," in page_map[j]:
-            vol, pg = page_map[j].split(",", 1)
-            return {"vol": vol, "page": int(pg)}
-        return {"vol": pages[j]["vol"], "page": pages[j]["page"]}
+        vol, pg = _turath_page_location(page_map, pages, j)
+        return {"vol": vol, "page": pg}
 
     if not headings:
-        return _turath_by_volume(book, multi)
+        return _turath_volumes(
+            _turath_chunk_chapters(_turath_by_volume(book, multi), work, multi),
+            volumes, work)
 
-    levels = [int(h["level"]) for h in headings]
-    level = min(max(int(work.get("section_level", 1)), min(levels)), max(levels))
-    starts = [(i, int(headings[i]["page"]) - 1) for i, h in enumerate(headings)
-              if int(h["level"]) == level]
-    chapters: list[dict] = []
-    for n, (head, start) in enumerate(starts, start=1):
-        end = starts[n][1] - 1 if n < len(starts) else len(pages) - 1
-        blocks = []
+    levels = [_int_or(h.get("level"), 1) for h in headings]
+    if not levels:
+        return _turath_volumes(
+            _turath_chunk_chapters(_turath_by_volume(book, multi), work, multi),
+            volumes, work)
+    section_level = _int_or(work.get("section_level", 1), 1)
+    level = min(max(section_level, min(levels)), max(levels))
+    # The parent title for a deeper heading (the letter for a fasl). The
+    # classical dictionaries are arranged by the last radical (level 1) and
+    # the first radical (the `فصل`, level 2); carrying the letter into the
+    # fasl note's name keeps that structure when the note is split by fasl.
+    parent_titles: dict[int, str] = {}
+    bab_titles: dict[int, str] = {}
+    stack: dict[int, str] = {}
+    current_bab = ""
+    for i, h in enumerate(headings):
+        hlevel = _int_or(h.get("level"), 1)
+        title = smart_quotes(str(h.get("title") or "")).strip()
+        parent = ""
+        for key in sorted((k for k in stack if k < hlevel), reverse=True):
+            parent = stack[key]
+            break
+        parent_titles[i] = parent
+        if hlevel == 1 or (hlevel == level and title.startswith("حرف")):
+            current_bab = ""
+        elif hlevel == level and title.startswith("باب"):
+            current_bab = title
+        bab_titles[i] = current_bab
+        stack[hlevel] = title
+        for key in [k for k in stack if k > hlevel]:
+            del stack[key]
+    starts: list[tuple[int, int]] = []
+    for i, h in enumerate(headings):
+        if _int_or(h.get("level"), 1) != level:
+            continue
+        start = _int_or(h.get("page"), 0) - 1
+        if 0 <= start < len(pages):
+            starts.append((i, start))
+    if not starts:
+        return _turath_volumes(
+            _turath_chunk_chapters(_turath_by_volume(book, multi), work, multi),
+            volumes, work)
+    def page_blocks(start: int, end: int, drop: set[int], own: int | None = None) -> list[dict]:
+        out: list[dict] = []
         for j in range(start, end + 1):
-            text = pages[j]["text"]
-            if j == start and n > 1:
+            text = pages[j].get("text") or ""
+            if own is not None and j == start:
                 # A page may close one chapter and open the next; keep the part
                 # that follows this chapter's own anchor.
                 m = next((mm for mm in _TURATH_TITLE.finditer(text)
-                          if int(mm.group(1)) - 1 == head), None)
+                          if int(mm.group(1)) - 1 == own), None)
                 if m:
                     text = text[m.start():]
-            body = _turath_page(text, headings, level, {head})
-            if body.strip():
-                where = loc(j)
-                blocks.append({"vol": where["vol"], "page": where["page"], "body": body})
+            body = _turath_page(text, headings, level, drop)
+            where = loc(j)
+            out.append({
+                "vol": where["vol"], "page": where["page"],
+                "page_label": _turath_page_label(where["page"]),
+                "body": body if body.strip() else "*(blank page in the source)*",
+            })
+        return out
+
+    chapters: list[dict] = []
+    # Everything before the first TOC heading (title page, author biography,
+    # publisher page) is part of the source but would otherwise be dropped.
+    front_end = starts[0][1] - 1 if starts else -1
+    if front_end >= 0:
+        blocks = page_blocks(0, front_end, set())
+        if any(b["body"].strip() and not b["body"].startswith("*(blank page") for b in blocks):
+            chapters.append({
+                "kind": "book", "id": "0", "base": "000 Front matter",
+                "title": "Front matter", "arabic": "المقدمات",
+                "letter": "", "fasl": "Front matter",
+                "level": level, "volume": blocks[0]["vol"], "volume_end": blocks[-1]["vol"],
+                "page_from": blocks[0]["page"], "page_to": blocks[-1]["page"],
+                "span": _turath_span(blocks, multi), "pages": blocks,
+            })
+    for n, (head, start) in enumerate(starts, start=1):
+        head_title = smart_quotes(str(headings[head].get("title") or "")).strip()
+        # A `باب` is the first-radical grouping between the letter and its
+        # `فصل` notes; it becomes a heading on the letter page, not a note.
+        if level == 2 and head_title.startswith("باب"):
+            continue
+        end = starts[n][1] - 1 if n < len(starts) else len(pages) - 1
+        own = head if n > 1 else None
+        if n > 1:
+            prev_head = starts[n - 2][0]
+            prev_title = str(headings[prev_head].get("title") or "")
+            this_title = str(headings[head].get("title") or "")
+            # The letter's `حرف` introduction and its first `فصل` can share a
+            # page. The introduction heading is not a chapter of its own, so
+            # keep its text at the top of that first fasl note instead of
+            # trimming it away before the fasl anchor.
+            if (headings[prev_head].get("page") == headings[head].get("page")
+                    and level > 1 and (prev_title.startswith("حرف") or prev_title.startswith("باب"))
+                    and this_title.startswith(("فصل", "حرف", "باب"))):
+                own = None
+        blocks = page_blocks(start, end, {head}, own)
         if not blocks:
             continue
-        title_ar = smart_quotes(headings[head]["title"]).strip()
+        title_ar = head_title
+        if not title_ar:
+            title_ar = f"Section {n}"
+        fasl = title_ar
+        parent = parent_titles.get(head, "")
+        bab = bab_titles.get(head, "")
+        if parent and level > 1:
+            if bab:
+                title_ar = f"{parent} - {bab} - {fasl}"
+            else:
+                title_ar = f"{parent} - {fasl}"
         base = f"{n:03d} {_turath_trim(title_ar)}"
         chapters.append({
             "kind": "book", "id": str(n), "base": base,
             "title": title_ar, "arabic": title_ar,
+            "letter": parent if level > 1 else "",
+            "bab": bab if level > 1 else "",
+            "fasl": fasl,
             "level": level, "volume": blocks[0]["vol"], "volume_end": blocks[-1]["vol"],
             "page_from": blocks[0]["page"], "page_to": blocks[-1]["page"],
             "span": _turath_span(blocks, multi), "pages": blocks,
@@ -4147,6 +4463,9 @@ def build_turath_units(work: dict, args: argparse.Namespace) -> list[dict]:
         if len(chapters) % 10 == 0:
             emit("step", name=work["title"], status="parsing",
                  detail=f"{len(chapters)} sections")
+    chapters = _turath_chunk_chapters(chapters, work, multi)
+    if work.get("letter_index"):
+        return _turath_letters(chapters, volumes, work)
     return _turath_volumes(chapters, volumes, work)
 
 
@@ -4156,13 +4475,15 @@ def _turath_by_volume(book: dict, multi: bool) -> list[dict]:
     for n, vol in enumerate(book["volumes"], start=1):
         blocks = []
         for j, p in enumerate(book["pages"]):
-            if p["vol"] != vol:
+            if p.get("vol") != vol:
                 continue
-            body = _turath_page(p["text"], [], 1, set())
-            if body.strip():
-                pm = (book["page_map"][j].split(",")
-                      if j < len(book["page_map"]) else [vol, p["page"]])
-                blocks.append({"vol": pm[0] or vol, "page": int(pm[1]), "body": body})
+            body = _turath_page(p.get("text") or "", [], 1, set())
+            page_vol, page_no = _turath_page_location(book["page_map"], book["pages"], j)
+            blocks.append({
+                "vol": page_vol or vol, "page": page_no,
+                "page_label": _turath_page_label(page_no),
+                "body": body if body.strip() else "*(blank page in the source)*",
+            })
         if blocks:
             chapters.append({"kind": "book", "id": str(n), "base": f"{n:03d} المجلد {vol}",
                              "title": f"المجلد {vol}", "arabic": f"المجلد {vol}",
@@ -4187,8 +4508,8 @@ def _turath_volumes(chapters: list[dict], volumes: list[str], work: dict) -> lis
         span = ""
         if chs:
             a, b = chs[0], chs[-1]
-            left = f"{a['volume']}:{a['page_from']}"
-            right = f"{b['volume_end']}:{b['page_to']}"
+            left = f"{a['volume']}:{_turath_page_label(a['page_from'])}"
+            right = f"{b['volume_end']}:{_turath_page_label(b['page_to'])}"
             span = f"p. {left}" if left == right else f"p. {left}–{right}"
         vol_units.append({
             "kind": "book-volume", "id": v, "base": f"{int(v):03d} المجلد {v}",
@@ -4202,10 +4523,88 @@ def _turath_volumes(chapters: list[dict], volumes: list[str], work: dict) -> lis
     return vol_units + chapters
 
 
+def _dedupe_book_titles(chapters: list[dict]) -> None:
+    """Make a clean dictionary note title unique.
+
+    Some source TOCs repeat a `فصل` heading within one letter (the second set
+    has no separate `باب` marker). The first note keeps the plain title; later
+    ones get `(2)`, `(3)`; their page spans distinguish them on the letter page.
+    """
+    seen: dict[str, int] = {}
+    for chapter in chapters:
+        if chapter.get("kind") != "book":
+            continue
+        key = str(chapter.get("title") or chapter.get("base") or "")
+        count = seen.get(key, 0) + 1
+        seen[key] = count
+        if count == 1:
+            continue
+        suffix = f" ({count})"
+        chapter["title"] = f"{chapter.get('title') or chapter.get('base')}{suffix}"
+        chapter["base"] = f"{chapter.get('base') or chapter.get('title')}{suffix}"
+        chapter["fasl"] = f"{chapter.get('fasl') or chapter.get('title')}{suffix}"
+        chapter["arabic"] = f"{chapter.get('arabic') or chapter.get('title')}{suffix}"
+        chapter["id"] = f"{chapter.get('id')}-{count}"
+
+
+def _turath_letters(chapters: list[dict], volumes: list[str], work: dict) -> list[dict]:
+    """The dictionary layout: work hub → letter index → fasl note.
+
+    The classical dictionaries are arranged by the last radical (the letter,
+    level 1) and the first radical (the `فصل`, level 2). The work hub lists one
+    letter note per letter; the letter note lists its fasl notes, with a plain
+    `## المجلد N` heading whenever the printed volume changes. There is no
+    volume note and no volume link: the volume is a reference marker inside the
+    letter page, not a navigation level.
+    """
+    _dedupe_book_titles(chapters)
+    groups: list[tuple[str, list[dict]]] = []
+    for chapter in chapters:
+        raw_letter = str(chapter.get("letter") or "").strip()
+        letter = raw_letter if raw_letter in _TURATH_LETTERS else "Front matter"
+        if not groups or groups[-1][0] != letter:
+            groups.append((letter, []))
+        groups[-1][1].append(chapter)
+    letter_units: list[dict] = []
+    for index, (letter, group) in enumerate(groups, start=1):
+        first, last = group[0], group[-1]
+        span = _turath_span([first["pages"][0], last["pages"][-1]], len(volumes) > 1)
+        letter_units.append({
+            "kind": "book-letter",
+            "id": f"letter-{index}",
+            "base": letter,
+            "title": letter,
+            "arabic": letter,
+            "span": span,
+            "chapters": [{
+                "base": c["base"],
+                "title": c["title"],
+                "bab": c.get("bab") or "",
+                "fasl": c.get("fasl") or c["title"],
+                "span": c["span"],
+                "volume": c.get("volume"),
+                "volume_end": c.get("volume_end"),
+            } for c in group],
+        })
+    # A fasl points up to its letter page (and the work).
+    letter_stems = {u["base"]: f"{work['dir']} - {u['base']}" for u in letter_units}
+    for chapter in chapters:
+        raw_letter = str(chapter.get("letter") or "").strip()
+        letter = raw_letter if raw_letter in _TURATH_LETTERS else "Front matter"
+        chapter["section_page"] = letter_stems.get(letter, "")
+    return letter_units + chapters
+
+
 def work_model(work: dict, units: list[dict], created: str, layout: str) -> dict:
     """Assemble the render model handed to the plugin's templates."""
     is_hadith = work["collection"] == "hadith"
     is_book = work["collection"] == "turath"
+    authors_ar = work.get("authors_ar")
+    if isinstance(authors_ar, str):
+        authors_ar = [authors_ar]
+    # `author_ar` remains an internal catalogue/publication-map spelling; the
+    # render model and every note expose the single standard `authors-ar` list.
+    authors_ar = list(authors_ar or ([work["author_ar"]] if work.get("author_ar") else []))
     return {
         "schema": MODEL_SCHEMA.get(work["collection"], BASE_MODEL_SCHEMA),
         "generated": created,
@@ -4219,6 +4618,10 @@ def work_model(work: dict, units: list[dict], created: str, layout: str) -> dict
             "dir": work["dir"],
             "short": work.get("short", ""),
             "title_ar": work.get("title_ar", ""),
+            "title_language": work.get("title_language") or work["language"],
+            "authors_ar": authors_ar,
+            "genre": work.get("genre", ""),
+            "genres": work.get("genres", []),
             "short_ar": work.get("short_ar", ""),
             "title_plain": strip_diacritics(work["title"]),
             "authors": work["authors"],
@@ -4255,7 +4658,7 @@ def work_model(work: dict, units: list[dict], created: str, layout: str) -> dict
             # The named romanization path this work's names follow (`vault`,
             # `wehr`, `full`) — so a note records which convention it is in.
             "convention": work.get("convention", DEFAULT_ROMANIZATION),
-            "unit_label": ("Roots" if work["collection"] == "dictionary"
+            "unit_label": ("Roots" if work["collection"] == "dictionary" or work.get("letter_index")
                            else "Chapters" if is_hadith or is_book
                            else "Sūrahs"),
             "layout": layout,

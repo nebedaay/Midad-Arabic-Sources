@@ -10,7 +10,7 @@
 <% if (work.authors && work.authors.length) { add_property('authors', work.authors.map(a => wikilink(a))); } -%>
 <% if (work.translators && work.translators.length) { add_property('translators', work.translators.map(a => wikilink(a))); } -%>
 <% if (work.language_links.length > 1) { add_property('language', work.language_links.map(l => wikilink(l))); } else { add_property('language', wikilink(work.language_links[0])); } -%>
-<% const aliasList = work.aliases.map(a => `${a} - ${unit.base}`); -%>
+<% const aliasList = work.aliases.slice(0, 1).map(a => `${a} - ${unit.base}`); -%>
 <% if (work.canonical) { aliasList.push(unit.translit, unit.arabic); } -%>
 <% add_property('aliases', aliasList); -%>
 <% add_property('cssclasses', [work.language === 'ar' ? 'quran-ar' : 'quran-en'], { quote: 'never' }); -%>

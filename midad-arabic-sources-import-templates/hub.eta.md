@@ -90,15 +90,22 @@
 ## Roots
 
 <% const letters = units.filter(u => u.kind === 'dict-index'); -%>
-A dictionary has too many roots to list here, so they are indexed by first letter. Each note also carries `term-ar`, `term`, and a `<%= work.note_prefix || 'HW' %> …` alias, so search works too.
-
 <% for (const u of letters) { -%>
 - <%= wikilink(u.note_stem, u.title || u.base) %> — <%= u.roots.length %>
 <% } -%>
 
 <% } else if (work.kind === 'book') { -%>
-<% if ((work.volumes || 1) > 1) { -%>
-<% for (const u of units.filter(u => u.kind === 'book-volume')) { -%>
+<% const letterUnits = units.filter(u => u.kind === 'book-letter'); -%>
+<% const volumeUnits = units.filter(u => u.kind === 'book-volume'); -%>
+<% if (letterUnits.length) { -%>
+## Roots
+
+<% for (const u of letterUnits) { -%>
+- <%= wikilink(u.note_stem || `${work.dir} - ${u.base}`, u.title || u.base) %>
+<% } -%>
+
+<% } else if ((work.volumes || 1) > 1 && volumeUnits.length) { -%>
+<% for (const u of volumeUnits) { -%>
 - <%= wikilink(u.note_stem || `${work.dir} - ${u.base}`, u.title || u.base) %><% if (u.chapters && u.chapters.length) { %> — <%= u.chapters.length %> chapter<%= u.chapters.length === 1 ? '' : 's' %><% } %>
 <% } -%>
 

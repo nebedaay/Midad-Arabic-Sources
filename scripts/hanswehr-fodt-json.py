@@ -21,7 +21,7 @@ not the app's adjacency: page 466 has one root (`šarufa`), entries under شرع
 before it, and the شرق root after it (the app had nested the مشرق group under
 شرف by adjacency).
 
-    python3 scripts/hanswehr-fodt-json.py --out ../../tmp/hanswehr-fodt
+    python3 scripts/hanswehr-fodt-json.py --out ../../tmp/hanswehr
 """
 
 from __future__ import annotations
@@ -59,13 +59,14 @@ def supplement_id(app_id: int) -> int:
     return SUPPLEMENT_ID_BASE + app_id
 
 WORK = {
-    "id": "hanswehr-fodt",
-    "title": "Hans Wehr Dictionary (FODT)",
+    "id": "hanswehr",
+    "title": "Hans Wehr Dictionary",
     "arabic": "معجم هانس ڤير",
-    "author": "Hans Wehr",
+    "title_language": "en",
+    "author": "Wehr, Hans",
     "editor": "J Milton Cowan",
     "source": "https://github.com/muhammad-abdurrahman/hans-wehr-fodt-parser",
-    "note_prefix": "HWF",
+    "note_prefix": "HW",
     "body": "grid",
     "convention": "wehr",
     "unique": True,
@@ -404,7 +405,8 @@ def build_model(entries: list[dict], meta: dict, mapping: dict[int, int]) -> dic
         "title": WORK["title"],
         "dir": WORK["title"],
         "short": "",
-        "title_ar": WORK["arabic"],
+        "title_ar": WORK["arabic"] if (WORK.get("title_language") or "ar") == "ar" else "",
+        "title_language": WORK.get("title_language") or "ar",
         "short_ar": "",
         "authors": [WORK["author"]],
         "translators": [],
@@ -418,7 +420,7 @@ def build_model(entries: list[dict], meta: dict, mapping: dict[int, int]) -> dic
         "up": ["[[Dictionaries]]"],
         "source": WORK["source"],
         "license_attribution": WORK["license_attribution"],
-        "repository_updated": "2017-03-30",
+        "repository_updated": "2016-11-01",
         "source_hash": meta["fodt_sha256"][:12],
         "author": WORK["author"],
         "body": WORK["body"],
@@ -457,7 +459,7 @@ def main() -> int:
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=1), encoding="utf-8")
 
     model = build_model(entries, meta, mapping)
-    model_path = args.out / "hanswehr-fodt.model.json"
+    model_path = args.out / "hanswehr.model.json"
     model_path.write_text(json.dumps(model, ensure_ascii=False, indent=1), encoding="utf-8")
 
     roots = sum(1 for e in entries if e["is_root"])

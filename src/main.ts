@@ -529,6 +529,7 @@ const SOURCE_TEMPLATE_KIND: Record<string, string> = {
 	dictionaryIndex: "dict-index",
 	book: "book",
 	bookVolume: "book-volume",
+	bookLetter: "book-letter",
 };
 
 const DEFAULT_PROMPT_NAME = "Default prompt";
@@ -3555,7 +3556,9 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			"tanzil.net": ["Tanzil", "Tanzil"],
 			"github.com/GibreelAbdullah/HansWehrDictionary": ["Hans Wehr", "Hans Wehr"],
 			"github.com/GibreelAbdullah/LaneLexicon": ["Lane", "Lane"],
-			"github.com/muhammad-abdurrahman/hans-wehr-fodt-parser": ["Hans Wehr FODT", "Hans Wehr FODT"],
+			// The FODT repository is now the only Hans Wehr source, so it keeps
+			// the plain repository name rather than a second, edition-suffixed MOC.
+			"github.com/muhammad-abdurrahman/hans-wehr-fodt-parser": ["Hans Wehr", "Hans Wehr"],
 		};
 		const mapped = known[repo];
 		if (mapped) return { name: mapped[0], label: mapped[1] };
@@ -4266,7 +4269,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			hadith: ["hadith"],
 			"quran-text": ["quran"],
 			dictionary: ["dictionary", "dictionaryIndex"],
-			turath: ["book", "bookVolume"],
+			turath: ["book", "bookVolume", "bookLetter"],
 		};
 		return ["hub", ...(unit[collection] ?? ["source"])];
 	}
@@ -4284,6 +4287,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			dictionaryIndex: t.dictionaryIndex,
 			book: t.book,
 			bookVolume: t.bookVolume,
+			bookLetter: t.bookLetter,
 			hub: t.hub,
 			moc: t.moc,
 			sources: t.sources,

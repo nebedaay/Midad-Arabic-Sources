@@ -161,10 +161,20 @@ PAGE_STYLES: set[str] = set()
 
 
 def _runs(paragraph) -> list[tuple[str, str | None]]:
-    """The paragraph's text as (text, style-name) runs, in document order."""
+    """The paragraph's text as (text, style-name) runs, in document order.
+
+    Embedded drawings are skipped. Some FODT paragraphs carry a scan image as
+    `<draw:frame>…<office:binary-data>BASE64…`; treating that payload as text
+    produced multi-megabyte Wehr root notes (قشط، قشع، كفأ، ندا) and froze
+    Obsidian. The image is not part of the dictionary text.
+    """
     out: list[tuple[str, str | None]] = []
+    media = {"frame", "image", "binary-data"}
 
     def walk(el, style: str | None = None) -> None:
+        local = el.tag.rsplit("}", 1)[-1] if "}" in el.tag else el.tag
+        if local in media:
+            return
         if el.tag == _T + "span":
             style = el.get(_T + "style-name")
         if el.text:

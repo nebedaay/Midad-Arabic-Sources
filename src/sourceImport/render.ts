@@ -29,6 +29,7 @@ export interface TemplateSet {
 	dictionaryIndex: string;
 	book: string;
 	bookVolume: string;
+	bookLetter: string;
 	hub: string;
 	moc: string;
 	sources: string;
@@ -66,6 +67,7 @@ export const TEMPLATE_FILES: Record<keyof TemplateSet, string> = {
 	dictionaryIndex: "dictionary-index.eta.md",
 	book: "book-note.eta.md",
 	bookVolume: "book-volume.eta.md",
+	bookLetter: "book-letter.eta.md",
 	hub: "hub.eta.md",
 	moc: "moc.eta.md",
 	sources: "sources.eta.md",
@@ -130,6 +132,7 @@ export function renderUnit(engine: SourceTemplateEngine, templates: TemplateSet,
 		: unit.kind === "dict-index" ? templates.dictionaryIndex
 		: unit.kind === "book" ? templates.book
 		: unit.kind === "book-volume" ? templates.bookVolume
+		: unit.kind === "book-letter" ? templates.bookLetter
 		: templates.source;
 	return renderTemplate(engine, tpl, {
 		work: model.work,
@@ -168,6 +171,7 @@ export function renderUnitYaml(engine: SourceTemplateEngine, templates: Template
 		: unit.kind === "dict-index" ? templates.dictionaryIndex
 		: unit.kind === "book" ? templates.book
 		: unit.kind === "book-volume" ? templates.bookVolume
+		: unit.kind === "book-letter" ? templates.bookLetter
 		: templates.source;
 	return renderYamlTemplate(engine, tpl, {
 		work: model.work,

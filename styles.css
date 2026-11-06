@@ -132,8 +132,8 @@
 body [dir="rtl"],
 body [dir="rtl"] *,
 body .mod-rtl,
-body .markdown-source-view.mod-cm6:not(.quran-ar):not(.quran-en) .cm-line:dir(rtl),
-body .markdown-preview-view:not(.quran-ar):not(.quran-en) :dir(rtl),
+body .markdown-source-view.mod-cm6:not(.quran-ar):not(.quran-en):not(.mas-prose) .cm-line:dir(rtl),
+body .markdown-preview-view:not(.quran-ar):not(.quran-en):not(.mas-prose) :dir(rtl),
 body .markdown-rendered :dir(rtl),
 body .callout[data-callout*="arabic"] {
     font-family: var(--latin-font), var(--arabic-font), serif;
