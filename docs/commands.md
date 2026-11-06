@@ -58,7 +58,7 @@ See [Document import](./document-import.md#annotations).
 - **Delete annotations for this source…** — move a work's annotation store and note to the plugin trash.
 - **Open Midad sidebar** — open the Midad sidebar. Navigation is available for every note; annotatable notes also show the Annotations tab, MOC links, and Manage sources.
 - **Copy source with annotations** — copy the managed source text plus a colour-callout annotation section.
-- **Adopt note for annotations** — make an arbitrary Markdown note annotatable by adding a stable work/unit identity and a managed body region. Known Midad transcriptions/translations are recognised without wrapping; a legacy one has its native metadata and literature-note list upgraded instead.
+- **Adopt note for annotations** — make an arbitrary Markdown note annotatable by adding a stable work/unit identity and a managed body region. Known Midad transcriptions/translations are recognised without wrapping; a legacy one has its native metadata and literature-note list upgraded instead, and a same-named adopted parent is consolidated into the native one with a backup.
 - **Open source annotations** — open the generated per-work annotation note.
 - **Open annotation trash** — restore or permanently delete annotation batches.
 - **Reload annotations** — reload the store and repaint open source notes.

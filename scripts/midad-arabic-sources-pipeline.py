@@ -704,6 +704,190 @@ def _note_identity(note: Path, citekey: str | None, doc_type: str | None,
     return key, kind, vol, standalone or stem.startswith("mas-")
 
 
+def _note_body(text: str) -> str:
+    if text.startswith("---"):
+        end = text.find("\n---", 3)
+        if end != -1:
+            return text[end + 4:]
+    return text
+
+
+def _block_key(block: list[str]) -> str:
+    match = re.match(r"^([A-Za-z][\w-]*):", block[0])
+    return match.group(1) if match else ""
+
+
+def _block_values(block: list[str]) -> list[str]:
+    values: list[str] = []
+    for line in block[1:]:
+        match = re.match(r"^\s+-\s*(.*)\s*$", line)
+        if not match:
+            continue
+        value = match.group(1).strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+            value = value[1:-1]
+        if value:
+            values.append(value)
+    return values
+
+
+def _list_block(key: str, values: list[str], quote) -> list[str]:
+    unique: list[str] = []
+    for value in values:
+        if value not in unique:
+            unique.append(value)
+    if not unique:
+        return [f"{key}: []"]
+    return [f"{key}:"] + [f'  - "{quote(value)}"' for value in unique]
+
+
+def _merge_parent_note(native_text: str, legacy_text: str, mv) -> tuple[str, str]:
+    """Merge useful author fields/body from a legacy parent into the native parent.
+
+    Native identity and citation blocks win. User-owned `up`, `shorttitle`,
+    custom properties, `created`, `related`, `aliases`, and `topics` survive;
+    the legacy title is kept as an alias. The legacy body is the base, with
+    only missing/broken volume links corrected.
+    """
+    native_blocks = mv._frontmatter_blocks(native_text)
+    legacy_blocks = mv._frontmatter_blocks(legacy_text)
+    native_by = {_block_key(block): block for block in native_blocks}
+    legacy_by = {_block_key(block): block for block in legacy_blocks}
+    merged: list[list[str]] = []
+    covered = {"midad-id", "midad-kind", "midad-work", "midad-unit", "title",
+               "title-ar", "authors", "aliases", "related", "topics", "created"}
+    for block in native_blocks:
+        key = _block_key(block)
+        if key == "created" and key in legacy_by:
+            merged.append(legacy_by[key])
+        elif key in ("related", "aliases", "topics") and key in legacy_by:
+            values = _block_values(block) + _block_values(legacy_by[key])
+            merged.append(_list_block(key, values, mv._yaml_quote))
+        else:
+            merged.append(block)
+    for block in legacy_blocks:
+        key = _block_key(block)
+        if not key or key in covered:
+            continue
+        if key not in native_by:
+            merged.append(block)
+
+    legacy_title = ""
+    match = re.match(r'^title:\s*"?(.*?)"?\s*$', legacy_by.get("title", ["", ""])[0], re.M)
+    if match:
+        legacy_title = match.group(1).strip()
+    if legacy_title:
+        for index, block in enumerate(merged):
+            if _block_key(block) == "aliases":
+                values = _block_values(block)
+                if legacy_title not in values:
+                    merged[index] = _list_block("aliases", values + [legacy_title], mv._yaml_quote)
+                break
+
+    # Native body links are the generated volume set; the legacy body is the
+    # author's material and wins. Repair a clear broken volume target, then add
+    # any generated volume link the author did not have.
+    native_body = _note_body(native_text).strip("\n")
+    legacy_body = _note_body(legacy_text).strip("\n")
+    body = legacy_body or native_body
+    native_targets = re.findall(r"\[\[([^\]|#]+)", native_body)
+    by_volume: dict[int, str] = {}
+    for target in native_targets:
+        vm = re.search(r"vol(?:ume)?\.?\s*(\d+)", target, re.I)
+        if vm:
+            by_volume[int(vm.group(1))] = target
+
+    def fix_link(match: re.Match) -> str:
+        target, alias = match.group(1), match.group(2) or ""
+        volume = re.search(r"volume\s*(\d+)", alias, re.I)
+        if volume and target not in native_targets:
+            replacement = by_volume.get(int(volume.group(1)))
+            if replacement:
+                return f"[[{replacement}|{alias}]]" if alias else f"[[{replacement}]]"
+        return match.group(0)
+
+    body = re.sub(r"\[\[([^\]|#]+)(?:\|([^\]]*))?\]\]", fix_link, body)
+    for target in native_targets:
+        if f"[[{target}" not in body:
+            body = (body.rstrip("\n") + "\n" if body.strip() else "") + f"- [[{target}]]\n"
+    frontmatter = "\n".join(line for block in merged for line in block)
+    return f"---\n{frontmatter}\n---\n\n{body.strip()}\n", body.strip()
+
+
+def _annotations_reference(path: str) -> bool:
+    root = CACHE / "annotations"
+    if not root.exists():
+        return False
+    for file in root.rglob("*.json"):
+        try:
+            if path in file.read_text(encoding="utf-8"):
+                return True
+        except Exception:
+            continue
+    return False
+
+
+def _consolidate_parent(native_parent: Path, mv) -> dict | None:
+    """Merge a same-named legacy/adopted parent into the native parent.
+
+    Runs only when exactly one legacy parent exists outside the native folder,
+    has `midad-kind: adopted`, and has no annotation references. The legacy note
+    is backed up and removed; the merged native note is backed up too.
+    """
+    if not native_parent.exists():
+        return None
+    candidates = []
+    for candidate in VAULT.rglob(native_parent.name):
+        if candidate == native_parent or not candidate.is_file():
+            continue
+        rel = candidate.relative_to(VAULT)
+        if any(part.startswith(".") for part in rel.parts):
+            continue
+        candidates.append(candidate)
+    if len(candidates) != 1:
+        return None
+    legacy = candidates[0]
+    legacy_text = legacy.read_text(encoding="utf-8")
+    if not re.search(r'^midad-kind:\s*"?adopted"?\s*$', legacy_text, re.M):
+        return None
+    # Only a parent/index note. A full transcription that happens to share the
+    # name is not safe to absorb and delete.
+    if not re.search(r'\[\[[^\]]+\s+-\s+(?:transcription|translation)\s+-\s+(?:vol|v)\.\s*\d+',
+                     legacy_text, re.I):
+        return None
+    rel_legacy = str(legacy.relative_to(VAULT))
+    if _annotations_reference(rel_legacy):
+        return {"skipped": "annotations", "legacy": rel_legacy}
+    native_text = native_parent.read_text(encoding="utf-8")
+    merged_text, _ = _merge_parent_note(native_text, legacy_text, mv)
+    backup_dir = CACHE / "backups"
+    backup_dir.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    legacy_backup = backup_dir / f"{stamp}-legacy-parent-{legacy.name}"
+    native_backup = backup_dir / f"{stamp}-native-parent-{native_parent.name}"
+    shutil.copy2(legacy, legacy_backup)
+    shutil.copy2(native_parent, native_backup)
+    native_parent.write_text(merged_text, encoding="utf-8")
+    legacy.unlink()
+    # The adopted registry no longer needs the old path; the native parent is
+    # already registered under the same work key by the annotation service.
+    registry = CACHE / "annotations/adopted.json"
+    if registry.exists():
+        try:
+            data = json.loads(registry.read_text(encoding="utf-8"))
+            notes = data.get("notes") if isinstance(data, dict) else None
+            if isinstance(notes, dict) and rel_legacy in notes:
+                del notes[rel_legacy]
+                registry.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
+        except Exception:
+            pass
+    return {
+        "legacy": rel_legacy,
+        "backup": str(legacy_backup),
+        "native_backup": str(native_backup),
+    }
+
+
 def cmd_postprocess_note(args) -> int:
     """Re-run local post-processing on an existing note, without an archive.
 
@@ -766,10 +950,17 @@ def cmd_postprocess_note(args) -> int:
         dest = mv.write_note(
             processed_body, citekey, doc_type, related=related,
             volume=volume, standalone=standalone, title=title, authors=authors)
-    emit("result", result={
+    consolidated = None
+    if volume is not None:
+        consolidated = _consolidate_parent(
+            mv.dest_path(citekey, doc_type, None, standalone), mv)
+    result = {
         "notes": [str(dest)], "backup": str(backup),
         "metadata_only": bool(args.metadata_only),
-    })
+    }
+    if consolidated:
+        result["consolidated"] = consolidated
+    emit("result", result=result)
     return 0
 
 

@@ -4459,6 +4459,14 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			metadataOnly ? `Upgrading ${target.basename}` : `Post-processing ${target.basename}`,
 			args,
 		);
+		const consolidated = result?.consolidated as {
+			legacy?: string; backup?: string; skipped?: string;
+		} | undefined;
+		if (consolidated?.skipped === "annotations") {
+			new Notice("A legacy parent has annotations, so it was left in place; the native parent is separate.");
+		} else if (consolidated?.legacy) {
+			new Notice(`Consolidated ${consolidated.legacy.split("/").pop() ?? consolidated.legacy} into the native parent.`);
+		}
 		if (result?.notes?.length && !metadataOnly) {
 			new Notice(`Post-processed ${target.basename}.`);
 		}
