@@ -1994,6 +1994,14 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 	/** Split a personal name into Zotero's firstName / lastName fields, best effort. */
 	nameParts(name: string): { firstName?: string; lastName?: string; name?: string } {
 		const s = String(name ?? "").trim();
+		// ScholarWeft names Western authors `Last, First`; a classical Arabic name
+		// is normally written as one name (`Ibn Manẓūr`, `Abū Jaʿfar al-Ṭabarī`).
+		if (s.includes(",")) {
+			const [last, ...rest] = s.split(",");
+			const first = rest.join(",").trim();
+			return first ? { firstName: first, lastName: last.trim() } : { lastName: last.trim() };
+		}
+		if (/(?:^|\s)(?:b\.\s|ibn\b|bint\b|al-\S|Abū\b|Abu\b)/i.test(s)) return { name: s };
 		const parts = s.split(/\s+/).filter(Boolean);
 		if (parts.length <= 1) return { lastName: s };
 		return { firstName: parts.slice(0, -1).join(" "), lastName: parts[parts.length - 1] };
@@ -4450,6 +4458,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		const canonicalId = this.resolveCanonicalQuran();
 		const canonicalRoot = this.settings.canonicalQuranFolder.trim() || `${outRoot}/Quran`;
 		const stats = await this.loadSourceStats();
+		const pubs = await this.loadPublicationMap();
 		const notice = new Notice("Updating imported sources…", 0);
 		const stop = notice.messageEl.createEl("button", { text: "Stop" });
 		stop.addEventListener("click", () => {
@@ -4470,6 +4479,11 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 				try {
 					if (!(await this.app.vault.adapter.exists(rel))) continue;
 					const model = JSON.parse(await this.app.vault.adapter.read(rel)) as SourceModel;
+					// A scoped render is the common path for a template change; it
+					// must inject the publication map too, or it silently drops the
+					// map-supplied `title-ar`/`authors-ar` from the hub.
+					const pub = pubs[key] ?? {};
+					model.work.publication = { ...pub, mas_note: this.masNote(pub) };
 					model.work.canonical_root = canonicalRoot;
 					model.work.canonical = model.work.collection === "quran-text" && String(model.work.id) === canonicalId;
 					// Per-note progress: a large work (a dictionary) can take minutes, so

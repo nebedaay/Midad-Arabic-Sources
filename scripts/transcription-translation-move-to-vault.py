@@ -161,9 +161,211 @@ def _source_id(citekey: str, ref: Path | None) -> str:
     return f"pdf:{citekey}"
 
 
+def _frontmatter_end(text: str) -> int:
+    """Index of the newline before the closing `---`, or -1."""
+    if not text.startswith("---"):
+        return -1
+    return text.find("\n---", 3)
+
+
+def _existing_list(path: Path, key: str) -> list[str]:
+    """A YAML list already on a note, preserved across a re-transcription."""
+    if not path.exists():
+        return []
+    text = path.read_text(encoding="utf-8")
+    end = _frontmatter_end(text)
+    if end == -1:
+        return []
+    match = re.search(rf"^{re.escape(key)}:[ \t]*\n((?:[ \t]+-[ \t]*.+\n?)*)", text[:end], re.M)
+    if not match:
+        return []
+    out = []
+    for line in match.group(1).splitlines():
+        value = line.strip().lstrip("- ").strip().strip('"').strip("'")
+        if value:
+            out.append(value)
+    return out
+
+
+def _existing_scalar(path: Path, key: str) -> str:
+    if not path.exists():
+        return ""
+    text = path.read_text(encoding="utf-8")
+    end = _frontmatter_end(text)
+    if end == -1:
+        return ""
+    match = re.search(rf'^{re.escape(key)}:[ \t]*"?(.*?)"?[ \t]*$', text[:end], re.M)
+    return match.group(1).strip() if match else ""
+
+
+def _existing_topics(path: Path) -> list[str]:
+    return _existing_list(path, "topics")
+
+
+ARABIC_SCRIPT = re.compile(r"[\u0600-\u06FF]")
+ARABIC_TITLE_LINE = re.compile(r"^#\s+(.+?)\s*$", re.M)
+ARABIC_AUTHOR_HEAD = re.compile(
+    r"^#{2,4}\s*(?:تأليف|المؤلف|المؤلفون|Author|By)\s*:?\s*$", re.M | re.I)
+
+
+def extract_arabic_metadata(body: str) -> tuple[str, list[str]]:
+    """The work's Arabic title and author from a transcription's title page.
+
+    The OCR keeps the title page's `# <title>` and `## تأليف` / `## Author`
+    headings, so the first Arabic level-1 heading and the line beneath an author
+    heading are the source's own forms. Both are best-effort: a missing value
+    leaves the property out, and the user can add it to the MOC.
+    """
+    text = body or ""
+    title = ""
+    for match in ARABIC_TITLE_LINE.finditer(text):
+        candidate = re.sub(r"\s+\^[\w-]+\s*$", "", match.group(1).strip())
+        if ARABIC_SCRIPT.search(candidate):
+            title = candidate
+            break
+    author = ""
+    for head in ARABIC_AUTHOR_HEAD.finditer(text):
+        for line in text[head.end():].splitlines():
+            value = line.strip()
+            if not value:
+                continue
+            if value.startswith("#"):
+                break
+            if ARABIC_SCRIPT.search(value):
+                author = value
+            break
+        if author:
+            break
+    if author:
+        # Strip title-page honorifics and the death-date clause, so the citation
+        # author is the name rather than "الإمام الشيخ … المتوفى … رحمه الله".
+        author = re.sub(
+            r"^(?:(?:الإمام|الشيخ|العلامة|الحافظ|المحدِّث|المحدث|القاضي|الفقيه|الأستاذ|الدكتور)\s+)+",
+            "", author).strip()
+        author = re.sub(r"\s+(?:المتوفى|المتوفية|المتوفّى|توفي|ت\.)\b.*$", "", author).strip()
+        author = re.sub(r"\s+رحمه\s+الله.*$", "", author).strip()
+    return title, ([author] if author else [])
+
+
+def _ensure_yaml_properties(path: Path, title_ar: str, authors_ar: list[str]) -> None:
+    """Add the Arabic metadata to the parent MOC if the user has not set it.
+
+    `authors-ar` is the one standard for Arabic names — a list, even for a
+    single author. The old singular `author-ar` is retired and removed here;
+    its value is recovered into the list when no list exists yet.
+    """
+    if not path.exists():
+        return
+    text = path.read_text(encoding="utf-8")
+    end = _frontmatter_end(text)
+    if end == -1:
+        return
+    frontmatter = text[:end]
+    if not authors_ar and not re.search(r"^authors-ar:", frontmatter, re.M):
+        existing = _existing_scalar(path, "author-ar")
+        if existing:
+            authors_ar = [existing]
+    # Retire the singular property wherever it survived from an earlier render.
+    new_frontmatter = re.sub(r"^author-ar:.*\n?", "", frontmatter, flags=re.M)
+    additions = ""
+    if title_ar and not re.search(r"^title-ar:", new_frontmatter, re.M):
+        additions += f'title-ar: "{_yaml_quote(title_ar)}"\n'
+    if authors_ar and not re.search(r"^authors-ar:", new_frontmatter, re.M):
+        additions += "authors-ar:\n" + "".join(
+            f'  - "{_yaml_quote(a)}"\n' for a in authors_ar)
+    if not additions and new_frontmatter == frontmatter:
+        return
+    suffix = ("\n" + additions.rstrip("\n")) if additions else ""
+    path.write_text(new_frontmatter + suffix + text[end:], encoding="utf-8")
+
+
+def _transcription_metadata(citekey: str, standalone: bool) -> tuple[str, list[str]]:
+    """A translation takes the Arabic title/author from its transcription."""
+    parent = dest_path(citekey, "transcription", None, standalone)
+    return _existing_scalar(parent, "title-ar"), _existing_list(parent, "authors-ar")
+
+
+# The bibliographic properties ScholarWeft uses on a literature note, in the
+# order they should appear on the MOC. `volume` is deliberately absent: on a
+# transcription note it is the transcription's own volume number, not the
+# source's bibliographic volume.
+CITATION_KEYS = (
+    "item-type", "title", "shorttitle", "authors", "authors-ar",
+    "editors", "translators", "contributors", "publisher", "place", "year",
+    "edition", "series", "series-number", "volumes", "number", "issue", "pages",
+    "doi", "isbn", "url", "language", "genre", "section", "citekey",
+    "zotero-link",
+)
+
+
+def _frontmatter_blocks(text: str, keys: tuple[str, ...] | None = None) -> list[list[str]]:
+    """Raw YAML property blocks (key line plus indented continuation lines)."""
+    end = _frontmatter_end(text)
+    if end == -1:
+        return []
+    blocks: list[list[str]] = []
+    current: list[str] | None = None
+    for line in text[3:end].splitlines():
+        match = re.match(r"^([A-Za-z][\w-]*):(.*)$", line)
+        if match:
+            if current:
+                blocks.append(current)
+            current = [line]
+        elif current is not None and (line.startswith(" ") or line.startswith("\t")):
+            current.append(line)
+        else:
+            if current:
+                blocks.append(current)
+            current = None
+    if current:
+        blocks.append(current)
+    if keys:
+        wanted = set(keys)
+        blocks = [block for block in blocks
+                  if re.match(r"^([A-Za-z][\w-]*):", block[0]).group(1) in wanted]
+    return blocks
+
+
+def _copy_bibliography(note_path: Path, ref_path: Path) -> None:
+    """Copy ScholarWeft's citation properties from a literature note to a MOC.
+
+    The source's `title`, `authors`, `authors-ar`, `shorttitle` and publication
+    fields replace the generated descriptive versions; the note's own `midad-*`,
+    `created`, `volume`, `topics`, `title-ar` and aliases are left alone.
+    """
+    if not note_path.exists() or not ref_path.exists():
+        return
+    source_blocks = _frontmatter_blocks(ref_path.read_text(encoding="utf-8"), CITATION_KEYS)
+    if not source_blocks:
+        return
+    source: dict[str, list[str]] = {}
+    for block in source_blocks:
+        key = re.match(r"^([A-Za-z][\w-]*):", block[0]).group(1)
+        source[key] = block
+    text = note_path.read_text(encoding="utf-8")
+    end = _frontmatter_end(text)
+    if end == -1:
+        return
+    seen: set[str] = set()
+    out: list[list[str]] = []
+    for block in _frontmatter_blocks(text):
+        key = re.match(r"^([A-Za-z][\w-]*):", block[0]).group(1)
+        if key in source:
+            out.append(source[key])
+            seen.add(key)
+        else:
+            out.append(block)
+    for key, block in source.items():
+        if key not in seen:
+            out.append(block)
+    frontmatter = "\n".join(line for block in out for line in block)
+    note_path.write_text("---\n" + frontmatter + "\n" + text[end:], encoding="utf-8")
+
+
 def build_yaml(citekey: str, doc_type: str, related: list[str], volume: int = None,
                standalone: bool = False, title: str | None = None,
-               authors: list[str] | None = None) -> str:
+               authors: list[str] | None = None, topics: list[str] | None = None,
+               title_ar: str = "", authors_ar: list[str] | None = None) -> str:
     """Build YAML frontmatter from the Zotero reference and the aliases.
 
     A standalone transcription (a PDF the user chose directly, with no Zotero
@@ -213,6 +415,8 @@ midad-work: "{_yaml_quote(mas_work)}"
 midad-unit: "{("vol." + str(volume)) if volume else "note"}"
 title: "{_yaml_quote(title)}"
 """
+    if title_ar:
+        yaml += f'title-ar: "{_yaml_quote(title_ar)}"\n'
     if shorttitle:
         yaml += f'shorttitle: "{_yaml_quote(shorttitle)}"\n'
     if volume:
@@ -220,6 +424,12 @@ title: "{_yaml_quote(title)}"
     if author_list:
         yaml += "authors:\n"
         for a in author_list:
+            yaml += f'  - "{_yaml_quote(a)}"\n'
+    if authors_ar:
+        # One standard: the list, even for a single author. The old singular
+        # `author-ar` is not written and is removed from older notes.
+        yaml += "authors-ar:\n"
+        for a in authors_ar:
             yaml += f'  - "{_yaml_quote(a)}"\n'
 
     if standalone:
@@ -239,6 +449,16 @@ title: "{_yaml_quote(title)}"
         yaml += "related:\n"
         for r in related:
             yaml += f'  - "{_yaml_quote(r)}"\n'
+
+    # Topics are user-assigned: the resource model counts this note under each
+    # topic MOC named here, and the topic MOC lists it. A re-transcription keeps
+    # the existing list.
+    if topics:
+        yaml += "topics:\n"
+        for topic in topics:
+            yaml += f'  - "{_yaml_quote(topic)}"\n'
+    else:
+        yaml += "topics: []\n"
 
     yaml += "---\n"
     return yaml
@@ -266,13 +486,17 @@ def dest_path(citekey: str, doc_type: str, volume: int = None, standalone: bool 
 
 
 def ensure_parent(citekey: str, doc_type: str, related: list[str], volume: int,
-                  standalone: bool = False):
+                  standalone: bool = False, title_ar: str = "",
+                  authors_ar: list[str] | None = None):
     """Create/update the multivolume parent note and its volume list."""
     if not volume:
         return None
     parent = dest_path(citekey, doc_type, None, standalone)
     if not parent.exists():
-        parent.write_text(build_yaml(citekey, doc_type, related, standalone=standalone) + "\n", encoding="utf-8")
+        parent.write_text(
+            build_yaml(citekey, doc_type, related, standalone=standalone,
+                       title_ar=title_ar, authors_ar=authors_ar) + "\n",
+            encoding="utf-8")
         print(f"Created parent: {parent.name}")
 
     content = parent.read_text(encoding="utf-8")
@@ -292,6 +516,7 @@ def ensure_parent(citekey: str, doc_type: str, related: list[str], volume: int,
             new_lines.append(f"- {entry}")
         parent.write_text("\n".join(new_lines), encoding="utf-8")
         print(f"Updated parent with vol. {volume}")
+    _ensure_yaml_properties(parent, title_ar, authors_ar or [])
     return parent
 
 
@@ -349,12 +574,26 @@ def write_note(body: str, citekey: str, doc_type: str, related: list[str] = None
                title: str | None = None, authors: list[str] | None = None) -> Path:
     """Build the YAML and write the finished note. Returns its path."""
     related = related or []
+    if doc_type == "transcription":
+        title_ar, authors_ar = extract_arabic_metadata(body)
+    else:
+        title_ar, authors_ar = _transcription_metadata(citekey, standalone)
     if not standalone:
-        ensure_parent(citekey, doc_type, related, volume, standalone)
+        ensure_parent(citekey, doc_type, related, volume, standalone, title_ar, authors_ar)
     dest = dest_path(citekey, doc_type, volume, standalone)
+    # A user's own Arabic metadata wins, exactly like `topics`.
+    title_ar = _existing_scalar(dest, "title-ar") or title_ar
+    authors_ar = _existing_list(dest, "authors-ar") or authors_ar
     yaml = build_yaml(citekey, doc_type, related, volume=volume, standalone=standalone,
-                      title=title, authors=authors)
+                      title=title, authors=authors, topics=_existing_topics(dest),
+                      title_ar=title_ar, authors_ar=authors_ar)
     dest.write_text(yaml + "\n" + body.strip() + "\n", encoding="utf-8")
+    if not standalone:
+        parent = dest_path(citekey, doc_type, None, standalone)
+        _ensure_yaml_properties(parent, title_ar, authors_ar)
+        ref = find_zotero(citekey)
+        if ref:
+            _copy_bibliography(parent, ref)
     # Record/refresh the ordered transcriptions/translations list on the
     # literature note: parent note first, then volumes in numerical order.
     if not standalone and sync_collection_property(citekey, doc_type, standalone):

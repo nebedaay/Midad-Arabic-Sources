@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Unified post-processing script for Gemini Batch OCR output.
-Applies all formatting fixes in one pass for any volume of Fi riyad al-tafsir.
+Applies all formatting fixes in one pass for any volume of a work.
 
 Usage: python3 scripts/postprocess-gemini-batch.py <input.md>
 Output: <input>.formatted.md with timestamp
@@ -16,7 +16,7 @@ Fixes applied:
 7. Page separators: collapse doubles, ensure \n\n---\n\n
 8. Page footers: remove - N - lines
 9. Paragraph joining: join broken lines within prose blocks
-10. Remove running headers (في رياض التفسير)
+10. Remove running headers
 11. Heading detection: **فصل : title** or plain → ### فصل : title (same for باب، الباب، الفصل)
 """
 import re

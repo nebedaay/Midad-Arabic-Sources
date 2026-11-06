@@ -7,13 +7,19 @@
     "Keyed by the work key shown in the collection MOC / the SourceWork key",
     "(<collection>:<id>). Any field here overrides the derived value; omit a key",
     "to fall back to the repository/source name.",
-    "Fields: title, publisher, place, date, edition, translators[], authors[],",
-    "editors[], note, verified (true = checked against the physical/authoritative edition).",
+    "Fields: item_type, title, shorttitle, title_ar, authors[], authors_ar[],",
+    "translators[], editors[], contributors[], publisher, place, date, edition, series,",
+    "series-number, volume, volumes, number, issue, pages, doi, isbn, url, genre, section,",
+    "citekey, language, note, verified (true = checked against the physical/authoritative edition).",
     "A name is normally a string; the last word becomes Zotero's last name. For names",
     "the split gets wrong (compound surnames like 'Abdel Haleem'), use an object:",
     "  { \"first\": \"M. A. S.\", \"last\": \"Abdel Haleem\" }  — or { \"name\": \"…\" } for a",
-    "single-field name. This override is used for the Zotero creator and the YAML link."
+    "single-field name. Western names use ScholarWeft's `Last, First` order",
+    "(Wehr, Hans; Lane, Edward William); a classical Arabic name may stay one name",
+    "(Ibn Manẓūr) or use { \"name\": \"…\" } to force a single-field creator.",
+    "This override is used for the Zotero creator and the YAML link."
   ],
+  "turath:1687": { "verified": true, "authors_ar": ["ابن منظور"] },
   "hadith:bukhari": {
     "verified": false,
     "publisher": "Darussalam",

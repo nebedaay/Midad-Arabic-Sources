@@ -15,18 +15,56 @@
 <% if (pub.mas_note) { add_property('midad-note', pub.mas_note); } -%>
 <% add_property('related', [], { force: true, merge: 'keep' }); -%>
 <% add_property('title', work.title); -%>
-<% const person = (a) => (typeof a === 'string' ? a : (a.name || [a.first, a.last].filter(Boolean).join(' '))); -%>
+<% const shortTitle = pub.shorttitle || work.short; -%>
+<% if (shortTitle) { add_property('shorttitle', shortTitle); } -%>
+<% /* The rule is the language of the published work, not its genre: an Arabic
+   dictionary keeps its Arabic title; an English-language work (Wehr, Lane, an
+   English Qur'ān translation) does not get an Arabic rendering of its title. */ -%>
+<% const titleArAllowed = (work.title_language || work.language) === 'ar'; -%>
+<% const titleAr = titleArAllowed ? (pub.title_ar || work.title_ar) : ''; -%>
+<% if (titleArAllowed && titleAr) { add_property('title-ar', titleAr, { quote: 'always' }); } else if (!titleArAllowed) { add_property('title-ar', '', { merge: 'remove' }); } -%>
+<% const scholarName = (a) => {
+  if (typeof a !== 'string') return a.name || [a.last, a.first].filter(Boolean).join(', ');
+  const s = a.trim();
+  if (s.includes(',') || /(?:^|\s)(?:b\.\s|ibn\b|bint\b|al-\S|Abū\b|Abu\b)/i.test(s)) return s;
+  const parts = s.split(/\s+/).filter(Boolean);
+  return parts.length > 1 ? `${parts[parts.length - 1]}, ${parts.slice(0, -1).join(' ')}` : s;
+}; -%>
+<% const person = (a) => scholarName(a); -%>
 <% const pubAuthors = (pub.authors && pub.authors.length) ? pub.authors : (work.authors || []); -%>
 <% const pubTranslators = (pub.translators && pub.translators.length) ? pub.translators : (work.translators || []); -%>
 <% const pubEditors = pub.editors || []; -%>
-<% add_property('item-type', 'book'); -%>
+<% add_property('item-type', pub.item_type || 'book'); -%>
 <% if (pubAuthors.length) { add_property('authors', pubAuthors.map(a => wikilink(person(a)))); } -%>
+<% const authorsArAllowed = (work.title_language || work.language) === 'ar'; -%>
+<% const authorsArRaw = authorsArAllowed ? ((pub.authors_ar && pub.authors_ar.length) ? pub.authors_ar : (work.authors_ar || [])) : []; -%>
+<% const authorsAr = Array.isArray(authorsArRaw) ? authorsArRaw : (authorsArRaw ? [authorsArRaw] : []); -%>
+<% if (authorsArAllowed && authorsAr.length) { add_property('authors-ar', authorsAr, { quote: 'always' }); } else if (!authorsArAllowed) { add_property('authors-ar', '', { merge: 'remove' }); } -%>
+<% /* One standard: `authors-ar` is the list, even for a single author. */ -%>
+<% add_property('author-ar', '', { merge: 'remove' }); -%>
 <% if (pubTranslators.length) { add_property('translators', pubTranslators.map(a => wikilink(person(a)))); } -%>
 <% if (pubEditors.length) { add_property('editors', pubEditors.map(a => wikilink(person(a)))); } -%>
+<% if (pub.contributors) { const contributors = Array.isArray(pub.contributors) ? pub.contributors : [pub.contributors]; add_property('contributors', contributors.map(a => wikilink(person(a)))); } -%>
 <% if (pub.publisher) { add_property('publisher', wikilink(pub.publisher)); } -%>
 <% if (pub.place) { add_property('place', pub.place); } -%>
 <% if (pub.date) { add_property('year', wikilink(String(pub.date).slice(0, 4))); } -%>
 <% if (pub.edition) { add_property('edition', pub.edition); } -%>
+<% if (pub.series) { add_property('series', pub.series); } -%>
+<% if (pub['series-number']) { add_property('series-number', pub['series-number']); } -%>
+<% if (pub.volume) { add_property('volume', pub.volume); } -%>
+<% const volumeCount = pub.volumes || (Number(work.volumes) > 1 ? Number(work.volumes) : ''); -%>
+<% if (volumeCount) { add_property('volumes', volumeCount); } -%>
+<% if (pub.number) { add_property('number', pub.number); } -%>
+<% if (pub.issue) { add_property('issue', pub.issue); } -%>
+<% if (pub.pages) { add_property('pages', pub.pages); } -%>
+<% if (pub.doi) { add_property('doi', pub.doi); } -%>
+<% if (pub.isbn) { add_property('isbn', pub.isbn); } -%>
+<% const url = pub.url || work.source; -%>
+<% if (url) { add_property('url', url); } -%>
+<% const genre = pub.genre || work.genre; -%>
+<% if (genre) { add_property('genre', genre); } -%>
+<% if (pub.section) { add_property('section', pub.section); } -%>
+<% if (pub.citekey) { add_property('citekey', pub.citekey); } -%>
 <% if (work.language_links.length > 1) { add_property('language', work.language_links.map(l => wikilink(l))); } else { add_property('language', wikilink(work.language_links[0])); } -%>
 <% if (work.repo) { add_property('repository', `[${work.repo_name || work.repo}](${work.repo})`); } -%>
 <% const showSource = work.source && work.source !== work.repo; -%>
