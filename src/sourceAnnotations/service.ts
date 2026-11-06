@@ -2495,9 +2495,23 @@ export class AnnotationService {
 	async openNavigationLink(path: string, heading?: string): Promise<void> {
 		const file = this.app.vault.getAbstractFileByPath(normalizePath(path));
 		if (!(file instanceof TFile)) return;
-		const base = file.path.replace(/\.md$/i, "");
-		const link = heading ? `${base}#${heading}` : base;
-		await this.app.workspace.openLinkText(link, file.path, false);
+		// Use a main-area Markdown leaf, never the sidebar leaf that received the
+		// click. The subpath makes Obsidian scroll to the heading; no sidebar
+		// re-render/focus change is needed to perform the navigation.
+		const leaves = this.app.workspace.getLeavesOfType("markdown")
+			.filter((leaf) => !leaf.view.containerEl.closest(
+				".mod-left-split, .mod-right-split, .workspace-drawer"));
+		const active = this.app.workspace.getActiveViewOfType(MarkdownView)?.leaf;
+		const target = leaves.find((leaf) => (leaf.view as MarkdownView).file?.path === file.path)
+			?? leaves.find((leaf) => leaf === active)
+			?? leaves[0]
+			?? this.app.workspace.getLeaf("tab");
+		await target.openFile(file, {
+			active: true,
+			eState: heading ? { subpath: `#${heading}` } : undefined,
+		});
+		if (heading) target.setEphemeralState({ subpath: `#${heading}` });
+		this.app.workspace.setActiveLeaf(target, { focus: true });
 	}
 
 	async openNamedNote(names: string[]): Promise<void> {

@@ -110,6 +110,9 @@ export class AnnotationSidebarView extends ItemView {
 		const token = ++this.renderToken;
 		const data = await this.service.sidebarData(file);
 		if (token !== this.renderToken) return;
+		const sameNote = this.navigationPath === data.notePath;
+		const previousScroll = this.contentEl
+			.querySelector<HTMLElement>(".mas-ann-nav__scroll")?.scrollTop ?? 0;
 		this.component?.unload();
 		const component = new Component();
 		component.load();
@@ -176,6 +179,13 @@ export class AnnotationSidebarView extends ItemView {
 		const scrollNavigation = this.activeTab === "navigation" && this.navigationPath !== data.notePath;
 		this.navigationPath = data.notePath;
 		showTab(this.activeTab, scrollNavigation);
+		if (sameNote && this.activeTab === "navigation" && !scrollNavigation) {
+			// A heading link or the native Outline can fire file-open/active-leaf
+			// changes without changing the note. Keep the reader's place instead
+			// of snapping the rebuilt sidebar back to the brand/header.
+			const scroller = root.querySelector<HTMLElement>(".mas-ann-nav__scroll");
+			if (scroller) scroller.scrollTop = previousScroll;
+		}
 		this.renderBottomLinks(root);
 	}
 
@@ -228,6 +238,7 @@ export class AnnotationSidebarView extends ItemView {
 				const icon = row.createSpan({ cls: "mas-ann-nav__parent-icon" });
 				setIcon(icon, "arrow-up");
 				this.renderNavigationLink(row, parent, "mas-ann-nav__parent-link");
+				if (parent.path) this.makeRowClickable(row, parent);
 			}
 		}
 
@@ -276,6 +287,7 @@ export class AnnotationSidebarView extends ItemView {
 				heading.createSpan({ cls: "mas-ann-nav__title", text: linkText(item) });
 			} else {
 				this.renderNavigationLink(heading, item, "mas-ann-nav__title");
+				if (item.path) this.makeRowClickable(heading, item);
 			}
 			if (item.annotationCount > 0) renderAnnotationCount(heading, item.annotationCount);
 			if (hasChildren) {
@@ -286,10 +298,21 @@ export class AnnotationSidebarView extends ItemView {
 					const childRow = children.createEl("li", { cls: "mas-ann-nav__child" });
 					const line = childRow.createDiv({ cls: "mas-ann-nav__row" });
 					this.renderNavigationLink(line, child, "mas-ann-nav__child-link");
+					if (child.path) this.makeRowClickable(line, child);
 					if (child.annotationCount > 0) renderAnnotationCount(line, child.annotationCount);
 				}
 			}
 		}
+	}
+
+	private makeRowClickable(row: HTMLElement, link: NavigationLink): void {
+		row.addClass("is-clickable");
+		row.addEventListener("click", (event) => {
+			const target = event.target as HTMLElement | null;
+			if (target?.closest(".mas-ann-nav__fold")) return;
+			event.preventDefault();
+			void this.service.openNavigationLink(link.path, link.heading);
+		});
 	}
 
 	private renderNavigationLink(parent: HTMLElement, link: NavigationLink, cls: string): void {

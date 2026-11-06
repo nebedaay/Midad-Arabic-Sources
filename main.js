@@ -14969,12 +14969,14 @@ var AnnotationSidebarView = class extends import_obsidian12.ItemView {
     this.component = null;
   }
   async refresh(file) {
-    var _a2;
+    var _a2, _b2, _c;
     const token = ++this.renderToken;
     const data = await this.service.sidebarData(file);
     if (token !== this.renderToken)
       return;
-    (_a2 = this.component) == null ? void 0 : _a2.unload();
+    const sameNote = this.navigationPath === data.notePath;
+    const previousScroll = (_b2 = (_a2 = this.contentEl.querySelector(".mas-ann-nav__scroll")) == null ? void 0 : _a2.scrollTop) != null ? _b2 : 0;
+    (_c = this.component) == null ? void 0 : _c.unload();
     const component = new import_obsidian12.Component();
     component.load();
     this.component = component;
@@ -15039,6 +15041,11 @@ var AnnotationSidebarView = class extends import_obsidian12.ItemView {
     const scrollNavigation = this.activeTab === "navigation" && this.navigationPath !== data.notePath;
     this.navigationPath = data.notePath;
     showTab(this.activeTab, scrollNavigation);
+    if (sameNote && this.activeTab === "navigation" && !scrollNavigation) {
+      const scroller = root.querySelector(".mas-ann-nav__scroll");
+      if (scroller)
+        scroller.scrollTop = previousScroll;
+    }
     this.renderBottomLinks(root);
   }
   async renderAnnotations(panel, data, component, token) {
@@ -15093,6 +15100,8 @@ var AnnotationSidebarView = class extends import_obsidian12.ItemView {
         const icon = row.createSpan({ cls: "mas-ann-nav__parent-icon" });
         (0, import_obsidian12.setIcon)(icon, "arrow-up");
         this.renderNavigationLink(row, parent, "mas-ann-nav__parent-link");
+        if (parent.path)
+          this.makeRowClickable(row, parent);
       }
     }
     if (!data.items.length) {
@@ -15141,6 +15150,8 @@ var AnnotationSidebarView = class extends import_obsidian12.ItemView {
         heading.createSpan({ cls: "mas-ann-nav__title", text: linkText(item) });
       } else {
         this.renderNavigationLink(heading, item, "mas-ann-nav__title");
+        if (item.path)
+          this.makeRowClickable(heading, item);
       }
       if (item.annotationCount > 0)
         renderAnnotationCount(heading, item.annotationCount);
@@ -15152,11 +15163,23 @@ var AnnotationSidebarView = class extends import_obsidian12.ItemView {
           const childRow = children.createEl("li", { cls: "mas-ann-nav__child" });
           const line = childRow.createDiv({ cls: "mas-ann-nav__row" });
           this.renderNavigationLink(line, child, "mas-ann-nav__child-link");
+          if (child.path)
+            this.makeRowClickable(line, child);
           if (child.annotationCount > 0)
             renderAnnotationCount(line, child.annotationCount);
         }
       }
     }
+  }
+  makeRowClickable(row, link) {
+    row.addClass("is-clickable");
+    row.addEventListener("click", (event) => {
+      const target = event.target;
+      if (target == null ? void 0 : target.closest(".mas-ann-nav__fold"))
+        return;
+      event.preventDefault();
+      void this.service.openNavigationLink(link.path, link.heading);
+    });
   }
   renderNavigationLink(parent, link, cls) {
     const text = linkText(link);
@@ -18003,12 +18026,23 @@ ${MANAGED_CLOSE}
       window.setTimeout(run, Math.max(60, delay));
   }
   async openNavigationLink(path2, heading) {
+    var _a2, _b2, _c, _d;
     const file = this.app.vault.getAbstractFileByPath((0, import_obsidian16.normalizePath)(path2));
     if (!(file instanceof import_obsidian16.TFile))
       return;
-    const base = file.path.replace(/\.md$/i, "");
-    const link = heading ? `${base}#${heading}` : base;
-    await this.app.workspace.openLinkText(link, file.path, false);
+    const leaves = this.app.workspace.getLeavesOfType("markdown").filter((leaf) => !leaf.view.containerEl.closest(".mod-left-split, .mod-right-split, .workspace-drawer"));
+    const active = (_a2 = this.app.workspace.getActiveViewOfType(import_obsidian16.MarkdownView)) == null ? void 0 : _a2.leaf;
+    const target = (_d = (_c = (_b2 = leaves.find((leaf) => {
+      var _a3;
+      return ((_a3 = leaf.view.file) == null ? void 0 : _a3.path) === file.path;
+    })) != null ? _b2 : leaves.find((leaf) => leaf === active)) != null ? _c : leaves[0]) != null ? _d : this.app.workspace.getLeaf("tab");
+    await target.openFile(file, {
+      active: true,
+      eState: heading ? { subpath: `#${heading}` } : void 0
+    });
+    if (heading)
+      target.setEphemeralState({ subpath: `#${heading}` });
+    this.app.workspace.setActiveLeaf(target, { focus: true });
   }
   async openNamedNote(names) {
     for (const name of names) {

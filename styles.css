@@ -1637,6 +1637,20 @@ body .mas-ann-card-quote ol {
     min-width: 0;
 }
 
+.mas-ann-nav__parent.is-clickable {
+    cursor: pointer;
+    border-radius: 4px;
+}
+
+.mas-ann-nav__parent.is-clickable:hover {
+    background: var(--background-modifier-hover);
+}
+
+.mas-ann-nav__parent.is-clickable > a.mas-ann-nav__parent-link {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
 .mas-ann-nav__parent-icon {
     display: inline-flex;
     color: var(--text-muted);
@@ -1675,6 +1689,21 @@ body .mas-ann-card-quote ol {
     flex-wrap: wrap;
     gap: 4px;
     padding: 2px 0;
+    min-width: 0;
+}
+
+.mas-ann-nav__row.is-clickable {
+    cursor: pointer;
+    border-radius: 4px;
+}
+
+.mas-ann-nav__row.is-clickable:hover {
+    background: var(--background-modifier-hover);
+}
+
+.mas-ann-nav__row.is-clickable > a.mas-ann-nav__title,
+.mas-ann-nav__row.is-clickable > a.mas-ann-nav__child-link {
+    flex: 1 1 auto;
     min-width: 0;
 }
 
