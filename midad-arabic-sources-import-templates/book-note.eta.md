@@ -16,6 +16,8 @@
 
 <% const multi = (work.volumes || 1) > 1; -%>
 <% for (const p of unit.pages) { -%>
+---
+
 #### p. <%= multi ? `${p.vol}:${p.page_label || p.page}` : (p.page_label || p.page) %>
 
 <%~ p.body %>

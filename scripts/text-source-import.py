@@ -880,7 +880,14 @@ def _ar_numeral(n: int) -> str:
 def _lookup_surah(name: str) -> dict | None:
     """Resolve a citation's sūra from its name (Arabic or transliterated) or number."""
     key = re.sub(r"^سوره", "", _normalize_ayah_name(name))  # tolerate a leading "سورة"
-    row = surah_name_index().get(key) or surah_name_index().get(re.sub(r"[^a-z]", "", name.lower()))
+    index = surah_name_index()
+    row = index.get(key) or index.get(re.sub(r"[^a-z]", "", name.lower()))
+    if not row:
+        # Some editions drop the article or write its alef as a preposition lām
+        # (`لنجم` for `النجم`). Try the bare name with the article restored.
+        bare = re.sub(r"^ال", "", key[1:] if key.startswith("ل") else key)
+        if bare:
+            row = index.get("ال" + bare) or index.get(bare)
     if row:
         return row
     digits = name.strip().translate(_ARABIC_TO_WESTERN)
@@ -894,10 +901,20 @@ def link_verse_citations(text: str, *, skip: tuple[int, int] | None = None) -> s
 
     Handles the shapes the repositories actually use (see `_VerseCitation`). `skip`
     is the (sūra, āya) of the verse being commented, so a citation of that very
-    verse is left as written.
+    verse is left as written. Existing wikilinks are protected: their display
+    text can look like a citation, but a second pass must never nest a link in
+    one that is already there.
     """
     if not text or ":" not in text or _CANONICAL_RIWAYA != "hafs":
         return text
+
+    links: list[str] = []
+
+    def protect(m: re.Match) -> str:
+        links.append(m.group(0))
+        return f"\x10{len(links) - 1}\x11"
+
+    text = re.sub(r"\[\[[^\]]*\]\]", protect, text)
 
     def repl(m: re.Match) -> str:
         if (m.group("open") == "[") != (m.group("close") == "]"):
@@ -924,7 +941,10 @@ def link_verse_citations(text: str, *, skip: tuple[int, int] | None = None) -> s
                     f"–[[{row['base']}#{last}|{_ar_numeral(last)}]])")
         return f"([[{row['base']}#{first}|{row['arabic']} : {_ar_numeral(first)}]])"
 
-    return _VerseCitation.sub(repl, text)
+    text = _VerseCitation.sub(repl, text)
+    for i, link in enumerate(links):
+        text = text.replace(f"\x10{i}\x11", link)
+    return text
 
 
 _QURAN_MODULE = None
@@ -977,16 +997,24 @@ def detect_quote_delims(text: str) -> tuple[str, ...]:
     return tuple(enabled)
 
 
-def link_quote_citations(text: str, *, surah: int, ayah: int, delims: tuple[str, ...] = ()) -> str:
+def link_quote_citations(
+    text: str, *, surah: int, ayah: int, delims: tuple[str, ...] = (),
+    linear: bool = True,
+) -> str:
     """Cite every Qur'ān quote that resolves to a verse other than this one.
 
     Quotes come from the vault-marked `﴿…﴾` spans and, when the work uses them
     (`delims`), from guillemets / curly quotes / parentheses. Each is matched
-    against the canonical notes with the transcription matcher, walking forward —
-    the quotes of the commented verse come in order — and a quote of the commented
-    verse itself is left uncited. One- or two-word quotes are never cited: nobody
-    quotes a word or two from a *different* verse, and matching them (﴿الم﴾,
-    ﴿ذَلِك﴾ …) would only produce false positives.
+    against the canonical notes with the transcription matcher.
+
+    `linear` is the tafsīr assumption: the quotes in a commentary run in the
+    order of the verse being discussed, so each lookup is hinted by the previous
+    match. In a general work (a dictionary, a book, ḥadīth) quotes are not
+    necessarily in Qur'ānic order, so callers pass `linear=False` and every quote
+    is looked up independently. A quote of the verse currently being commented
+    is left uncited. One- or two-word quotes are never cited: nobody quotes a
+    word or two from a *different* verse, and matching them (﴿الم﴾, ﴿ذَلِك﴾ …)
+    would only produce false positives.
     """
     if not text or _CANONICAL_RIWAYA != "hafs":
         return text
@@ -1005,7 +1033,11 @@ def link_quote_citations(text: str, *, surah: int, ayah: int, delims: tuple[str,
             if len(seg.split()) <= 2:
                 continue
             try:
-                res = tfq.find_verse_in_text(seg, hint_surah=state["s"], hint_verse=state["v"])
+                res = tfq.find_verse_in_text(
+                    seg,
+                    hint_surah=state["s"] if linear else None,
+                    hint_verse=state["v"] if linear else None,
+                )
             except Exception:  # noqa: BLE001
                 res = None
             if res:
@@ -1013,7 +1045,8 @@ def link_quote_citations(text: str, *, surah: int, ayah: int, delims: tuple[str,
         if not res:
             return ""
         s, v = res[0][0], res[0][1]
-        state["s"], state["v"] = s, v
+        if linear:
+            state["s"], state["v"] = s, v
         if (s, v) == (surah, ayah):
             return ""
         row = _surah_rows()[s - 1]
@@ -1023,6 +1056,36 @@ def link_quote_citations(text: str, *, surah: int, ayah: int, delims: tuple[str,
     text = _QuoteMark.sub(lambda m: m.group(0) + cite(m.group(1).strip()), text)
     for name in delims:
         text = _ExtraDelims[name].sub(lambda m: m.group(0) + cite(m.group(1).strip()), text)
+    return text
+
+
+def link_source_content(
+    text: str, *, surah: int = 0, ayah: int = 0,
+    linear: bool = False, skip_current: bool = False,
+    delims: tuple[str, ...] = (), language: str = "ar",
+) -> str:
+    """The one citation pass shared by every born-digital source collection.
+
+    This runs after the source's own normalisation (HTML → markdown, smart
+    quotes, `﴿…﴾` markers) and before the renderer writes anything. Doing every
+    citation here — rather than adding a Turath-only or ḥadīth-only pass — keeps
+    the content treatment the same across repositories.
+
+    `linear` and `skip_current` are the two tafsīr-specific assumptions:
+    commentary quotes follow the verse under discussion, and that verse's own
+    text is not re-cited. Every other genre looks each quote up independently,
+    because its quotations are not tied to a surrounding verse. `language`
+    gates the Arabic-only quote matcher; explicit `sūra: āya` citations still
+    link in an English translation when the source supplies them.
+    """
+    if not text:
+        return text
+    skip = (surah, ayah) if skip_current and surah and ayah else None
+    text = link_verse_citations(text, skip=skip)
+    if language == "ar":
+        text = link_quote_citations(
+            text, surah=surah, ayah=ayah, delims=delims, linear=linear,
+        )
     return text
 
 
@@ -2005,7 +2068,7 @@ def parse_work_file(data, shape: str) -> list[tuple[int, str]]:
 # entry, because a re-render only replays the model and cannot apply an
 # acquisition change. Bump the affected entry whenever this file's output for a
 # collection changes, and mirror it in the plugin's `COLLECTION_MODEL_SCHEMA`.
-MODEL_SCHEMA: dict[str, int] = {"dictionary": 6, "turath": 1}
+MODEL_SCHEMA: dict[str, int] = {"dictionary": 6, "turath": 2}
 BASE_MODEL_SCHEMA = 1
 
 
@@ -2037,9 +2100,15 @@ def _ayah_blocks(surah: dict, records: list[tuple[int, str]], english: bool,
     for g in groups:
         start, end = g["start"], g["end"]
         body = clean_text(g["raw"], english=english)
-        # Link citations of *other* verses; the commented verse's own quotes stay.
-        body = link_verse_citations(body, skip=(surah["number"], start))
-        body = link_quote_citations(body, surah=surah["number"], ayah=start, delims=delims)
+        # One content pass for every collection. In a tafsīr the quotes follow
+        # the verse under discussion and that verse is not re-cited; the same
+        # pass runs for general works in `link_source_content` with linear=False.
+        body = link_source_content(
+            body,
+            surah=surah["number"], ayah=start,
+            linear=True, skip_current=True, delims=delims,
+            language="en" if english else "ar",
+        )
         if not body:
             continue
         if end == start:
@@ -2180,10 +2249,12 @@ def build_hadith_units(work: dict, args: argparse.Namespace) -> list[dict]:
             hadiths.append({
                 "number": h.get("idInBook", h.get("id")),
                 "narrator": clean_text(en.get("narrator", ""), english=True),
-                "english": link_verse_citations(clean_text(en.get("text", ""), english=True)),
-                "arabic": link_quote_citations(
-                    link_verse_citations(clean_text(h.get("arabic", ""), english=False)),
-                    surah=0, ayah=0),
+                "english": link_source_content(
+                    clean_text(en.get("text", ""), english=True),
+                    language="en", linear=False),
+                "arabic": link_source_content(
+                    clean_text(h.get("arabic", ""), english=False),
+                    language="ar", linear=False),
             })
         units.append({
             "kind": "hadith",
@@ -2215,7 +2286,9 @@ def build_quran_text_units(work: dict, table: list[dict], wanted: set[int] | Non
             continue
         blocks: list[dict] = []
         for v in data.get("verses", []):
-            text = clean_text(v.get("text") or "", english=False)
+            text = link_source_content(
+                clean_text(v.get("text") or "", english=False),
+                language="ar", linear=False)
             if text:
                 # `number_in_hafs` is a list in the riwāyāt files but null in the
                 # Uthmani edition; a null must not reach the template's loop.
@@ -4159,13 +4232,18 @@ def _turath_page(text: str, headings: list[dict], section_level: int,
     out.append(text[pos:])
 
     body = html.unescape(re.sub(r"<[^>]+>", "", "".join(out)))
-    # Qur'an quotes get the vault's marker; bracketed sūra:āya refs become links.
+    # Qur'ān quotes get the vault's marker. Smart quotes run here, before any
+    # wikilink is generated: a curly apostrophe must never enter a link target
+    # (`Al-An’am` would no longer match `Al-An'am`).
     body = re.sub(r"﴿(.+?)﴾", lambda m: f"*﴿{m.group(1)}﴾{{.quran-quote}}*",
                   body, flags=re.DOTALL)
-    body = link_verse_citations(body)
+    body = smart_quotes(body)
     paragraphs = [re.sub(r"\s+", " ", p).strip() for p in re.split(r"\n\s*\n", body)]
     paragraphs = [re.sub(r"\s*\n\s*", " ", p) for p in paragraphs if p.strip()]
-    return smart_quotes("\n\n".join(paragraphs))
+    body = "\n\n".join(paragraphs)
+    # The same citation pass as every other collection. A Turath book is not a
+    # tafsīr, so quotes are looked up independently rather than in verse order.
+    return link_source_content(body, language="ar", linear=False)
 
 
 def _turath_span(blocks: list[dict], multi: bool) -> str:

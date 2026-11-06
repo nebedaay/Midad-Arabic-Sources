@@ -25,7 +25,9 @@ Turath has far more books than any catalogue can list. **Add by URL** (a tab in 
 - **Ḥadīth collections** — `AhmedBaset/hadith-json`: 17 collections (Bukhārī, Muslim, Abū Dāwūd, Tirmidhī, Nasāʾī, Ibn Mājah, Mālik, Aḥmad, and the forties), Arabic and English.
 - **Qurʾān texts (riwāyāt)** — `risan/quran-json`: Warsh, Qālūn, al-Dūrī, Shuʿbah, al-Sūsī, plus canonical Ḥafṣ.
 - **Dictionaries** — Hans Wehr’s *Dictionary of Modern Written Arabic* (from its FODT edition) and Lane’s *An Arabic-English Lexicon* (from its SQLite edition), one note per root.
-- **Classical texts (Turath.io)** — the public API covering ~8,500 books across fiqh, uṣūl, ʿaqīda, ḥadīth commentary, tārīkh, adab, and language. One note per table-of-contents heading, with the source’s pages preserved as `#### p. N` markers.
+- **Classical texts (Turath.io)** — the public API covering ~8,500 books across fiqh, uṣūl, ʿaqīda, ḥadīth commentary, tārīkh, adab, and language. One note per table-of-contents heading, with the source’s pages preserved as `---`-separated `#### p. N` markers.
+
+All running-text source bodies go through one content postprocessor before rendering, whatever their repository: `﴿…﴾` spans get the vault’s Qur’ān-quote marker, explicit `sūra: āya` citations become links, and each resolved quotation gets a citation. Tafsīr adds the commentary-specific rule — quotes follow the verse under discussion, and that verse’s own text is not re-cited. Other genres (ḥadīth, Qur’ān translations, Turath books) look up each quote independently, because their quotations are not tied to a surrounding verse. Smart quotes run before link generation, so a link target never receives a curly apostrophe.
 
 ## Commands
 

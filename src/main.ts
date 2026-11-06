@@ -494,11 +494,14 @@ const SOURCE_CATALOG_SCHEMA = 4;
  * `dictionary` → 6: the leading-parenthesis fix, the verb-form look-ahead, the
  * engine fallback, the gemination completion, `title`/`section_page`, and
  * dropping the generated form-label parenthetical (`<b>III</b> (اَاَخَذَ)`).
+ * `turath` → 2: the shared content postprocessor links Qur'ān quotes in general
+ * works and no longer smart-quotes link targets.
  * Bump only the affected entries, and in step with `MODEL_SCHEMA` in
  * `scripts/text-source-import.py`.
  */
 const COLLECTION_MODEL_SCHEMA: Record<string, number> = {
 	dictionary: 6,
+	turath: 2,
 };
 
 /**
