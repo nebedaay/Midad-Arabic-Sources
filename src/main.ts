@@ -2606,6 +2606,19 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			const modelPath = normalizePath(`.midad-arabic-sources/source-models/${work.collection}/${work.id}.json`);
 			const hubPath = normalizePath(`${outRoot}/${dir}.md`);
 			const folderPath = normalizePath(`${outRoot}/${dir}`);
+			const canonicalRoot = this.settings.canonicalQuranFolder.trim() || `${outRoot}/Quran`;
+			const canonicalId = this.resolveCanonicalQuran();
+
+			// Read the expected paths before dropping the model. This matters for
+			// the canonical Qur'ān, whose sūra notes live outside the work folder;
+			// without it a removal would leave them behind.
+			const expected: string[] = [];
+			if (await adapter.exists(modelPath)) {
+				try {
+					const model = JSON.parse(await adapter.read(modelPath)) as SourceModel;
+					expected.push(...expectedNotePaths(model, outRoot, canonicalRoot, canonicalId));
+				} catch { /* the folder walk below still covers the work folder */ }
+			}
 
 			// Drop the cached model first, so nothing can re-render the work while
 			// the (larger, slower) note files are being deleted.
@@ -2617,11 +2630,17 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 				}
 			}
 
-			// Enumerate what is left, so progress is meaningful.
-			const files: string[] = [];
-			if (await adapter.exists(hubPath)) files.push(hubPath);
-			if (await adapter.exists(folderPath)) files.push(...(await this.listFilesUnder(folderPath)));
-			const total = files.length;
+			// Enumerate what is left, so progress is meaningful. Expected paths may
+			// include a canonical note that is already absent; only existing files
+			// are added.
+			const files = new Set<string>();
+			for (const path of [hubPath, ...expected]) {
+				if (await adapter.exists(path)) files.add(path);
+			}
+			if (await adapter.exists(folderPath)) {
+				for (const path of await this.listFilesUnder(folderPath)) files.add(path);
+			}
+			const total = files.size;
 			let done = 0;
 			onProgress?.(0, total);
 
