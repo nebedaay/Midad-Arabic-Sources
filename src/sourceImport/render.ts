@@ -90,6 +90,15 @@ async function readVaultFile(app: App, path: string): Promise<string | null> {
 	return null;
 }
 
+/** Is this an old rendered note of `dir` that the current model no longer lists? */
+async function isStaleWorkNote(app: App, path: string, dir: string): Promise<boolean> {
+	const text = await readVaultFile(app, path);
+	if (!text) return false;
+	if (!text.includes("text-source") || !text.includes("mas-managed")) return false;
+	if (!text.includes("midad-up:")) return false;
+	return text.includes(`[[${dir}]]`) || text.includes(`[[${dir}|`);
+}
+
 /** Read the four templates: user folder first, then the bundled defaults. */
 export async function loadTemplates(app: App, bundledDir: string, userDir: string | null): Promise<TemplateSet> {
 	const out: Record<string, string> = {};
@@ -447,6 +456,30 @@ export async function renderModelToVault(
 		await writeMerged(app, hubPath, hubContent, force);
 		seen?.set(hubPath, contentHash(hubContent.content));
 		written.push(hubPath);
+	}
+
+	// A model change can rename or regroup notes (Turath volume names becoming
+	// letter/fasl names, dictionary root romanisations changing, a chapter split
+	// into parts). Prune any old generated source note under this work's folder
+	// that the current model no longer lists. Only Midad-generated text-source
+	// notes carrying this work's link are touched; hand-written notes are left.
+	const expected = new Set<string>([normalizePath(hubPath)]);
+	if (!(singleUnit && !isQuranText)) {
+		for (const unit of model.units) {
+			expected.add(normalizePath(`${unit.note_folder}/${unit.note_stem}.md`));
+		}
+	}
+	const scanFolders = new Set<string>([normalizePath(folder)]);
+	if (isCanonical && canonicalRoot) scanFolders.add(normalizePath(canonicalRoot));
+	for (const scanFolder of scanFolders) {
+		for (const path of await listMarkdown(app, scanFolder)) {
+			const rel = normalizePath(path);
+			if (expected.has(rel)) continue;
+			if (!(await isStaleWorkNote(app, rel, dir))) continue;
+			await deleteNote(app, rel);
+			seen?.delete(rel);
+			seen?.delete(path);
+		}
 	}
 	tick();
 	return written;
