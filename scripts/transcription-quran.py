@@ -187,6 +187,30 @@ def get_surah_name(surah_num: int) -> tuple[str, str]:
     arabic = aliases[2] if len(aliases) > 2 else str(surah_num)
     return (stem, arabic)
 
+def strip_orphan_quote_classes(content: str) -> str:
+    """Delete `{.quran-quote}` markers that are not the class of an italic span."""
+    return re.sub(r'\{\.quran-quote\}(?!\*)', '', content)
+
+
+def render_quran_quote(text: str, position: str, surah: int, verse: int,
+                       end_verse: int | str | None = None) -> str:
+    """The one renderer for every Qur'ān quotation.
+
+    `position` is `begin`, `full`, or `end`. All three use the same italic +
+    `.quran-quote` wrapper and the same citation link. Only the ornate opening
+    (`begin`/`full`) and closing (`full`/`end`) parentheses vary, so a quote
+    split across a page has exactly one opening and one closing.
+    """
+    body = text.strip()
+    fragment = get_tashkil_fragment(body, surah, verse)
+    if fragment:
+        body = fragment
+    opening = "\ufd3f" if position in ("begin", "full") else ""
+    closing = "\ufd3e" if position in ("end", "full") else ""
+    link = build_wikilink(surah, verse, end_verse=end_verse).strip()
+    return f"*{opening}{body}{closing}{{.quran-quote}}* {link}"
+
+
 def normalize_arabic(text: str) -> str:
     """Strip tashkīl and normalize Unicode for matching."""
     # Aggressively normalizes away orthographic variants common in
@@ -368,7 +392,17 @@ def get_tashkil_fragment(quote_text: str, surah_num: int, verse_num: int) -> str
                 tashkil_parts.append(seg)
         return ' * '.join(tashkil_parts)
     if idx < 0:
-        return None
+        # Loose spelling fallback (see `find_verse_in_text`): treat yāʾ as
+        # optional so ano/orthographic variants like أراك / أرىك still get the
+        # canonical tashkīl.
+        loose_quote = normalize_arabic(quote_text).replace("ي", "")
+        loose_verse = normalized_verse.replace("ي", "")
+        lidx = loose_verse.find(loose_quote)
+        if lidx < 0:
+            return None
+        return _extract_tashkil_by_index(
+            verse, lidx, len(loose_quote), loose_verse,
+            lambda value: normalize_arabic(value).replace("ي", ""))
     return _extract_tashkil_by_index(verse, idx, len(normalized_quote), normalized_verse)
 
 
@@ -431,14 +465,20 @@ def find_verse_range(quote_text: str, surah: int, start_verse: int) -> tuple[int
     # Extract the tashkīl fragment corresponding to the match
     return _extract_tashkil_by_index(verse, idx, len(normalized_quote), normalized_verse)
 
-def _extract_tashkil_by_index(verse: str, norm_idx: int, norm_len: int, normalized_verse: str) -> str:
+def _extract_tashkil_by_index(
+    verse: str, norm_idx: int, norm_len: int, normalized_verse: str,
+    norm_func=None,
+) -> str:
     """Extract the tashkīl text from verse given a position in the normalized text.
-    
-    Uses normalize_arabic per-character for exact sync with the matching function."""
+
+    `norm_func` lets the loose (yāʾ-insensitive) fallback use the same mapping
+    machinery as the exact matcher.
+    """
+    norm_func = norm_func or normalize_arabic
     # Build mapping: for each verse char, how many normalized chars it contributes
     contrib = []
     for ch in verse:
-        nc = normalize_arabic(ch)
+        nc = norm_func(ch)
         contrib.append(len(nc) if nc else 0)
     
     # Find start: verse position where cumulative contribution reaches norm_idx
@@ -483,7 +523,7 @@ def _extract_tashkil_by_index(verse: str, norm_idx: int, norm_len: int, normaliz
     
     # Verify: if normalized output doesn't match expected, try ±2 offset
     expected_norm = normalized_verse[norm_idx:norm_idx + norm_len]
-    if normalize_arabic(fragment) != expected_norm:
+    if norm_func(fragment) != expected_norm:
         for offset in [1, -1, 2, -2]:
             adj_start = start_vi + offset
             if adj_start < 0 or adj_start >= len(verse):
@@ -497,7 +537,7 @@ def _extract_tashkil_by_index(verse: str, norm_idx: int, norm_len: int, normaliz
                 col2 += contrib[vi2] if vi2 < len(contrib) else 0
                 vi2 += 1
             adj_frag = "".join(adj_result)
-            if normalize_arabic(adj_frag) == expected_norm:
+            if norm_func(adj_frag) == expected_norm:
                 return adj_frag
     
     return fragment
@@ -706,7 +746,9 @@ def discover_and_mark_quotes(content: str, tafsir: bool = False) -> tuple[str, l
                     if verse_range else build_wikilink(surah, verse_num))
         
         # Replace only the (text) portion — preserve citation prefix
-        replacement = f"*{LF}{fragment}{LE}{{.quran-quote}}*{wikilink}"
+        replacement = render_quran_quote(
+            fragment, "full", surah, verse_num,
+            verse_range[1] if verse_range else None)
         new_content = new_content[:adj_start] + replacement + new_content[adj_end:]
         offset += len(replacement) - (adj_end - adj_start)
         
@@ -772,7 +814,9 @@ def discover_and_mark_quotes(content: str, tafsir: bool = False) -> tuple[str, l
                 wikilink = (build_wikilink(surah, verse_range[0], end_verse=verse_range[1])
                             if verse_range else build_wikilink(surah, verse_num))
                 
-                replacement = f"*{LF}{fragment}{LE}{{.quran-quote}}*{wikilink}"
+                replacement = render_quran_quote(
+            fragment, "full", surah, verse_num,
+            verse_range[1] if verse_range else None)
                 new_content = new_content[:m.start()] + replacement + new_content[m.end():]
                 
                 found.append({
@@ -784,20 +828,16 @@ def discover_and_mark_quotes(content: str, tafsir: bool = False) -> tuple[str, l
 
 
 def fix_cross_page_guillemets(content: str) -> tuple[str, int]:
-    """Complete a quotation opened on one page and closed at the start of the next.
+    """Complete a quote opened on one page and closed at the start of the next.
 
-    This is the guillemet/straight/curly counterpart of `fix_cross_page_quotes`.
-    It deliberately preserves the source's opening and closing marks instead of
-    wrapping the continuation in a second pair of ornate brackets. The opening
-    fragment gets the `.quran-quote` class, the closing fragment gets the class
-    and the citation link.
+    The fragments go through `render_quran_quote` as `begin` and `end`, so they
+    use the same tashkīl, ornate brackets, and link as every other quote.
     """
-    LF, LE = '\ufd3f', '\ufd3e'
-    changed = 0
-    # Work backwards so earlier offsets stay valid.
+    LF = '\ufd3f'
     opens = list(re.finditer(r'([«“"])([^»”"\n]{1,80})[ \t]*$', content, re.M))
+    edits: list[tuple[int, int, str]] = []
     seen_closes: set[int] = set()
-    for m in reversed(opens):
+    for m in opens:
         if '{.quran-quote}' in content[m.start():m.end()] or LF in content[m.start():m.end()]:
             continue
         partial = m.group(2).strip()
@@ -822,32 +862,18 @@ def fix_cross_page_guillemets(content: str) -> tuple[str, int]:
         if not result:
             continue
         surah, verse, _, _ = result[0]
-        wikilink = build_wikilink(surah, verse)
-        # Opening fragment: add the class, preserving its guillemet/quote mark.
-        content = (content[:m.start(1) + 1] + partial + '{.quran-quote}'
-                   + content[m.end():])
-        # The page offsets moved by the opening replacement; find the closing
-        # quote again from the page boundary after the reopening.
-        search_from = m.end() + len('{.quran-quote}')
-        sep = re.search(r'\n\n---\n\n', content[search_from:])
-        if not sep:
+        close_start = page_start + page_offset + cont.start(1)
+        close_end = page_start + page_offset + cont.end()
+        if close_start in seen_closes:
             continue
-        page_start = search_from + sep.end()
-        raw_page = content[page_start:]
-        head = re.match(r'^\s*####\s+p\.[^\n]*\n+', raw_page)
-        page_offset = len(head.group(0)) if head else 0
-        page = raw_page[page_offset:]
-        cont = re.match(r'\s*([^»”"\n]{1,200})([»”"])', page)
-        if not cont:
-            continue
-        lead = len(page) - len(page.lstrip())
-        close_end = page_start + page_offset + lead + cont.end()
-        if content[close_end:close_end + len('{.quran-quote}')] == '{.quran-quote}':
-            continue
-        # `cont.end()` includes the closing mark; insert class+link after it.
-        content = content[:close_end] + '{.quran-quote}' + wikilink + content[close_end:]
-        changed += 1
-    return content, changed
+        seen_closes.add(close_start)
+        begin = render_quran_quote(partial, "begin", surah, verse)
+        end_text = render_quran_quote(continuation, "end", surah, verse)
+        edits.append((close_start, close_end, end_text))
+        edits.append((m.start(1), m.end(), begin))
+    for start, end, replacement in sorted(edits, key=lambda edit: edit[0], reverse=True):
+        content = content[:start] + replacement + content[end:]
+    return content, len(seen_closes)
 
 
 def link_open_fragments(content: str, tafsir: bool = False) -> tuple[str, int]:
@@ -882,7 +908,8 @@ def link_open_fragments(content: str, tafsir: bool = False) -> tuple[str, int]:
         if not after:
             continue
         verse_no = after[0]
-        lines[index] = line + build_wikilink(prior[0], verse_no)
+        replacement = render_quran_quote(fragment, "begin", prior[0], verse_no)
+        lines[index] = line[:match.start(1)] + replacement + line[match.end(2):]
         added += 1
     return "\n".join(lines), added
 
@@ -1007,11 +1034,15 @@ def add_missing_refs(content: str) -> tuple[str, int]:
                     surah = verses[0][0]
                     v_start, v_end = verses[0][1], verses[-1][1]
                     range_wl = build_wikilink(surah, v_start, end_verse=v_end)
-                    body = ' * '.join(f"*{LF}{sm[1]}{LE}{{.quran-quote}}*" for sm in segment_matches)
-                    parts.append(body + range_wl)
-                    added += 1
+                    body = ' * '.join(
+                        render_quran_quote(sm[1] or sm[0], "full", sm[3], sm[4])
+                        for sm in segment_matches)
+                    parts.append(body)
+                    added += len(segment_matches)
                 else:
-                    body = ' * '.join(f"*{LF}{sm[1]}{LE}{{.quran-quote}}*{sm[2]}" for sm in segment_matches)
+                    body = ' * '.join(
+                        render_quran_quote(sm[1] or sm[0], "full", sm[3], sm[4])
+                        for sm in segment_matches)
                     parts.append(body)
                     added += len(segment_matches)
                 _bump(segment_matches[-1][3], segment_matches[-1][4],
@@ -1058,8 +1089,8 @@ def add_missing_refs(content: str) -> tuple[str, int]:
         stem, arabic = get_surah_name(surah)
         wikilink = build_wikilink(surah, verse_num)
         
-        # Add opening *LF
-        replacement = f"*\ufd3f{text}\ufd3e{{.quran-quote}}*{wikilink}"
+        # A closing-only fragment is the end of a quote.
+        replacement = render_quran_quote(text, "end", surah, verse_num)
         new_content = new_content[:m.start()] + replacement + new_content[end:]
         added += 1
     
@@ -1087,8 +1118,8 @@ def add_missing_refs(content: str) -> tuple[str, int]:
         stem, arabic = get_surah_name(surah)
         wikilink = build_wikilink(surah, verse_num)
         
-        # Add closing LE and {.quran-quote}
-        replacement = f"*\ufd3f{text}\ufd3e{{.quran-quote}}*{wikilink}"
+        # An opening-only fragment is the beginning of a quote.
+        replacement = render_quran_quote(text, "begin", surah, verse_num)
         new_content = new_content[:m.start()] + replacement + new_content[end:]
         added += 1
     
@@ -1212,16 +1243,15 @@ def fix_cross_page_quotes(content: str) -> tuple[str, int]:
         cont_raw = nxt[cont_start:end].strip()
         if len(normalize_arabic(cont_raw)) < 2:
             continue
-        wikilink = build_wikilink(surah, verse)
         rest = nxt[end:]
         # Drop Gemini's stray verse-number marker or closing asterisk, but do
         # NOT eat the opener of the next quote (*LF...).
         rest = re.sub(r'^[ \t]*\*' + LF + r'[\d\u0660-\u0669]*' + LE + r'\*', '', rest)
         rest = re.sub(r'^[ \t]*\*(?!' + LF + r')', '', rest, count=1)
         rest = re.sub(r'^[ \t]*' + LE, '', rest, count=1)
-        blocks[i] = body[:m.start()] + '*' + LF + partial + '{.quran-quote}*'
-        blocks[i + 1] = (nxt[:cont_start] + '*' + cont_raw + LE
-                         + '{.quran-quote}*' + wikilink + rest)
+        blocks[i] = body[:m.start()] + render_quran_quote(partial, "begin", surah, verse)
+        blocks[i + 1] = (nxt[:cont_start] + render_quran_quote(cont_raw, "end", surah, verse)
+                         + rest)
         count += 1
     return '\n\n---\n\n'.join(blocks), count
 
@@ -1595,7 +1625,7 @@ if __name__ == "__main__":
             frag = get_tashkil_fragment(text, s, v)
             if not frag: continue
             wl = build_wikilink(s, v)
-            replacement = f"*{LF}{frag}{LE}{{.quran-quote}}*{wl}"
+            replacement = render_quran_quote(frag, "full", s, v)
             content = content[:m.start()] + replacement + content[m.end():]
             found += 1
             print(f"  ({s}:{v}) {text[:60]}", flush=True)

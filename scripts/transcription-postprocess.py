@@ -181,6 +181,7 @@ def run(input_path, out_path=None, metadata=False, tafsir=False):
     # Enforce one blank line between all blocks (fixes "text\n---" setext
     # headings) and collapse any excess.
     content = pp.normalize_spacing(content)
+    content = tfq.strip_orphan_quote_classes(content)
     
     # Save
     if out_path is None:
