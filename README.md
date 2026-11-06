@@ -8,7 +8,7 @@ Some of its many features:
 - **transcribes** (OCRs) your scanned PDFs, either directly or through fetching them as Zotero attachments
 - **translates** those transcriptions into English
 - **transliterates** Arabic passages for integration into English writing
-- **provides an annotation interface** similar to Zotero’s PDF annotation features, keeping them even if the source document is updated or removed from Obsidian
+- **provides an annotation interface** similar to Zotero’s PDF annotation features, preserving your annotations even if the source document is updated or removed from Obsidian
 - **auto-updates and re-renders** generated source notes when templates and upstream sources change
 - **exports sources** as auto-updated Zotero items
 
@@ -158,7 +158,7 @@ Copy `main.js`, `manifest.json`, and `styles.css` into your plugin folder (`<con
 
 ## Credits
 
-Midad Arabic Sources’ ETA templating, managed-region merge, and note conventions follow **[ScholarWeft](https://github.com/nebedaay/ScholarWeft)**, which pioneered them. The importer draws on the public corpora of [spa5k/tafsir_api](https://github.com/spa5k/tafsir_api), the [Qurʾānic Universal Library](https://qul.tarteel.ai/), [fawazahmed0/quran-api](https://github.com/fawazahmed0/quran-api), [AhmedBaset/hadith-json](https://github.com/AhmedBaset/hadith-json), [risan/quran-json](https://github.com/risan/quran-json), [Turath.io](https://app.turath.io), and GibreelAbdullah’s [Hans Wehr](https://github.com/GibreelAbdullah/HansWehrDictionary) and [Lane](https://github.com/GibreelAbdullah/LaneLexicon) dictionary editions. Transliteration uses [CAMeL Tools](https://github.com/CAMeL-Lab/camel_tools).
+Midad Arabic Sources’ ETA templating, managed-region merge, and note conventions follow **[ScholarWeft](https://github.com/nebedaay/ScholarWeft)**, which pioneered them. The importer draws on the public corpora of [spa5k/tafsir_api](https://github.com/spa5k/tafsir_api), the [Qurʾānic Universal Library](https://qul.tarteel.ai/), [fawazahmed0/quran-api](https://github.com/fawazahmed0/quran-api), [AhmedBaset/hadith-json](https://github.com/AhmedBaset/hadith-json), [risan/quran-json](https://github.com/risan/quran-json), [Turath.io](https://app.turath.io), GibreelAbdullah’s [Lane](https://github.com/GibreelAbdullah/LaneLexicon) and [Hans Wehr](https://github.com/GibreelAbdullah/HansWehrDictionary) dictionary editions, and [muhammad-abdurrahman/hans-wehr-fodt-parser](https://github.com/muhammad-abdurrahman/hans-wehr-fodt-parser) for Wehr’s FODT text. Transliteration uses [CAMeL Tools](https://github.com/CAMeL-Lab/camel_tools).
 
 ## License
 

@@ -24,7 +24,7 @@ Turath has far more books than any catalogue can list. **Add by URL** (a tab in 
 - **Qurʾān translations** — `fawazahmed0/quran-api`: 50+ English translations.
 - **Ḥadīth collections** — `AhmedBaset/hadith-json`: 17 collections (Bukhārī, Muslim, Abū Dāwūd, Tirmidhī, Nasāʾī, Ibn Mājah, Mālik, Aḥmad, and the forties), Arabic and English.
 - **Qurʾān texts (riwāyāt)** — `risan/quran-json`: Warsh, Qālūn, al-Dūrī, Shuʿbah, al-Sūsī, plus canonical Ḥafṣ.
-- **Dictionaries** — Hans Wehr’s *Dictionary of Modern Written Arabic* and Lane’s *An Arabic-English Lexicon*, both read from their SQLite editions (one note per root).
+- **Dictionaries** — Hans Wehr’s *Dictionary of Modern Written Arabic* (from its FODT edition) and Lane’s *An Arabic-English Lexicon* (from its SQLite edition), one note per root.
 - **Classical texts (Turath.io)** — the public API covering ~8,500 books across fiqh, uṣūl, ʿaqīda, ḥadīth commentary, tārīkh, adab, and language. One note per table-of-contents heading, with the source’s pages preserved as `#### p. N` markers.
 
 ## Commands

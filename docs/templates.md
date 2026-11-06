@@ -21,6 +21,7 @@ Because the model is cached, editing a template and running **“Re-render impor
    - `dictionary-index.eta.md` — one index note per first letter (a dictionary’s roots)
    - `book-note.eta.md` — one note per chapter of a book (Turath.io)
    - `book-volume.eta.md` — one volume index per volume of a multi-volume book
+   - `book-letter.eta.md` — one letter index for a classical dictionary (the work hub lists letters; each letter page lists its fasl notes under volume headings)
    - `hub.eta.md` — the per-work hub note that lists all units
    - `moc.eta.md` — the skeleton for a category MOC (e.g. `Tafsīr Sources`)
    - `sources.eta.md` — the managed region of the top-level parent note (`Midad Arabic Sources`)
@@ -28,9 +29,9 @@ Because the model is cached, editing a template and running **“Re-render impor
 
 The plugin reads your copies first and falls back to the bundled defaults.
 
-Each work’s entry in its category MOC is just `- [[Work]]` — the work hub note, which carries the `repository:` property for provenance. A Turath work appears in **two** category MOCs — the repository MOC `Turath` and its work-type MOC (e.g. `Fiqh Sources`) — and carries both in the hub’s `midad-up:`. The category MOC’s generated region is also a managed region: it is rebuilt from the full set of imported works on every render, so entries never duplicate, and a language heading (`# Arabic Texts`, `# English Texts`) appears only when it has content.
+Each work’s entry in its category MOC is just `- [[Work]]` — the work hub note, which carries the `repository:` property for provenance. A Turath work appears in the repository MOC `Turath` and in **one or more** work-type MOCs (e.g. `Fiqh Sources`; Lisān al-ʿArab is in both `Language Sources` and `Dictionaries`), and carries all of them in the hub’s `midad-up:`. The category MOC’s generated region is also a managed region: it is rebuilt from the full set of imported works on every render, so entries never duplicate, and a language heading (`# Arabic Texts`, `# English Texts`) appears only when it has content.
 
-Every category MOC points up to one **parent note** (the setting **“Sources parent note”**, default `Midad Arabic Sources`). The plugin reuses an existing `Midad Arabic Sources` note wherever it lives in the vault, or creates one in the sources folder. It writes only its own managed region there: a `>[!mas-sources-list]` callout listing **By Topic**, **By Source**, and **Annotations**. The generated **Midad Arabic Sources - Topics** and **Midad Arabic Sources - By Source** notes are themselves managed MOCs, as are the category, repository, transcription, and translation MOCs they link. The callout type and its styling are the plugin’s own (`mas-sources-list` in `styles.css`), so nothing depends on a callout defined elsewhere in your vault.
+Every category MOC points up to one **parent note** (the setting **“Sources parent note”**, default `Midad Arabic Sources`). The plugin reuses an existing `Midad Arabic Sources` note wherever it lives in the vault, or creates one in the sources folder. It writes only its own managed region there: a `>[!mas-sources-list]` callout listing **Topics**, **Repositories**, and **My Midad Content**, with the per-entry source counts. The generated **Midad Arabic Sources - Topics**, **Midad Arabic Sources - Repositories**, and **Midad Arabic Sources - My Midad Content** notes are themselves managed MOCs, as are the category, repository, transcription, and translation MOCs they link. Both the parent note and the sidebar’s resource browser are rendered from `.midad-arabic-sources/resource-model.json`; the note is only the fallback for the sidebar when that file is absent. The callout type and its styling are the plugin’s own (`mas-sources-list` in `styles.css`), so nothing depends on a callout defined elsewhere in your vault.
 
 Top-level source notes (work hubs, MOCs, and transcription/translation parents) carry `[[Midad Arabic Sources]]` in `midad-up`, so the corpus is traceable without giving every individual sūra, chapter, root, or volume note a backlink to the parent.
 
@@ -47,6 +48,7 @@ A work with a single unit — for example a one-chapter ḥadīth book such as a
 - **A content note’s `title` is its own title, not its file name.** A file name must be unique across the vault, so it carries the work (`Hans Wehr Dictionary - ز z`, `Tafsīr al-Jalālayn - 002 Al-Baqarah`) and the work’s folder/hub carries its **repository qualifier** (`Tafsīr al-Ṭabarī (tafsir_api)`), so two editions of one work can be installed side by side; a work known to exist only once across the imported repositories (the two dictionaries, for now) is flagged `unique` and keeps its bare folder name. `title:` and the hub/MOC link aliases stay clean (the book title for a work, the chapter heading for a chapter); the work is already named by `midad-up`, so `title` is what a table of contents would print — the chapter (`title: ز z`, `title: 2 Al-Baqarah`, `title: 1 Revelation`), never `<work> - <unit>`. A title is for viewing, so a numeric prefix drops its leading zeros (`2 Al-Baqarah`); the *file name* keeps them, because that is what makes the sūra notes sort. A letter-index page is labelled with the letter and its romanized equivalent (`ز z`), the same way a definition page carries both.
 - **A link that points into a work names the note’s own title, not its file name.** An MOC or hub is outside the context of the notes it lists, so its links carry an alias that drops the work title and any other classifying prefix: the hub lists `- [[Lane's Lexicon - ا ā|ا ā]] — 182`, and a letter index lists `- [[LL 3 اب abba|اب abba]]`. A dictionary entry’s link also drops the `LL`/`HW` id, which the digitisation added rather than the book. The file name stays unique across the vault; only the *display* is the title proper. (The `title` property follows the same rule from the other side: a note’s own `title` is its chapter, never `<work> - <chapter>`.)
 - **A content note carries no title/chapter heading.** The work (or ḥadīth chapter) name lives in the `title` property, the file name, and `midad-up` — so it is not repeated as an H1. Ḥadīth chapter notes therefore title as just the chapter (`title: 1 Revelation`) and their `#` headings are the ḥadīth numbers.
+- A **content page carries one default alias**, `<work title> - <unit>`, to keep the alias index small. The work hub keeps the full alias set (title, short title, Arabic forms, and the plain romanization); add any per-page alias you want by hand.
 - A **multi-unit hub** keeps `# <work title>` as its own heading, since it holds an index rather than numbered content.
 
 This keeps every H1 a targetable unit number and every canonical link a targetable H2.
@@ -83,12 +85,15 @@ Every template receives a data object. The engine destructures it for you, so yo
 | `title` | `Tafsīr al-Jalālayn` | romanized, vault style |
 | `dir` | `Tafsīr al-Jalālayn` | output folder (unique) |
 | `short` | `al-Jalālayn` | short title, if any |
-| `title_ar` | `تفسير الجلالين` | native Arabic title |
+| `title_ar` | `تفسير الجلالين` | native Arabic title — only for an Arabic-language work whose published title is Arabic (an Arabic dictionary included), not an English title or a translation of one |
+| `title_language` | `en` | the language of the published work/title, when it differs from the content language; gates `title-ar` and `authors-ar` (Wehr and Lane are `en`; an Arabic dictionary is `ar`) |
+| `authors_ar` | `["ابن منظور"]` | native Arabic author names — the original Arabic name, not the Arabic writing of a Western name; a list even for one author, one name each, never split |
+| `genre` / `genres` | `language` / `["language", "lexicography"]` | the work’s kind(s); the hub writes `genre` |
 | `short_ar` | `الجلالين` | native short title, if any |
 | `title_plain` | `Tafsir al-Jalalayn` | diacritic-less romanized (for search) |
 | `authors` | `["Jalāl al-Dīn al-Maḥallī", …]` | romanized author names |
 | `translators` | `["Feras Hamza"]` | rendered as `translators:` under `authors:` (overridden by `publication.translators`) |
-| `publication` | `{ publisher: "Darussalam", …, mas_note: "…" }` | *injected by the plugin* from `publication-map.json`; adds `item-type`, `editors`, `publisher`, `place`, `year`, `edition`, `midad-note` to the hub YAML. A name may be a string, or `{first, last}` where the last-word split is wrong. `mas_note` is the map’s `note` plus the provisional caveat — the same text the Zotero `extra` carries. |
+| `publication` | `{ publisher: "Darussalam", …, mas_note: "…" }` | *injected by the plugin* from `publication-map.json`; adds the citation block to the hub YAML (`item-type`, `shorttitle`, `title-ar`/`authors-ar` when the map supplies them, `editors`, `translators`, `contributors`, `publisher`, `place`, `year`, `edition`, `series`, `series-number`, `volume`/`volumes`, `number`, `issue`, `pages`, `doi`, `isbn`, `url`, `genre`, `section`, `citekey`, `midad-note`). A name may be a string (`Last, First` for Western names; a classical Arabic name stays one name) or `{first, last}` where the split is wrong. `mas_note` is the map’s `note` plus the provisional caveat — the same text the Zotero `extra` carries. |
 | `aliases` | `["Tafsīr al-Jalālayn", "al-Jalālayn", "تفسير الجلالين", "الجلالين", "Tafsir al-Jalalayn"]` | the parent alias set |
 | `language` | `ar` | primary language code |
 | `languages` | `["ar", "en"]` | every language the work contains (ḥadīth are bilingual) |
@@ -102,7 +107,7 @@ Every template receives a data object. The engine destructures it for you, so yo
 | `repository_updated` | `2026-06-04` | the repository’s own last-updated date for this item |
 | `author` | `Muḥammad b. Ismāʿīl al-Bukhārī` | author line (hub) |
 | `kind` | `surah`, `hadith`, `quran`, `dict` or `book` | selects the note template |
-| `unit_label` | `Sūrahs` or `Chapters` | hub section heading |
+| `unit_label` | `Sūrahs`, `Chapters`, or `Roots` | hub section heading (`Roots` for dictionaries and letter-index works) |
 | `no_notes` | `true` | generate only the work note (canonical Ḥafṣ riwāya) |
 | `unit_prefix` | `Qurʾān (riwāyat Warsh)` | fallback prefix for unit links (`note_stem` supersedes it) |
 | `layout` | `stacked` or `table` | bilingual layout |
@@ -110,9 +115,11 @@ Every template receives a data object. The engine destructures it for you, so yo
 | `note_prefix` | `HW` or `LL` | a dictionary’s root-note prefix (file name, `aliases:`, and the `<prefix>-id` property) |
 | `convention` | `vault`, `wehr` or `full` | the named romanization path the work’s names follow (see below) |
 | `supplement_from` | `49881` or `0` | the id at which the source stops being one book and starts being a second (Lane’s Supplement) |
-| `volumes` | `1` or `8` | a book work’s volume count; the hub lists volumes when greater than 1 |
-| `section_level` | `1` | the TOC level that defines a chapter in a book work |
+| `volumes` | `1` or `8` | a book work’s volume count; the hub lists volume indexes when greater than 1 unless the work uses a letter index, whose letter pages carry the volume headings |
+| `section_level` | `1` or `2` | the TOC level that defines a chapter in a book work; `2` for the classical dictionaries, where it is the `فصل` |
 | `mocs` | `["Turath", "Fiqh Sources"]` | every category MOC the work belongs to (the hub’s `midad-up`) |
+
+Names follow ScholarWeft’s convention: `Last, First` for Western-style names (`Wehr, Hans`, `Lane, Edward William`), and one name for classical Arabic names (`Ibn Manẓūr`, `Abū Jaʿfar al-Ṭabarī`, `Muḥammad b. Ismāʿīl al-Bukhārī`). `authors-ar` is the source’s own Arabic forms, a list even for one author, and is never split. The hub’s `authors` / `translators` / `editors` / `contributors` links go through `scholarName`; a transcription/translation parent copies its literature note’s citation fields wholesale, so the source title/authors replace the descriptive versions while the aliases keep them.
 
 ### Romanization conventions
 
@@ -189,6 +196,8 @@ The source database is not one row per root: 548 root words have several `IS_ROO
 
 Turath.io serves a whole book as one JSON whose TOC is a flat list of headings. One chapter note is generated per heading at the work’s `section_level` (default 1); deeper headings become `##`/`###` inside it, and every page gets a `#### p. N` marker (the same page heading the transcription pipeline uses). In a multi-volume work the page marker carries the volume (`#### p. 1:7`), and one `book-volume` index note is generated per volume; a chapter points `midad-up` to the volume it starts in.
 
+The classical dictionaries use the source’s own **`فصل`** level and the dictionary navigation shape: **work hub → letter pages → fasl notes**. They are set to `section_level: 2` and `letter_index: true`. The level-1 heading is the **last radical** (the letter, e.g. `ب`), the level-2 heading is the **first radical** (the fasl, e.g. `فصل الهمزة`), and a `باب` between them groups the fasl notes under their first radical. The work hub lists the letters under `## Roots`; there is no volume index. Each letter page lists its fasl notes, inserting a plain `## المجلد N` heading whenever the printed volume changes and a plain `### باب …` heading when the source’s `باب` grouping changes. The volume headings are reference markers, not links. The note title is `<letter> - <fasl>` (with `باب` where the source has one), the file name `<work dir> - <letter> - <fasl>`, and the fasl’s `midad-up` points to its letter page. A source that repeats a fasl title within one letter (some TOCs repeat the `فصل` set) gets `(2)`, `(3)` on the later notes, with the page span distinguishing them. The 4 MiB cap (`_TURATH_MAX_NOTE_BYTES`, overridable with `max_note_bytes`) remains as a fallback and splits at page boundaries. Lisān’s largest fasl is about 0.6 MB.
+
 | Field | Example |
 | --- | --- |
 | `id` | `3` (the chapter’s ordinal) |
@@ -199,14 +208,26 @@ Turath.io serves a whole book as one JSON whose TOC is a flat list of headings. 
 | `volume`, `volume_end` | the volume the chapter starts/ends in |
 | `page_from`, `page_to` | printed page numbers |
 | `span` | `p. 4–58` (or `p. 1:221–2:889`) |
-| `section_page` | the volume note’s name (multi-volume only; used by `midad-up`) |
-| `pages[]` | `{ vol, page, body }` — body is ready markdown |
+| `section_page` | the letter page’s name for a letter-index work; otherwise the volume note’s name (used by `midad-up`) |
+| `pages[]` | `{ vol, page, page_label, body }` — `page_label` is the printed page or `[unnumbered]` (a page the source leaves unnumbered); body is ready markdown |
 
 `toc-N` anchors are `<span data-type="title" id=toc-N>`; the chapter’s own anchor is dropped (the title carries it) and deeper ones become `##`/`###`. `﴿…﴾` becomes the vault’s `{.quran-quote}` span, and bracketed `sūra: āya` refs are linked to the canonical Qur’ān notes.
 
+### Book letter unit fields (`unit.kind === "book-letter"`)
+
+One per letter of a classical dictionary (Lisān, al-Qāmūs, Tāj). The work hub lists these letters; the letter page lists its fasl notes under `## المجلد` and `### باب` headings.
+
+| Field | Example |
+| --- | --- |
+| `id` | `letter-2` |
+| `base` | `ب` |
+| `title` | `ب` |
+| `span` | `p. 1:204–1:806` |
+| `chapters[]` | `{ base, title, bab, fasl, span, volume, volume_end }` |
+
 ### Book volume unit fields (`unit.kind === "book-volume"`)
 
-One per volume of a multi-volume work, listing the chapters that start in it.
+One per volume of a multi-volume work, listing the chapters that start in it. A letter-index dictionary does not use volume units; its letter pages carry the volume headings.
 
 | Field | Example |
 | --- | --- |
