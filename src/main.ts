@@ -4635,7 +4635,11 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			const hashes = await this.sourceTemplateHashes();
 			const store = await this.loadSourceHashes();
 			const changed = Object.entries(hashes).some(([k, h]) => h.hash && store.templates[k]?.hash !== h.hash);
-			if (changed) await this.applyTemplateChanges("auto");
+			// A template change is recorded before the render, and the render is
+			// skipped when another source operation is running. The recorded hash
+			// then matches, so without this retry the change would never be applied.
+			// A stale work is the durable signal that the render still owes us.
+			if (changed || (await this.findStaleSourceWorks()).length > 0) await this.applyTemplateChanges("auto");
 		} catch { /* templates unavailable */ } finally {
 			this.templateCheckRunning = false;
 		}
