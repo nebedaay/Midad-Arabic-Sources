@@ -857,6 +857,11 @@ def process(input_path):
     # ── Repair page headings, last, in case any pass touched them ──
     c = re.sub(r'([^\n])(####\s+p\.?\s*\*?\s*\d+\s*)$', r'\1\n\n\2', c, flags=re.M)
     c = re.sub(r'^####\s+p\.?\s*\*?\s*(\d+)\s*$', r'#### p. \1', c, flags=re.M)
+    # A page heading must close at its number. If an earlier pass glued the
+    # first body line to it (`#### p. 60*﴿…`), split it before the block pass.
+    # Match the complete number and only split when the next character is a
+    # non-digit, non-space; otherwise `p. 10` would become `p. 1` + `0`.
+    c = re.sub(r'^(####\s+p\.\s*\d+(?::\d+)?)(?=[^\d\s])', r'\1\n\n', c, flags=re.M)
     print(f"  Spacing normalized")
 
     return c
