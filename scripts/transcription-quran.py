@@ -814,12 +814,17 @@ def discover_and_mark_quotes(content: str, tafsir: bool = False) -> tuple[str, l
         adj_start = paren_start + offset
         adj_end = paren_end + offset
         
-        results = find_verse_in_text(
-            text_clean,
-            hint_surah=focus_s if tafsir else None,
-            hint_verse=focus_v if tafsir else None,
-        )
-        if not results and tafsir and focus_s and len(text_clean.split()) <= 4:
+        hint = citation_hint(text_clean, new_content, adj_start, adj_end)
+        hint_range = (hint[1], hint[2]) if hint and hint[2] else None
+        if hint:
+            results = [(hint[0], hint[1], load_verse(hint[0], hint[1]) or "", 1.0)]
+        else:
+            results = find_verse_in_text(
+                text_clean,
+                hint_surah=focus_s if tafsir else None,
+                hint_verse=focus_v if tafsir else None,
+            )
+        if not results and not hint and tafsir and focus_s and len(text_clean.split()) <= 4:
             # In a commentary a very short fragment is usually the next words
             # of the verse already under discussion.
             after = find_verse_after(normalize_arabic(text_clean), focus_s, focus_v, 0)
@@ -835,11 +840,12 @@ def discover_and_mark_quotes(content: str, tafsir: bool = False) -> tuple[str, l
         focus_s, focus_v = surah, verse_num
         print(f"\n    ({surah}:{verse_num}) {text_clean[:60]}", flush=True, end="")
         fragment = get_tashkil_fragment(text_clean, surah, verse_num)
-        verse_range = None
+        verse_range = hint_range
         if not fragment:
             # A quotation can span two or more consecutive verses. Keep the
             # source text and cite the range rather than dropping the quote.
-            verse_range = find_verse_range(text_clean, surah, verse_num)
+            if not verse_range:
+                verse_range = find_verse_range(text_clean, surah, verse_num)
             if verse_range:
                 fragment = text_clean
             elif len(text_clean.split()) <= 12:
@@ -1087,6 +1093,14 @@ def add_missing_refs(content: str) -> tuple[str, int]:
         text = full_match[full_match.index(LF)+1:full_match.index(LE)]
         text_clean = re.sub(r'\s*\.\s*', ' ', text).strip()
         text_clean = re.sub(r'\s*[-–—]?\s*ال?[اآ]?ية\s*$', '', text_clean).strip()
+        hint = citation_hint(text_clean, new_content, m.start(), m.end())
+        if hint:
+            hint_s, hint_v, hint_end = hint
+            wikilink = build_wikilink(hint_s, hint_v, end_verse=hint_end)
+            parts.append(keep + wikilink)
+            _bump(hint_s, hint_v, _end_offset(hint_s, hint_v, normalize_arabic(text_clean)))
+            added += 1
+            continue
         if normalize_arabic(text_clean) in BLACKLISTED_PHRASES:
             parts.append(keep); continue
         if re.match(r'\s*[\[\(][^\]\)]*\d', after):
@@ -1458,9 +1472,19 @@ def parse_gemini_ref(citation: str, surah_lookup: dict = None) -> tuple[int, int
         return None
 
     values = [int(m.group(0)) for m in nums]
+    # A source may write both the sūra name and a redundant `sūra:āya`
+    # (`[النساء 4:105]`). The first number is then the sūra, not the verse.
+    first_num_pos = nums[0].start()
+    has_surah_name = bool(inner_w[:first_num_pos].strip())
+    has_colon_after_first = (
+        len(values) > 1
+        and ':' in inner_w[nums[0].end():nums[1].start()]
+    )
     # If there are more than two numbers and the first looks like a surah,
     # drop it and treat the remainder as verse numbers.
     start = 1 if (len(values) > 2 and values[0] <= 114) else 0
+    if has_surah_name and has_colon_after_first and values[0] <= 114:
+        start = 1
 
     v1 = values[start]
     v2 = values[start + 1] if len(values) > start + 1 else None
@@ -1608,6 +1632,38 @@ def convert_gemini_refs(content: str) -> tuple[str, int]:
         converted += 1
     
     return new_content, converted
+
+
+def citation_hint(text: str, content: str, start: int, end: int) -> tuple[int, int, int | None] | None:
+    """A verified citation adjacent to a quote, used as a first search hint.
+
+    The source citation is never trusted on its own: the quoted text must be
+    found in the named verse (or range). If verification fails, callers fall
+    back to ordinary text matching.
+    """
+    lookup = _build_surah_lookup()
+    candidates: list[str] = []
+    after = content[end:end + 100]
+    match = re.match(r'\s*([\[\(][^\]\)\n]+[\]\)])', after)
+    if match:
+        candidates.append(match.group(1))
+    before = content[max(0, start - 100):start]
+    match = re.search(r'([\[\(][^\]\)\n]+[\]\)])\s*$', before)
+    if match:
+        candidates.append(match.group(1))
+    for citation in candidates:
+        if '[[' in citation or ']]' in citation:
+            continue
+        parsed = parse_gemini_ref(citation, lookup)
+        if not parsed:
+            continue
+        surah, verse, end_verse = parsed
+        if end_verse:
+            if find_verse_range(text, surah, verse):
+                return (surah, verse, end_verse)
+        if get_tashkil_fragment(text, surah, verse):
+            return (surah, verse, None)
+    return None
 
 
 def strip_gemini_refs(content: str) -> tuple[str, int]:

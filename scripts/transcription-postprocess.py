@@ -133,12 +133,13 @@ def run(input_path, out_path=None, metadata=False, tafsir=False):
     content, discovered = tfq.discover_and_mark_quotes(content, tafsir=tafsir)
     print(f"  Discovered: {len(discovered)}")
 
-    # Discard Gemini's own citations; every verse is located locally.
-    content, refs_stripped = tfq.strip_gemini_refs(content)
-    print(f"  Gemini refs discarded: {refs_stripped}")
-
+    # Add links before discarding the source citations: a verified adjacent
+    # citation is a cheap first search hint.
     content, refs_added = tfq.add_missing_refs(content)
     print(f"  Refs added: {refs_added}")
+
+    content, refs_stripped = tfq.strip_gemini_refs(content)
+    print(f"  Gemini refs discarded: {refs_stripped}")
 
     content, links_fixed = tfq.fix_wikilinks(content)
     print(f"  Links fixed: {links_fixed}")
