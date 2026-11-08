@@ -45,7 +45,7 @@ function baseName(path: string): string {
 /** `@citekey - transcription - v. 4 - Gemini` → its parts. */
 /** Filenames Midad's pipeline can have produced; anything else is skipped
  *  before the metadata cache is consulted. */
-const KNOWN_NOTE_NAME = /^(@[^ ]+|mas-[^ ]+)\s+-\s+(?:transcription|translation)(?:\s|$)/i;
+const KNOWN_NOTE_NAME = /^(@[^ ]+|mas-[^ ]+)\s+-\s+(?:transcription|translation)(?:\s|$|[-,–—])/i;
 
 function parseKnownNote(path: string, title?: string): {
 	kind: AdoptedKind;
@@ -57,7 +57,7 @@ function parseKnownNote(path: string, title?: string): {
 	hasTitle: boolean;
 } | null {
 	const name = baseName(path);
-	const match = /^(@[^ ]+|mas-[^ ]+)\s+-\s+(transcription|translation)(?:\s+-\s+(?:v(?:ol)?\.?|volume)\s*(\d+))?(?:\s+-\s+(.+))?$/i.exec(name);
+	const match = /^(@[^ ]+|mas-[^ ]+)\s+-\s+(transcription|translation)(?:\s*-\s*(?:v(?:ol)?\.?|volume)\s*(\d+))?(?:\s*[-,–—]\s*(.+))?$/i.exec(name);
 	if (!match) return null;
 	const cite = match[1].replace(/^mas-/, '@');
 	const kind = match[2].toLowerCase() as "transcription" | "translation";

@@ -39,13 +39,17 @@ def vault_stem(stem: str):
     return citekey, (int(vm.group(1)) if vm else None)
 
 
-def archive_name(stem: str, doc_type: str, citekey: str = None, volume: int = None) -> str:
+def archive_name(stem: str, doc_type: str, citekey: str = None, volume: int = None,
+                 unit: str = None) -> str:
     if citekey is None or volume is None:
         ck, vol = vault_stem(stem)
         citekey = citekey or ck
         volume = volume if volume is not None else vol
     if volume:
         return f"{citekey} - {doc_type} - vol. {volume} files.zip"
+    if unit:
+        safe_unit = re.sub(r'[\\/:*?"<>|]', "-", unit.strip()).strip(" .")
+        return f"{citekey} - {doc_type} - {safe_unit} files.zip"
     return f"{citekey} - {doc_type} files.zip"
 
 
@@ -85,6 +89,11 @@ def main():
         idx = sys.argv.index("--volume")
         if idx + 1 < len(sys.argv):
             volume = int(sys.argv[idx + 1])
+    unit = None
+    if "--unit" in sys.argv:
+        idx = sys.argv.index("--unit")
+        if idx + 1 < len(sys.argv):
+            unit = sys.argv[idx + 1].strip() or None
 
     files = [batch_file.parent / pat.format(stem=stem) for pat in INTERMEDIATES[doc_type]]
     files = [f for f in files if f.exists()]
@@ -92,7 +101,7 @@ def main():
         print(f"ERROR: no intermediate files found next to {batch_file.name}")
         sys.exit(1)
 
-    zip_path = dest_dir / archive_name(stem, doc_type, citekey, volume)
+    zip_path = dest_dir / archive_name(stem, doc_type, citekey, volume, unit)
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as z:
         for f in files:
             z.write(f, arcname=f.name)

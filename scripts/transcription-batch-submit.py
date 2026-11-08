@@ -22,7 +22,7 @@ from google.genai import types
 # The built-in prompt lives in midad_prompts.py so the plugin can seed and refresh
 # its "Default prompt" from the same text, and the general rules stay hardcoded.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from midad_prompts import build_transcription_prompt  # noqa: E402
+from midad_prompts import COVER_METADATA_PROMPT, build_transcription_prompt  # noqa: E402
 
 VAULT = Path(os.environ.get("OBSIDIAN_VAULT", os.path.expanduser("~/Documents/Obsidian Vault")))
 API_KEY = os.environ.get("GEMINI_API_KEY", os.environ.get("GOOGLE_API_KEY", ""))
@@ -126,15 +126,23 @@ def upload_pages(pages_dir: Path, client: genai.Client) -> list:
     return uploaded
 
 
-def build_jsonl(uploaded: list, jsonl_path: Path, system_prompt: str = SYSTEM_PROMPT):
-    """Build the batch request JSONL."""
+def build_jsonl(uploaded: list, jsonl_path: Path, system_prompt: str = SYSTEM_PROMPT,
+                cover_prompt: str | None = None):
+    """Build the batch request JSONL.
+
+    The cover metadata supplement is attached only to the first uploaded page,
+    so Gemini cannot repeat the YAML block on every page.
+    """
     with open(jsonl_path, "w", encoding="utf-8") as f:
-        for item in uploaded:
+        for index, item in enumerate(uploaded):
+            prompt = system_prompt
+            if cover_prompt and index == 0:
+                prompt = f"{system_prompt}\n\n{cover_prompt}"
             payload = {
                 "key": item["local_name"],
                 "request": {
                     "model": MODEL,
-                    "system_instruction": {"parts": [{"text": system_prompt}]},
+                    "system_instruction": {"parts": [{"text": prompt}]},
                     "contents": [{
                         "role": "user",
                         "parts": [
@@ -176,7 +184,7 @@ def submit_batch(jsonl_path: Path, client: genai.Client, pdf_stem: str) -> str:
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("Usage: python3 transcription-batch-submit.py input.pdf [--work-dir DIR] [--prompt-file PATH] [--metadata] [--model MODEL]")
+        print("Usage: python3 transcription-batch-submit.py input.pdf [--work-dir DIR] [--prompt-file PATH] [--model MODEL]")
         sys.exit(1)
     
     pdf_path = Path(sys.argv[1]).resolve()
@@ -200,7 +208,7 @@ if __name__ == "__main__":
         idx = sys.argv.index("--model")
         if idx + 1 < len(sys.argv):
             MODEL = _model_name(sys.argv[idx + 1])
-    system_prompt = build_transcription_prompt(read_prompt(prompt_file), metadata="--metadata" in sys.argv)
+    system_prompt = build_transcription_prompt(read_prompt(prompt_file))
 
     stem = pdf_path.stem
     pages_dir = work_dir / f"{stem}-pages"
@@ -223,7 +231,7 @@ if __name__ == "__main__":
     
     # 3. Build JSONL
     print(f"\nBuilding batch JSONL...")
-    build_jsonl(uploaded, jsonl_path, system_prompt)
+    build_jsonl(uploaded, jsonl_path, system_prompt, COVER_METADATA_PROMPT)
     
     # 4. Submit batch
     print(f"\nSubmitting batch job...")

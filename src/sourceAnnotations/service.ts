@@ -385,7 +385,7 @@ export class AnnotationService {
 		// transcriptions list) instead. This keeps legacy notes looking like the
 		// notes the current pipeline writes.
 		const masKind = frontmatter?.["midad-kind"];
-		const legacyTranscription = /^(?:@|mas-).+?\s+-\s+(?:transcription|translation)(?:\s+-\s+(?:vol|v)\.\s*\d+)?$/i.test(file.basename);
+		const legacyTranscription = /^(?:@|mas-).+?\s+-\s+(?:transcription|translation)(?:\s+-\s+(?:vol|v)\.\s*\d+)?(?:\s*[-,–—]\s*.+)?$/i.test(file.basename);
 		if (masKind === "transcription" || masKind === "translation" || legacyTranscription) {
 			if (this.host.upgradeTranscription) {
 				new Notice("Upgrading transcription metadata…");

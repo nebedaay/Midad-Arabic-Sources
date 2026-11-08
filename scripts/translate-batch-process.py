@@ -604,12 +604,24 @@ def translation_filename(stem: str) -> str:
     return f"{citekey} - translation.md"
 
 
-def citekey_and_volume(stem: str):
-    """(citekey, volume) from a batch stem such as '@ck - transcription - vol. 2'."""
+def citekey_volume_unit(stem: str):
+    """(citekey, volume, unit) from a note/batch stem.
+
+    `@ck - transcription - vol. 2` has a volume; `@ck - transcription - Chapter 1`
+    and the legacy comma form have a partial unit instead.
+    """
+    match = re.match(
+        r'@?(\S+?)\s+-\s+(?:transcription|translation)'
+        r'(?:\s+-\s+(?:vol|v)\.\s*(\d+))?'
+        r'(?:\s*[-,–—]\s*(.+))?$',
+        stem, re.I)
+    if match:
+        unit = (match.group(3) or "").strip() or None
+        return match.group(1), (int(match.group(2)) if match.group(2) else None), unit
     m = re.match(r'@?(\S+)', stem)
     citekey = m.group(1) if m else stem
     vm = re.search(r'\b(?:vol|v)\.\s*(\d+)\b', stem, re.I)
-    return citekey, (int(vm.group(1)) if vm else None)
+    return citekey, (int(vm.group(1)) if vm else None), None
 
 
 def main():
@@ -682,13 +694,13 @@ def main():
     # Use the same note builder as the move-to-vault step, whether writing to
     # the canonical vault path or to an explicit --out path.
     mv = SourceFileLoader("mv", str(SCRIPTS / "transcription-translation-move-to-vault.py")).load_module()
-    citekey, volume = citekey_and_volume(stem)
+    citekey, volume, unit = citekey_volume_unit(stem)
     if out_path is not None:
-        yaml = mv.build_yaml(citekey, "translation", [], volume=volume)
+        yaml = mv.build_yaml(citekey, "translation", [], volume=volume, unit=unit)
         out_path.write_text(yaml + "\n" + result.strip() + "\n", encoding="utf-8")
         print(f"\nSaved: {out_path}")
     else:
-        dest = mv.write_note(result, citekey, "translation", volume=volume)
+        dest = mv.write_note(result, citekey, "translation", volume=volume, unit=unit)
         print(f"\nSaved: {dest}")
 
 

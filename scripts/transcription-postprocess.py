@@ -28,20 +28,100 @@ META_SINGLE = re.compile(
 )
 
 
-def _clean_meta(value: str) -> str:
-    return value.strip().strip('"').strip("'").strip("*").strip()
+def _clean_meta(value) -> str:
+    return str(value or "").strip().strip('"').strip("'").strip("*").strip()
 
 
-def extract_metadata(body: str) -> tuple[str, dict[str, str]]:
-    """Remove TITLE:/AUTHOR: lines anywhere and keep the first values.
+def _clean_list(value) -> list[str]:
+    if isinstance(value, list):
+        raw = value
+    else:
+        text = _clean_meta(value)
+        raw = re.split(r"[;\n]", text) if text else []
+    return [_clean_meta(item) for item in raw if _clean_meta(item)]
 
-    Gemini sometimes puts the markers on every page, and sometimes puts
-    TITLE and AUTHOR on one line because there is no blank line between them.
-    Both forms are removed; only the first title and author are kept.
+
+def _simple_yaml(block: str) -> dict:
+    """A tiny fallback for the small, flat cover block we ask the model for."""
+    data: dict = {}
+    current = ""
+    for raw in block.splitlines():
+        line = raw.rstrip()
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        item = re.match(r"^\s*-\s*(.*)$", line)
+        if item and current:
+            if not isinstance(data.get(current), list):
+                data[current] = []
+            data[current].append(_clean_meta(item.group(1)))
+            continue
+        field = re.match(r"^([A-Za-z][\w-]*):\s*(.*)$", line)
+        if field:
+            current = field.group(1)
+            value = _clean_meta(field.group(2))
+            if value:
+                data[current] = value
+            else:
+                data[current] = []
+    return data
+
+
+COVER_KEYS = {
+    "title", "shorttitle", "title-ar", "shorttitle-ar",
+    "authors", "editors", "authors-ar", "editors-ar",
+}
+
+
+def _cover_metadata(block: str) -> dict:
+    try:
+        import yaml
+        parsed = yaml.safe_load(block)
+    except Exception:
+        parsed = None
+    if not isinstance(parsed, dict):
+        parsed = _simple_yaml(block)
+    meta: dict = {}
+    for key, value in parsed.items():
+        if key not in COVER_KEYS:
+            continue
+        if key in ("authors", "editors", "authors-ar", "editors-ar"):
+            values = _clean_list(value)
+            if values:
+                meta[key] = values
+        else:
+            value = _clean_meta(value)
+            if value:
+                meta[key] = value
+    return meta
+
+
+def _take_cover_block(body: str) -> tuple[str, dict]:
+    """Remove a leading fenced (or `---` delimited) YAML cover block."""
+    fence = re.match(r"^\s*```(?:ya?ml)?[ \t]*\n(.*?)\n```[ \t]*(?:\n|$)", body, re.S | re.I)
+    if not fence:
+        fence = re.match(r"^\s*---[ \t]*\n(.*?)\n---[ \t]*(?:\n|$)", body, re.S)
+    if not fence:
+        return body, {}
+    meta = _cover_metadata(fence.group(1))
+    if not meta:
+        return body, {}
+    rest = body[fence.end():]
+    while rest.startswith("\n"):
+        rest = rest[1:]
+    return rest, meta
+
+
+def extract_metadata(body: str) -> tuple[str, dict]:
+    """Remove the first-page cover block and legacy TITLE:/AUTHOR: lines.
+
+    The current prompt asks for a fenced YAML block only on the first page.
+    Older archives and standalone runs may instead carry TITLE:/AUTHOR: lines,
+    sometimes on every page and sometimes on one line; those are also removed,
+    with the first value winning.
     """
-    meta: dict[str, str] = {}
+    body, meta = _take_cover_block(body)
     keep: list[str] = []
-    removed = False
+    removed = bool(meta)
     for line in body.splitlines():
         pair = META_PAIR.match(line)
         single = None if pair else META_SINGLE.match(line)
@@ -49,15 +129,19 @@ def extract_metadata(body: str) -> tuple[str, dict[str, str]]:
             title, author = _clean_meta(pair.group(1)), _clean_meta(pair.group(2))
             if title and "title" not in meta:
                 meta["title"] = title
-            if author and "author" not in meta:
-                meta["author"] = author
+            if author and "authors" not in meta:
+                meta["authors"] = [author]
             removed = True
             continue
         if single:
             key = single.group(1).lower()
             value = _clean_meta(single.group(2))
-            if value and key not in meta:
-                meta[key] = value
+            if value:
+                if key == "author":
+                    if "authors" not in meta:
+                        meta["authors"] = [value]
+                elif key not in meta:
+                    meta[key] = value
             removed = True
             continue
         keep.append(line)
@@ -67,7 +151,6 @@ def extract_metadata(body: str) -> tuple[str, dict[str, str]]:
     while keep and not keep[0].strip():
         keep.pop(0)
     return "\n".join(keep), meta
-
 
 def run(input_path, out_path=None, metadata=False, tafsir=False):
     """Format and Qur'an-process a raw transcription. Returns the output Path."""

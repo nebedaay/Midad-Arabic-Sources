@@ -168,6 +168,8 @@ export async function runAnnotationRegressionTests(): Promise<RegressionResult> 
 	const known = {
 		"_2 Bibliographic notes/@demo - transcription.md": "---\ntitle: Demo Book\n---\n",
 		"_2 Bibliographic notes/@demo - transcription - v. 2 - Variant.md": "text",
+		"_2 Bibliographic notes/@demo - transcription - chapter one.md": "text",
+		"_2 Bibliographic notes/@demo - transcription, chapter two.md": "text",
 		"_2 Bibliographic notes/@demo - translation - v. 2.md": "translation",
 	};
 	const app = fakeApp(known, {
@@ -177,10 +179,12 @@ export async function runAnnotationRegressionTests(): Promise<RegressionResult> 
 	await registry.load();
 	await registry.scanKnownNotes();
 	const entries = registry.all();
-	check("adoption scanner registers known notes", entries.length === 3);
+	check("adoption scanner registers known notes", entries.length === 5);
 	check("transcription volumes share one work", new Set(entries.filter((e) => e.kind === "transcription").map((e) => e.workKey)).size === 1);
 	check("translation is a separate work", entries.filter((e) => e.kind === "translation").every((e) => e.workKey !== entries.find((x) => x.kind === "transcription")?.workKey));
 	check("hub title is used for the series", entries.some((e) => e.workTitle === "Transcription - Demo Book"));
+	check("partial units stay under their work", entries.filter((e) => e.unitKey.startsWith("note:chapter")).every((e) => e.workKey === entries.find((x) => x.unitKey === "note")?.workKey));
+	check("legacy comma unit is recognized", entries.some((e) => e.unitTitle === "chapter two"));
 
 	const recovered = new AdoptedNotesRegistry(fakeApp({}));
 	await recovered.restoreFromStore(

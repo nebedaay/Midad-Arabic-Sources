@@ -2303,7 +2303,7 @@ var BUNDLED_ASSETS = [
   { path: "midad-arabic-sources-import-templates/dictionary-index.eta.md", content: "<% start_YAML(); -%>\n<% add_property('document-type', '[[text-source]]'); -%>\n<% add_property('created', generated); -%>\n<% add_property('updated', updated()); -%>\n<% add_property('midad-up', [wikilink(work.dir)]); -%>\n<% add_property('related', [], { force: true, merge: 'keep' }); -%>\n<% add_property('title', unit.title || unit.base); -%>\n<% add_property('language', wikilink('Arabic')); -%>\n<% add_property('aliases', []); -%>\n<% add_property('cssclasses', [work.cssclass], { quote: 'never' }); -%>\n<%~ end_YAML() %>\n<span class=\"mas-managed\">mas-managed</span>\n\n# <%= unit.base %>\n\n<% for (const r of unit.roots) { -%>\n- <%= wikilink(r.base, r.title || `${r.arabic} ${r.roman}`) %>\n<% } -%>\n\n<span class=\"mas-managed\">/mas-managed</span>\n" },
   { path: "midad-arabic-sources-import-templates/dictionary-note.eta.md", content: "<% const isProse = work.body === 'prose'; -%>\n<% start_YAML(); -%>\n<% add_property('document-type', '[[text-source]]'); -%>\n<% add_property('created', generated); -%>\n<% add_property('updated', updated()); -%>\n<% add_property('midad-up', [unit.section_page ? wikilink(unit.section_page) : null, wikilink(work.dir)].filter(Boolean)); -%>\n<% add_property('related', [], { force: true, merge: 'keep' }); -%>\n<% add_property('title', unit.title || `${unit.root.arabic} ${unit.root.roman}`); -%>\n<% add_property('term-ar', unit.root.arabic); -%>\n<% add_property('term', unit.root.roman); -%>\n<% add_property(`${(work.note_prefix || 'HW').toLowerCase()}-id`, unit.id); -%>\n<% add_property('language', wikilink('Arabic')); -%>\n<% add_property('aliases', [`${work.note_prefix || 'HW'} ${unit.root.arabic}`, `${work.note_prefix || 'HW'} ${unit.root.roman}`]); -%>\n<% add_property('cssclasses', [work.cssclass, isProse ? 'mas-prose' : null].filter(Boolean), { quote: 'never' }); -%>\n<%~ end_YAML() %>\n<span class=\"mas-managed\">mas-managed</span>\n\n<% const rowsOf = (e) => (e.bullets || e.lines || []); -%>\n<% const isBullets = (e) => Array.isArray(e.bullets); -%>\n<% const defBlock = (e) => ['> [!mas-dictionary-definition]', ...rowsOf(e).map((b, i) => `> - ${i === 0 && isBullets(e) ? `<span class=\"mas-hw\">${b}</span>` : b}`)].join('\\n'); -%>\n<% const bodyOf = (e) => isProse ? (e.paragraphs || []).join('\\n\\n') : defBlock(e); -%>\n<% const headingOf = (e, level) => `${'#'.repeat(level)} ${e.roman ? `*${e.roman}* ` : ''}(${e.arabic}) ^${e.id}`; -%>\n<% const blocks = [headingOf(unit.root, 1)]; -%>\n<% if (bodyOf(unit.root)) blocks.push(bodyOf(unit.root)); -%>\n<% if (unit.root.supplement) blocks.push('# Supplement'); -%>\n<% let suppShown = !!unit.root.supplement; -%>\n<% for (const e of unit.entries) { -%>\n<% if (e.supplement && !suppShown) { blocks.push('# Supplement'); suppShown = true; } -%>\n<% blocks.push(headingOf(e, 2)); -%>\n<% if (bodyOf(e)) blocks.push(bodyOf(e)); -%>\n<% } -%>\n<%~ blocks.join('\\n\\n') %>\n\n<span class=\"mas-managed\">/mas-managed</span>\n" },
   { path: "midad-arabic-sources-import-templates/hadith-note.eta.md", content: "<% start_YAML(); -%>\n<% add_property('document-type', '[[text-source]]'); -%>\n<% add_property('created', generated); -%>\n<% add_property('updated', updated()); -%>\n<% add_property('midad-up', [unit.section_page ? wikilink(unit.section_page) : null, wikilink(work.dir)].filter(Boolean)); -%>\n<% add_property('related', [], { force: true, merge: 'keep' }); -%>\n<% add_property('title', unit.title || unit.base); -%>\n<% if (work.authors && work.authors.length) { add_property('authors', work.authors.map(a => wikilink(a))); } -%>\n<% if (work.translators && work.translators.length) { add_property('translators', work.translators.map(a => wikilink(a))); } -%>\n<% if (work.language_links.length > 1) { add_property('language', work.language_links.map(l => wikilink(l))); } else { add_property('language', wikilink(work.language_links[0])); } -%>\n<% add_property('aliases', work.aliases.slice(0, 1).map(a => `${a} - ${unit.base}`)); -%>\n<% add_property('cssclasses', [work.cssclass], { quote: 'never' }); -%>\n<%~ end_YAML() %>\n<span class=\"mas-managed\">mas-managed</span>\n\n<% for (const h of unit.hadiths) { -%>\n# <%= h.number %>\n\n<% if (bilingual === 'table') { -%>\n| \u0627\u0644\u0639\u0631\u0628\u064A\u0629 | English |\n| --- | --- |\n| <%~ h.arabic.replace(/\\n+/g, '<br>') %> | <%~ h.english.replace(/\\n+/g, '<br>') %> |\n\n<% } else { -%>\n<% if (h.narrator) { -%>\n**<%~ h.narrator %>**\n\n<% } -%>\n<%~ h.english %>\n\n<%~ h.arabic %>\n\n<% } -%>\n<% } -%>\n<% if (!unit.hadiths || !unit.hadiths.length) { -%>\n> [!missing-data] No hadiths were found for this chapter in the source.\n\n<% } -%>\n<span class=\"mas-managed\">/mas-managed</span>\n" },
-  { path: "midad-arabic-sources-import-templates/hub.eta.md", content: "<% start_YAML(); -%>\n<% add_property('document-type', '[[text-source]]'); -%>\n<% add_property('created', generated); -%>\n<% add_property('updated', updated()); -%>\n<% const pub = work.publication || {}; -%>\n<% const yamlId = (value) => String(value).replace(/:/g, '/'); -%>\n<% add_property('midad-up', [...work.up, '[[Midad Arabic Sources]]']); -%>\n<% add_property('midad-id', yamlId('repo:' + work.key)); -%>\n<% add_property('midad-kind', 'repo-work'); -%>\n<% /* Retired properties. The source is derived from midad-id/midad-kind/midad-work,\n   and the raw key is midad-id without its `repo/` prefix. Declared empty with\n   `remove` so a re-render deletes either one from an older note. */ -%>\n<% add_property('midad-source', '', { merge: 'remove' }); -%>\n<% add_property('midad-key', '', { merge: 'remove' }); -%>\n<% if (pub.mas_note) { add_property('midad-note', pub.mas_note); } -%>\n<% add_property('related', [], { force: true, merge: 'keep' }); -%>\n<% add_property('title', work.title); -%>\n<% const shortTitle = pub.shorttitle || work.short; -%>\n<% if (shortTitle) { add_property('shorttitle', shortTitle); } -%>\n<% /* The rule is the language of the published work, not its genre: an Arabic\n   dictionary keeps its Arabic title; an English-language work (Wehr, Lane, an\n   English Qur'\u0101n translation) does not get an Arabic rendering of its title. */ -%>\n<% const titleArAllowed = (work.title_language || work.language) === 'ar'; -%>\n<% const titleAr = titleArAllowed ? (pub.title_ar || work.title_ar) : ''; -%>\n<% if (titleArAllowed && titleAr) { add_property('title-ar', titleAr, { quote: 'always' }); } else if (!titleArAllowed) { add_property('title-ar', '', { merge: 'remove' }); } -%>\n<% const scholarName = (a) => {\n  if (typeof a !== 'string') return a.name || [a.last, a.first].filter(Boolean).join(', ');\n  const s = a.trim();\n  if (s.includes(',') || /(?:^|\\s)(?:b\\.\\s|ibn\\b|bint\\b|al-\\S|Ab\u016B\\b|Abu\\b)/i.test(s)) return s;\n  const parts = s.split(/\\s+/).filter(Boolean);\n  return parts.length > 1 ? `${parts[parts.length - 1]}, ${parts.slice(0, -1).join(' ')}` : s;\n}; -%>\n<% const person = (a) => scholarName(a); -%>\n<% const pubAuthors = (pub.authors && pub.authors.length) ? pub.authors : (work.authors || []); -%>\n<% const pubTranslators = (pub.translators && pub.translators.length) ? pub.translators : (work.translators || []); -%>\n<% const pubEditors = pub.editors || []; -%>\n<% add_property('item-type', pub.item_type || 'book'); -%>\n<% if (pubAuthors.length) { add_property('authors', pubAuthors.map(a => wikilink(person(a)))); } -%>\n<% const authorsArAllowed = (work.title_language || work.language) === 'ar'; -%>\n<% const authorsArRaw = authorsArAllowed ? ((pub.authors_ar && pub.authors_ar.length) ? pub.authors_ar : (work.authors_ar || [])) : []; -%>\n<% const authorsAr = Array.isArray(authorsArRaw) ? authorsArRaw : (authorsArRaw ? [authorsArRaw] : []); -%>\n<% if (authorsArAllowed && authorsAr.length) { add_property('authors-ar', authorsAr, { quote: 'always' }); } else if (!authorsArAllowed) { add_property('authors-ar', '', { merge: 'remove' }); } -%>\n<% /* One standard: `authors-ar` is the list, even for a single author. */ -%>\n<% add_property('author-ar', '', { merge: 'remove' }); -%>\n<% if (pubTranslators.length) { add_property('translators', pubTranslators.map(a => wikilink(person(a)))); } -%>\n<% if (pubEditors.length) { add_property('editors', pubEditors.map(a => wikilink(person(a)))); } -%>\n<% if (pub.contributors) { const contributors = Array.isArray(pub.contributors) ? pub.contributors : [pub.contributors]; add_property('contributors', contributors.map(a => wikilink(person(a)))); } -%>\n<% if (pub.publisher) { add_property('publisher', wikilink(pub.publisher)); } -%>\n<% if (pub.place) { add_property('place', pub.place); } -%>\n<% if (pub.date) { add_property('year', wikilink(String(pub.date).slice(0, 4))); } -%>\n<% if (pub.edition) { add_property('edition', pub.edition); } -%>\n<% if (pub.series) { add_property('series', pub.series); } -%>\n<% if (pub['series-number']) { add_property('series-number', pub['series-number']); } -%>\n<% if (pub.volume) { add_property('volume', pub.volume); } -%>\n<% const volumeCount = pub.volumes || (Number(work.volumes) > 1 ? Number(work.volumes) : ''); -%>\n<% if (volumeCount) { add_property('volumes', volumeCount); } -%>\n<% if (pub.number) { add_property('number', pub.number); } -%>\n<% if (pub.issue) { add_property('issue', pub.issue); } -%>\n<% if (pub.pages) { add_property('pages', pub.pages); } -%>\n<% if (pub.doi) { add_property('doi', pub.doi); } -%>\n<% if (pub.isbn) { add_property('isbn', pub.isbn); } -%>\n<% const url = pub.url || work.source; -%>\n<% if (url) { add_property('url', url); } -%>\n<% const genre = pub.genre || work.genre; -%>\n<% if (genre) { add_property('genre', genre); } -%>\n<% if (pub.section) { add_property('section', pub.section); } -%>\n<% if (pub.citekey) { add_property('citekey', pub.citekey); } -%>\n<% if (work.language_links.length > 1) { add_property('language', work.language_links.map(l => wikilink(l))); } else { add_property('language', wikilink(work.language_links[0])); } -%>\n<% if (work.repo) { add_property('repository', `[${work.repo_name || work.repo}](${work.repo})`); } -%>\n<% const showSource = work.source && work.source !== work.repo; -%>\n<% const sourceLabel = work.repo_name && work.source_name && work.repo_name !== work.source_name ? `${work.source_name} (upstream)` : (work.source_name || work.source); -%>\n<% add_property('source', showSource ? `[${sourceLabel}](${work.source})` : undefined); -%>\n<% if (work.license_attribution) { add_property('license-attribution', work.license_attribution); } -%>\n<% if (work.repository_updated) { add_property('repository-updated', work.repository_updated); } -%>\n<% add_property('aliases', work.aliases); -%>\n<% add_property('cssclasses', [], { merge: 'replace' }); -%>\n<%~ end_YAML() %>\n<span class=\"mas-managed\">mas-managed</span>\n\n<% if (!unit) { -%>\n# <%= work.title %>\n\n<% } -%>\n<% if (work.author) { -%>\n*<%~ work.author %>*\n\n<% } -%>\n<% if (unit) { -%>\n<% if (unit.kind === 'hadith') { -%>\n<% for (const h of unit.hadiths) { -%>\n# <%= h.number %>\n\n<% if (bilingual === 'table') { -%>\n| \u0627\u0644\u0639\u0631\u0628\u064A\u0629 | English |\n| --- | --- |\n| <%~ h.arabic.replace(/\\n+/g, '<br>') %> | <%~ h.english.replace(/\\n+/g, '<br>') %> |\n\n<% } else { -%>\n<% if (h.narrator) { -%>\n**<%~ h.narrator %>**\n\n<% } -%>\n<%~ h.english %>\n\n<%~ h.arabic %>\n\n<% } -%>\n<% } -%>\n<% } else if (unit.kind === 'book') { -%>\n<% const multi = (work.volumes || 1) > 1; -%>\n<% for (const p of unit.pages) { -%>\n#### p. <%= multi ? `${p.vol}:${p.page}` : p.page %>\n\n<%~ p.body %>\n\n<% } -%>\n<% } else { -%>\n<% for (const b of unit.blocks) { -%>\n# <%= b.number %>\n\n## <%= b.ref %>\n\n<%~ b.body %>\n\n<% } -%>\n<% } -%>\n<% } else if (work.kind === 'dict') { -%>\n## Roots\n\n<% const letters = units.filter(u => u.kind === 'dict-index'); -%>\n<% for (const u of letters) { -%>\n- <%= wikilink(u.note_stem, u.title || u.base) %> \u2014 <%= u.roots.length %>\n<% } -%>\n\n<% } else if (work.kind === 'book') { -%>\n<% const letterUnits = units.filter(u => u.kind === 'book-letter'); -%>\n<% const volumeUnits = units.filter(u => u.kind === 'book-volume'); -%>\n<% if (letterUnits.length) { -%>\n## Roots\n\n<% for (const u of letterUnits) { -%>\n- <%= wikilink(u.note_stem || `${work.dir} - ${u.base}`, u.title || u.base) %>\n<% } -%>\n\n<% } else if ((work.volumes || 1) > 1 && volumeUnits.length) { -%>\n<% for (const u of volumeUnits) { -%>\n- <%= wikilink(u.note_stem || `${work.dir} - ${u.base}`, u.title || u.base) %><% if (u.chapters && u.chapters.length) { %> \u2014 <%= u.chapters.length %> chapter<%= u.chapters.length === 1 ? '' : 's' %><% } %>\n<% } -%>\n\n<% } else { -%>\n<% for (const u of units.filter(u => u.kind === 'book')) { -%>\n- <%= wikilink(u.note_stem || `${work.dir} - ${u.base}`, u.title || u.base) %><% if (u.span) { %> \u2014 <%= u.span %><% } %>\n<% } -%>\n\n<% } -%>\n<% } else { -%>\n## <%= work.unit_label %>\n\n<% for (const u of units) { -%>\n- <%= wikilink(u.note_stem || (work.unit_prefix ? `${work.unit_prefix} - ${u.base}` : u.base), u.title || u.base) %>\n<% } -%>\n\n<% } -%>\n<span class=\"mas-managed\">/mas-managed</span>\n" },
+  { path: "midad-arabic-sources-import-templates/hub.eta.md", content: "<% start_YAML(); -%>\n<% add_property('document-type', '[[text-source]]'); -%>\n<% add_property('created', generated); -%>\n<% add_property('updated', updated()); -%>\n<% const pub = work.publication || {}; -%>\n<% const yamlId = (value) => String(value).replace(/:/g, '/'); -%>\n<% add_property('midad-up', [...work.up, '[[Midad Arabic Sources]]']); -%>\n<% add_property('midad-id', yamlId('repo:' + work.key)); -%>\n<% add_property('midad-kind', 'repo-work'); -%>\n<% /* Retired properties. The source is derived from midad-id/midad-kind/midad-work,\n   and the raw key is midad-id without its `repo/` prefix. Declared empty with\n   `remove` so a re-render deletes either one from an older note. */ -%>\n<% add_property('midad-source', '', { merge: 'remove' }); -%>\n<% add_property('midad-key', '', { merge: 'remove' }); -%>\n<% if (pub.mas_note) { add_property('midad-note', pub.mas_note); } -%>\n<% add_property('related', [], { force: true, merge: 'keep' }); -%>\n<% add_property('title', work.title); -%>\n<% const shortTitle = pub.shorttitle || work.short; -%>\n<% if (shortTitle) { add_property('shorttitle', shortTitle); } -%>\n<% /* The rule is the language of the published work, not its genre: an Arabic\n   dictionary keeps its Arabic title; an English-language work (Wehr, Lane, an\n   English Qur'\u0101n translation) does not get an Arabic rendering of its title. */ -%>\n<% const titleArAllowed = (work.title_language || work.language) === 'ar'; -%>\n<% const titleAr = titleArAllowed ? (pub.title_ar || work.title_ar) : ''; -%>\n<% const shortTitleAr = titleArAllowed ? (pub.shorttitle_ar || pub.short_ar || work.short_ar || work.shorttitle_ar || '') : ''; -%>\n<% /* An Arabic work always carries title-ar, even when the catalogue has not\n   supplied the original title; the user can fill the empty value later. */ -%>\n<% if (titleArAllowed) { add_property('title-ar', titleAr || '', { force: true, quote: 'always' }); } else { add_property('title-ar', '', { merge: 'remove' }); } -%>\n<% if (titleArAllowed && shortTitleAr) { add_property('shorttitle-ar', shortTitleAr, { quote: 'always' }); } else if (!titleArAllowed) { add_property('shorttitle-ar', '', { merge: 'remove' }); } -%>\n<% const scholarName = (a) => {\n  if (typeof a !== 'string') return a.name || [a.last, a.first].filter(Boolean).join(', ');\n  const s = a.trim();\n  if (s.includes(',') || /(?:^|\\s)(?:b\\.\\s|ibn\\b|bint\\b|al-\\S|Ab\u016B\\b|Abu\\b)/i.test(s)) return s;\n  const parts = s.split(/\\s+/).filter(Boolean);\n  return parts.length > 1 ? `${parts[parts.length - 1]}, ${parts.slice(0, -1).join(' ')}` : s;\n}; -%>\n<% const person = (a) => scholarName(a); -%>\n<% const pubAuthors = (pub.authors && pub.authors.length) ? pub.authors : (work.authors || []); -%>\n<% const pubTranslators = (pub.translators && pub.translators.length) ? pub.translators : (work.translators || []); -%>\n<% const pubEditors = pub.editors || []; -%>\n<% add_property('item-type', pub.item_type || 'book'); -%>\n<% if (pubAuthors.length) { add_property('authors', pubAuthors.map(a => wikilink(person(a)))); } -%>\n<% const authorsArAllowed = (work.title_language || work.language) === 'ar'; -%>\n<% const authorsArRaw = authorsArAllowed ? ((pub.authors_ar && pub.authors_ar.length) ? pub.authors_ar : (work.authors_ar || [])) : []; -%>\n<% const authorsAr = Array.isArray(authorsArRaw) ? authorsArRaw : (authorsArRaw ? [authorsArRaw] : []); -%>\n<% if (authorsArAllowed && authorsAr.length) { add_property('authors-ar', authorsAr, { quote: 'always' }); } else if (!authorsArAllowed) { add_property('authors-ar', '', { merge: 'remove' }); } -%>\n<% /* One standard: `authors-ar` is the list, even for a single author. */ -%>\n<% add_property('author-ar', '', { merge: 'remove' }); -%>\n<% if (pubTranslators.length) { add_property('translators', pubTranslators.map(a => wikilink(person(a)))); } -%>\n<% if (pubEditors.length) { add_property('editors', pubEditors.map(a => wikilink(person(a)))); } -%>\n<% if (pub.contributors) { const contributors = Array.isArray(pub.contributors) ? pub.contributors : [pub.contributors]; add_property('contributors', contributors.map(a => wikilink(person(a)))); } -%>\n<% if (pub.publisher) { add_property('publisher', wikilink(pub.publisher)); } -%>\n<% if (pub.place) { add_property('place', pub.place); } -%>\n<% if (pub.date) { add_property('year', wikilink(String(pub.date).slice(0, 4))); } -%>\n<% if (pub.edition) { add_property('edition', pub.edition); } -%>\n<% if (pub.series) { add_property('series', pub.series); } -%>\n<% if (pub['series-number']) { add_property('series-number', pub['series-number']); } -%>\n<% if (pub.volume) { add_property('volume', pub.volume); } -%>\n<% const volumeCount = pub.volumes || (Number(work.volumes) > 1 ? Number(work.volumes) : ''); -%>\n<% if (volumeCount) { add_property('volumes', volumeCount); } -%>\n<% if (pub.number) { add_property('number', pub.number); } -%>\n<% if (pub.issue) { add_property('issue', pub.issue); } -%>\n<% if (pub.pages) { add_property('pages', pub.pages); } -%>\n<% if (pub.doi) { add_property('doi', pub.doi); } -%>\n<% if (pub.isbn) { add_property('isbn', pub.isbn); } -%>\n<% const url = pub.url || work.source; -%>\n<% if (url) { add_property('url', url); } -%>\n<% const genre = pub.genre || work.genre; -%>\n<% if (genre) { add_property('genre', genre); } -%>\n<% if (pub.section) { add_property('section', pub.section); } -%>\n<% if (pub.citekey) { add_property('citekey', pub.citekey); } -%>\n<% if (work.language_links.length > 1) { add_property('language', work.language_links.map(l => wikilink(l))); } else { add_property('language', wikilink(work.language_links[0])); } -%>\n<% if (work.repo) { add_property('repository', `[${work.repo_name || work.repo}](${work.repo})`); } -%>\n<% const showSource = work.source && work.source !== work.repo; -%>\n<% const sourceLabel = work.repo_name && work.source_name && work.repo_name !== work.source_name ? `${work.source_name} (upstream)` : (work.source_name || work.source); -%>\n<% add_property('source', showSource ? `[${sourceLabel}](${work.source})` : undefined); -%>\n<% if (work.license_attribution) { add_property('license-attribution', work.license_attribution); } -%>\n<% if (work.repository_updated) { add_property('repository-updated', work.repository_updated); } -%>\n<% add_property('aliases', work.aliases); -%>\n<% add_property('cssclasses', [], { merge: 'replace' }); -%>\n<%~ end_YAML() %>\n<span class=\"mas-managed\">mas-managed</span>\n\n<% if (!unit) { -%>\n# <%= work.title %>\n\n<% } -%>\n<% if (work.author) { -%>\n*<%~ work.author %>*\n\n<% } -%>\n<% if (unit) { -%>\n<% if (unit.kind === 'hadith') { -%>\n<% for (const h of unit.hadiths) { -%>\n# <%= h.number %>\n\n<% if (bilingual === 'table') { -%>\n| \u0627\u0644\u0639\u0631\u0628\u064A\u0629 | English |\n| --- | --- |\n| <%~ h.arabic.replace(/\\n+/g, '<br>') %> | <%~ h.english.replace(/\\n+/g, '<br>') %> |\n\n<% } else { -%>\n<% if (h.narrator) { -%>\n**<%~ h.narrator %>**\n\n<% } -%>\n<%~ h.english %>\n\n<%~ h.arabic %>\n\n<% } -%>\n<% } -%>\n<% } else if (unit.kind === 'book') { -%>\n<% const multi = (work.volumes || 1) > 1; -%>\n<% for (const p of unit.pages) { -%>\n#### p. <%= multi ? `${p.vol}:${p.page}` : p.page %>\n\n<%~ p.body %>\n\n<% } -%>\n<% } else { -%>\n<% for (const b of unit.blocks) { -%>\n# <%= b.number %>\n\n## <%= b.ref %>\n\n<%~ b.body %>\n\n<% } -%>\n<% } -%>\n<% } else if (work.kind === 'dict') { -%>\n## Roots\n\n<% const letters = units.filter(u => u.kind === 'dict-index'); -%>\n<% for (const u of letters) { -%>\n- <%= wikilink(u.note_stem, u.title || u.base) %> \u2014 <%= u.roots.length %>\n<% } -%>\n\n<% } else if (work.kind === 'book') { -%>\n<% const letterUnits = units.filter(u => u.kind === 'book-letter'); -%>\n<% const volumeUnits = units.filter(u => u.kind === 'book-volume'); -%>\n<% if (letterUnits.length) { -%>\n## Roots\n\n<% for (const u of letterUnits) { -%>\n- <%= wikilink(u.note_stem || `${work.dir} - ${u.base}`, u.title || u.base) %>\n<% } -%>\n\n<% } else if ((work.volumes || 1) > 1 && volumeUnits.length) { -%>\n<% for (const u of volumeUnits) { -%>\n- <%= wikilink(u.note_stem || `${work.dir} - ${u.base}`, u.title || u.base) %><% if (u.chapters && u.chapters.length) { %> \u2014 <%= u.chapters.length %> chapter<%= u.chapters.length === 1 ? '' : 's' %><% } %>\n<% } -%>\n\n<% } else { -%>\n<% for (const u of units.filter(u => u.kind === 'book')) { -%>\n- <%= wikilink(u.note_stem || `${work.dir} - ${u.base}`, u.title || u.base) %><% if (u.span) { %> \u2014 <%= u.span %><% } %>\n<% } -%>\n\n<% } -%>\n<% } else { -%>\n## <%= work.unit_label %>\n\n<% for (const u of units) { -%>\n- <%= wikilink(u.note_stem || (work.unit_prefix ? `${work.unit_prefix} - ${u.base}` : u.base), u.title || u.base) %>\n<% } -%>\n\n<% } -%>\n<span class=\"mas-managed\">/mas-managed</span>\n" },
   { path: "midad-arabic-sources-import-templates/moc.eta.md", content: `<% start_YAML(); -%>
 <% add_property('created', generated, { merge: 'keep' }); -%>
 <% add_property('midad-up', parent === 'Midad Arabic Sources' ? ['[[Midad Arabic Sources]]'] : [wikilink(parent), '[[Midad Arabic Sources]]']); -%>
@@ -3963,13 +3963,17 @@ def vault_stem(stem: str):
     return citekey, (int(vm.group(1)) if vm else None)
 
 
-def archive_name(stem: str, doc_type: str, citekey: str = None, volume: int = None) -> str:
+def archive_name(stem: str, doc_type: str, citekey: str = None, volume: int = None,
+                 unit: str = None) -> str:
     if citekey is None or volume is None:
         ck, vol = vault_stem(stem)
         citekey = citekey or ck
         volume = volume if volume is not None else vol
     if volume:
         return f"{citekey} - {doc_type} - vol. {volume} files.zip"
+    if unit:
+        safe_unit = re.sub(r'[\\\\/:*?"<>|]', "-", unit.strip()).strip(" .")
+        return f"{citekey} - {doc_type} - {safe_unit} files.zip"
     return f"{citekey} - {doc_type} files.zip"
 
 
@@ -4009,6 +4013,11 @@ def main():
         idx = sys.argv.index("--volume")
         if idx + 1 < len(sys.argv):
             volume = int(sys.argv[idx + 1])
+    unit = None
+    if "--unit" in sys.argv:
+        idx = sys.argv.index("--unit")
+        if idx + 1 < len(sys.argv):
+            unit = sys.argv[idx + 1].strip() or None
 
     files = [batch_file.parent / pat.format(stem=stem) for pat in INTERMEDIATES[doc_type]]
     files = [f for f in files if f.exists()]
@@ -4016,7 +4025,7 @@ def main():
         print(f"ERROR: no intermediate files found next to {batch_file.name}")
         sys.exit(1)
 
-    zip_path = dest_dir / archive_name(stem, doc_type, citekey, volume)
+    zip_path = dest_dir / archive_name(stem, doc_type, citekey, volume, unit)
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as z:
         for f in files:
             z.write(f, arcname=f.name)
@@ -4278,7 +4287,9 @@ def infer_explicit_volume(name: str):
     An arbitrary user-chosen PDF may have a year or an edition number in its
     name; treating the last number as a volume would be wrong.
     """
-    stem = Path(name).stem
+    stem = Path(name).stem.strip()
+    if re.fullmatch(r"\\d{1,3}", stem):
+        return int(stem)
     m = re.search(r'(?:vol(?:ume)?|juz|\u062C\u0632\u0621|\u062C)\\s*[._-]?\\s*(\\d+)', stem, re.I)
     return int(m.group(1)) if m else None
 
@@ -4358,7 +4369,8 @@ def resolve_pdfs(note_path):
         if path:
             fn = data.get("filename") or a["filename"]
             found[a["key"]] = {"key": a["key"], "filename": fn, "path": path,
-                               "exists": Path(path).exists(), "volume": infer_volume(fn)}
+                               "exists": Path(path).exists(), "volume": infer_explicit_volume(fn),
+                               "title": data.get("title") or Path(fn).stem}
 
     # The parent's children (covers attachments the note does not list).
     if zkey:
@@ -4371,7 +4383,8 @@ def resolve_pdfs(note_path):
             if path:
                 fn = data.get("filename") or Path(path).name
                 found[key or path] = {"key": key, "filename": fn, "path": path,
-                                      "exists": Path(path).exists(), "volume": infer_volume(fn)}
+                                      "exists": Path(path).exists(), "volume": infer_explicit_volume(fn),
+                                      "title": data.get("title") or Path(fn).stem}
 
     # (1) ScholarWeft zlinks cache
     zlinks = VAULT / ".scholar-weft" / "zlinks.json"
@@ -4381,7 +4394,8 @@ def resolve_pdfs(note_path):
             for p in pdfs:
                 if not any(v["path"] == p for v in found.values()):
                     found["zlinks:" + p] = {"key": "", "filename": Path(p).name, "path": p,
-                                            "exists": Path(p).exists(), "volume": infer_volume(p)}
+                                            "exists": Path(p).exists(), "volume": infer_explicit_volume(p),
+                                            "title": Path(p).stem}
         except Exception:
             pass
 
@@ -4391,7 +4405,8 @@ def resolve_pdfs(note_path):
             continue
         p = ZOTERO_DATA_DIR / "storage" / a["key"] / a["filename"]
         found.setdefault(a["key"], {"key": a["key"], "filename": a["filename"], "path": str(p),
-                                    "exists": p.exists(), "volume": infer_volume(a["filename"])})
+                                    "exists": p.exists(), "volume": infer_explicit_volume(a["filename"]),
+                                    "title": Path(a["filename"]).stem})
 
     items = list(found.values())
     items.sort(key=lambda v: (not v["exists"], v["filename"].lower()))
@@ -4490,10 +4505,12 @@ def _strip_yaml(text: str) -> str:
     return text
 
 
-def _archive(batch_txt: Path, citekey: str, doc_type: str, volume):
+def _archive(batch_txt: Path, citekey: str, doc_type: str, volume, unit: str | None = None):
     args = [str(batch_txt), "--citekey", citekey]
     if volume:
         args += ["--volume", str(volume)]
+    if unit:
+        args += ["--unit", unit]
     return run_script("archive-batch-files.py", args)
 
 
@@ -4506,26 +4523,36 @@ def _parse_pdf_arg(value: str):
     return value, None
 
 
-def _read_note_metadata(processed: Path) -> tuple[str | None, list[str] | None]:
-    """Read the title/author sidecar written by transcription-postprocess.py."""
+def _read_note_metadata(processed: Path) -> dict:
+    """Read the cover-metadata sidecar written by transcription-postprocess.py."""
     sidecar = processed.with_suffix(processed.suffix + ".meta.json")
     if not sidecar.exists():
-        return None, None
+        return {}
     try:
         meta = json.loads(sidecar.read_text(encoding="utf-8"))
     except Exception:
-        return None, None
+        return {}
+    return meta if isinstance(meta, dict) else {}
+
+
+def _cover_values(meta: dict) -> tuple[str | None, list[str] | None]:
+    """Title and authors from a cover sidecar, including the legacy shape."""
     title = meta.get("title") if isinstance(meta.get("title"), str) else None
-    author = meta.get("author") if isinstance(meta.get("author"), str) else None
-    authors = [a.strip() for a in author.split(";") if a.strip()] if author else None
-    return title, authors
+    authors = meta.get("authors")
+    if isinstance(authors, list):
+        authors = [str(a).strip() for a in authors if str(a).strip()]
+    else:
+        author = meta.get("author") if isinstance(meta.get("author"), str) else ""
+        authors = [a.strip() for a in author.split(";") if a.strip()]
+    return title, authors or None
 
 
 def cmd_transcribe(args) -> int:
     citekey = args.citekey
     standalone = bool(getattr(args, "standalone", False))
     model = getattr(args, "model", None) or ""
-    specs = [_parse_pdf_arg(v) for v in (args.pdf or [])]
+    explicit_unit = (getattr(args, "unit", None) or "").strip() or None
+    specs = [(*_parse_pdf_arg(v), None) for v in (args.pdf or [])]
 
     if not specs:
         if standalone:
@@ -4536,14 +4563,14 @@ def cmd_transcribe(args) -> int:
             fail(f"Literature note not found: @{citekey}.md (set the literature-notes folder, or use Transcribe a PDF)")
             return 1
         _, items = resolve_pdfs(note)
-        specs = [(i["path"], i.get("volume")) for i in items if i["exists"]]
+        specs = [(i["path"], i.get("volume"), i.get("title")) for i in items if i["exists"]]
     if not specs:
         fail("No PDF file found for this item.")
         return 1
 
     mv = load_module("transcription-translation-move-to-vault.py")
     results = []
-    for pdf_path, vol in specs:
+    for pdf_path, vol, zotero_title in specs:
         pdf = Path(pdf_path)
         volume = vol
         if volume is None:
@@ -4552,7 +4579,20 @@ def cmd_transcribe(args) -> int:
             elif standalone:
                 volume = infer_explicit_volume(pdf.name)
             else:
-                volume = infer_volume(pdf.name)
+                volume = None
+        unit = explicit_unit
+        if unit:
+            volume = None
+        if volume is None and not unit:
+            title_value = (zotero_title or pdf.stem).strip()
+            ref = mv.find_zotero(citekey) if not standalone else None
+            work_title = mv.extract_zotero_field(ref.read_text(encoding="utf-8"), "title") if ref else ""
+            normal = lambda value: re.sub(r"[^a-z0-9\\u0600-\\u06FF]+", "", (value or "").casefold())
+            looks_part = bool(re.search(
+                r"\\b(?:introduction|preface|foreword|chapter|part|section|conclusion|appendix|index)\\b",
+                title_value, re.I))
+            if title_value and (looks_part or len(specs) > 1 or (work_title and normal(title_value) != normal(work_title))):
+                unit = title_value
         stem = pdf.stem
         # Keep all intermediates inside the plugin cache, not beside the source PDF.
         work = WORK_DIR / f"{_slug(citekey)}-{_slug(stem)}"
@@ -4563,15 +4603,13 @@ def cmd_transcribe(args) -> int:
 
         save_state(stage="submitting", status="running", doc_type="transcription",
                    pid=os.getpid(), citekey=citekey, pdf=str(pdf), volume=volume,
-                   standalone=standalone, model=model,
+                   unit=unit, standalone=standalone, model=model,
                    work_dir=str(work), log=str(_LOG_PATH) if _LOG_PATH else "",
                    prompt_file=str(args.prompt_file) if getattr(args, "prompt_file", None) else "")
         step("transcribe", "start", f"{pdf.name}" + (f" (vol. {volume})" if volume else ""))
         submit_args = [str(pdf), "--work-dir", str(work)]
         if getattr(args, "prompt_file", None):
             submit_args += ["--prompt-file", str(args.prompt_file)]
-        if standalone:
-            submit_args.append("--metadata")
         if model:
             submit_args += ["--model", model]
         if run_script("transcription-batch-submit.py", submit_args):
@@ -4585,24 +4623,21 @@ def cmd_transcribe(args) -> int:
             fix_args = [str(batch_txt), "--fix"]
             if getattr(args, "prompt_file", None):
                 fix_args += ["--prompt-file", str(args.prompt_file)]
-            if standalone:
-                fix_args.append("--metadata")
             if model:
                 fix_args += ["--model", model]
             run_script("transcription-process-raw.py", fix_args)
 
         if not processed.exists() or processed.stat().st_mtime < raw.stat().st_mtime:
-            post_args = [str(raw), str(processed)]
-            if standalone:
-                post_args.append("--metadata")
+            post_args = [str(raw), str(processed), "--metadata"]
             run_script("transcription-postprocess.py", post_args)
 
         save_state(stage="writing", status="running")
-        title, authors = _read_note_metadata(processed)
+        cover = _read_note_metadata(processed)
+        title, authors = _cover_values(cover)
         dest = mv.write_note(_strip_yaml(processed.read_text(encoding="utf-8")), citekey,
                              "transcription", volume=volume, standalone=standalone,
-                             title=title, authors=authors)
-        _archive(batch_txt, citekey, "transcription", volume)
+                             title=title, authors=authors, unit=unit, cover=cover)
+        _archive(batch_txt, citekey, "transcription", volume, unit)
         # Only the vault note and the txt/json archive survive.
         shutil.rmtree(work, ignore_errors=True)
         save_state(stage="done", status="done", note=str(dest))
@@ -4617,6 +4652,7 @@ def _resume_transcription(st: dict) -> int:
     citekey = st.get("citekey")
     pdf = st.get("pdf")
     volume = st.get("volume")
+    unit = st.get("unit")
     standalone = bool(st.get("standalone"))
     model = st.get("model") or ""
     stem = Path(pdf).stem
@@ -4625,7 +4661,8 @@ def _resume_transcription(st: dict) -> int:
     if not batch_txt.exists():
         return cmd_transcribe(argparse.Namespace(citekey=citekey, pdf=[pdf], volume=volume,
                                                 pages=None, standalone=standalone, model=model,
-                                                prompt_file=st.get("prompt_file") or None))
+                                                prompt_file=st.get("prompt_file") or None,
+                                                unit=unit))
 
     mv = load_module("transcription-translation-move-to-vault.py")
     raw = work / f"{stem}-raw.md"
@@ -4636,21 +4673,18 @@ def _resume_transcription(st: dict) -> int:
         fix_args = [str(batch_txt), "--fix"]
         if st.get("prompt_file"):
             fix_args += ["--prompt-file", str(st["prompt_file"])]
-        if standalone:
-            fix_args.append("--metadata")
         if model:
             fix_args += ["--model", model]
         run_script("transcription-process-raw.py", fix_args)
     if not processed.exists() or processed.stat().st_mtime < raw.stat().st_mtime:
-        post_args = [str(raw), str(processed)]
-        if standalone:
-            post_args.append("--metadata")
+        post_args = [str(raw), str(processed), "--metadata"]
         run_script("transcription-postprocess.py", post_args)
-    title, authors = _read_note_metadata(processed)
+    cover = _read_note_metadata(processed)
+    title, authors = _cover_values(cover)
     dest = mv.write_note(_strip_yaml(processed.read_text(encoding="utf-8")), citekey,
                          "transcription", volume=volume, standalone=standalone,
-                         title=title, authors=authors)
-    _archive(batch_txt, citekey, "transcription", volume)
+                         title=title, authors=authors, unit=unit, cover=cover)
+    _archive(batch_txt, citekey, "transcription", volume, unit)
     shutil.rmtree(work, ignore_errors=True)
     save_state(stage="done", status="done", note=str(dest))
     emit("result", result={"notes": [str(dest)]})
@@ -4703,10 +4737,19 @@ def cmd_translate(args) -> int:
             step("translate", "error", src.name); continue
         txt = src.parent / f"{src.stem}.translate.txt"
         run_script("translate-batch-process.py", [str(txt), "--poll", str(POLL_SECONDS)])
-        _archive(txt, citekey, "translation", args.volume)
         vm = re.search(r'vol\\.\\s*(\\d+)', src.stem)
         vol = int(vm.group(1)) if vm else None
-        dest = mv.dest_path(citekey, "translation", args.volume if args.volume is not None else vol)
+        unit = None
+        unit_match = re.match(
+            r'^@?\\S+?\\s+-\\s+(?:transcription|translation)'
+            r'(?:\\s+-\\s+(?:vol|v)\\.\\s*\\d+)?'
+            r'(?:\\s*[-,\u2013\u2014]\\s*(.+))?$',
+            src.stem, re.I)
+        if unit_match:
+            unit = (unit_match.group(1) or "").strip() or None
+        final_vol = args.volume if args.volume is not None else vol
+        _archive(txt, citekey, "translation", final_vol, unit)
+        dest = mv.dest_path(citekey, "translation", final_vol, unit=unit)
         step("translate", "done", dest.name)
         results.append(str(dest))
 
@@ -4723,24 +4766,27 @@ def cmd_reprocess(args) -> int:
 
 
 def _note_identity(note: Path, citekey: str | None, doc_type: str | None,
-                   volume: int | None, standalone: bool):
-    """Resolve a legacy/native transcription note's citekey, type, and volume."""
+                   volume: int | None, standalone: bool, unit: str | None = None):
+    """Resolve a legacy/native note's citekey, type, volume, and partial unit."""
     stem = note.stem
     match = re.match(
         r"^(?:@|mas-)(.+?)\\s+-\\s+(transcription|translation)"
-        r"(?:\\s+-\\s+(?:vol|v)\\.\\s*(\\d+))?$",
+        r"(?:\\s*-\\s*(?:vol|v)\\.\\s*(\\d+))?"
+        r"(?:\\s*[-,\u2013\u2014]\\s*(.+))?$",
         stem, re.I)
     inferred_citekey = match.group(1) if match else ""
     inferred_type = match.group(2).lower() if match else ""
     inferred_volume = int(match.group(3)) if match and match.group(3) else None
+    inferred_unit = match.group(4).strip() if match and match.group(4) else ""
     key = (citekey or inferred_citekey).strip()
     kind = (doc_type or inferred_type or "transcription").strip().lower()
     vol = inferred_volume if volume is None else volume
+    label = (unit or inferred_unit).strip() or None
     if kind not in ("transcription", "translation"):
         raise ValueError(f"Unknown note type: {kind}")
     if not key:
         raise ValueError("Could not determine the note's citekey; pass --citekey.")
-    return key, kind, vol, standalone or stem.startswith("mas-")
+    return key, kind, vol, standalone or stem.startswith("mas-"), label
 
 
 def _note_body(text: str) -> str:
@@ -4939,8 +4985,9 @@ def cmd_postprocess_note(args) -> int:
     if not note.exists():
         fail(f"Note not found: {note}")
         return 1
-    citekey, doc_type, volume, standalone = _note_identity(
-        note, args.citekey, args.type, args.volume, args.standalone)
+    citekey, doc_type, volume, standalone, unit = _note_identity(
+        note, args.citekey, args.type, args.volume, args.standalone,
+        getattr(args, "unit", None))
     text = note.read_text(encoding="utf-8")
     body = text
     if text.startswith("---"):
@@ -4952,10 +4999,11 @@ def cmd_postprocess_note(args) -> int:
     mv = load_module("transcription-translation-move-to-vault.py")
     related = mv._existing_list(note, "related")
     parent = mv.dest_path(citekey, doc_type, None, standalone)
+    mode_source = parent if parent.exists() else note
     tafsir = bool(getattr(args, "tafsir", False))
-    if parent.exists():
-        mode = mv._existing_scalar(parent, "midad-transcription-mode").strip().lower()
-        topics = mv._existing_list(parent, "topics")
+    if mode_source.exists():
+        mode = mv._existing_scalar(mode_source, "midad-transcription-mode").strip().lower()
+        topics = mv._existing_list(mode_source, "topics")
         tafsir = tafsir or mode == "tafsir" or any(
             "tafsir" in topic.lower().replace("\u012B", "i").replace("\u0101", "a")
             for topic in topics
@@ -4997,7 +5045,8 @@ def cmd_postprocess_note(args) -> int:
     with contextlib.redirect_stdout(io.StringIO()):
         dest = mv.write_note(
             processed_body, citekey, doc_type, related=related,
-            volume=volume, standalone=standalone, title=title, authors=authors)
+            volume=volume, standalone=standalone, title=title, authors=authors,
+            unit=unit)
     consolidated = None
     if volume is not None:
         consolidated = _consolidate_parent(
@@ -5005,6 +5054,7 @@ def cmd_postprocess_note(args) -> int:
     result = {
         "notes": [str(dest)], "backup": str(backup),
         "metadata_only": bool(args.metadata_only), "tafsir": tafsir,
+        "unit": unit,
     }
     if consolidated:
         result["consolidated"] = consolidated
@@ -5026,6 +5076,7 @@ def main() -> int:
     p.add_argument("--citekey", required=True)
     p.add_argument("--pdf", action="append")
     p.add_argument("--volume", type=int)
+    p.add_argument("--unit")
     p.add_argument("--pages", type=int)
     p.add_argument("--standalone", action="store_true")
     p.add_argument("--model")
@@ -5049,6 +5100,7 @@ def main() -> int:
     p.add_argument("--citekey")
     p.add_argument("--type", choices=("transcription", "translation"))
     p.add_argument("--volume", type=int)
+    p.add_argument("--unit", help="Partial-transcription description, e.g. 'West Africa women'.")
     p.add_argument("--standalone", action="store_true")
     p.add_argument("--metadata-only", action="store_true")
     p.add_argument("--tafsir", action="store_true",
@@ -5193,6 +5245,8 @@ DEFAULT_TRANSLATION_PROMPT = (
 )
 
 
+# Kept for older prompt files and archives. New submissions use the richer,
+# first-page-only cover block below.
 STANDALONE_METADATA_PROMPT = (
     "TITLE PAGE METADATA (standalone scanned book)\\n"
     "If the PDF looks like a title page or cover, start the reply with two plain lines before the first page heading:\\n"
@@ -5200,6 +5254,32 @@ STANDALONE_METADATA_PROMPT = (
     "AUTHOR: the book's author as printed\\n"
     "Use the source's own language and script. Do not invent, guess, or romanize these values. "
     "If one is not clearly visible, omit that line. Do not use YAML, bold, or quotation marks around them, and do not repeat them."
+)
+
+COVER_METADATA_PROMPT = (
+    "COVER METADATA (first page only)\\n"
+    "When this is the first page of the PDF and it visibly contains a title page, cover, copyright page, or the opening of the work, "
+    "begin your reply with one fenced YAML block, then a blank line and the normal page heading and transcription. "
+    "On every other page, or when no title-page metadata is visible, do not output a YAML block at all.\\n"
+    "Use exactly these keys, omit any key you cannot read, and never guess, invent, or transliterate a value:\\n"
+    "\`\`\`yaml\\n"
+    "title:\\n"
+    "shorttitle:\\n"
+    "authors:\\n"
+    "  - \\n"
+    "editors:\\n"
+    "  - \\n"
+    "title-ar:\\n"
+    "shorttitle-ar:\\n"
+    "authors-ar:\\n"
+    "  - \\n"
+    "editors-ar:\\n"
+    "  - \\n"
+    "\`\`\`\\n"
+    "Give \`title\`, \`shorttitle\`, \`authors\`, and \`editors\` in the romanized form used in Western scholarship (IJMES), "
+    "and \`title-ar\`, \`shorttitle-ar\`, \`authors-ar\`, and \`editors-ar\` in the source's Arabic script. "
+    "If the source is not Arabic, omit the \`-ar\` keys. \`shorttitle\` and \`shorttitle-ar\` are the short form normally used in citations, "
+    "not a truncation of the title. Do not repeat the block, and do not wrap it in any other text."
 )
 
 
@@ -5590,9 +5670,9 @@ def resolve(src: Path, workdir: Path):
     raise SystemExit("ERROR: could not determine batch type/stem from the input")
 
 
-def existing_metadata(mv, citekey: str, doc_type: str, volume):
+def existing_metadata(mv, citekey: str, doc_type: str, volume, unit: str | None = None):
     """Title/author from an existing note, for a standalone reprocess."""
-    path = mv.dest_path(citekey, doc_type, volume)
+    path = mv.dest_path(citekey, doc_type, volume, unit=unit)
     if not path.exists():
         return None, None
     text = path.read_text(encoding="utf-8")
@@ -5653,7 +5733,18 @@ def main():
             r'\\s+-\\s+(?:transcription|translation)\\b', src.stem, re.I
         ):
             archive_stem = src.stem
-        citekey, volume = tbp.citekey_and_volume(archive_stem)
+        unit = None
+        archive_match = re.match(
+            r'(@?\\S+)\\s+-\\s+(?:transcription|translation)'
+            r'(?:\\s+-\\s+(?:vol|v)\\.\\s*(\\d+))?'
+            r'(?:\\s+-\\s+(.+?))?\\s+files$',
+            archive_stem, re.I)
+        if archive_match:
+            citekey = archive_match.group(1)
+            volume = int(archive_match.group(2)) if archive_match.group(2) else None
+            unit = (archive_match.group(3) or "").strip() or None
+        else:
+            citekey, volume = tbp.citekey_and_volume(archive_stem)
 
         if doc_type == "translation":
             jsonl = base / f"{stem}.translate-output.jsonl"
@@ -5666,7 +5757,7 @@ def main():
                 out_override.write_text(tbp.build_translation(stem, result), encoding="utf-8")
                 dest = out_override
             else:
-                dest = mv.write_note(result, citekey, "translation", volume=volume)
+                dest = mv.write_note(result, citekey, "translation", volume=volume, unit=unit)
         else:
             jsonl = base / f"{stem}-output.jsonl"
             if not jsonl.exists():
@@ -5680,11 +5771,12 @@ def main():
             raw_path.write_text(yaml.rstrip("\\n") + "\\n\\n" + raw_text.lstrip("\\n"), encoding="utf-8")
 
             processed = workdir / "processed.md"
-            # A standalone PDF has no literature note; only then does the
-            # post-processor extract TITLE:/AUTHOR: markers.
+            # Cover metadata is extracted for every transcription: it supplies
+            # the Arabic title/author fields even when Zotero supplies the
+            # romanized bibliography.
             standalone = mv.find_zotero(citekey) is None
             tpp = load("transcription-postprocess.py")
-            tpp.run(raw_path, out_path=processed, metadata=standalone)
+            tpp.run(raw_path, out_path=processed, metadata=True)
 
             if out_override:
                 out_override.write_text(processed.read_text(encoding="utf-8"), encoding="utf-8")
@@ -5698,25 +5790,31 @@ def main():
                 # A standalone PDF has no literature note. Preserve the
                 # existing note's verified title/author, fill any gap from the
                 # fresh sidecar, and do not add a [[@citekey]] up link.
+                meta_path = processed.with_suffix(processed.suffix + ".meta.json")
+                cover = {}
+                if meta_path.exists():
+                    try:
+                        parsed = json.loads(meta_path.read_text(encoding="utf-8"))
+                        if isinstance(parsed, dict):
+                            cover = parsed
+                    except Exception:
+                        cover = {}
                 title, authors = (None, None)
                 if standalone:
-                    title, authors = existing_metadata(mv, citekey, "transcription", volume)
+                    title, authors = existing_metadata(mv, citekey, "transcription", volume, unit)
                     # The existing note is authoritative: the user may have
                     # verified/edited its romanized title and author. Use the
                     # fresh sidecar only to fill a missing value.
-                    if not title or not authors:
-                        meta_path = processed.with_suffix(processed.suffix + ".meta.json")
-                        if meta_path.exists():
-                            try:
-                                meta = json.loads(meta_path.read_text(encoding="utf-8"))
-                                title = title or meta.get("title") or None
-                                author = meta.get("author")
-                                if not authors and author:
-                                    authors = [a.strip() for a in author.split(";") if a.strip()]
-                            except Exception:
-                                pass
+                    if not title:
+                        title = cover.get("title") if isinstance(cover.get("title"), str) else None
+                    if not authors:
+                        if isinstance(cover.get("authors"), list):
+                            authors = [str(a).strip() for a in cover["authors"] if str(a).strip()] or None
+                        elif isinstance(cover.get("author"), str):
+                            authors = [a.strip() for a in cover["author"].split(";") if a.strip()] or None
                 dest = mv.write_note(body, citekey, "transcription", volume=volume,
-                                     standalone=standalone, title=title, authors=authors)
+                                     standalone=standalone, title=title, authors=authors,
+                                     unit=unit, cover=cover)
 
         print(f"\\nReprocessed -> {dest}")
     finally:
@@ -5751,7 +5849,7 @@ from google.genai import types
 # The built-in prompt lives in midad_prompts.py so the plugin can seed and refresh
 # its "Default prompt" from the same text, and the general rules stay hardcoded.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from midad_prompts import build_transcription_prompt  # noqa: E402
+from midad_prompts import COVER_METADATA_PROMPT, build_transcription_prompt  # noqa: E402
 
 VAULT = Path(os.environ.get("OBSIDIAN_VAULT", os.path.expanduser("~/Documents/Obsidian Vault")))
 API_KEY = os.environ.get("GEMINI_API_KEY", os.environ.get("GOOGLE_API_KEY", ""))
@@ -5855,15 +5953,23 @@ def upload_pages(pages_dir: Path, client: genai.Client) -> list:
     return uploaded
 
 
-def build_jsonl(uploaded: list, jsonl_path: Path, system_prompt: str = SYSTEM_PROMPT):
-    """Build the batch request JSONL."""
+def build_jsonl(uploaded: list, jsonl_path: Path, system_prompt: str = SYSTEM_PROMPT,
+                cover_prompt: str | None = None):
+    """Build the batch request JSONL.
+
+    The cover metadata supplement is attached only to the first uploaded page,
+    so Gemini cannot repeat the YAML block on every page.
+    """
     with open(jsonl_path, "w", encoding="utf-8") as f:
-        for item in uploaded:
+        for index, item in enumerate(uploaded):
+            prompt = system_prompt
+            if cover_prompt and index == 0:
+                prompt = f"{system_prompt}\\n\\n{cover_prompt}"
             payload = {
                 "key": item["local_name"],
                 "request": {
                     "model": MODEL,
-                    "system_instruction": {"parts": [{"text": system_prompt}]},
+                    "system_instruction": {"parts": [{"text": prompt}]},
                     "contents": [{
                         "role": "user",
                         "parts": [
@@ -5905,7 +6011,7 @@ def submit_batch(jsonl_path: Path, client: genai.Client, pdf_stem: str) -> str:
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("Usage: python3 transcription-batch-submit.py input.pdf [--work-dir DIR] [--prompt-file PATH] [--metadata] [--model MODEL]")
+        print("Usage: python3 transcription-batch-submit.py input.pdf [--work-dir DIR] [--prompt-file PATH] [--model MODEL]")
         sys.exit(1)
     
     pdf_path = Path(sys.argv[1]).resolve()
@@ -5929,7 +6035,7 @@ if __name__ == "__main__":
         idx = sys.argv.index("--model")
         if idx + 1 < len(sys.argv):
             MODEL = _model_name(sys.argv[idx + 1])
-    system_prompt = build_transcription_prompt(read_prompt(prompt_file), metadata="--metadata" in sys.argv)
+    system_prompt = build_transcription_prompt(read_prompt(prompt_file))
 
     stem = pdf_path.stem
     pages_dir = work_dir / f"{stem}-pages"
@@ -5952,7 +6058,7 @@ if __name__ == "__main__":
     
     # 3. Build JSONL
     print(f"\\nBuilding batch JSONL...")
-    build_jsonl(uploaded, jsonl_path, system_prompt)
+    build_jsonl(uploaded, jsonl_path, system_prompt, COVER_METADATA_PROMPT)
     
     # 4. Submit batch
     print(f"\\nSubmitting batch job...")
@@ -6887,20 +6993,100 @@ META_SINGLE = re.compile(
 )
 
 
-def _clean_meta(value: str) -> str:
-    return value.strip().strip('"').strip("'").strip("*").strip()
+def _clean_meta(value) -> str:
+    return str(value or "").strip().strip('"').strip("'").strip("*").strip()
 
 
-def extract_metadata(body: str) -> tuple[str, dict[str, str]]:
-    """Remove TITLE:/AUTHOR: lines anywhere and keep the first values.
+def _clean_list(value) -> list[str]:
+    if isinstance(value, list):
+        raw = value
+    else:
+        text = _clean_meta(value)
+        raw = re.split(r"[;\\n]", text) if text else []
+    return [_clean_meta(item) for item in raw if _clean_meta(item)]
 
-    Gemini sometimes puts the markers on every page, and sometimes puts
-    TITLE and AUTHOR on one line because there is no blank line between them.
-    Both forms are removed; only the first title and author are kept.
+
+def _simple_yaml(block: str) -> dict:
+    """A tiny fallback for the small, flat cover block we ask the model for."""
+    data: dict = {}
+    current = ""
+    for raw in block.splitlines():
+        line = raw.rstrip()
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        item = re.match(r"^\\s*-\\s*(.*)$", line)
+        if item and current:
+            if not isinstance(data.get(current), list):
+                data[current] = []
+            data[current].append(_clean_meta(item.group(1)))
+            continue
+        field = re.match(r"^([A-Za-z][\\w-]*):\\s*(.*)$", line)
+        if field:
+            current = field.group(1)
+            value = _clean_meta(field.group(2))
+            if value:
+                data[current] = value
+            else:
+                data[current] = []
+    return data
+
+
+COVER_KEYS = {
+    "title", "shorttitle", "title-ar", "shorttitle-ar",
+    "authors", "editors", "authors-ar", "editors-ar",
+}
+
+
+def _cover_metadata(block: str) -> dict:
+    try:
+        import yaml
+        parsed = yaml.safe_load(block)
+    except Exception:
+        parsed = None
+    if not isinstance(parsed, dict):
+        parsed = _simple_yaml(block)
+    meta: dict = {}
+    for key, value in parsed.items():
+        if key not in COVER_KEYS:
+            continue
+        if key in ("authors", "editors", "authors-ar", "editors-ar"):
+            values = _clean_list(value)
+            if values:
+                meta[key] = values
+        else:
+            value = _clean_meta(value)
+            if value:
+                meta[key] = value
+    return meta
+
+
+def _take_cover_block(body: str) -> tuple[str, dict]:
+    """Remove a leading fenced (or \`---\` delimited) YAML cover block."""
+    fence = re.match(r"^\\s*\`\`\`(?:ya?ml)?[ \\t]*\\n(.*?)\\n\`\`\`[ \\t]*(?:\\n|$)", body, re.S | re.I)
+    if not fence:
+        fence = re.match(r"^\\s*---[ \\t]*\\n(.*?)\\n---[ \\t]*(?:\\n|$)", body, re.S)
+    if not fence:
+        return body, {}
+    meta = _cover_metadata(fence.group(1))
+    if not meta:
+        return body, {}
+    rest = body[fence.end():]
+    while rest.startswith("\\n"):
+        rest = rest[1:]
+    return rest, meta
+
+
+def extract_metadata(body: str) -> tuple[str, dict]:
+    """Remove the first-page cover block and legacy TITLE:/AUTHOR: lines.
+
+    The current prompt asks for a fenced YAML block only on the first page.
+    Older archives and standalone runs may instead carry TITLE:/AUTHOR: lines,
+    sometimes on every page and sometimes on one line; those are also removed,
+    with the first value winning.
     """
-    meta: dict[str, str] = {}
+    body, meta = _take_cover_block(body)
     keep: list[str] = []
-    removed = False
+    removed = bool(meta)
     for line in body.splitlines():
         pair = META_PAIR.match(line)
         single = None if pair else META_SINGLE.match(line)
@@ -6908,15 +7094,19 @@ def extract_metadata(body: str) -> tuple[str, dict[str, str]]:
             title, author = _clean_meta(pair.group(1)), _clean_meta(pair.group(2))
             if title and "title" not in meta:
                 meta["title"] = title
-            if author and "author" not in meta:
-                meta["author"] = author
+            if author and "authors" not in meta:
+                meta["authors"] = [author]
             removed = True
             continue
         if single:
             key = single.group(1).lower()
             value = _clean_meta(single.group(2))
-            if value and key not in meta:
-                meta[key] = value
+            if value:
+                if key == "author":
+                    if "authors" not in meta:
+                        meta["authors"] = [value]
+                elif key not in meta:
+                    meta[key] = value
             removed = True
             continue
         keep.append(line)
@@ -6926,7 +7116,6 @@ def extract_metadata(body: str) -> tuple[str, dict[str, str]]:
     while keep and not keep[0].strip():
         keep.pop(0)
     return "\\n".join(keep), meta
-
 
 def run(input_path, out_path=None, metadata=False, tafsir=False):
     """Format and Qur'an-process a raw transcription. Returns the output Path."""
@@ -7385,7 +7574,7 @@ if __name__ == "__main__":
                 except Exception as e:
                     print(f"  WARNING: could not read prompt file: {e}")
         sys.path.insert(0, str(SCRIPTS))
-        from midad_prompts import build_transcription_prompt
+        from midad_prompts import COVER_METADATA_PROMPT, build_transcription_prompt
         system_prompt = build_transcription_prompt(user_prompt, metadata="--metadata" in sys.argv)
         
         # Find previous JSONL (same stem without " - try X" suffix)
@@ -7491,7 +7680,10 @@ if __name__ == "__main__":
                         "contents": [sync_prompt, types.Part.from_uri(file_uri=file.uri, mime_type="application/pdf")],
                     }
                     if system_prompt:
-                        kwargs["config"] = types.GenerateContentConfig(system_instruction=system_prompt)
+                        page_prompt = system_prompt
+                        if key == "pg_0001":
+                            page_prompt = f"{page_prompt}\\n\\n{COVER_METADATA_PROMPT}"
+                        kwargs["config"] = types.GenerateContentConfig(system_instruction=page_prompt)
                     response = client.models.generate_content(**kwargs)
                     new_text = getattr(response, 'text', '') or ''
                     data.setdefault('response', {})
@@ -9516,6 +9708,89 @@ def _note_prefix(standalone: bool) -> str:
     return "mas-" if standalone else "@"
 
 
+def _unit_slug(value: str | None) -> str:
+    """A stable midad-unit / midad-id slug for a partial transcription."""
+    text = re.sub(r"[^a-z0-9]+", "-", (value or "").lower()).strip("-")
+    return text
+
+
+def _plain_name(value) -> str:
+    """Display text from a plain name or a wikilink."""
+    text = str(value or "").strip().strip('"').strip("'")
+    match = re.match(r"^\\[\\[([^\\]|]+)(?:\\|([^\\]]+))?\\]\\]$", text)
+    if match:
+        text = (match.group(2) or match.group(1)).strip()
+    return text.strip()
+
+
+def _author_label(authors: list[str] | None) -> str:
+    """Last/single-name label used in a citation alias."""
+    for value in authors or []:
+        name = _plain_name(value)
+        if not name:
+            continue
+        if "," in name:
+            name = name.split(",", 1)[0]
+        return name.strip()
+    return ""
+
+
+def _cover_scalar(cover: dict | None, key: str) -> str:
+    value = (cover or {}).get(key)
+    return str(value).strip() if isinstance(value, (str, int, float)) else ""
+
+
+def _cover_list(cover: dict | None, key: str) -> list[str]:
+    value = (cover or {}).get(key)
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip()]
+    if isinstance(value, str):
+        return [item.strip() for item in value.split(";") if item.strip()]
+    return []
+
+
+def _year_label(ref: Path | None) -> str:
+    if not ref:
+        return ""
+    value = extract_zotero_field(ref.read_text(encoding="utf-8"), "year") or ""
+    value = re.sub(r"^\\[\\[|\\]\\]$", "", value.strip())
+    return value
+
+
+def _alias_label(parts: list[str], suffix: str) -> str:
+    body = " - ".join(part for part in (p.strip() for p in parts) if part)
+    return f"{body} ({suffix})" if body else ""
+
+
+def canonical_citation_aliases(
+    *, title: str, shorttitle: str, authors: list[str] | None,
+    authors_ar: list[str] | None, title_ar: str, shorttitle_ar: str,
+    year: str, doc_type: str, volume: int | None = None,
+    unit: str = "", include_arabic: bool = True,
+) -> list[str]:
+    """The two standard aliases for a generated document."""
+    suffix = doc_type
+    if volume:
+        suffix += f", vol. {volume}"
+    base_title = _strip_type_suffix(shorttitle or title).strip() or "Untitled"
+    authors_plain = [_plain_name(a) for a in (authors or []) if _plain_name(a)]
+    aliases: list[str] = []
+    roman = _alias_label([_author_label(authors_plain), year, base_title], suffix)
+    if unit:
+        roman += f" - {unit}" if roman else unit
+    if roman:
+        aliases.append(roman)
+    if include_arabic and (title_ar or shorttitle_ar):
+        authors_ar_plain = [_plain_name(a) for a in (authors_ar or []) if _plain_name(a)]
+        arabic_title = (shorttitle_ar or title_ar).strip()
+        arabic = _alias_label([_author_label(authors_ar_plain), year, arabic_title], suffix)
+        if unit:
+            arabic += f" - {unit}" if arabic else unit
+        if arabic and arabic not in aliases:
+            aliases.append(arabic)
+    return aliases[:2]
+
+
 def _transcription_note(citekey: str, volume: int | None, standalone: bool = False) -> Path:
     folder = VAULT / DEST_FOLDERS["transcription"]
     prefix = _note_prefix(standalone)
@@ -9640,7 +9915,11 @@ def extract_arabic_metadata(body: str) -> tuple[str, list[str]]:
             if not value:
                 continue
             if value.startswith("#"):
-                break
+                # Many covers put the author on the next heading
+                # (\`### \u062A\u0623\u0644\u064A\u0641:\` followed by \`### \u0627\u0644\u0634\u064A\u062E \u2026\`).
+                value = value.lstrip("#").strip()
+                if not value:
+                    continue
             if ARABIC_SCRIPT.search(value):
                 author = value
             break
@@ -9689,9 +9968,11 @@ def _ensure_yaml_properties(path: Path, title_ar: str, authors_ar: list[str]) ->
     path.write_text(new_frontmatter + suffix + text[end:], encoding="utf-8")
 
 
-def _transcription_metadata(citekey: str, standalone: bool) -> tuple[str, list[str]]:
+def _transcription_metadata(citekey: str, standalone: bool,
+                            unit: str | None = None) -> tuple[str, list[str]]:
     """A translation takes the Arabic title/author from its transcription."""
-    parent = dest_path(citekey, "transcription", None, standalone)
+    parent = dest_path(citekey, "transcription", None, standalone,
+                       unit=unit)
     return _existing_scalar(parent, "title-ar"), _existing_list(parent, "authors-ar")
 
 
@@ -9774,8 +10055,13 @@ def _copy_bibliography(note_path: Path, ref_path: Path) -> None:
 
 def build_yaml(citekey: str, doc_type: str, related: list[str], volume: int = None,
                standalone: bool = False, title: str | None = None,
-               authors: list[str] | None = None, topics: list[str] | None = None,
-               title_ar: str = "", authors_ar: list[str] | None = None) -> str:
+               shorttitle: str | None = None,
+               authors: list[str] | None = None, editors: list[str] | None = None,
+               topics: list[str] | None = None,
+               title_ar: str = "", authors_ar: list[str] | None = None,
+               shorttitle_ar: str = "", editors_ar: list[str] | None = None,
+               unit: str | None = None,
+               up: list[str] | None = None, arabic: bool = False) -> str:
     """Build YAML frontmatter from the Zotero reference and the aliases.
 
     A standalone transcription (a PDF the user chose directly, with no Zotero
@@ -9786,20 +10072,31 @@ def build_yaml(citekey: str, doc_type: str, related: list[str], volume: int = No
     """
     ref = None if standalone else find_zotero(citekey)
     title_base = (title or "").strip() or "Untitled"
-    short_base = title_base
+    short_base = (shorttitle or "").strip() or title_base
     raw_authors = [authors] if isinstance(authors, str) else (authors or [])
     author_list = [a.strip() for a in raw_authors if a and a.strip()]
+    editor_list = [a.strip() for a in (editors or []) if a and a.strip()]
 
     if ref:
         text = ref.read_text(encoding="utf-8")
         title_base = extract_zotero_field(text, "title") or "Untitled"
-        short_base = extract_zotero_field(text, "shorttitle") or title_base
+        short_base = extract_zotero_field(text, "shorttitle") or short_base
         author_field = extract_zotero_field(text, "authors")
         if author_field:
             author_list = [author_field.lstrip('- ').strip().strip('"')]
+        editor_field = extract_zotero_field(text, "editors") or extract_zotero_field(text, "editor")
+        if editor_field:
+            editor_list = [editor_field.lstrip('- ').strip().strip('"')]
 
-    title = f"{title_base} ({doc_type})"
-    shorttitle = f"{short_base} ({doc_type})" if short_base != title_base else ""
+    unit_label = (unit or "").strip()
+    title_suffix = doc_type
+    if volume:
+        title_suffix += f", vol. {volume}"
+    title = f"{title_base} ({title_suffix})"
+    shorttitle = f"{short_base} ({title_suffix})" if short_base != title_base else ""
+    if unit_label:
+        title += f" - {unit_label}"
+        shorttitle += f" - {unit_label}" if shorttitle else ""
     up_category = "Arabic transcriptions" if doc_type == "transcription" else "Arabic translations"
 
     mas_up_items = [f'  - "[[{up_category}]]"']
@@ -9813,19 +10110,25 @@ def build_yaml(citekey: str, doc_type: str, related: list[str], volume: int = No
 
     source_id = _source_id(citekey, ref)
     mas_work = f"{source_id}:{doc_type}"
-    mas_id = f"{mas_work}:vol.{volume}" if volume else mas_work
+    unit_id = _unit_slug(unit_label) if unit_label else (f"vol.{volume}" if volume else "note")
+    mas_id = f"{mas_work}:{unit_id}" if unit_id != "note" else mas_work
 
     yaml = f"""---
 created: {datetime.now().strftime('%Y-%m-%d %H:%M')}
 midad-up:
 {chr(10).join(mas_up_items)}
-midad-id: "{_yaml_quote(mas_id)}"
+midad-id: "{_yaml_id(mas_id)}"
 midad-kind: "{doc_type}"
-midad-work: "{_yaml_quote(mas_work)}"
-midad-unit: "{("vol." + str(volume)) if volume else "note"}"
+midad-work: "{_yaml_id(mas_work)}"
+midad-unit: "{unit_id}"
 title: "{_yaml_quote(title)}"
 """
-    if title_ar:
+    if not shorttitle_ar and title_ar:
+        shorttitle_ar = re.split(r"[:\u060C]", title_ar, maxsplit=1)[0].strip()
+    if arabic:
+        yaml += f'title-ar: "{_yaml_quote(title_ar)}"\\n'
+        yaml += f'shorttitle-ar: "{_yaml_quote(shorttitle_ar)}"\\n'
+    elif title_ar:
         yaml += f'title-ar: "{_yaml_quote(title_ar)}"\\n'
     if shorttitle:
         yaml += f'shorttitle: "{_yaml_quote(shorttitle)}"\\n'
@@ -9835,22 +10138,28 @@ title: "{_yaml_quote(title)}"
         yaml += "authors:\\n"
         for a in author_list:
             yaml += f'  - "{_yaml_quote(a)}"\\n'
-    if authors_ar:
+    if authors_ar or arabic:
         # One standard: the list, even for a single author. The old singular
         # \`author-ar\` is not written and is removed from older notes.
-        yaml += "authors-ar:\\n"
-        for a in authors_ar:
+        yaml += "authors-ar:\\n" if authors_ar else "authors-ar: []\\n"
+        for a in authors_ar or []:
             yaml += f'  - "{_yaml_quote(a)}"\\n'
+    if editor_list:
+        yaml += "editors:\\n"
+        for e in editor_list:
+            yaml += f'  - "{_yaml_quote(e)}"\\n'
+    if editors_ar:
+        yaml += "editors-ar:\\n"
+        for e in editors_ar:
+            yaml += f'  - "{_yaml_quote(e)}"\\n'
 
-    if standalone:
-        aliases = []
-        suffix = doc_type if not volume else f"{doc_type}, vol. {volume}"
-        if title_base != "Untitled":
-            aliases.append(f"{title_base} ({suffix})")
-            if author_list:
-                aliases.append(f"{author_list[0]} - {title_base} ({suffix})")
-    else:
-        aliases = compute_aliases(citekey, doc_type, volume, standalone)
+    year = _year_label(ref)
+    aliases = canonical_citation_aliases(
+        title=title_base, shorttitle=short_base, authors=author_list,
+        authors_ar=authors_ar, title_ar=title_ar, shorttitle_ar=shorttitle_ar,
+        year=year, doc_type=doc_type, volume=volume, unit=unit_label,
+        include_arabic=os.environ.get("MIDAD_INCLUDE_ARABIC_ALIAS", "1") != "0",
+    )
     if aliases:
         yaml += "aliases:\\n"
         for a in aliases:
@@ -9859,6 +10168,10 @@ title: "{_yaml_quote(title)}"
         yaml += "related:\\n"
         for r in related:
             yaml += f'  - "{_yaml_quote(r)}"\\n'
+    if up:
+        yaml += "up:\\n"
+        for value in up:
+            yaml += f'  - "{_yaml_quote(value)}"\\n'
 
     # Topics are user-assigned: the resource model counts this note under each
     # topic MOC named here, and the topic MOC lists it. A re-transcription keeps
@@ -9885,13 +10198,19 @@ def detect_volume(filename: str) -> int | None:
     return int(m.group(1)) if m else None
 
 
-def dest_path(citekey: str, doc_type: str, volume: int = None, standalone: bool = False) -> Path:
+def dest_path(citekey: str, doc_type: str, volume: int = None,
+              standalone: bool = False, unit: str | None = None) -> Path:
     """Vault destination path for a note."""
     dest_dir = VAULT / DEST_FOLDERS[doc_type]
     dest_dir.mkdir(parents=True, exist_ok=True)
     prefix = _note_prefix(standalone)
     if volume:
         return dest_dir / f"{prefix}{citekey} - {doc_type} - vol. {volume}.md"
+    if unit:
+        legacy = dest_dir / f"{prefix}{citekey} - {doc_type}, {unit.strip()}.md"
+        if legacy.exists():
+            return legacy
+        return dest_dir / f"{prefix}{citekey} - {doc_type} - {unit.strip()}.md"
     return dest_dir / f"{prefix}{citekey} - {doc_type}.md"
 
 
@@ -9947,20 +10266,25 @@ def ensure_parent(citekey: str, doc_type: str, related: list[str], volume: int,
 
 
 def _collection_notes(citekey: str, doc_type: str, standalone: bool = False):
-    """(parent_name, [volume_names sorted numerically]) for a citekey."""
+    """(parent_name, volume_names, partial_names) for a citekey."""
     folder = VAULT / DEST_FOLDERS[doc_type]
     prefix = _note_prefix(standalone)
     parent = f"{prefix}{citekey} - {doc_type}"
     vols = []
+    partials = []
     if folder.exists():
-        for p in folder.glob(f"{prefix}{citekey} - {doc_type} - vol. *.md"):
-            if "modified" in p.stem:
-                continue
-            m = re.search(r'vol\\.\\s*(\\d+)', p.stem)
-            if m:
-                vols.append((int(m.group(1)), p.stem))
+        for pattern in (f"{prefix}{citekey} - {doc_type} - *.md",
+                        f"{prefix}{citekey} - {doc_type}, *.md"):
+            for p in folder.glob(pattern):
+                if "modified" in p.stem:
+                    continue
+                m = re.search(r'vol\\.\\s*(\\d+)', p.stem)
+                if m:
+                    vols.append((int(m.group(1)), p.stem))
+                elif p.stem not in partials:
+                    partials.append(p.stem)
     vols.sort(key=lambda t: t[0])
-    return parent, [name for _, name in vols]
+    return parent, [name for _, name in vols], sorted(partials)
 
 
 def _write_list_property(citekey: str, prop: str, items: list) -> bool:
@@ -9990,31 +10314,57 @@ def sync_collection_property(citekey: str, doc_type: str, standalone: bool = Fal
     """Keep @citekey.md's transcriptions/translations list ordered:
     the parent note first, then the volumes in numerical order."""
     prop = "transcriptions" if doc_type == "transcription" else "translations"
-    parent, vols = _collection_notes(citekey, doc_type, standalone)
-    items = [parent] + vols if vols else [parent]
+    parent, vols, partials = _collection_notes(citekey, doc_type, standalone)
+    folder = VAULT / DEST_FOLDERS[doc_type]
+    items = []
+    if (folder / f"{parent}.md").exists():
+        items.append(parent)
+    items.extend(vols)
+    items.extend(partials)
     return _write_list_property(citekey, prop, items)
 
 
 def write_note(body: str, citekey: str, doc_type: str, related: list[str] = None,
                volume: int = None, standalone: bool = False,
-               title: str | None = None, authors: list[str] | None = None) -> Path:
+               title: str | None = None, authors: list[str] | None = None,
+               unit: str | None = None, cover: dict | None = None) -> Path:
     """Build the YAML and write the finished note. Returns its path."""
     related = related or []
+    cover = cover or {}
+    editors = _cover_list(cover, "editors")
+    editors_ar = _cover_list(cover, "editors-ar")
     if doc_type == "transcription":
         title_ar, authors_ar = extract_arabic_metadata(body)
+        title_ar = _cover_scalar(cover, "title-ar") or title_ar
+        authors_ar = _cover_list(cover, "authors-ar") or authors_ar
+        shorttitle_ar = _cover_scalar(cover, "shorttitle-ar")
+        if not title:
+            title = _cover_scalar(cover, "title") or None
+        if not authors:
+            authors = _cover_list(cover, "authors") or None
+        cover_shorttitle = _cover_scalar(cover, "shorttitle") or None
     else:
-        title_ar, authors_ar = _transcription_metadata(citekey, standalone)
-    if not standalone:
+        title_ar, authors_ar = _transcription_metadata(citekey, standalone, unit)
+        shorttitle_ar = ""
+        cover_shorttitle = None
+    if not standalone and volume:
         ensure_parent(citekey, doc_type, related, volume, standalone, title_ar, authors_ar)
-    dest = dest_path(citekey, doc_type, volume, standalone)
-    # A user's own Arabic metadata wins, exactly like \`topics\`.
+    dest = dest_path(citekey, doc_type, volume, standalone, unit=unit)
+    # A user's own Arabic metadata and editors win, exactly like \`topics\`.
     title_ar = _existing_scalar(dest, "title-ar") or title_ar
     authors_ar = _existing_list(dest, "authors-ar") or authors_ar
+    shorttitle_ar = _existing_scalar(dest, "shorttitle-ar") or shorttitle_ar
+    editors = _existing_list(dest, "editors") or editors
+    editors_ar = _existing_list(dest, "editors-ar") or editors_ar
+    is_arabic = bool(ARABIC_SCRIPT.search(body)) if doc_type == "transcription" else bool(title_ar or authors_ar)
     yaml = build_yaml(citekey, doc_type, related, volume=volume, standalone=standalone,
-                      title=title, authors=authors, topics=_existing_topics(dest),
-                      title_ar=title_ar, authors_ar=authors_ar)
+                      title=title, shorttitle=cover_shorttitle,
+                      authors=authors, editors=editors, topics=_existing_topics(dest),
+                      title_ar=title_ar, authors_ar=authors_ar,
+                      shorttitle_ar=shorttitle_ar, editors_ar=editors_ar,
+                      unit=unit, up=_existing_list(dest, "up"), arabic=is_arabic)
     dest.write_text(yaml + "\\n" + body.strip() + "\\n", encoding="utf-8")
-    if not standalone:
+    if not standalone and not unit:
         parent = dest_path(citekey, doc_type, None, standalone)
         _ensure_yaml_properties(parent, title_ar, authors_ar)
         ref = find_zotero(citekey)
@@ -10697,12 +11047,24 @@ def translation_filename(stem: str) -> str:
     return f"{citekey} - translation.md"
 
 
-def citekey_and_volume(stem: str):
-    """(citekey, volume) from a batch stem such as '@ck - transcription - vol. 2'."""
+def citekey_volume_unit(stem: str):
+    """(citekey, volume, unit) from a note/batch stem.
+
+    \`@ck - transcription - vol. 2\` has a volume; \`@ck - transcription - Chapter 1\`
+    and the legacy comma form have a partial unit instead.
+    """
+    match = re.match(
+        r'@?(\\S+?)\\s+-\\s+(?:transcription|translation)'
+        r'(?:\\s+-\\s+(?:vol|v)\\.\\s*(\\d+))?'
+        r'(?:\\s*[-,\u2013\u2014]\\s*(.+))?$',
+        stem, re.I)
+    if match:
+        unit = (match.group(3) or "").strip() or None
+        return match.group(1), (int(match.group(2)) if match.group(2) else None), unit
     m = re.match(r'@?(\\S+)', stem)
     citekey = m.group(1) if m else stem
     vm = re.search(r'\\b(?:vol|v)\\.\\s*(\\d+)\\b', stem, re.I)
-    return citekey, (int(vm.group(1)) if vm else None)
+    return citekey, (int(vm.group(1)) if vm else None), None
 
 
 def main():
@@ -10775,13 +11137,13 @@ def main():
     # Use the same note builder as the move-to-vault step, whether writing to
     # the canonical vault path or to an explicit --out path.
     mv = SourceFileLoader("mv", str(SCRIPTS / "transcription-translation-move-to-vault.py")).load_module()
-    citekey, volume = citekey_and_volume(stem)
+    citekey, volume, unit = citekey_volume_unit(stem)
     if out_path is not None:
-        yaml = mv.build_yaml(citekey, "translation", [], volume=volume)
+        yaml = mv.build_yaml(citekey, "translation", [], volume=volume, unit=unit)
         out_path.write_text(yaml + "\\n" + result.strip() + "\\n", encoding="utf-8")
         print(f"\\nSaved: {out_path}")
     else:
-        dest = mv.write_note(result, citekey, "translation", volume=volume)
+        dest = mv.write_note(result, citekey, "translation", volume=volume, unit=unit)
         print(f"\\nSaved: {dest}")
 
 
@@ -11592,7 +11954,7 @@ if __name__ == '__main__':
   { path: "docs/midad-arabic-transliteration.md", content: "# Midad Arabic Transliteration (Zotero)\n\n**Midad Arabic Transliteration** is an optional **Zotero 7** plugin that creates a romanized copy of a Zotero item by transliterating its Arabic fields through the same resident server as Midad Arabic Sources. It is a companion project, not part of the Obsidian plugin bundle: its source and `.xpi` live in the Midad repository under `midad-arabic-transliteration/`, so there is one place to download and document it.\n\n## Requirements\n\n- **Zotero 7**.\n- The **Midad transliteration server** running, normally on `127.0.0.1:8756`. Start it with **Transliteration server\u2026** in Obsidian, or `python3 scripts/transliterate-server.py --port 8756`; see [Transliteration](./transliteration.md).\n- The Python and CAMeL data the server needs \u2014 see [Dependencies](./dependencies.md).\n\n## Install\n\n1. Start the transliteration server.\n2. Download [midad-arabic-transliteration.xpi](https://github.com/nebedaay/Midad-Arabic-Sources/raw/main/midad-arabic-transliteration/midad-arabic-transliteration.xpi).\n3. In Zotero, open **Tools \u2192 Plugins**, use the gear menu, and choose **Install Plugin From File\u2026**.\n4. Select the `.xpi` and enable **Midad Arabic Transliteration**.\n\nThere is no separate preferences pane. To change the server URL or engine, use Zotero's **Settings \u2192 Advanced \u2192 Config Editor** and edit `extensions.midadArabicTransliteration.serverUrl` (default `http://127.0.0.1:8756`) and `extensions.midadArabicTransliteration.engine` (`bert`, `mle`, or `none`). The running server and these preferences must agree.\n\n## Use\n\nSelect one or more items and right-click **Midad: Create romanized copy** (the same action is under **Tools**). The plugin:\n\n- creates a **copy** and leaves the original untouched;\n- transliterates every field containing Arabic script;\n- maps the **Place** field through the server's place list and transliterates it otherwise;\n- converts the creators as well, so an Arabic author name becomes a romanized author;\n- asks for a reading when the engine reports an unknown term, and adds the answer to the shared user lexicon through the server.\n\nIt needs the server for every run: the request goes to `/transliterate`, with `/place` for places and `/lexicon` for unknown terms. If the server is not running, the command reports the failure and changes nothing.\n\n## Updates\n\n`manifest.json` points at `midad-arabic-transliteration/updates.json` in the Midad repository, so Zotero can check for a newer `.xpi`. The authoritative build is the `.xpi` beside that file; after a Midad update, reinstall from the downloaded `.xpi` if Zotero has not picked it up.\n\nIt is a separate companion under the same GPL-3.0 licence; it is not part of the Obsidian community-plugin review surface.\n", extract: false },
   { path: "docs/setup.md", content: "# Setup\n\n**Midad Arabic Sources** brings classical Arabic texts into your Obsidian vault and turns them into a linkable, searchable part of your notes. This page covers installing it, the folders it uses and writes to, and the first run.\n\nThe plugin is **desktop only**: it runs local Python scripts and reads files outside the vault.\n\n## Requirements\n\n- **Obsidian 1.13 or later.** The settings use Obsidian\u2019s declarative settings API.\n- **Python 3** and a few packages, for transcription, translation, and the transliteration engine \u2014 see [Dependencies](./dependencies.md).\n\n## Recommended\n\n- A **Gemini API key** in an LLM configuration used to transcribe scanned PDFs and translate and transcribe Arabic text.\n- **[Zotero](https://www.zotero.org/)** (optional), for an automated pipeline to transcribe and translate Zotero attachments, and to send imported works to your library \u2014 see [Zotero export](./zotero.md).\n- **[ScholarWeft](https://community.obsidian.md/plugins/scholar-weft)** or **[ZotLit](https://github.com/aidenlx/zotlit)** to create the `@citekey` Zotero literature notes used by the automatic transcription/translation route. Neither is required for importing texts or for **Transcribe a PDF\u2026**.\n\n## Install\n\n### Community plugins (recommended)\n\n1. Open **Settings \u2192 Community plugins** and turn off **Restricted Mode**.\n2. Choose **Browse**, search for **Midad Arabic Sources**, then **Install** and **Enable**.\n\nIf the listing is not visible yet \u2014 the plugin is submitted for review \u2014 use BRAT below.\n\n### Alternative: BRAT (latest beta)\n\n1. In Obsidian, enable **Community plugins** (turn off Restricted Mode), then install and enable [BRAT](https://github.com/TfTHacker/obsidian42-brat).\n2. In BRAT\u2019s settings, add `nebedaay/Midad-Arabic-Sources` to the **Beta plugin list**.\n3. Enable **Midad Arabic Sources** in **Settings \u2192 Community plugins**. BRAT keeps it up to date from each release.\n\n### Manually\n\nDownload `main.js`, `manifest.json`, and `styles.css` from the [latest release](https://github.com/nebedaay/Midad-Arabic-Sources/releases) and copy them into your plugin folder \u2014 `<config folder>/plugins/midad-arabic-sources/`, where `<config folder>` is the one set in **Settings \u2192 Files and links \u2192 Override config folder** \u2014 then enable the plugin. The plugin extracts its Python scripts and import templates into the same folder on load, so nothing else needs copying.\n\n## What ships inside the plugin\n\nEverything the plugin needs is compiled into `main.js` and unpacked into the plugin folder (`<config folder>/plugins/midad-arabic-sources/`) on startup:\n\n- `scripts/` \u2014 the Python pipeline, the catalog-driven importer, and the transliteration service.\n- `midad-arabic-sources-import-templates/` \u2014 the default ETA templates the importer renders notes with.\n\nA plugin update therefore carries the new scripts and templates, which is what lets a template change trigger a re-render. See [Templates](./templates.md).\n\n## Fonts\n\nThe plugin **downloads no fonts and embeds none** \u2014 Obsidian's review rules forbid external resources, and bundling the Arabic faces would add several megabytes to `main.js`. It asks for the faces it was designed with and falls back through fonts that ship with the operating system, so Arabic, transliteration, and Qur'\u0101nic text always render. For the intended typography, install these (all free):\n\n| Face | Used for | Where |\n| --- | --- | --- |\n| **Noto Serif** | Latin text and transliteration | Google Fonts (SIL OFL) |\n| **Scheherazade New** | Arabic text | Google Fonts (SIL OFL) |\n| **Noto Naskh Arabic** | Arabic fallback | Google Fonts (SIL OFL) |\n| **Amiri Quran** | Qur'\u0101nic text | Google Fonts (SIL OFL) |\n| **KFGQPC Uthmanic Script HAFS** | Qur'\u0101nic text (preferred) | King Fahd Complex (free download) |\n\nThe stacks are defined once in `styles.css`:\n\n- `--latin-font`: Noto Serif, then Charter, Georgia, Times New Roman, Liberation Serif.\n- `--arabic-font`: Scheherazade New, Noto Naskh Arabic, Amiri, then the system faces (Traditional Arabic, Arabic Typesetting, Simplified Arabic, Sakkal Majalla on Windows; Al Bayan, Geeza Pro, Baghdad on macOS).\n- `--quran-font`: KFGQPC Uthmanic Script HAFS, Amiri Quran, then the Arabic stack. The \u06DD end-of-\u0101ya glyph comes from the same face.\n\nIf a face is missing, rendering continues with the next one; nothing breaks. To use a different typeface, override these variables in a CSS snippet:\n\n```css\n:root {\n  --arabic-font: \"My Arabic Face\";\n  --quran-font: \"My Quran Face\";\n}\n```\n\n## First run\n\n1. **Open the settings** (Settings \u2192 Community plugins \u2192 Midad Arabic Sources). The pages are **General**, **LLM**, **Transliteration**, **Transcription and translation**, **Source import from repository**, **Annotations**, **Zotero**, and **Documentation**. General sets the source folder; LLM holds the reusable model/API-key configurations.\n2. Start the transliteration server if you will romanize Arabic: run **Transliteration server\u2026** from the command palette; it shows whether the service is running and gives one **Start** / **Stop** button. Restarting is only needed when the engine code changes \u2014 see [Transliteration](./transliteration.md).\n3. **Install some texts**: run **Manage text sources\u2026** and pick works from a repository. See [Document import](./document-import.md).\n4. **Set the sources folder** under **General** if `Midad Arabic Sources` is not where you want the corpus. Every installed work goes into `<sources folder>/Installed Sources`.\n5. **Set the literature notes folder** under **Transcription and translation** if your `@citekey` notes are not in ScholarWeft\u2019s folder. Leave it blank to use ScholarWeft\u2019s own setting; with neither, the pipeline finds an `@citekey` note by name anywhere in the vault.\n\n## The folder layout\n\nThe plugin keeps everything under one **sources folder** (`Midad Arabic Sources` for a new install; existing vaults keep their current folder, e.g. `_7 Sources`):\n\n```text\n<sources folder>/\n  Installed Sources/\n    Tafs\u012Br al-\u1E6Cabar\u012B (tafsir_api)/\n      Tafs\u012Br al-\u1E6Cabar\u012B (tafsir_api).md  \u2190 the work hub (table of contents)\n      001 Al-Fatihah.md                 \u2190 one note per s\u016Bra / chapter / root\n      002 Al-Baqarah.md\n      \u2026\n    Quran/                             \u2190 the canonical Qur\u2019\u0101n notes\n  Transcriptions/                      \u2190 PDF transcriptions\n  Translations/                        \u2190 their translations\n  Annotation Notes/                    \u2190 generated per-work annotation notes\n  Tafs\u012Br Sources.md                    \u2190 a topic MOC\n  \u1E24ad\u012Bth Sources.md\n  Midad Arabic Sources - Topics.md     \u2190 the topic index\n  Midad Arabic Sources - Repositories.md      \u2190 the repository index\n  Midad Arabic Sources - My Midad Content.md  \u2190 transcriptions, translations, annotations\n```\n\nExisting installations are migrated once automatically on the first launch after the update. Changing **General \u2192 Sources folder** asks for confirmation when files exist, then moves the folders and rewrites explicit links in Markdown notes as well as the adopted-annotation registry. The MOCs stay at the source root. The parent **Midad Arabic Sources** note is the existing top-level note (or is created in the source root if missing).\n\n**Resource index.** **Midad Arabic Sources** is the parent note and the distinctive index for everything MAS manages. Its managed block groups the resources into **Topics** (`Midad Arabic Sources - Topics`, the genre/type MOCs), **Repositories** (`Midad Arabic Sources - Repositories`, the repository MOCs), and **My Midad Content** (`Midad Arabic Sources - My Midad Content`, listing My Transcriptions, My Translations, and Annotations). Each entry on the parent note carries the number of sources under it. The same three categories, with cached counts, are what the sidebar\u2019s Navigation tab shows when no Midad note is in context: both are rendered from `.midad-arabic-sources/resource-model.json`, and the parent note is only the fallback if that file is missing. Repository MOCs list their works and are keyed by the acquisition repository (`repo_name`), not by the upstream text provider. A work\u2019s `source:` property records that provider when it differs, so a Qur\u02BE\u0101n translation fetched from `quran-api` but digitized from Tanzil appears under **Quran API** while its hub also carries `source: tanzil.net`; when the two are the same, `source:` is omitted. The transcription/translation MOCs are split into works from literature notes and works transcribed/translated directly from PDFs. A transcription or translation is filed under a topic by adding that topic MOC to its `topics:` property.\n\n**Source identity.** MAS-created and adopted notes carry a `midad-id` (with `midad-kind`, and `midad-work`/`midad-unit` on transcriptions and translations). The source a note belongs to is derived from those ids rather than stored in a separate property. Repository works are identified at the hub (`repo/<collection>/<id>`) and tracked internally by work, so their individual s\u016Bra/chapter/root notes do not need their own ids. YAML values use `/` rather than `:` so Obsidian does not mistake them for URL schemes; the internal model and registry keys keep their `:` form. Zotero literature notes are indexed by their stable `sw-zotero-id`; a transcription or translation associated with a Zotero item keeps the `@<citekey>` filename, while a standalone PDF with no Zotero citekey uses a `mas-` filename. Arbitrary adopted notes use a generated `note/<uuid>`. `.midad-arabic-sources/sources.json` is the unified index of every source kind.\n\n- **A work hub** carries the bibliographic properties and links every note in the work.\n- **A content note** is one s\u016Bra, \u1E25ad\u012Bth chapter, book chapter, or dictionary root.\n- **A category MOC** lists every installed work of one kind (Tafs\u012Br Sources, \u1E24ad\u012Bth Sources, \u2026). The plugin rebuilds the list inside a managed region, so entries never duplicate.\n- **The parent note** (setting **Sources parent note**) is reused if a note with that name already exists anywhere in the vault; the plugin writes only its own managed region. Top-level source notes carry `[[Midad Arabic Sources]]` in their `midad-up`; individual unit notes link to their hub or MOC instead, so the parent backlink list stays useful.\n\nFile names are unique across the whole vault, so a work note carries its work name (`Tafs\u012Br al-\u1E6Cabar\u012B (tafsir_api) - 002 Al-Baqarah`) while its `title:` and the hub\u2019s link text stay clean (`2 Al-Baqarah`). A work whose folder name would collide can carry a **repository qualifier** in parentheses so two editions of the same work sit side by side. See [Document import](./document-import.md).\n\n## Where state lives\n\nThe plugin keeps its cache and bookkeeping in `.midad-arabic-sources/` at the vault root:\n\n| Path | Holds |\n| --- | --- |\n| `cache/text-sources/` | The raw source JSON downloaded from each repository. |\n| `source-models/<collection>/<id>.json` | The language-neutral **render model** each work is rendered from. |\n| `source-archives/<collection>/<id>.zip` | The archived work: its render model plus the rendered markdown notes. Legacy `.json.gz` model-only archives are still readable. |\n| `annotations/<collection>/<id>/` | The sharded annotation store and its derived indexes. |\n| `annotations/adopted.json` | The registry of automatically adopted transcriptions, translations, and known notes. |\n| `source-imports.json` | The manifest: every work and its status (`installed`, `deleting`, `archived`). |\n| `source-catalog.json` | The cached catalogue of available works (7-day TTL). |\n| `source-stats.json` | Measured sizes and the per-template render watermarks. |\n| `template-history.json` | The content-hash timeline that decides whether a template change affects notes. |\n| `archive/` | Archived transcription batches. |\n| `jobs/` | The persisted state of running pipeline jobs. |\n\nDeleting a work from the plugin removes its cached model and its notes (a hard delete, not a trash move); its source JSON stays cached, so re-installing is quick. Archiving instead writes a zip containing the model and the rendered markdown, removes the live notes, and keeps the annotations; restore unzips the notes directly when the template hashes still match, and otherwise re-renders from the model without downloading.\n\n## Updating and state\n\nRestart Obsidian after a plugin update \u2014 the plugin loads `main.js` only at startup. On the next run it unpacks the new scripts and templates, re-measures what changed, and re-renders only the notes whose templates moved. Your edits are preserved: generated content sits inside a managed region, and only template-declared frontmatter properties are reconciled. See [Templates](./templates.md).\n\nIf a source changes upstream, **Check for source updates** asks each repository whether the text moved and re-downloads only what did. See [Document import](./document-import.md).\n", extract: false },
   { path: "docs/templates.md", content: '# Templates and the render model\n\nThese are the default ETA templates the plugin uses to turn acquired text corpora (tafs\u012Brs, Qur\u2019\u0101n translations, \u1E25ad\u012Bth collections, dictionaries, and Turath.io\u2019s classical books) into Obsidian notes. They are bundled with the plugin, can be copied into your vault and edited, and re-render every affected work from its cached model whenever you ask. See [Document import](./document-import.md) for installing and managing works; the rest of this page is the template and render-model reference.\n\n## The two-stage design\n\n1. **Acquisition** (Python, `scripts/text-source-import.py`): downloads a work\u2019s source JSON, caches it under `.midad-arabic-sources/cache/`, and writes a language-neutral **render model** to `.midad-arabic-sources/source-models/<collection>/<id>.json`.\n2. **Rendering** (this plugin, ETA): reads a model and writes one note per unit, plus a per-work hub note and a category MOC entry.\n\nBecause the model is cached, editing a template and running **\u201CRe-render imported sources\u201D** regenerates every affected note without re-downloading anything.\n\n## How to edit the templates\n\n1. In Midad Arabic Sources settings, set a **Template folder** (for example `Templates`).\n2. Run the command **\u201CCopy import templates to vault\u201D**. This copies these files into `<Template folder>/midad-arabic-sources-import-templates/`:\n   - `source-note.eta.md` \u2014 one note per s\u016Brah of a commentary (tafs\u012Br)\n   - `translation-note.eta.md` \u2014 one note per s\u016Brah of a Qur\u2019\u0101n translation\n   - `hadith-note.eta.md` \u2014 one note per chapter (kit\u0101b) of a \u1E25ad\u012Bth collection\n   - `quran-note.eta.md` \u2014 one note per s\u016Brah of a Qur\u2019\u0101n riw\u0101ya (Qur\u2019\u0101n text)\n   - `dictionary-note.eta.md` \u2014 one note per dictionary root (lexicons)\n   - `dictionary-index.eta.md` \u2014 one index note per first letter (a dictionary\u2019s roots)\n   - `book-note.eta.md` \u2014 one note per chapter of a book (Turath.io)\n   - `book-volume.eta.md` \u2014 one volume index per volume of a multi-volume book\n   - `book-letter.eta.md` \u2014 one letter index for a classical dictionary (the work hub lists letters; each letter page lists its fasl notes under volume headings)\n   - `hub.eta.md` \u2014 the per-work hub note that lists all units\n   - `moc.eta.md` \u2014 the skeleton for a category MOC (e.g. `Tafs\u012Br Sources`)\n   - `sources.eta.md` \u2014 the managed region of the top-level parent note (`Midad Arabic Sources`)\n3. Edit the copies, then run **\u201CRe-render imported sources\u201D**.\n\nThe plugin reads your copies first and falls back to the bundled defaults.\n\nEach work\u2019s entry in its category MOC is just `- [[Work]]` \u2014 the work hub note, which carries the `repository:` property for provenance. A Turath work appears in the repository MOC `Turath` and in **one or more** work-type MOCs (e.g. `Fiqh Sources`; Lis\u0101n al-\u02BFArab is in both `Language Sources` and `Dictionaries`), and carries all of them in the hub\u2019s `midad-up:`. The category MOC\u2019s generated region is also a managed region: it is rebuilt from the full set of imported works on every render, so entries never duplicate, and a language heading (`# Arabic Texts`, `# English Texts`) appears only when it has content.\n\nEvery category MOC points up to one **parent note** (the setting **\u201CSources parent note\u201D**, default `Midad Arabic Sources`). The plugin reuses an existing `Midad Arabic Sources` note wherever it lives in the vault, or creates one in the sources folder. It writes only its own managed region there: a `>[!mas-sources-list]` callout listing **Topics**, **Repositories**, and **My Midad Content**, with the per-entry source counts. The generated **Midad Arabic Sources - Topics**, **Midad Arabic Sources - Repositories**, and **Midad Arabic Sources - My Midad Content** notes are themselves managed MOCs, as are the category, repository, transcription, and translation MOCs they link. Both the parent note and the sidebar\u2019s resource browser are rendered from `.midad-arabic-sources/resource-model.json`; the note is only the fallback for the sidebar when that file is absent. The callout type and its styling are the plugin\u2019s own (`mas-sources-list` in `styles.css`), so nothing depends on a callout defined elsewhere in your vault.\n\nTop-level source notes (work hubs, MOCs, and transcription/translation parents) carry `[[Midad Arabic Sources]]` in `midad-up`, so the corpus is traceable without giving every individual s\u016Bra, chapter, root, or volume note a backlink to the parent.\n\nAll plugin-managed frontmatter properties use the `midad-` prefix and are written together at the start of the generated property block (`midad-up`, `midad-id`, `midad-kind`, `midad-note`; transcriptions and translations add `midad-work` and `midad-unit`). The plain `up` property is never generated, so it remains available for the user. `midad-source` and `midad-key` were retired: the source a note belongs to is derived from `midad-id` / `midad-kind` / `midad-work`, and the raw work key is the `midad-id` without its `repo/` prefix.\n\nLanguage sections in every category and repository MOC use one shared order: **Arabic Texts** first, then any other languages alphabetically, then **English Texts**. This keeps bilingual works and the consolidated Qur\u02BE\u0101n MOC consistent.\n\nA work with a single unit \u2014 for example a one-chapter \u1E25ad\u012Bth book such as al-Arba\u02BF\u016Bn al-Nawawiyya \u2014 keeps its content in the work note itself rather than a hub that links to one child note.\n\n## Heading convention\n\n- **A numbered unit is an H1.** A Qur\u2019\u0101n verse or a \u1E25ad\u012Bth number is always `# <number>` \u2014 in s\u016Brah notes, riw\u0101ya notes, and the single-unit hub alike.\n- **The link to the canonical Qur\u2019\u0101n is an H2 in Arabic notes.** S\u016Brah notes use `## [[002 Al-Baqarah#2|\u0627\u0644\u0628\u0642\u0631\u0629 : \u0662]]`; riw\u0101ya notes use the \u1E24af\u1E63 correspondence `## [[002 Al-Baqarah#3|\u1E24af\u1E63 3]]`. **English translations** put the reference in the verse H1 (`# 2 [[\u2026|\u0627\u0644\u0628\u0642\u0631\u0629 \u0662]]`) so CSS can place it under the emblem in the left gutter without adding a separate heading block or the \u201C : \u201D.\n- **A content note\u2019s `title` is its own title, not its file name.** A file name must be unique across the vault, so it carries the work (`Hans Wehr Dictionary - \u0632 z`, `Tafs\u012Br al-Jal\u0101layn - 002 Al-Baqarah`) and the work\u2019s folder/hub carries its **repository qualifier** (`Tafs\u012Br al-\u1E6Cabar\u012B (tafsir_api)`), so two editions of one work can be installed side by side; a work known to exist only once across the imported repositories (the two dictionaries, for now) is flagged `unique` and keeps its bare folder name. `title:` and the hub/MOC link aliases stay clean (the book title for a work, the chapter heading for a chapter); the work is already named by `midad-up`, so `title` is what a table of contents would print \u2014 the chapter (`title: \u0632 z`, `title: 2 Al-Baqarah`, `title: 1 Revelation`), never `<work> - <unit>`. A title is for viewing, so a numeric prefix drops its leading zeros (`2 Al-Baqarah`); the *file name* keeps them, because that is what makes the s\u016Bra notes sort. A letter-index page is labelled with the letter and its romanized equivalent (`\u0632 z`), the same way a definition page carries both.\n- **A link that points into a work names the note\u2019s own title, not its file name.** An MOC or hub is outside the context of the notes it lists, so its links carry an alias that drops the work title and any other classifying prefix: the hub lists `- [[Lane\'s Lexicon - \u0627 \u0101|\u0627 \u0101]] \u2014 182`, and a letter index lists `- [[LL 3 \u0627\u0628 abba|\u0627\u0628 abba]]`. A dictionary entry\u2019s link also drops the `LL`/`HW` id, which the digitisation added rather than the book. The file name stays unique across the vault; only the *display* is the title proper. (The `title` property follows the same rule from the other side: a note\u2019s own `title` is its chapter, never `<work> - <chapter>`.)\n- **A content note carries no title/chapter heading.** The work (or \u1E25ad\u012Bth chapter) name lives in the `title` property, the file name, and `midad-up` \u2014 so it is not repeated as an H1. \u1E24ad\u012Bth chapter notes therefore title as just the chapter (`title: 1 Revelation`) and their `#` headings are the \u1E25ad\u012Bth numbers.\n- A **content page carries one default alias**, `<work title> - <unit>`, to keep the alias index small. The work hub keeps the full alias set (title, short title, Arabic forms, and the plain romanization); add any per-page alias you want by hand.\n- A **multi-unit hub** keeps `# <work title>` as its own heading, since it holds an index rather than numbered content.\n\nThis keeps every H1 a targetable unit number and every canonical link a targetable H2.\n\n## Qur\u2019\u0101n citations in source text\n\nArabic tafs\u012Brs cite *other* verses inline. Acquisition rewrites those citations into links to the canonical Qur\u2019\u0101n notes, in whatever shape the repository uses: `[\u064A\u064F\u0648\u0633\u064F\u0641\u064E: \u0661\u0660\u0663]`, `[ \u0627\u0644\u0623\u0639\u0631\u0627\u0641 : 3 ]`, `[\u0665\u0660: \u0663\u0668]` (s\u016Bra:\u0101ya, al-Qur\u1E6Dub\u012B), `(\u0627\u0644\u0642\u0635\u0635: \u0665)`, and `[\u0627\u0644\u0622\u064A\u0629: \u0661\u0662\u0663]` (a verse of the s\u016Bra being commented). A quote of the commented verse itself carries no citation and is left alone; editorial refs like `[\u062A\u0641\u0633\u064A\u0631 \u0627\u0628\u0646 \u0643\u062B\u064A\u0631: \u0662 / \u0661\u0663\u0665]` never match a s\u016Bra and are untouched.\n\nThis requires **\u1E24af\u1E63** to be the canonical riw\u0101ya, because the matcher reads the canonical s\u016Bra notes and almost every source quotes the \u1E24af\u1E63 reading \u2014 the setting says so. If a different riw\u0101ya is canonical, no citation linking is done.\n\n## Variables available in a template\n\nEvery template receives a data object. The engine destructures it for you, so you can use these names directly:\n\n| Name | Meaning |\n| --- | --- |\n| `work` | the work metadata (see the table below) |\n| `unit` | the current s\u016Brah or chapter (see unit fields) |\n| `units` | every unit in the work (used by the hub template) |\n| `bilingual` | `work.layout` \u2014 `"stacked"` or `"table"` (used by \u1E25ad\u012Bth) |\n| `generated` | the model\u2019s generation date (`YYYY-MM-DD`) |\n| `mocs` | the category MOC names (parent-note template) |\n| `parent` | the parent note name (MOC template) |\n\n### `work` fields\n\n| Field | Example | Notes |\n| --- | --- | --- |\n| `key` | `tafsir:ar-tafsir-al-jalalayn` | internal `<collection>:<id>`; the hub\'s `midad-id` writes it as `repo/tafsir/ar-tafsir-al-jalalayn` |\n| `collection` | `tafsir` | `tafsir`, `tafsir-qul`, `quran`, `hadith`, `quran-text`, `dictionary`, `turath` |\n| `collection_label` | `Qur\u02BE\u0101n commentaries (tafs\u012Br)` | for the import modal |\n| `id` | `ar-tafsir-al-jalalayn` | source id/slug |\n| `name` | `Tafsir Jalalayn` | source name (ASCII) |\n| `title` | `Tafs\u012Br al-Jal\u0101layn` | romanized, vault style |\n| `dir` | `Tafs\u012Br al-Jal\u0101layn` | output folder (unique) |\n| `short` | `al-Jal\u0101layn` | short title, if any |\n| `title_ar` | `\u062A\u0641\u0633\u064A\u0631 \u0627\u0644\u062C\u0644\u0627\u0644\u064A\u0646` | native Arabic title \u2014 only for an Arabic-language work whose published title is Arabic (an Arabic dictionary included), not an English title or a translation of one |\n| `title_language` | `en` | the language of the published work/title, when it differs from the content language; gates `title-ar` and `authors-ar` (Wehr and Lane are `en`; an Arabic dictionary is `ar`) |\n| `authors_ar` | `["\u0627\u0628\u0646 \u0645\u0646\u0638\u0648\u0631"]` | native Arabic author names \u2014 the original Arabic name, not the Arabic writing of a Western name; a list even for one author, one name each, never split |\n| `genre` / `genres` | `language` / `["language", "lexicography"]` | the work\u2019s kind(s); the hub writes `genre` |\n| `short_ar` | `\u0627\u0644\u062C\u0644\u0627\u0644\u064A\u0646` | native short title, if any |\n| `title_plain` | `Tafsir al-Jalalayn` | diacritic-less romanized (for search) |\n| `authors` | `["Jal\u0101l al-D\u012Bn al-Ma\u1E25all\u012B", \u2026]` | romanized author names |\n| `translators` | `["Feras Hamza"]` | rendered as `translators:` under `authors:` (overridden by `publication.translators`) |\n| `publication` | `{ publisher: "Darussalam", \u2026, mas_note: "\u2026" }` | *injected by the plugin* from `publication-map.json`; adds the citation block to the hub YAML (`item-type`, `shorttitle`, `title-ar`/`authors-ar` when the map supplies them, `editors`, `translators`, `contributors`, `publisher`, `place`, `year`, `edition`, `series`, `series-number`, `volume`/`volumes`, `number`, `issue`, `pages`, `doi`, `isbn`, `url`, `genre`, `section`, `citekey`, `midad-note`). A name may be a string (`Last, First` for Western names; a classical Arabic name stays one name) or `{first, last}` where the split is wrong. `mas_note` is the map\u2019s `note` plus the provisional caveat \u2014 the same text the Zotero `extra` carries. |\n| `aliases` | `["Tafs\u012Br al-Jal\u0101layn", "al-Jal\u0101layn", "\u062A\u0641\u0633\u064A\u0631 \u0627\u0644\u062C\u0644\u0627\u0644\u064A\u0646", "\u0627\u0644\u062C\u0644\u0627\u0644\u064A\u0646", "Tafsir al-Jalalayn"]` | the parent alias set |\n| `language` | `ar` | primary language code |\n| `languages` | `["ar", "en"]` | every language the work contains (\u1E25ad\u012Bth are bilingual) |\n| `language_links` | `["Arabic", "English"]` | the `language:` property (`[[Arabic]]` alone, or a list) |\n| `cssclass` | `tafsir` | drives CSS (`tafsir`, `hadith`, \u2026); Qur\'\u0101n notes use `quran-ar` (Arabic, RTL) or `quran-en` (translation, LTR), so each direction, face, size, and leading is set independently |\n| `moc` | `Tafs\u012Br Sources` | category MOC note name |\n| `moc_sections` | `["Arabic Texts", \u2026]` | MOC headings, derived from `languages` |\n| `up` | `["[[Tafs\u012Br Sources]]"]` | internal model field; rendered as `midad-up` |\n| `source` | `https://qul.tarteel.ai/\u2026` | provenance URL |\n| `repository_name` | `qul.tarteel.ai` | short name for the `repository:` property |\n| `repository_updated` | `2026-06-04` | the repository\u2019s own last-updated date for this item |\n| `author` | `Mu\u1E25ammad b. Ism\u0101\u02BF\u012Bl al-Bukh\u0101r\u012B` | author line (hub) |\n| `kind` | `surah`, `hadith`, `quran`, `dict` or `book` | selects the note template |\n| `unit_label` | `S\u016Brahs`, `Chapters`, or `Roots` | hub section heading (`Roots` for dictionaries and letter-index works) |\n| `no_notes` | `true` | generate only the work note (canonical \u1E24af\u1E63 riw\u0101ya) |\n| `unit_prefix` | `Qur\u02BE\u0101n (riw\u0101yat Warsh)` | fallback prefix for unit links (`note_stem` supersedes it) |\n| `layout` | `stacked` or `table` | bilingual layout |\n| `body` | `grid` or `prose` | a dictionary\u2019s body shape: Wehr\u2019s label/content senses, or Lane\u2019s paragraphs |\n| `note_prefix` | `HW` or `LL` | a dictionary\u2019s root-note prefix (file name, `aliases:`, and the `<prefix>-id` property) |\n| `convention` | `vault`, `wehr` or `full` | the named romanization path the work\u2019s names follow (see below) |\n| `supplement_from` | `49881` or `0` | the id at which the source stops being one book and starts being a second (Lane\u2019s Supplement) |\n| `volumes` | `1` or `8` | a book work\u2019s volume count; the hub lists volume indexes when greater than 1 unless the work uses a letter index, whose letter pages carry the volume headings |\n| `section_level` | `1` or `2` | the TOC level that defines a chapter in a book work; `2` for the classical dictionaries, where it is the `\u0641\u0635\u0644` |\n| `mocs` | `["Turath", "Fiqh Sources"]` | every category MOC the work belongs to (the hub\u2019s `midad-up`) |\n\nNames follow ScholarWeft\u2019s convention: `Last, First` for Western-style names (`Wehr, Hans`, `Lane, Edward William`), and one name for classical Arabic names (`Ibn Man\u1E93\u016Br`, `Ab\u016B Ja\u02BFfar al-\u1E6Cabar\u012B`, `Mu\u1E25ammad b. Ism\u0101\u02BF\u012Bl al-Bukh\u0101r\u012B`). `authors-ar` is the source\u2019s own Arabic forms, a list even for one author, and is never split. The hub\u2019s `authors` / `translators` / `editors` / `contributors` links go through `scholarName`; a transcription/translation parent copies its literature note\u2019s citation fields wholesale, so the source title/authors replace the descriptive versions while the aliases keep them.\n\n### Romanization conventions\n\nA work **declares** which transliteration path it follows, rather than letters being swapped ad hoc. The engine (`arabic-bw-transliterate.py`) emits the vault\u2019s own convention, so every other path is a recast of that:\n\n- **`vault`** \u2014 the house convention: no case endings, but a verb\u2019s inflection, a pronominal or prepositional ending and the two tanw\u012Bn exceptions are kept (`ba\u1E25r`, `kataba`, `minka`, `q\u0101\u1E0Din`, `\u1E6Dab\u02BFan`). Lane uses this: it transliterates nothing itself, so its names are ours.\n- **`wehr`** \u2014 Hans Wehr\u2019s own, the European Orientalist system of the printed dictionary (`\u0161`, `\u1E6F`, `\u1E35`, `\u1E0F`, `\u1E21`, `\u010D`, `\u017E`). Two letters need care, because its scanned text is unreliable about them. It writes q\u0101f as plain `q`, so the `\u1E33` that turns up is a mis-read kh\u0101\u02BE (`a\u1E33a\u1E0Da` for `a\u1E2Ba\u1E0Fa`) and is folded onto kh\u0101\u02BE when a reading is validated. And `th` is **not** recast to `\u1E6F` when converting: in a reading it may equally be \u062A + \u0647 (`\u062A\u0647\u062A\u0647` \u2192 `thth`), so that letter is converted positionally instead, where the Arabic is known (`_hw_fix_underlined`), and a reading the definition supplies is used as it stands. Wehr uses this convention so that a name the engine produced still matches the transliterations the note\u2019s own text carries.\n- **`full`** \u2014 fully vocalised, every case ending written. That is the service\u2019s `keep_case` mode (it changes how a reading is *produced*, not how its letters are written) and is what the vault uses for Qur\u2019\u0101n passages.\n\nThe convention is declared per work in `DICTIONARIES` (`scripts/text-source-import.py`), travels to the model as `work.convention`, and is applied by one function, `_hw_romanize`, everywhere a name is produced \u2014 including the letter-page labels, so `\u062B \u1E6F` in Wehr and `\u062B th` in Lane.\n\nLanguages are derived from the source catalogue: each work gets a code and its English name (e.g. `fr` \u2192 `French`), and its MOC section follows (`French Texts`). To add a language, extend `LANGUAGE_NAMES` in `scripts/text-source-import.py`.\n\n### S\u016Brah unit fields (`unit.kind === "surah"`)\n\n| Field | Example |\n| --- | --- |\n| `id` | `2` |\n| `base` | `002 Al-Baqarah` (matches the `<Sources>/Installed Sources/Quran` note name) |\n| `translit` | `Al-Baqarah` |\n| `arabic` | `\u0627\u0644\u0628\u0642\u0631\u0629` |\n| `blocks[]` | one per \u0101ya: `{ number, ref, body }` |\n| `note_stem` | `Tafs\u012Br al-Jal\u0101layn - 002 Al-Baqarah` |\n\n`note_stem` is added at render time and is the **authoritative name of the unit\u2019s note** \u2014 the same value is used for the file and for the hub\u2019s link to it, so a link can never name a note that was not written. (For the canonical riw\u0101ya it is the bare `base`, since its s\u016Bra notes are unprefixed in `canonical_root`.)\n\n`blocks[].ref` is a ready-made link such as `[[002 Al-Baqarah#2|\u0627\u0644\u0628\u0642\u0631\u0629 : \u0662]]`, so `[[Tafs\u012Br al-Jal\u0101layn - 002 Al-Baqarah#2]]` parallels `[[002 Al-Baqarah#2]]`. `blocks[].body` already has Qur\u2019\u0101n spans marked as `*\uFD3F\u2026\uFD3E{.quran-quote}*`.\n\n### \u1E24ad\u012Bth unit fields (`unit.kind === "hadith"`)\n\n| Field | Example |\n| --- | --- |\n| `id` | `1` |\n| `base` | `1 Revelation` |\n| `label` | `1 Revelation` |\n| `arabic` | `\u0643\u062A\u0627\u0628 \u0628\u062F\u0621 \u0627\u0644\u0648\u062D\u0649` |\n| `english` | `Revelation` |\n| `hadiths[]` | one per hadith: `{ number, narrator, english, arabic }` |\n\n### Dictionary unit fields (`unit.kind === "dict"`)\n\nOne unit per dictionary **root**; the note is named `<prefix> <id> <arabic> <roman>` (unprefixed, as the vault already keeps these). The prefix is per-work \u2014 `HW` for Hans Wehr, `LL` for Lane\u2019s Lexicon \u2014 so the two dictionaries never collide, and a re-render prunes only its own work\u2019s stale names. It is also the property prefix (`hw-id` / `ll-id`) and the `aliases:` prefix (`HW \u062D\u0631\u0628` / `LL \u062D\u0631\u0628`).\n\n| Field | Example |\n| --- | --- |\n| `id` | `24102` (the root\u2019s `ID`) |\n| `base` | `HW 24102 \u0648\u0633\u062E wasaka` |\n| `root` | the root entry `{ id, arabic, roman, verb_form, bullets[] }` (grid) or `{ id, arabic, roman, verb_form, paragraphs[] }` (prose) |\n| `entries[]` | the derived entries, same shape |\n\n`bullets[]` are the definition\u2019s bullets: the rendered template emits the entry\u2019s `arabic` as the first `> - \u2026`, then each of `bullets`. The source marks sense numbers with `<b>II</b>`; a `<b>`/`</b>` pair becomes a line, and a fully-vocalised Arabic parenthetical (`(\u0648\u064E\u0633\u064E\u0651\u062E\u064E)`) is dropped while a Latin one (`(\u0647\u0640 s.th.)`) is kept. A vocalised Arabic parenthetical immediately after a **form label** is dropped too (`<b>III</b> (\u0627\u064E\u0627\u064E\u062E\u064E\u0630\u064E) \u2026` \u2192 `<b>III</b> \u2026`): the digitisation generated one for every derived form, and it is corrupt where the print gives none, while the print\u2019s own form \u2014 when it gives one \u2014 sits *after* that parenthetical and is kept (`(\u0627\u0650\u0627\u0652\u062A\u064E\u062E\u064E\u0630\u064E) \u0627\u062A\u062E\u0630 itta\u1E33ada \u2026` \u2192 `\u0627\u062A\u062E\u0630 itta\u1E33ada \u2026`).\n\n`paragraphs[]` are the same thing for a **prose** work: the source\u2019s own paragraphs, in markdown. A note whose source folds a second book into the first \u2014 Lane\u2019s database carries the Supplement (Book II) as a suffix block in the scan\u2019s own numbering, from id 49,881 on \u2014 marks the boundary: the first unit at or above that id is preceded by a `# Supplement` heading, once per note, so the two books stay distinguishable inside one root\u2019s page. The id is the work\u2019s `supplement_from` in the acquisition config, and is also written to the model\u2019s `work` (0 = no such split, as for Wehr). `work.body` selects which the template renders (`grid` or `prose`), and a prose note also carries the `mas-prose` class in `cssclasses` \u2014 Obsidian resolves a paragraph that starts with Arabic to RTL (and to the Arabic size and leading), which is wrong for Lane\u2019s English prose, so the CSS needs a hook to reset it. Lane\u2019s definitions are English prose with `<i>`/`<h3>`/`<center>` markup and no Latin transliteration at all: `<i>\u2026</i>` becomes `*\u2026*`, a `<center>` block becomes the vault\u2019s poetry callout (`>[!arabic-poetry]`, one `>- ` hemistich per line \u2014 2,159 of the 2,160 blocks are Arabic verse), the source\u2019s dividers (`===`, `___`) become paragraph breaks, the cross-reference arrow (`\u{1F87B}`) becomes `\u2193`, a lone aorist vowel mark (`aor. \uFE79`) becomes the vowel itself (`aor. u`), the rare `<table>` is flattened, and the remaining tags are dropped. Lane\u2019s own `*` \u2014 a separator inside a reference list, `(S, * M, A, K;)` \u2014 is padded with spaces on both sides, because Obsidian has no working escape for it and an unpadded `*` pairs with another one and italicises everything between them; a `*` with a space on either side can neither open nor close emphasis. Lane\u2019s square brackets \u2014 editorial additions \u2014 become round ones, and the leading headword is wrapped in `<span class="mas-hw">` so the CSS can size it as Arabic while the prose stays at text size. The source\u2019s quotes are already correct curly ones, so a prose body turns only the stray straight quote (`smart_quotes` re-decides every mark and would reverse a closing quote that follows a space: `\u2026 war \u201D]` \u2192 `\u2026 war \u201C]`).\n\nThe definition callout is `[!mas-dictionary-definition]` (renamed from `hans-wehr-definition`, which is still accepted as a CSS alias so un-rerendered notes keep their styling).\n\nThe **transliteration** (`term`, the heading, and the note name) is taken from the definition after HTML tags are stripped. The only tag in the corpus is `<b>` \u2014 the verb-form sense marker \u2014 and stripping it is essential: otherwise `<b>` supplies a stray `b` that passes for the romanisation (`\u0627\u0628\u0646` \u2192 `b`). The scan is character by character over a transliteration alphabet that includes the dotted consonants and the hyphen, so `al-y\u016Bn\u0101n` survives whole rather than truncating to `al`. A leading parenthetical is skipped when it is an etymology pointer \u2014 no Arabic inside (`(Fr.)`), or opening with a language/grammar abbreviation (`(Turk. \u0628\u0648\u0631\u063A\u0649 bur\u011F\u0173)`, `(pl. of \u2026)`, `(also \u2026)`) \u2014 but **kept** when it holds the transliteration itself, as Wehr does for noun roots: `\u062D\u0631\u0628 (\u1E25arb f., pl. \u062D\u0631\u0648\u0628 \u1E25ur\u016Bb \u2026)` \u2192 `\u1E25arb`.\n\nWhen a root\u2019s own definition is itself a verb form \u2014 it *starts* with a sense marker, e.g. `\u0627\u0628\u0646 <b>II</b> \u2026 \u2026` \u2014 there is no transliteration to take, so it comes from the first **derived** entry that is not itself a verb form (`\u0627\u0628\u0646` \u2192 `ubna`, `\u0627\u062E\u0648` \u2192 `a\u1E33`).\n\nOnly if that fails too is the entry named by transliterating the bare root. That is done with the plugin\u2019s own engine (`arabic-bw-transliterate.py`, the one behind the *Transliterate* commands) rather than letter by letter \u2014 a real reading beats `\u02BFbrwd`. It is asked **`standalone`** (a word on its own, not an excerpt\u2019s final word, so it is not read in pausal form) and **without case endings**, i.e. the citation form, which is what `AI OS/Arabic transliteration guidelines.md` wants for a headword: no tanw\u012Bn on nouns (`ba\u1E25r`, not `ba\u1E25run`) \u2014 guideline 4\u2019s defective-root and adverbial exceptions (`q\u0101\u1E0Din`, `\u1E6Dab\u02BFan`) come from the lexicon \u2014 while a verb\u2019s final inflection is kept (`kataba`, guideline 5) and a suffixed word keeps its vowel (`minka`).\n\nThat last step \u2014 and everything that follows it \u2014 is the **same machinery both dictionaries use** (`_hw_root_romanization`). The two differ only in what comes before: Wehr\u2019s definitions and entries carry transliterations, so those are taken first; Lane\u2019s carry none, so it goes straight to the shared reading. Either way the order is the root itself, then the root\u2019s own entries (a term that *is* the root, then one that merely contains its radicals), then \u2014 only if nothing was found \u2014 letter by letter. A bare cluster carrying a **hamza seat** tries the entries first, since the engine cannot know the vowel of an unvocalised hamza \u2014 a seat being an explicit hamza-bearing letter (\u0623 \u0625 \u0622 \u0624 \u0626 \u0621 \u0671) or a bare alif in first position, *not* a medial or final alif, which is simply a long \u0101 (`\u063A\u0627\u063A\u0629` reads `gh\u0101gha`; treating its alif as a seat once made the note take a different entry word\u2019s reading instead of its own). The gates key off the *input* being an unvocalised cluster, not off which dictionary it came from. The Lane paragraph below spells the rules out.\n\nA reading is accepted only when it **is the root itself**: the analysis behind it must be a single morpheme (the engine marks proclitic/enclitic boundaries with `+_`/`_+`), and its consonant skeleton \u2014 a case ending aside \u2014 must equal the root\u2019s. So `bajjana`, `a\u1E63udd` and `wabaytuhu` are rejected rather than named. A doubled consonant is the one exception, because it is not an added morpheme: it marks the intensive form (II, `fa\u02BF\u02BFala`), so the engine\u2019s bare `battak` is completed to the perfect `battaka` (`\u0634\u062F` \u2192 `shadda`, `\u0645\u062F` \u2192 `madda`). Only when nothing qualifies does the character-by-character radical transliteration stand in. A printed diptote marker (mamn\u016B\u02BF min al-\u1E63arf) arrived as a literal digit glued to the transliteration and is re-emitted as a superscript: `\u0627\u062D\u0645\u062F a\u1E25mad2 \u2026` \u2192 `*a\u1E25mad*<sup>2</sup> \u2026`.\n\nFor a **prose** work the engine is the *primary* name source, not a fallback \u2014 Lane\u2019s definitions carry no transliteration at all \u2014 and there it is reading a bare, unvocalised cluster, so a short or vowel-less result (`th`, `khr`) is a guess rather than a word and is rejected (`\u0627\u062B` \u2192 `\u0101th`). And a bare root that yields nothing is named from the root\u2019s own entries, in two passes over the Arabic words of the entry in order \u2014 the term Lane gives first, with its subject or object after it (`\u0623\u064E\u062B\u064E\u0641\u064E \u0627\u0644\u0642\u0650\u062F\u0652\u0631\u064E`), then the examples that follow, so a word carrying the radicals may be found anywhere in the article. The first pass takes a word that **is** the root: an equality test on the skeleton, with gemination collapsed, the hamza ignored and the weak letters dropped (`\u0623\u064E\u062B\u064E\u0641\u064E` for `\u0627\u062B\u0641` \u2192 `athafa`, `\u0638\u064E\u0644\u064E\u0651` for `\u0638\u0644` \u2192 `\u1E93alla`, `\u0646\u064E\u0623\u064E\u062A\u064E` for `\u0646\u0623\u062A` \u2192 `na\u02BEata`, and `\u0622\u062F\u0649` for `\u0627\u062F\u0648`, whose \u0648 the derived verb loses). The second pass, since many entries never give the plain term at all (`\u0623\u064E\u062A\u0652\u0623\u064E\u0631\u0652\u062A\u064F \u0625\u0650\u0644\u064E\u064A\u0652\u0647\u0650 \u0627\u0644\u0646\u064E\u0651\u0638\u064E\u0631\u064E` for `\u062A\u0623\u0631`), accepts a word that merely **contains** the radicals \u2014 a conjugated verb, which the conventions allow as a last resort before the letter-by-letter fallback; a one-letter skeleton is refused, since it would match almost anything. The reading is then brought to the vault\u2019s citation form: no tanw\u012Bn (`\u0623\u064E\u062A\u0652\u0645\u064C` \u2192 `atmun` \u2192 `atm`), except `-an` and a defective root\u2019s indefinite (`\u0642\u064E\u0627\u0636\u064D` \u2192 `q\u0101\u1E0Din`), and the short vowel the engine drops from a citation form is restored from the source (`\u0646\u064E\u0623\u064E\u062A\u064E` \u2192 `na\u02BEat` \u2192 `na\u02BEata`, per the guideline keeping a verb\u2019s final inflection). That is a *restoration*, not a rule that every name ends in `a`. The one place a vowel is supplied rather than restored is the doubled-consonant completion: a reading with a doubled consonant is a form-II verb (`fa\u02BF\u02BFala`), whose dictionary form is the perfect, so `battak` is written `battaka` \u2014 the `a` is the perfect\u2019s own inflection, not a product of the doubling. It fires only on a genuine doubled consonant, so `\u062A\u0647\u062A\u0647` names as `tahtaha`, not `\u1E6F\u1E6Fa`. The skeletons that decide all this are built **one character per Arabic letter** \u2014 \u062B maps to `\u1E6F`, never `th` \u2014 so a digraph written for one letter can never be confused with two letters that happen to spell the same thing. Two things make that work for Lane\u2019s hamza roots. The validation ignores the hamza on both sides, because a vocalised word writes it (`\u0646\u064E\u0623\u064E\u062A\u064E`) while Lane\u2019s bare root drops the carrier (`\u0646\u0627\u062A`) and the engine spells it (`na\u02BEat`). And a root carrying a hamza tries the entries *first*: the engine cannot know a bare hamza\u2019s vowel, reading `\u0646\u0623\u062A` as the vowel-less `n\u02BEat` (or, from the carrier-less `\u0646\u0627\u062A`, as `n\u0101t`). The letter-by-letter fallback \u2014 reached only when no reading exists at all \u2014 writes a hamza as `\u02BE` (`\u062B\u0623\u0641` \u2192 `th\u02BEf`, never `\u0101`) and reads an *initial* one as the vowel it carries (`\u0627\u062B\u0641` \u2192 `athf`, the bare root `\u0627` \u2192 `a`), since a hamza is a seat rather than a consonant and a root cannot begin with a long vowel. (A letter page\u2019s own label is a different matter and still reads `\u0627 \u0101`.) The comparison folds the variants the sources use and the scans confuse \u2014 a j\u012Bm or ghayn written `g` (`\u0101te\u0161g\u012B` for `\u0622\u062A\u0634\u062C\u064A`, `g\u0101ga` for `\u063A\u0627\u063A\u0629`, `wagd` for `\u0648\u063A\u062F` \u2014 the comparison tries both readings of an ambiguous `g`), a q\u0101f written `\u1E33`, a kh\u0101\u02BE written `\u1E35` \u2014 and, since the weak letters are dropped from both sides, a w\u0101w or y\u0101\u02BE written as the vowel it sounds (`ibr\u012Bz`, `\u1E33\u014Dl`, `b\u0113t`), and a `\u1E6F` (\u062B) whose underline the scan lost as plain `t`. What the comparison accepts, the rendering then writes in the work\u2019s own convention: `_hw_fix_underlined` walks the reading\u2019s consonants against the Arabic\u2019s radicals in step and rewrites the ambiguous ones \u2014 a `t` standing where a \u062B does (`tabata` \u2192 `\u1E6Fabata` in Wehr, `thabata` in Lane; `kataba` untouched), and a `g` standing where a \u063A or a \u062C does (`g\u0101ga` \u2192 `\u1E21\u0101\u1E21a` / `gh\u0101gha`, `\u0101te\u0161g\u012B` \u2192 `\u0101te\u0161j\u012B`). A **derived** entry is a derivative, not the root, so it is shown in the vocalised Arabic alone; no transliterated heading is invented for it (that would need one engine call per derived row \u2014 47,000 of them \u2014 and the conventions bar a derivative from standing as a name anyway).\n\nA dictionary also carries one `dict-index` unit per first letter (Arabic order, alef variants folded), listed by the hub; each index note links the roots filed under that letter. These notes are **prefixed** (`<work dir> - <letter>`), unlike the roots. The bottom page names its letter page **first** in `midad-up` (`[[Hans Wehr Dictionary - \u062D \u1E25]]`, then the work, then the plugin), so you can step to the adjacent entries of the same letter.\n\nThe source database is not one row per root: 548 root words have several `IS_ROOT` rows (the verb and the noun \u2014 `\u062D\u0631\u0628` is both `\u1E25ariba` 4457 and `\u1E25arb` 4458), 246 rows are pointers ("look up alphabetically") paired with the row carrying the entry, and a few rows sit three levels deep. Acquisition **merges** a root\u2019s rows into the one note that print has \u2014 the first row with real content is the note, the rest join it as sections, and every derived form of the group nests beneath \u2014 so nothing with content is dropped and no root is split across pages.\n\n### Book unit fields (`unit.kind === "book"`)\n\nTurath.io serves a whole book as one JSON whose TOC is a flat list of headings. One chapter note is generated per heading at the work\u2019s `section_level` (default 1); deeper headings become `##`/`###` inside it, and every page gets a `#### p. N` marker (the same page heading the transcription pipeline uses). Each marker is preceded by the `---` page separator and a blank line, exactly as in transcriptions and translations. In a multi-volume work the page marker carries the volume (`#### p. 1:7`), and one `book-volume` index note is generated per volume; a chapter points `midad-up` to the volume it starts in.\n\nThe classical dictionaries use the source\u2019s own **`\u0641\u0635\u0644`** level and the dictionary navigation shape: **work hub \u2192 letter pages \u2192 fasl notes**. They are set to `section_level: 2` and `letter_index: true`. The level-1 heading is the **last radical** (the letter, e.g. `\u0628`), the level-2 heading is the **first radical** (the fasl, e.g. `\u0641\u0635\u0644 \u0627\u0644\u0647\u0645\u0632\u0629`), and a `\u0628\u0627\u0628` between them groups the fasl notes under their first radical. The work hub lists the letters under `## Roots`; there is no volume index. Each letter page lists its fasl notes, inserting a plain `## \u0627\u0644\u0645\u062C\u0644\u062F N` heading whenever the printed volume changes and a plain `### \u0628\u0627\u0628 \u2026` heading when the source\u2019s `\u0628\u0627\u0628` grouping changes. The volume headings are reference markers, not links. The note title is `<letter> - <fasl>` (with `\u0628\u0627\u0628` where the source has one), the file name `<work dir> - <letter> - <fasl>`, and the fasl\u2019s `midad-up` points to its letter page. A source that repeats a fasl title within one letter (some TOCs repeat the `\u0641\u0635\u0644` set) gets `(2)`, `(3)` on the later notes, with the page span distinguishing them. The 4 MiB cap (`_TURATH_MAX_NOTE_BYTES`, overridable with `max_note_bytes`) remains as a fallback and splits at page boundaries. Lis\u0101n\u2019s largest fasl is about 0.6 MB.\n\n| Field | Example |\n| --- | --- |\n| `id` | `3` (the chapter\u2019s ordinal) |\n| `base` | `003 [\u0627\u0644\u0623\u0631\u0628\u0639\u0648\u0646 \u0627\u0644\u0646\u0648\u0648\u064A\u0629]` (file name; capped at a word boundary) |\n| `title` | `3 [\u0627\u0644\u0623\u0631\u0628\u0639\u0648\u0646 \u0627\u0644\u0646\u0648\u0648\u064A\u0629]` (full heading, for display) |\n| `arabic` | `[\u0627\u0644\u0623\u0631\u0628\u0639\u0648\u0646 \u0627\u0644\u0646\u0648\u0648\u064A\u0629]` |\n| `level` | the TOC level the chapter was cut at |\n| `volume`, `volume_end` | the volume the chapter starts/ends in |\n| `page_from`, `page_to` | printed page numbers |\n| `span` | `p. 4\u201358` (or `p. 1:221\u20132:889`) |\n| `section_page` | the letter page\u2019s name for a letter-index work; otherwise the volume note\u2019s name (used by `midad-up`) |\n| `pages[]` | `{ vol, page, page_label, body }` \u2014 `page_label` is the printed page or `[unnumbered]` (a page the source leaves unnumbered); body is ready markdown |\n\n`toc-N` anchors are `<span data-type="title" id=toc-N>`; the chapter\u2019s own anchor is dropped (the title carries it) and deeper ones become `##`/`###`. `\uFD3F\u2026\uFD3E` becomes the vault\u2019s `{.quran-quote}` span, and bracketed `s\u016Bra: \u0101ya` refs are linked to the canonical Qur\u2019\u0101n notes.\n\n### Book letter unit fields (`unit.kind === "book-letter"`)\n\nOne per letter of a classical dictionary (Lis\u0101n, al-Q\u0101m\u016Bs, T\u0101j). The work hub lists these letters; the letter page lists its fasl notes under `## \u0627\u0644\u0645\u062C\u0644\u062F` and `### \u0628\u0627\u0628` headings.\n\n| Field | Example |\n| --- | --- |\n| `id` | `letter-2` |\n| `base` | `\u0628` |\n| `title` | `\u0628` |\n| `span` | `p. 1:204\u20131:806` |\n| `chapters[]` | `{ base, title, bab, fasl, span, volume, volume_end }` |\n\n### Book volume unit fields (`unit.kind === "book-volume"`)\n\nOne per volume of a multi-volume work, listing the chapters that start in it. A letter-index dictionary does not use volume units; its letter pages carry the volume headings.\n\n| Field | Example |\n| --- | --- |\n| `id` | `1` |\n| `base` | `001 \u0627\u0644\u0645\u062C\u0644\u062F 1` |\n| `title` | `\u0627\u0644\u0645\u062C\u0644\u062F 1` |\n| `span` | `p. 1:7\u20132:889` |\n| `chapters[]` | `{ base, title, span }` (`note_stem` is set at render time) |\n\n## Helper functions\n\nExposed as bare globals (the same pattern as ScholarWeft):\n\n| Helper | Purpose |\n| --- | --- |\n| `start_YAML()` | begins a frontmatter block |\n| `add_property(key, value, opts?)` | adds a YAML property; `value` may be a string or a list |\n| `end_YAML()` | returns the assembled frontmatter block (including `---` fences) |\n| `wikilink(target, alias?)` | `[[target]]` or `[[target|alias]]` |\n| `heading(level, text)` | a `#`\u2026`######` heading |\n| `escape_md(text)` | escapes markdown metacharacters |\n| `updated()` / `import_date()` | local timestamp / date |\n\n`add_property` options: `quote` (`"auto"` | `"always"` | `"never"`) and `force` (emit even when empty). Lists render as `key:` plus two-space `- item` lines.\n\n## Re-rendering and merging\n\nRe-rendering is non-destructive:\n\n- **Managed region.** The generated body is wrapped in `<span class="mas-managed">mas-managed</span>` \u2026 `<span class="mas-managed">/mas-managed</span>`. A re-render replaces exactly that span; anything you write above or below it is preserved.\n- **Frontmatter merge.** Only the properties the template declares are touched. Every other property \u2014 including anything you add by hand \u2014 is preserved verbatim and in place.\n- **`related:`** is declared with `merge: \'keep\'`: the template inserts it once (empty), then your value always wins. Use it for topics you want linked.\n- **`updated:`** is the volatile render timestamp; it is ignored when deciding whether a re-render actually changed anything.\n\nPer-property merge strategies: `replace` (default \u2014 the template wins), `append` (union with your list), `keep` (write once, then never touch), `subtract` (migration only), and `remove` (retirement only \u2014 declare a retired property with an empty value and it is deleted on the next re-render).\n\n## Auto-update when a template changes\n\nThe plugin keeps a template-hash timeline in `.midad-arabic-sources/template-history.json`. Each note records when it was rendered (`updated:`), so the plugin can tell which notes predate the current template.\n\nWhen you edit a template, the plugin offers to re-render the affected notes (the setting **\u201CUpdate notes when templates change\u201D** controls *Ask* / *Always* / *Never*). You can always re-render manually with **\u201CRe-render imported sources\u201D**.\n\n## Upstream changes\n\nEach work records the repository\u2019s own `repository-updated` date. **\u201CCheck for source updates\u201D** runs a two-stage check: it first asks the repository for that date, and only if it moved does it fetch the item\u2019s **content hash** (a git blob SHA returned by the server \u2014 no download). If the hash changed the text changed and it re-downloads and re-renders; if only the date moved (schema/metadata churn) it just records the new date. The check runs at most every **\u201CCheck repositories every \u2026 days\u201D** (default 7; 0 = command only).\n\n## Annotations\n\nAnnotations are an overlay, not native `==` marks: select text inside the managed region and the plugin stores the quote, colour, and comment in `.midad-arabic-sources/annotations/`, then paints it in Live Preview and Reading view. The generated source note is never modified. The margin icon opens a comment tooltip. In Live Preview the active annotation exposes oval drag handles, links are atomic selections, and a partial legacy link is widened on startup. The Midad sidebar has a Navigation tab for every note and, where annotations are supported, an Annotations tab with click-to-scroll cards. Each work gets a generated annotation note and a shared Source Annotations MOC. The outer callout uses a light blue paper colour; comments appear first in a colour-gradient inset callout, quotes follow on a white inset page with highlighted text, and each callout ends with an alphanumeric `^ann\u2026` block ID on its own line. Re-renders re-anchor quotes by exact text first and then by surrounding context; unmatched annotations remain in the note\'s **Unanchored** section and can be re-anchored from a new selection. **Copy source with annotations** copies the source plus an Annotations section for use outside the vault. Source archive keeps the annotations when the notes are removed.\n\n## Layouts\n\n`work.layout` is set at acquisition time (`fetch --layout stacked|table`). The bundled \u1E25ad\u012Bth template renders the Arabic and English of each hadith as separate paragraphs by default (`stacked`), or as facing-page table cells when set to `table`. Edit `hadith-note.eta.md` to try grids/flexboxes; the genre is exposed as `cssclasses` so your CSS can target it.\n\n## Source JSON shapes (for reference)\n\n| Collection | Source | Shape |\n| --- | --- | --- |\n| `tafsir` | spa5k/tafsir_api (quran.com mirror) | per-s\u016Brah JSON: `[{ text, ayah, surah }]` or `{ ayahs: [...] }` |\n| `quran` | fawazahmed0/quran-api | per-chapter JSON: `{ chapter: [{ chapter, verse, text }] }` |\n| `hadith` | AhmedBaset/hadith-json | per-book JSON: `{ metadata, chapters[], hadiths[] }` |\n| `quran-text` | risan/quran-json | per-s\u016Bra JSON: `{ id, verses: [{ id, text, number_in_hafs }] }` |\n| `turath` | turath.io | whole-book JSON (`books-v3`, Arabic-diacritic keys): `{ meta, indexes, pages }`; `headings[]`, `page_map[]`, `pages[{text,vol,page}]` |\n\nThe acquisition script hides these differences; templates only ever see the normalized model.\n', extract: false },
-  { path: "docs/transcription.md", content: "# Transcription (scanned PDFs)\n\n**Transcribe this item\u2019s PDF file(s)** turns a literature item\u2019s scanned PDFs into page-separated Arabic markdown, using a Gemini OCR pipeline with local post-processing. Run it from a `@citekey` note (the command reads that note\u2019s Zotero attachments). For best results, import Zotero items using **[ScholarWeft](https://community.obsidian.md/plugins/scholar-weft)**, which creates the necessary properties.\n\n**Transcribe a PDF\u2026** does the same for any PDF you choose, with no Zotero item or literature note.\n\n## Literature notes and Zotero\n\nThe automated item route assumes a **literature note** for the Zotero item: a Markdown note named `@<citekey>`, carrying the item\u2019s `citekey`/`zotero-key` and its `attachments:` (or a cached Zotero path). Midad looks for it in the folder set under **Transcription and translation \u2192 Literature notes folder**; when that setting is blank it uses ScholarWeft\u2019s own `literatureNoteFolder`, and if neither is available it finds the `@<citekey>` note by name anywhere in the vault. Normally **[ScholarWeft](https://community.obsidian.md/plugins/scholar-weft)** or **[ZotLit](https://github.com/aidenlx/zotlit)** creates it from Zotero. ScholarWeft\u2019s default template creates exactly the metadata the plugin needs. Midad does not import references or create these notes itself, and it does not create a Zotero item for a PDF; it only finds the PDFs described by an existing note.\n\nPDF resolution for that route tries the Zotero local API, the ScholarWeft `zlinks` cache, and `~/Zotero/storage` in that order. If you have no literature note (or no Zotero), use **Transcribe a PDF\u2026**, which needs no citekey and writes a `mas-` note instead.\n\n## What happens\n\nThe OCR and translation models are chosen on the plugin's **LLM** settings page. Add one or more configurations there, then assign one to **Transcription** and one to **Translation**. Each configuration carries its own provider, model, and API key, so the same model can use a free key for transliteration and a paid key for the PDF pipeline. The pipeline currently requires a Gemini configuration for transcription and translation. The default is Gemini 3.5 Flash Lite.\n\nFor each PDF the pipeline:\n\n1. **Bursts** the PDF into one PDF per page.\n2. **Submits** a Gemini batch job over the pages using the model assigned to transcription (batch mode is cheaper and handles a whole book at once).\n3. **Collects** the raw OCR output and re-OCRs any page the model flagged as a hallucination.\n4. **Post-processes** locally.\n\nThe intermediates live under `.midad-arabic-sources/work/` and are removed once the vault note is written; the batch archive under `.midad-arabic-sources/archive/` is kept, and it is what **Reprocess from archive\u2026** re-runs without resubmitting.\n\nThe finished note is written to `<Sources>/Transcriptions/` as `@<citekey> - transcription.md` when it belongs to a Zotero item, with one `#### p. N` heading per page. A standalone PDF, with no Zotero citekey, uses `mas-<slug> - transcription.md`. Transcriptions and translations are automatically made annotatable; multi-volume series share one annotation note. A multi-volume item gets `@<citekey> - transcription - vol. N.md` (or the `mas-` form for a standalone series), and the volume number is inferred from the PDF filename when the dialog does not supply one.\n\n## Standalone PDFs (no Zotero item)\n\n**Transcribe a PDF\u2026** opens a dialog with a file picker and an editable path, so it works for a PDF anywhere on disk. The citekey is generated from the filename (`pdf-<name>`) and can be changed before starting; it determines the note name, and the dialog refuses to overwrite an existing transcription with the same citekey.\n\nA standalone PDF has no Zotero record to supply its bibliography, so the transcription prompt adds a short title-page instruction: Gemini writes the printed title and author as `TITLE:` and `AUTHOR:` lines above the first page. Post-processing removes those lines from the body and saves them as a sidecar beside the processed text. The pipeline then writes them into the note\u2019s `title:` and `authors:` fields. This instruction is passed only for standalone PDFs; literature-note transcriptions do not receive it.\n\nWhen the note is written, a second dialog shows the guessed title and author for verification. Correct them and choose **Save** (or **Save and open**); **Skip** keeps the guess and the note can be edited later. The resulting YAML carries the same bibliographic fields as a Zotero-derived transcription, except that there is no `[[@citekey]]` literature-note link in `midad-up:` because no such note exists.\n\n## Post-processing\n\nLocal scripts run after OCR and never call Gemini:\n\n- **Qur\u02BE\u0101n quotes** \u2014 `\uFD3F \u2026 \uFD3E` spans and Arabic text inside straight or curly double quotes, guillemets, and parentheses are checked against the canonical Qur\u02BE\u0101n; matches get tashk\u012Bl and a citation. A quotation spanning consecutive verses gets a range link, and old links whose alias is the canonical work title are rewritten to the s\u016Bra name. Every quotation \u2014 full, beginning, or end \u2014 goes through the same renderer: canonical tashk\u012Bl, `*\u2026{.quran-quote}*`, the ornate opening only on the beginning/full segment, the ornate closing only on the end/full segment, and the usual link after each segment. A quote opened at the end of one page and closed at the start of the next therefore has exactly one opening and one closing; the original quotation marks are replaced by that pair, not duplicated. An open fragment with no closing mark is treated as the start of a quote when the next page\u2019s body begins with a recognised continuation.\n- **Citation normalization** \u2014 before discarding a source citation, an adjacent `[\u0627\u0644\u0646\u0633\u0627\u0621 4:105]` / `(\u0627\u0644\u0646\u0633\u0627\u0621: \u0661\u0660\u0665)`-style citation is parsed and used as a **verified first search hint**: the quote is accepted only if its text is actually present in that verse or range, otherwise the normal text search runs. Once the plugin adds its own link, any remaining source citation that names a Qur\u02BE\u0101nic verse is removed, so it cannot sit alongside the generated one. Every Qur\u02BE\u0101n link display is normalized to the s\u016Bra name and Arabic-Indic numerals; western digits left by older renders are rewritten. Ordinary hadith/editorial references are not touched.\n- **Poetry** \u2014 verse is wrapped in the `>[!arabic-poetry]` callout, one hemistich per `>- ` line. The OCR prompt asks for a `\xA7\xA7\xA7` line marker and `%%` between hemistiches; post-processing also accepts the older `*` forms, including a marker stuck to the first word, and splits multiple couplets that were returned on one line.\n- **Footnotes** \u2014 the source\u2019s footnote markers and bodies are reconstructed as markdown footnotes.\n- **TOC** \u2014 a fihris/contents page (recognized by a `\u0641\u0647\u0631\u0633`/`\u0645\u062D\u062A\u0648\u064A\u0627\u062A` heading or a `\u0635\u062D\u064A\u0641\u0629` column header) is kept one entry per line and formatted as a `>[!TOC]` callout with `>-` list items. `#### Title page` is renamed `#### TOC` when the page\u2019s content is a table of contents.\n- **Tashk\u012Bl** \u2014 the transcription\u2019s vocalization is normalised (for example the wa\u1E63la alif and dagger alif), matching the transliteration engine\u2019s conventions.\n\n`transcription-format.py` and `transcription-quran.py` are the two scripts behind this step; the orchestrator runs them in order.\n\nA transcription made by an older version of the plugin (or before it) may have no archive. **Post-process this transcription/translation** runs the same current scripts over the note body in place, without Gemini. It writes a backup under `.midad-arabic-sources/backups/`, rebuilds the native YAML and volume parent, and adds the note to the literature note\u2019s `transcriptions:`/`translations:` list. The previous text is left in the backup if the result needs to be compared or restored.\n\n**Assign topic and post-process this transcription\u2026** writes a topic to the parent note. A parent topic containing \u201Ctafs\u012Br\u201D enables commentary mode: short quote fragments are checked first against the verse under discussion and the nearest previous match, rather than only against the whole Qur\u2019\u0101n. This is the right setting for a tafs\u012Br such as F\u012B Riy\u0101\u1E0D al-Tafs\u012Br; a general work leaves it off.\n\nIn commentary mode, consecutive segments of the same verse form one citation run. The first and last segments keep the link; intermediate segments keep the quote formatting but omit the repeated link. A switch to another verse or range starts a new run, so the first quote after the switch is cited. Quote runs inside footnote callouts are left alone.\n\nIf a same-named legacy/adopted parent exists elsewhere, the native parent absorbs its author-created YAML fields and body, fixes a clearly broken volume link, backs up both notes, and removes the duplicate. Native identity and citation fields win; author fields such as `up`, `shorttitle`, `related`, and aliases are merged. If the legacy parent is referenced by annotations, or if more than one candidate exists, it is left untouched rather than guessed at.\n\n## Prompts\n\nThe dialog has a **Prompt** dropdown to the left of **Select all** / **Select none**, listing the available transcription prompts. **Default prompt** is the built-in OCR instruction; it can be edited but not deleted.\n\n- **Modify selected** opens the editor for the chosen prompt. **Save** replaces it; **Save as** adds a copy under a new name.\n- **Create a new prompt from selected** starts a copy of the chosen prompt, which is useful for adapting the pipeline to a different language, script, or page layout.\n- **Delete selected prompt** removes a custom prompt; it is disabled for **Default prompt**.\n\nThe prompts live in `.midad-arabic-sources/transcription-prompts.json`. An unmodified **Default prompt** is refreshed from the plugin's built-in text after an update; once you edit it, your version is kept. The selected prompt is passed to the batch job as its system instruction.\n\nThe editor holds only the **text-specific** part. The pipeline appends it to a shared, hardcoded format contract (page headings such as `#### p. N`, `---` page separators, one blank line between blocks, no hard wrapping) and the general transcription rules (accuracy, poetry, footnotes). Those general parts stay consistent across every text; the editable part describes the document in front of you.\n\n## Commands\n\n- **Transcribe this item\u2019s PDF file(s)** \u2014 the full pipeline above.\n- **Transcribe a PDF\u2026** \u2014 choose any PDF on disk, with no Zotero item, then verify the guessed title and author.\n- **Re-render this source** \u2014 re-run post-processing for the active transcription/translation from its archived JSON. On a volume note, choose only that volume or all volumes. If there is no archive, it falls back to in-place post-processing.\n- **Post-process this transcription/translation** \u2014 run the current local post-processing scripts over the open note, without an archive or Gemini.\n- **Re-render transcriptions of this item\u2019s attachments** \u2014 from a literature note, re-render all of its transcription/translation notes, using archives where present and in-place post-processing for legacy notes.\n- **Check transcription pipeline** \u2014 list the archived batches on disk.\n- **Show pipeline status** \u2014 reveal the live status panel while a job runs, resume a job that was interrupted, or open the last log when nothing is running.\n- **Open last pipeline log** \u2014 open the most recent job log.\n- **Reprocess from archive\u2026** \u2014 pick an archived batch and re-run post-processing only (no Gemini resubmission). Use this after a change to the post-processing scripts, or to recover an interrupted job.\n\n## Progress and logs\n\nA running job shows a **non-modal status panel** pinned to the corner of the window: one line per pipeline event, with `step/steps` progress. It stays until you close it, and it is what **Show pipeline status** reveals.\n\nEach job writes a log and a state file under `.midad-arabic-sources/jobs/`. The state file is removed on success and kept on failure, which is how the plugin offers to **resume** a job after a reload or a crash \u2014 it will not resume a job whose recorded process is still alive.\n\n## Requirements\n\n- A **Gemini API key** in the LLM configuration assigned to transcription and translation (or `GEMINI_API_KEY`/`GOOGLE_API_KEY` in the pipeline's environment).\n- Python 3 with `pymupdf`, `requests`, and `google-genai`.\n- The PDFs themselves: for **Transcribe this item\u2019s PDF file(s)**, a `@citekey` literature note (from ScholarWeft or ZotLit) and the item\u2019s Zotero attachments, resolved via the local Zotero API, the ScholarWeft `zlinks` cache, or the Zotero storage folder; for **Transcribe a PDF\u2026**, a PDF chosen directly from disk.\n\nSee [Dependencies](./dependencies.md) for the install lines, [Translation](./translation.md) for translating a finished transcription, and [Commands \u2192 From the command line](./commands.md#from-the-command-line) to run the pipeline from a terminal.\n", extract: false },
+  { path: "docs/transcription.md", content: "# Transcription (scanned PDFs)\n\n**Transcribe this item\u2019s PDF file(s)** turns a literature item\u2019s scanned PDFs into page-separated Arabic markdown, using a Gemini OCR pipeline with local post-processing. Run it from a `@citekey` note (the command reads that note\u2019s Zotero attachments). For best results, import Zotero items using **[ScholarWeft](https://community.obsidian.md/plugins/scholar-weft)**, which creates the necessary properties.\n\n**Transcribe a PDF\u2026** does the same for any PDF you choose, with no Zotero item or literature note.\n\n## Literature notes and Zotero\n\nThe automated item route assumes a **literature note** for the Zotero item: a Markdown note named `@<citekey>`, carrying the item\u2019s `citekey`/`zotero-key` and its `attachments:` (or a cached Zotero path). Midad looks for it in the folder set under **Transcription and translation \u2192 Literature notes folder**; when that setting is blank it uses ScholarWeft\u2019s own `literatureNoteFolder`, and if neither is available it finds the `@<citekey>` note by name anywhere in the vault. Normally **[ScholarWeft](https://community.obsidian.md/plugins/scholar-weft)** or **[ZotLit](https://github.com/aidenlx/zotlit)** creates it from Zotero. ScholarWeft\u2019s default template creates exactly the metadata the plugin needs. Midad does not import references or create these notes itself, and it does not create a Zotero item for a PDF; it only finds the PDFs described by an existing note.\n\nPDF resolution for that route tries the Zotero local API, the ScholarWeft `zlinks` cache, and `~/Zotero/storage` in that order. If you have no literature note (or no Zotero), use **Transcribe a PDF\u2026**, which needs no citekey and writes a `mas-` note instead.\n\n## What happens\n\nThe OCR and translation models are chosen on the plugin's **LLM** settings page. Add one or more configurations there, then assign one to **Transcription** and one to **Translation**. Each configuration carries its own provider, model, and API key, so the same model can use a free key for transliteration and a paid key for the PDF pipeline. The pipeline currently requires a Gemini configuration for transcription and translation. The default is Gemini 3.5 Flash Lite.\n\nFor each PDF the pipeline:\n\n1. **Bursts** the PDF into one PDF per page.\n2. **Submits** a Gemini batch job over the pages using the model assigned to transcription (batch mode is cheaper and handles a whole book at once).\n3. **Collects** the raw OCR output and re-OCRs any page the model flagged as a hallucination.\n4. **Post-processes** locally.\n\nThe intermediates live under `.midad-arabic-sources/work/` and are removed once the vault note is written; the batch archive under `.midad-arabic-sources/archive/` is kept, and it is what **Reprocess from archive\u2026** re-runs without resubmitting.\n\nArabic metadata is kept in `title-ar`, `shorttitle-ar`, `authors-ar`, and `editors-ar`; an Arabic work carries `title-ar` even when the cover did not supply it, with an empty value the user can fill later. The **Include Arabic aliases** setting (on by default) adds the Arabic-script alias when an Arabic title and author are known; each note gets at most one romanized and one Arabic alias.\n\nThe finished note is written to `<Sources>/Transcriptions/` as `@<citekey> - transcription.md` when it belongs to a Zotero item, with one `#### p. N` heading per page. A standalone PDF, with no Zotero citekey, uses `mas-<slug> - transcription.md`. Transcriptions and translations are automatically made annotatable; multi-volume series share one annotation note. A multi-volume item gets `@<citekey> - transcription - vol. N.md` (or the `mas-` form for a standalone series), and the volume number is inferred from the PDF filename when the dialog does not supply one.\n\nA PDF whose title is not a volume is treated as a **unit** of the work \u2014 a chapter, introduction, conclusion, or a named partial file. It is written as `@<citekey> - transcription - <Zotero title>.md`; `midad-id` is `zotero/<zotero-id>/transcription/<slug>`, `midad-work` omits the unit, and `midad-unit` is the slug. The alias is `Author - year - Short title (transcription) - <title>`, with the Arabic counterpart using the same literal unit title. The unit title is taken from the Zotero attachment title; when only a filename is available it is the filename stem. A title matching the work title and no volume marker is still a full transcription, not a unit.\n\n## Standalone PDFs (no Zotero item)\n\n**Transcribe a PDF\u2026** opens a dialog with a file picker and an editable path, so it works for a PDF anywhere on disk. The citekey is generated from the filename (`pdf-<name>`) and can be changed before starting; it determines the note name, and the dialog refuses to overwrite an existing transcription with the same citekey.\n\nThe first page of every transcription also receives a **cover metadata** supplement. When that page visibly contains a title page, cover, copyright page, or the opening of the work, Gemini returns one fenced YAML block before the transcription with `title`, `shorttitle`, `authors`, `editors`, and their Arabic-script counterparts (`title-ar`, `shorttitle-ar`, `authors-ar`, `editors-ar`). Post-processing removes the block from the body and saves it as a sidecar; the pipeline uses the romanized values for a standalone PDF and the Arabic values to populate `title-ar`, `shorttitle-ar`, `authors-ar`, and `editors-ar` even when Zotero supplied the romanized bibliography. The supplement is attached only to the first page, so later pages cannot repeat it. Older archives may instead carry `TITLE:`/`AUTHOR:` lines; those are still recognized and removed.\n\nA standalone PDF has no Zotero record to supply its bibliography, so the romanized title, short title, authors, and editors from the cover block become its `title:`, `shorttitle:`, `authors:`, and `editors:` fields. A second dialog lets you verify them before saving.\n\nWhen the note is written, a second dialog shows the guessed title and author for verification. Correct them and choose **Save** (or **Save and open**); **Skip** keeps the guess and the note can be edited later. The resulting YAML carries the same bibliographic fields as a Zotero-derived transcription, except that there is no `[[@citekey]]` literature-note link in `midad-up:` because no such note exists.\n\n## Post-processing\n\nLocal scripts run after OCR and never call Gemini:\n\n- **Qur\u02BE\u0101n quotes** \u2014 `\uFD3F \u2026 \uFD3E` spans and Arabic text inside straight or curly double quotes, guillemets, and parentheses are checked against the canonical Qur\u02BE\u0101n; matches get tashk\u012Bl and a citation. A quotation spanning consecutive verses gets a range link, and old links whose alias is the canonical work title are rewritten to the s\u016Bra name. Every quotation \u2014 full, beginning, or end \u2014 goes through the same renderer: canonical tashk\u012Bl, `*\u2026{.quran-quote}*`, the ornate opening only on the beginning/full segment, the ornate closing only on the end/full segment, and the usual link after each segment. A quote opened at the end of one page and closed at the start of the next therefore has exactly one opening and one closing; the original quotation marks are replaced by that pair, not duplicated. An open fragment with no closing mark is treated as the start of a quote when the next page\u2019s body begins with a recognised continuation.\n- **Citation normalization** \u2014 before discarding a source citation, an adjacent `[\u0627\u0644\u0646\u0633\u0627\u0621 4:105]` / `(\u0627\u0644\u0646\u0633\u0627\u0621: \u0661\u0660\u0665)`-style citation is parsed and used as a **verified first search hint**: the quote is accepted only if its text is actually present in that verse or range, otherwise the normal text search runs. Once the plugin adds its own link, any remaining source citation that names a Qur\u02BE\u0101nic verse is removed, so it cannot sit alongside the generated one. Every Qur\u02BE\u0101n link display is normalized to the s\u016Bra name and Arabic-Indic numerals; western digits left by older renders are rewritten. Ordinary hadith/editorial references are not touched.\n- **Poetry** \u2014 verse is wrapped in the `>[!arabic-poetry]` callout, one hemistich per `>- ` line. The OCR prompt asks for a `\xA7\xA7\xA7` line marker and `%%` between hemistiches; post-processing also accepts the older `*` forms, including a marker stuck to the first word, and splits multiple couplets that were returned on one line.\n- **Footnotes** \u2014 the source\u2019s footnote markers and bodies are reconstructed as markdown footnotes.\n- **TOC** \u2014 a fihris/contents page (recognized by a `\u0641\u0647\u0631\u0633`/`\u0645\u062D\u062A\u0648\u064A\u0627\u062A` heading or a `\u0635\u062D\u064A\u0641\u0629` column header) is kept one entry per line and formatted as a `>[!TOC]` callout with `>-` list items. `#### Title page` is renamed `#### TOC` when the page\u2019s content is a table of contents.\n- **Tashk\u012Bl** \u2014 the transcription\u2019s vocalization is normalised (for example the wa\u1E63la alif and dagger alif), matching the transliteration engine\u2019s conventions.\n\n`transcription-format.py` and `transcription-quran.py` are the two scripts behind this step; the orchestrator runs them in order.\n\nA transcription made by an older version of the plugin (or before it) may have no archive. **Post-process this transcription/translation** runs the same current scripts over the note body in place, without Gemini. It writes a backup under `.midad-arabic-sources/backups/`, rebuilds the native YAML and volume parent, and adds the note to the literature note\u2019s `transcriptions:`/`translations:` list. The previous text is left in the backup if the result needs to be compared or restored.\n\n**Assign topic and post-process this transcription\u2026** writes a topic to the parent note. A parent topic containing \u201Ctafs\u012Br\u201D enables commentary mode: short quote fragments are checked first against the verse under discussion and the nearest previous match, rather than only against the whole Qur\u2019\u0101n. This is the right setting for a tafs\u012Br such as F\u012B Riy\u0101\u1E0D al-Tafs\u012Br; a general work leaves it off.\n\nIn commentary mode, consecutive segments of the same verse form one citation run. The first and last segments keep the link; intermediate segments keep the quote formatting but omit the repeated link. A switch to another verse or range starts a new run, so the first quote after the switch is cited. Quote runs inside footnote callouts are left alone.\n\nIf a same-named legacy/adopted parent exists elsewhere, the native parent absorbs its author-created YAML fields and body, fixes a clearly broken volume link, backs up both notes, and removes the duplicate. Native identity and citation fields win; author fields such as `up`, `shorttitle`, `related`, and aliases are merged. If the legacy parent is referenced by annotations, or if more than one candidate exists, it is left untouched rather than guessed at.\n\n## Prompts\n\nThe dialog has a **Prompt** dropdown to the left of **Select all** / **Select none**, listing the available transcription prompts. **Default prompt** is the built-in OCR instruction; it can be edited but not deleted.\n\n- **Modify selected** opens the editor for the chosen prompt. **Save** replaces it; **Save as** adds a copy under a new name.\n- **Create a new prompt from selected** starts a copy of the chosen prompt, which is useful for adapting the pipeline to a different language, script, or page layout.\n- **Delete selected prompt** removes a custom prompt; it is disabled for **Default prompt**.\n\nThe prompts live in `.midad-arabic-sources/transcription-prompts.json`. An unmodified **Default prompt** is refreshed from the plugin's built-in text after an update; once you edit it, your version is kept. The selected prompt is passed to the batch job as its system instruction.\n\nThe editor holds only the **text-specific** part. The pipeline appends it to a shared, hardcoded format contract (page headings such as `#### p. N`, `---` page separators, one blank line between blocks, no hard wrapping) and the general transcription rules (accuracy, poetry, footnotes). Those general parts stay consistent across every text; the editable part describes the document in front of you.\n\n## Commands\n\n- **Transcribe this item\u2019s PDF file(s)** \u2014 the full pipeline above.\n- **Transcribe a PDF\u2026** \u2014 choose any PDF on disk, with no Zotero item, then verify the guessed title and author.\n- **Re-render this source** \u2014 re-run post-processing for the active transcription/translation from its archived JSON. On a volume note, choose only that volume or all volumes. If there is no archive, it falls back to in-place post-processing.\n- **Post-process this transcription/translation** \u2014 run the current local post-processing scripts over the open note, without an archive or Gemini.\n- **Re-render transcriptions of this item\u2019s attachments** \u2014 from a literature note, re-render all of its transcription/translation notes, using archives where present and in-place post-processing for legacy notes.\n- **Check transcription pipeline** \u2014 list the archived batches on disk.\n- **Show pipeline status** \u2014 reveal the live status panel while a job runs, resume a job that was interrupted, or open the last log when nothing is running.\n- **Open last pipeline log** \u2014 open the most recent job log.\n- **Reprocess from archive\u2026** \u2014 pick an archived batch and re-run post-processing only (no Gemini resubmission). Use this after a change to the post-processing scripts, or to recover an interrupted job.\n\n## Progress and logs\n\nA running job shows a **non-modal status panel** pinned to the corner of the window: one line per pipeline event, with `step/steps` progress. It stays until you close it, and it is what **Show pipeline status** reveals.\n\nEach job writes a log and a state file under `.midad-arabic-sources/jobs/`. The state file is removed on success and kept on failure, which is how the plugin offers to **resume** a job after a reload or a crash \u2014 it will not resume a job whose recorded process is still alive.\n\n## Requirements\n\n- A **Gemini API key** in the LLM configuration assigned to transcription and translation (or `GEMINI_API_KEY`/`GOOGLE_API_KEY` in the pipeline's environment).\n- Python 3 with `pymupdf`, `requests`, and `google-genai`.\n- The PDFs themselves: for **Transcribe this item\u2019s PDF file(s)**, a `@citekey` literature note (from ScholarWeft or ZotLit) and the item\u2019s Zotero attachments, resolved via the local Zotero API, the ScholarWeft `zlinks` cache, or the Zotero storage folder; for **Transcribe a PDF\u2026**, a PDF chosen directly from disk.\n\nSee [Dependencies](./dependencies.md) for the install lines, [Translation](./translation.md) for translating a finished transcription, and [Commands \u2192 From the command line](./commands.md#from-the-command-line) to run the pipeline from a terminal.\n", extract: false },
   { path: "docs/translation.md", content: "# Translation\n\n**Translate this item\u2019s transcription(s)** turns a finished Arabic transcription into an English translation, one page per page, using the same Gemini pipeline. It assumes a Zotero literature note in the format created by **[ScholarWeft](https://community.obsidian.md/plugins/scholar-weft)**, which is recommended as a companion plugin for Midad Arabic Sources.\n\nRun it from a `@citekey` note, preferably generated by ScholarWeft. As with transcription, the item route assumes the `@citekey` literature note in the folder set under **Transcription and translation \u2192 Literature notes folder** (blank uses ScholarWeft\u2019s `literatureNoteFolder`, then a vault-wide search by note name); without one, translate a transcription from its own note, or use the standalone transcription workflow first. A dialog lists that item\u2019s transcriptions (all checked by default) plus any PDFs it found; deselect the ones you do not want, optionally set a **Volume** number, and click **Translate**.\n\n- The translation is submitted as a Gemini batch job and written to `<Sources>/Translations/` as `@<citekey> - translation.md` (or `\u2026 - translation - vol. N.md`) when it belongs to a Zotero item. A standalone PDF route, with no Zotero citekey, uses `mas-<slug> - translation.md`. Translations are automatically made annotatable, with all volumes of a series sharing one annotation note.\n- A translation mirrors its transcription note\u2019s aliases and is linked from it, so the two sit side by side.\n- The batch is archived under `.midad-arabic-sources/archive/`, so it can be reprocessed later.\n- The same progress panel and log apply as for [transcription](./transcription.md).\n\n## Prompts\n\nThe dialog has the same **Prompt** controls as transcription: a dropdown beside **Select all** / **Select none**, with **Modify selected**, **Create a new prompt from selected**, and **Delete selected prompt**. Prompts live in `.midad-arabic-sources/translation-prompts.json`, and the selected prompt is sent as the batch job's system instruction. **Default prompt** can be edited but not deleted.\n\nThe editor holds only the **text-specific** part. The pipeline appends it to the shared, hardcoded format contract (page headings, `---` separators, blank lines, no hard wrapping) and the general translation rules (structure, poetry, footnotes, italics and quotes). The default text-specific part names the source language, the target language, Qur'an-quote formatting, and IJMES transliteration.\n\nThere is no separate \u201Cre-translate selected pages\u201D command yet; re-running **Translate this item\u2019s transcription(s)** on a transcription replaces its translation. Page-level re-translation is on the roadmap.\n\nTranslation needs the same prerequisites as transcription: a **Gemini configuration assigned to translation** on the LLM settings page, and Python 3 with `google-genai`, `requests`, and `pymupdf` \u2014 see [Dependencies](./dependencies.md).\n", extract: false },
   { path: "docs/transliteration.md", content: "# Transliteration\n\nMidad Arabic Sources romanizes Arabic from Obsidian. A resident Python service does the work, so the model loads once and Obsidian does not pay for it on every call.\n\nThe romanization server also has a command-line interface for running it and invoking transliteration from a terminal (see the [Commands](./commands.md) documentation). It also provides a local web interface for use in a web browser (see below).\n\n## Commands\n\n- **Transliterate selection to clipboard** \u2014 romanize the selection, or the current line if nothing is selected, and copy the result.\n- **Transliterate note to new note** \u2014 romanize a whole note (or the selection) into a sibling note named `<note> (romanized)`.\n- **Transliteration server\u2026** \u2014 one dialog that shows the server's status (running or not, engines loaded, which engine is actually being used, and the LLM providers) with a single button that **Starts** or **Stops** it. The **Transliteration** settings page carries the same status line and the same button, so you never have to check before knowing whether to start or stop.\n\nBoth transliteration commands open a small dialog first, with two toggles:\n\n- **Full vocalization** \u2014 retain case endings and tanw\u012Bn (with pausal shortening at the end of a passage).\n- **Use LLM** \u2014 romanize with the configured API instead of the rule engine. Your choices are remembered as the new defaults.\n\nOnly Arabic-script runs are changed. Markdown, newlines, link targets, and `{.quran-quote}` attributes pass through untouched; a link\u2019s alias is transliterated.\n\n## The resident server\n\nThe service is `scripts/transliterate-server.py` and listens on `127.0.0.1:8756` by default. Start it from the command palette, or by hand:\n\n```shell\npython3 scripts/transliterate-server.py --port 8756\n```\n\nThe plugin's **Start transliteration server** loads only `bert` \u2014 it passes no `--preload`, so the script's `bert` default applies. When starting by hand, run it the same way: **no `--preload` flag**. `--preload` is repeatable, so a server started as `--preload bert --preload mle` loads both; that is how an `mle` engine ends up resident even though nothing asks for it. **Check transliteration server** reports what is *loaded*, not what is used, so `engines_loaded: [\"bert\",\"mle\"]` means the server was started with both preloads.\n\n**Restart the server whenever the engine changes.** A long-running server keeps serving the code it loaded at startup, so an older `arabic-bw-transliterate.py` can keep running while the file on disk is new. This is exactly how a stale engine once silently stripped final short vowels and tanw\u012Bn from every reading. **Check transliteration server** reports only the *loaded* engines, so it cannot see that the code is out of date. When in doubt, **Stop transliteration server** then **Start transliteration server**.\n\n## Engines\n\nSet the engine under **Transliteration \u2192 Engine**.\n\n| Engine | Startup | Use |\n| --- | --- | --- |\n| `bert` (default) | ~16 s | Best for unvocalized prose; the engine the plugin is tuned for. |\n| `mle` (opt-in) | ~2 s | Faster and rougher on classical text; choose it only if you prefer it. Needs the calima MLE data. |\n| `none` | ~1 s | No CAMeL at all; fully vocalized input only, and no proclitic hyphens. |\n\n`bert` is the default and what all the tuning targets: it reads **context**, so it diacritizes unvocalized classical prose far better than `mle`, at the cost of size and startup \u2014 ~0.4 GB and ~16 s for the MSA model, against ~85 MB and ~2 s for MLE (both share the ~160 MB morphology database). `mle` is never preloaded or selected for you \u2014 pick it under **Transliteration \u2192 Engine** only if you want it. If `bert` cannot load (missing `transformers` or its data) the script falls back to `mle` automatically and tells you \u2014 an Obsidian alert, or stderr at the CLI. See [Dependencies](./dependencies.md) for the install sizes.\n\nThe BERT load is per process, which is why the service exists: interactive use pays it once for the session instead of on every call.\n\n## Romanization options\n\n- **Sun-letter assimilation** \u2014 assimilate the article before sun letters (`ash-shams`); when off, the article is invariant (`al-shams`). Off by default.\n- **Keep case endings** \u2014 retain noun and adjective i\u02BFr\u0101b endings and `-un`/`-in` tanw\u012Bn. Off by default; verb inflections and pronominal-suffix vowels are always kept. Qur\u02BE\u0101n spans are always fully vocalized.\n- **Name mode** \u2014 capitalize each substantive word, for author and editor fields (`al-Q\u0101\u1E0D\u012B \u02BFIy\u0101\u1E0D`, `al-\u02BFA\u1E6D\u1E6D\u0101r`). `al-` stays lowercase unless it opens the field; `b.`/`bt.`/`wuld` stay lowercase.\n- **Final dotless y\u0101\u02BE** \u2014 read a final `\u0649` as alif maq\u1E63\u016Bra (`\u0101`), or let the analysis choose. After a kasra it is always read as a defective y\u0101\u02BE (`zidn\u012B`), never as `a\u012B`.\n\n## The convention\n\nThe engine implements the IAFR/vault transliteration guidelines, not a generic romanization:\n\n- The definite article is invariant `al-`, hyphenated, with elision on proclitics (`wa-l-`, `bi-l-`, `lil-`).\n- T\u0101\u02BE marb\u016B\u1E6Da is dropped after a short fat\u1E25a (`al-qiy\u0101ma`), kept as `h` after \u0101 (`al-\u1E25ay\u0101h`), and written `t` in i\u1E0D\u0101fa.\n- Feminine nisba `\u0640\u064A\u0651\u0629` is `-iyya`; masculine `\u0640\u064A\u0651` is `-\u012B`.\n- Word-initial `\u0622` is `\u0101`; elsewhere madda is `\u02BE\u0101` (`al-qur\u02BE\u0101n`).\n- Tanw\u012Bn `-an` is kept by default; `-un`/`-in` only with **Keep case endings**. A defective-root indefinite keeps `-in` (`q\u0101\u1E0Din`).\n- Provided tashk\u012Bl is authoritative: a fully vocalized token is transliterated from its own \u1E25arak\u0101t, and the engine is used only to segment proclitics.\n\n## The user lexicon\n\nWhen the engine has no credible morphological analysis for a term, the plugin can ask you for a romanization and remember it. After a note transliteration, a dialog lists the unknown terms with a suggested reading per row; edit any that are wrong and **Save** to add them to the lexicon (`scripts/transliteration-lexicon.json`). The next run uses them.\n\nThe lexicon is also the place to pin a term the engine misreads. It grows file by file.\n\n## LLM romanization\n\nLLM configurations are managed on the plugin's **LLM** settings page. A configuration records a provider, model, optional base URL, and API key:\n\n- **Provider** \u2014 Gemini, DeepSeek, or **OpenAI-compatible**.\n- **Model** \u2014 e.g. `gemini-3.5-flash-lite`; for OpenAI-compatible, e.g. `gpt-4o-mini` or your local model.\n- **Base URL** \u2014 OpenAI-compatible only: the endpoint, e.g. `https://api.openai.com/v1`, `https://openrouter.ai/api/v1`, or `http://localhost:11434/v1`. Empty uses the server's `OPENAI_BASE_URL`.\n- **API key** \u2014 optional; used only when the server process has no `GEMINI_API_KEY` / `GOOGLE_API_KEY` / `DEEPSEEK_API_KEY` / `OPENAI_API_KEY` in its environment.\n\nAdd as many configurations as you need with **Add LLM configuration**; then choose one for **Transliteration**, one for **Transcription**, and one for **Translation**. Configurations can share a model and differ only by API key. Transcription and translation currently require a Gemini configuration; transliteration accepts all three providers.\n\n**OpenAI-compatible** is any endpoint that speaks the OpenAI chat-completions API: OpenAI itself, OpenRouter, Groq, or a local llama.cpp / Ollama / vLLM server. Set the base URL, model, and key in the configuration (or the server's `OPENAI_BASE_URL` / `OPENAI_MODEL` / `OPENAI_API_KEY`); the CLI takes `--provider openai --base-url \u2026 --model \u2026`.\n\nTurn it on per call with **Use LLM** in the transliteration dialog. The LLM path lives in the server (`POST /romanize`), so it can also translate in the same call.\n\n## The web browser interface\n\nThe server serves a self-contained interface at `http://127.0.0.1:8756/`. Arabic goes on the right, the result on the left, with route (rule engine or LLM) and the same options as the commands. Unknown terms are listed below the result with an editable romanization and an **Add** button that writes to the lexicon and refreshes the result in place. It is handy for working outside Obsidian, or for testing after an engine change. The same script also has a command-line interface; see [Commands \u2192 From the command line](./commands.md#from-the-command-line). For a Zotero item, the optional [Midad Arabic Transliteration](./midad-arabic-transliteration.md) companion uses the same server to create a romanized copy.\n", extract: false },
   { path: "docs/troubleshooting.md", content: "# Troubleshooting\n\n## Transliteration\n\n### \u201CTransliteration server not reachable\u201D\n\nThe service is not running, or it is on another port. Run **Transliteration server\u2026** and press **Start**, or start it by hand (`python3 scripts/transliterate-server.py --port 8756`). If you changed the port under **Transliteration \u2192 Server URL**, the setting and the running process must agree.\n\n### Readings lose their final short vowels and tanw\u012Bn\n\nThe resident server keeps serving the code it loaded at startup, so an older `arabic-bw-transliterate.py` can still be running while the file on disk is new. Open **Transliteration server\u2026** and press **Stop**, then **Start**. The dialog reports only the *loaded* engines, so it cannot by itself detect a stale one.\n\n### The BERT engine will not load\n\nThe `bert` engine needs `transformers` and its model data. Install them and fetch the data (`camel_data -i disambig-bert-unfactored-msa`); the model ships inside that package, so there is no separate download. If BERT still cannot load, the server falls back to `mle` and tells you; or choose **Engine** `mle` (faster, rougher) or `none` (fully vocalized input only). See [Dependencies](./dependencies.md).\n\n### \u201CThe transliteration server did not start\u201D / \u201CNo module named camel_tools\u201D\n\nThe plugin spawns the server with the same Python resolution it uses elsewhere: the **Transliteration \u2192 Python path** setting first, then PATH, the installer venv, conda/anaconda, pyenv, Homebrew and the distro interpreters, probing for `camel_tools`. A GUI-launched Obsidian has a much smaller PATH than your terminal, so it can miss a conda install that `python3` finds in the shell. Set **Transliteration \u2192 Python path** to the interpreter where `camel_tools` is installed (e.g. `~/miniconda3/bin/python3`); the failure notice prints the last lines of the server log, including the missing module.\n\n### \u201CNo usable Python found\u201D\n\nThe plugin could not import `fitz`, `requests`, and `google.genai` from any candidate interpreter. Install them into the Python you want and set its full path under **Transcription and translation \u2192 Python executable**.\n\n### A word is romanized wrongly every time\n\nAdd it to the user lexicon: after a note transliteration, a dialog lists the terms the engine had no analysis for, with an editable romanization per row. Words the engine *does* misread can be pinned there too. See [Transliteration](./transliteration.md).\n\n## Transcription and translation\n\n### \u201CLLM configuration required\u201D\n\nAdd a Gemini configuration under **LLM \u2192 Configurations**, assign it to transcription or translation, and enter its API key; or launch Obsidian from a shell that exports `GEMINI_API_KEY` (or `GOOGLE_API_KEY`).\n\n### \u201CNo PDF attachments found for this item\u201D\n\nThe command ran on something other than a `@citekey` note, or the item has no PDF. The pipeline resolves PDFs from the Zotero local API, the ScholarWeft `zlinks` cache, and the Zotero storage folder, in that order; a linked file whose absolute path is known only to a running Zotero may be missing when Zotero is closed.\n\n### A job seems frozen\n\nA Gemini batch has no per-page progress; the panel updates only when a page or step completes. **Show pipeline status** reveals the panel and offers to resume a job that stopped.\n\n### A job stopped, or Obsidian reloaded mid-run\n\nThe job\u2019s state file survives under `.midad-arabic-sources/jobs/`. **Show pipeline status** offers to resume it; the plugin refuses if the recorded process is still alive. To recover a finished batch without resubmitting, use **Reprocess from archive\u2026**.\n\n### Post-processing changed but the note did not\n\nRe-run **Reprocess from archive\u2026** on the batch to regenerate the note from the archived OCR, without paying for Gemini again.\n\n## Document import\n\n### \u201CThis source requires transliteration to render, but the transliteration server is not running\u201D\n\nThe dictionaries name entries by romanizing the bare root, which needs the service. Start it and **Try again**, or choose **Proceed without transliteration** (the entries are then named from their radicals).\n\n### A work\u2019s notes or cached model are missing\n\nRun **Check imported sources**. It compares the manifest against the vault and the model cache and offers to restore anything missing. An `installed` work is restored if any file is absent; a work mid-removal is never restored.\n\n### A template edit does not take effect\n\nThe bundled templates live in your Obsidian configuration folder, which the vault file watcher ignores, and the plugin polls for changes only every 45 seconds (and only when **Update notes when templates change** is on). Run **Apply template changes to imported sources** to apply it at once. Remember the edit must be in the *user* template folder (`Copy import templates to vault`) or in the bundled copy that `npm run deploy` writes; editing the deployed copy is overwritten by the next deploy.\n\n### Editing a template re-rendered far more than expected\n\nRe-renders are scoped to the unit kinds whose template changed. A change to the dictionary note template still rewrites every root, because every root uses it; use **Re-render this source** to limit it to one work.\n\n### \u201CCheck for source updates\u201D re-rendered a work unexpectedly\n\nA changed upstream **content hash** (not just a moved date) triggers a re-download and re-render. A date-only move records the new date and changes nothing.\n\n### The plugin was updated but the old behaviour persists\n\nRestart Obsidian. The plugin loads `main.js` only at startup, and it unpacks the new scripts and templates on the next load.\n\n## Zotero\n\n### \u201CNo local Zotero found on port 23119\u201D\n\nStart Zotero, or choose the **Web API** method and enter a key and library ID. The **Detect** button only fills the library ID from a *running* local Zotero.\n\n### Items duplicate instead of updating\n\nUpdate-in-place relies on the stored item key and version. If you deleted the item in Zotero, it is recreated only when **Create Zotero items for all sources** is on; otherwise re-send it by hand.\n\n### A template re-render sent nothing\n\nThat is correct. Sends are decided by the content hash of the work model and the publication map, not the rendered note, so a pure template change needs no update.\n\n### Bibliographic details look wrong\n\nThey come from `publication-map.json` and are marked `verified: false` until checked. Edit your vault copy of the map, then re-send. See [Zotero export](./zotero.md).\n", extract: false },
@@ -12869,11 +13231,11 @@ function baseName(path2) {
   var _a2, _b2;
   return (_b2 = (_a2 = path2.split("/").pop()) == null ? void 0 : _a2.replace(/\.md$/i, "")) != null ? _b2 : path2;
 }
-var KNOWN_NOTE_NAME = /^(@[^ ]+|mas-[^ ]+)\s+-\s+(?:transcription|translation)(?:\s|$)/i;
+var KNOWN_NOTE_NAME = /^(@[^ ]+|mas-[^ ]+)\s+-\s+(?:transcription|translation)(?:\s|$|[-,–—])/i;
 function parseKnownNote(path2, title) {
   var _a2;
   const name = baseName(path2);
-  const match = /^(@[^ ]+|mas-[^ ]+)\s+-\s+(transcription|translation)(?:\s+-\s+(?:v(?:ol)?\.?|volume)\s*(\d+))?(?:\s+-\s+(.+))?$/i.exec(name);
+  const match = /^(@[^ ]+|mas-[^ ]+)\s+-\s+(transcription|translation)(?:\s*-\s*(?:v(?:ol)?\.?|volume)\s*(\d+))?(?:\s*[-,–—]\s*(.+))?$/i.exec(name);
   if (!match)
     return null;
   const cite = match[1].replace(/^mas-/, "@");
@@ -16205,7 +16567,7 @@ var AnnotationService = class {
       return;
     }
     const masKind = frontmatter == null ? void 0 : frontmatter["midad-kind"];
-    const legacyTranscription = /^(?:@|mas-).+?\s+-\s+(?:transcription|translation)(?:\s+-\s+(?:vol|v)\.\s*\d+)?$/i.test(file.basename);
+    const legacyTranscription = /^(?:@|mas-).+?\s+-\s+(?:transcription|translation)(?:\s+-\s+(?:vol|v)\.\s*\d+)?(?:\s*[-,–—]\s*.+)?$/i.test(file.basename);
     if (masKind === "transcription" || masKind === "translation" || legacyTranscription) {
       if (this.host.upgradeTranscription) {
         new import_obsidian16.Notice("Upgrading transcription metadata\u2026");
@@ -18410,18 +18772,20 @@ function inferVolumeJS(name) {
   return nums ? parseInt(nums[nums.length - 1], 10) : null;
 }
 function archivedNoteInfo(path2) {
+  var _a2;
   const stem = basenameJS(path2).replace(/\.md$/i, "");
-  const typed = stem.match(/^(?:@|mas-)(.+?) - (transcription|translation)(?: - (?:vol|v)\.\s*(\d+))?$/i);
+  const typed = stem.match(/^(?:@|mas-)(.+?) - (transcription|translation)(?: - (?:vol|v)\.\s*(\d+))?(?:\s*[-,–—]\s*(.+))?$/i);
   if (typed) {
     return {
       citekey: typed[1],
       type: typed[2].toLowerCase(),
-      volume: typed[3] ? parseInt(typed[3], 10) : null
+      volume: typed[3] ? parseInt(typed[3], 10) : null,
+      unit: ((_a2 = typed[4]) == null ? void 0 : _a2.trim()) || null
     };
   }
   const literature = stem.match(/^@([^\s/]+)$/);
   if (literature)
-    return { citekey: literature[1], type: null, volume: null };
+    return { citekey: literature[1], type: null, volume: null, unit: null };
   return null;
 }
 function archivedBatchInfo(name) {
@@ -18507,6 +18871,7 @@ var DEFAULT_SETTINGS = {
   pipelineScript: "scripts/midad-arabic-sources-pipeline.py",
   literatureNoteFolder: "",
   geminiApiKey: "",
+  includeArabicAliases: true,
   sourceImportScript: "scripts/text-source-import.py",
   sourceRoot: "Midad Arabic Sources",
   sourceLayoutMigrated: false,
@@ -19277,6 +19642,7 @@ var MidadArabicSourcesPlugin = class extends import_obsidian18.Plugin {
           MIDAD_TRANSLATIONS_DIR: this.translationsFolder(),
           ...this.resolveLiteratureNotesFolder() ? { MIDAD_LITERATURE_DIR: this.resolveLiteratureNotesFolder() } : {},
           MIDAD_CANONICAL_QURAN_DIR: this.canonicalQuranFolder(),
+          MIDAD_INCLUDE_ARABIC_ALIAS: this.settings.includeArabicAliases === false ? "0" : "1",
           ...taskKey ? { GEMINI_API_KEY: taskKey } : {}
         }
       });
@@ -21944,7 +22310,7 @@ ${lines.join("\n")}`;
       new import_obsidian18.Notice("That note is not recognised as a transcription or translation.");
       return;
     }
-    if (info.volume == null && this.noteHasVolumes(info.citekey, info.type)) {
+    if (info.volume == null && !info.unit && this.noteHasVolumes(info.citekey, info.type)) {
       new import_obsidian18.Notice("That is a volume index; open the volume note you want to post-process.");
       return;
     }
@@ -21958,6 +22324,8 @@ ${lines.join("\n")}`;
     ];
     if (info.volume != null)
       args.push("--volume", String(info.volume));
+    if (info.unit)
+      args.push("--unit", info.unit);
     if (target.basename.startsWith("mas-"))
       args.push("--standalone");
     if (metadataOnly)
@@ -21998,7 +22366,7 @@ ${lines.join("\n")}`;
       return { note, info: found };
     }).filter((entry) => !!entry);
     const typesWithVolumes = new Set(infos.filter((entry) => entry.info.volume != null).map((entry) => entry.info.type));
-    const chosen = infos.filter((entry) => !(entry.info.volume == null && typesWithVolumes.has(entry.info.type)));
+    const chosen = infos.filter((entry) => !(entry.info.volume == null && !entry.info.unit && typesWithVolumes.has(entry.info.type)));
     const zips = (_d = (_c = await this.pipelineResult(["list-archive"])) == null ? void 0 : _c.zips) != null ? _d : [];
     let done = 0;
     for (const entry of chosen) {
@@ -23186,6 +23554,11 @@ var MidadArabicSourcesSettingTab = class extends import_obsidian18.PluginSetting
             render: password(() => this.plugin.settings.geminiApiKey, (v) => {
               this.plugin.settings.geminiApiKey = v;
             })
+          },
+          {
+            name: "Include Arabic aliases",
+            desc: "Add an Arabic-script alias to transcriptions and translations whose Arabic title and author are known (at most one romanized and one Arabic alias).",
+            control: { type: "toggle", key: "includeArabicAliases" }
           },
           doc("Transcription guide", "transcription.md", "The Gemini OCR pipeline, its post-processing, status, and reprocessing."),
           doc("Translation guide", "translation.md", "Translating a finished transcription.")

@@ -70,9 +70,9 @@ def resolve(src: Path, workdir: Path):
     raise SystemExit("ERROR: could not determine batch type/stem from the input")
 
 
-def existing_metadata(mv, citekey: str, doc_type: str, volume):
+def existing_metadata(mv, citekey: str, doc_type: str, volume, unit: str | None = None):
     """Title/author from an existing note, for a standalone reprocess."""
-    path = mv.dest_path(citekey, doc_type, volume)
+    path = mv.dest_path(citekey, doc_type, volume, unit=unit)
     if not path.exists():
         return None, None
     text = path.read_text(encoding="utf-8")
@@ -133,7 +133,18 @@ def main():
             r'\s+-\s+(?:transcription|translation)\b', src.stem, re.I
         ):
             archive_stem = src.stem
-        citekey, volume = tbp.citekey_and_volume(archive_stem)
+        unit = None
+        archive_match = re.match(
+            r'(@?\S+)\s+-\s+(?:transcription|translation)'
+            r'(?:\s+-\s+(?:vol|v)\.\s*(\d+))?'
+            r'(?:\s+-\s+(.+?))?\s+files$',
+            archive_stem, re.I)
+        if archive_match:
+            citekey = archive_match.group(1)
+            volume = int(archive_match.group(2)) if archive_match.group(2) else None
+            unit = (archive_match.group(3) or "").strip() or None
+        else:
+            citekey, volume = tbp.citekey_and_volume(archive_stem)
 
         if doc_type == "translation":
             jsonl = base / f"{stem}.translate-output.jsonl"
@@ -146,7 +157,7 @@ def main():
                 out_override.write_text(tbp.build_translation(stem, result), encoding="utf-8")
                 dest = out_override
             else:
-                dest = mv.write_note(result, citekey, "translation", volume=volume)
+                dest = mv.write_note(result, citekey, "translation", volume=volume, unit=unit)
         else:
             jsonl = base / f"{stem}-output.jsonl"
             if not jsonl.exists():
@@ -160,11 +171,12 @@ def main():
             raw_path.write_text(yaml.rstrip("\n") + "\n\n" + raw_text.lstrip("\n"), encoding="utf-8")
 
             processed = workdir / "processed.md"
-            # A standalone PDF has no literature note; only then does the
-            # post-processor extract TITLE:/AUTHOR: markers.
+            # Cover metadata is extracted for every transcription: it supplies
+            # the Arabic title/author fields even when Zotero supplies the
+            # romanized bibliography.
             standalone = mv.find_zotero(citekey) is None
             tpp = load("transcription-postprocess.py")
-            tpp.run(raw_path, out_path=processed, metadata=standalone)
+            tpp.run(raw_path, out_path=processed, metadata=True)
 
             if out_override:
                 out_override.write_text(processed.read_text(encoding="utf-8"), encoding="utf-8")
@@ -178,25 +190,31 @@ def main():
                 # A standalone PDF has no literature note. Preserve the
                 # existing note's verified title/author, fill any gap from the
                 # fresh sidecar, and do not add a [[@citekey]] up link.
+                meta_path = processed.with_suffix(processed.suffix + ".meta.json")
+                cover = {}
+                if meta_path.exists():
+                    try:
+                        parsed = json.loads(meta_path.read_text(encoding="utf-8"))
+                        if isinstance(parsed, dict):
+                            cover = parsed
+                    except Exception:
+                        cover = {}
                 title, authors = (None, None)
                 if standalone:
-                    title, authors = existing_metadata(mv, citekey, "transcription", volume)
+                    title, authors = existing_metadata(mv, citekey, "transcription", volume, unit)
                     # The existing note is authoritative: the user may have
                     # verified/edited its romanized title and author. Use the
                     # fresh sidecar only to fill a missing value.
-                    if not title or not authors:
-                        meta_path = processed.with_suffix(processed.suffix + ".meta.json")
-                        if meta_path.exists():
-                            try:
-                                meta = json.loads(meta_path.read_text(encoding="utf-8"))
-                                title = title or meta.get("title") or None
-                                author = meta.get("author")
-                                if not authors and author:
-                                    authors = [a.strip() for a in author.split(";") if a.strip()]
-                            except Exception:
-                                pass
+                    if not title:
+                        title = cover.get("title") if isinstance(cover.get("title"), str) else None
+                    if not authors:
+                        if isinstance(cover.get("authors"), list):
+                            authors = [str(a).strip() for a in cover["authors"] if str(a).strip()] or None
+                        elif isinstance(cover.get("author"), str):
+                            authors = [a.strip() for a in cover["author"].split(";") if a.strip()] or None
                 dest = mv.write_note(body, citekey, "transcription", volume=volume,
-                                     standalone=standalone, title=title, authors=authors)
+                                     standalone=standalone, title=title, authors=authors,
+                                     unit=unit, cover=cover)
 
         print(f"\nReprocessed -> {dest}")
     finally:

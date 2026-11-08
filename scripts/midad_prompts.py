@@ -111,6 +111,8 @@ DEFAULT_TRANSLATION_PROMPT = (
 )
 
 
+# Kept for older prompt files and archives. New submissions use the richer,
+# first-page-only cover block below.
 STANDALONE_METADATA_PROMPT = (
     "TITLE PAGE METADATA (standalone scanned book)\n"
     "If the PDF looks like a title page or cover, start the reply with two plain lines before the first page heading:\n"
@@ -118,6 +120,32 @@ STANDALONE_METADATA_PROMPT = (
     "AUTHOR: the book's author as printed\n"
     "Use the source's own language and script. Do not invent, guess, or romanize these values. "
     "If one is not clearly visible, omit that line. Do not use YAML, bold, or quotation marks around them, and do not repeat them."
+)
+
+COVER_METADATA_PROMPT = (
+    "COVER METADATA (first page only)\n"
+    "When this is the first page of the PDF and it visibly contains a title page, cover, copyright page, or the opening of the work, "
+    "begin your reply with one fenced YAML block, then a blank line and the normal page heading and transcription. "
+    "On every other page, or when no title-page metadata is visible, do not output a YAML block at all.\n"
+    "Use exactly these keys, omit any key you cannot read, and never guess, invent, or transliterate a value:\n"
+    "```yaml\n"
+    "title:\n"
+    "shorttitle:\n"
+    "authors:\n"
+    "  - \n"
+    "editors:\n"
+    "  - \n"
+    "title-ar:\n"
+    "shorttitle-ar:\n"
+    "authors-ar:\n"
+    "  - \n"
+    "editors-ar:\n"
+    "  - \n"
+    "```\n"
+    "Give `title`, `shorttitle`, `authors`, and `editors` in the romanized form used in Western scholarship (IJMES), "
+    "and `title-ar`, `shorttitle-ar`, `authors-ar`, and `editors-ar` in the source's Arabic script. "
+    "If the source is not Arabic, omit the `-ar` keys. `shorttitle` and `shorttitle-ar` are the short form normally used in citations, "
+    "not a truncation of the title. Do not repeat the block, and do not wrap it in any other text."
 )
 
 

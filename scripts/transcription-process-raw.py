@@ -306,7 +306,7 @@ if __name__ == "__main__":
                 except Exception as e:
                     print(f"  WARNING: could not read prompt file: {e}")
         sys.path.insert(0, str(SCRIPTS))
-        from midad_prompts import build_transcription_prompt
+        from midad_prompts import COVER_METADATA_PROMPT, build_transcription_prompt
         system_prompt = build_transcription_prompt(user_prompt, metadata="--metadata" in sys.argv)
         
         # Find previous JSONL (same stem without " - try X" suffix)
@@ -412,7 +412,10 @@ if __name__ == "__main__":
                         "contents": [sync_prompt, types.Part.from_uri(file_uri=file.uri, mime_type="application/pdf")],
                     }
                     if system_prompt:
-                        kwargs["config"] = types.GenerateContentConfig(system_instruction=system_prompt)
+                        page_prompt = system_prompt
+                        if key == "pg_0001":
+                            page_prompt = f"{page_prompt}\n\n{COVER_METADATA_PROMPT}"
+                        kwargs["config"] = types.GenerateContentConfig(system_instruction=page_prompt)
                     response = client.models.generate_content(**kwargs)
                     new_text = getattr(response, 'text', '') or ''
                     data.setdefault('response', {})

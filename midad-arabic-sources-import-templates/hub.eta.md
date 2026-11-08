@@ -22,7 +22,11 @@
    English Qur'ān translation) does not get an Arabic rendering of its title. */ -%>
 <% const titleArAllowed = (work.title_language || work.language) === 'ar'; -%>
 <% const titleAr = titleArAllowed ? (pub.title_ar || work.title_ar) : ''; -%>
-<% if (titleArAllowed && titleAr) { add_property('title-ar', titleAr, { quote: 'always' }); } else if (!titleArAllowed) { add_property('title-ar', '', { merge: 'remove' }); } -%>
+<% const shortTitleAr = titleArAllowed ? (pub.shorttitle_ar || pub.short_ar || work.short_ar || work.shorttitle_ar || '') : ''; -%>
+<% /* An Arabic work always carries title-ar, even when the catalogue has not
+   supplied the original title; the user can fill the empty value later. */ -%>
+<% if (titleArAllowed) { add_property('title-ar', titleAr || '', { force: true, quote: 'always' }); } else { add_property('title-ar', '', { merge: 'remove' }); } -%>
+<% if (titleArAllowed && shortTitleAr) { add_property('shorttitle-ar', shortTitleAr, { quote: 'always' }); } else if (!titleArAllowed) { add_property('shorttitle-ar', '', { merge: 'remove' }); } -%>
 <% const scholarName = (a) => {
   if (typeof a !== 'string') return a.name || [a.last, a.first].filter(Boolean).join(', ');
   const s = a.trim();

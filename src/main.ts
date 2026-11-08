@@ -188,6 +188,8 @@ interface MidadArabicSourcesSettings {
 	pipelineScript: string;
 	literatureNoteFolder: string;
 	geminiApiKey: string;
+	/** Include the Arabic-script alias (when Arabic metadata is known). */
+	includeArabicAliases?: boolean;
 	// General
 	sourceRoot: string;
 	sourceLayoutMigrated?: boolean;
@@ -291,6 +293,8 @@ interface ArchivedNoteInfo {
 	citekey: string;
 	type: ArchivedDocType | null;
 	volume: number | null;
+	/** Human description for a partial transcription, e.g. "West Africa women". */
+	unit: string | null;
 }
 
 /** An archive name parsed into its citekey, kind, and optional volume. */
@@ -302,18 +306,20 @@ interface ArchivedBatchInfo {
 
 function archivedNoteInfo(path: string): ArchivedNoteInfo | null {
 	const stem = basenameJS(path).replace(/\.md$/i, "");
-	const typed = stem.match(/^(?:@|mas-)(.+?) - (transcription|translation)(?: - (?:vol|v)\.\s*(\d+))?$/i);
+	const typed = stem.match(
+		/^(?:@|mas-)(.+?) - (transcription|translation)(?: - (?:vol|v)\.\s*(\d+))?(?:\s*[-,–—]\s*(.+))?$/i);
 	if (typed) {
 		return {
 			citekey: typed[1],
 			type: typed[2].toLowerCase() as ArchivedDocType,
 			volume: typed[3] ? parseInt(typed[3], 10) : null,
+			unit: typed[4]?.trim() || null,
 		};
 	}
 	// A literature note: re-render any archived transcription/translation for
 	// its citekey.
 	const literature = stem.match(/^@([^\s/]+)$/);
-	if (literature) return { citekey: literature[1], type: null, volume: null };
+	if (literature) return { citekey: literature[1], type: null, volume: null, unit: null };
 	return null;
 }
 
@@ -590,6 +596,7 @@ const DEFAULT_SETTINGS: MidadArabicSourcesSettings = {
 	pipelineScript: "scripts/midad-arabic-sources-pipeline.py",
 	literatureNoteFolder: "",
 	geminiApiKey: "",
+	includeArabicAliases: true,
 	sourceImportScript: "scripts/text-source-import.py",
 	sourceRoot: "Midad Arabic Sources",
 	sourceLayoutMigrated: false,
@@ -1410,6 +1417,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 						? { MIDAD_LITERATURE_DIR: this.resolveLiteratureNotesFolder() }
 						: {}),
 					MIDAD_CANONICAL_QURAN_DIR: this.canonicalQuranFolder(),
+					MIDAD_INCLUDE_ARABIC_ALIAS: this.settings.includeArabicAliases === false ? "0" : "1",
 					...(taskKey ? { GEMINI_API_KEY: taskKey } : {}),
 				},
 			});
@@ -4507,7 +4515,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			new Notice("That note is not recognised as a transcription or translation.");
 			return;
 		}
-		if (info.volume == null && this.noteHasVolumes(info.citekey, info.type)) {
+		if (info.volume == null && !info.unit && this.noteHasVolumes(info.citekey, info.type)) {
 			new Notice("That is a volume index; open the volume note you want to post-process.");
 			return;
 		}
@@ -4517,6 +4525,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			"--type", info.type,
 		];
 		if (info.volume != null) args.push("--volume", String(info.volume));
+		if (info.unit) args.push("--unit", info.unit);
 		if (target.basename.startsWith("mas-")) args.push("--standalone");
 		if (metadataOnly) args.push("--metadata-only");
 		const result = await this.runWithProgress(
@@ -4570,7 +4579,8 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		// re-render its volumes instead. A single-volume work has no volume note,
 		// so its parent is the text and is included.
 		const typesWithVolumes = new Set(infos.filter((entry) => entry.info.volume != null).map((entry) => entry.info.type));
-		const chosen = infos.filter((entry) => !(entry.info.volume == null && typesWithVolumes.has(entry.info.type)));
+		const chosen = infos.filter((entry) =>
+			!(entry.info.volume == null && !entry.info.unit && typesWithVolumes.has(entry.info.type)));
 		const zips = (await this.pipelineResult(["list-archive"]))?.zips ?? [];
 		let done = 0;
 		for (const entry of chosen) {
@@ -5961,6 +5971,11 @@ class MidadArabicSourcesSettingTab extends PluginSettingTab {
 							() => this.plugin.settings.geminiApiKey,
 							(v) => { this.plugin.settings.geminiApiKey = v; }
 						),
+					},
+					{
+						name: "Include Arabic aliases",
+						desc: "Add an Arabic-script alias to transcriptions and translations whose Arabic title and author are known (at most one romanized and one Arabic alias).",
+						control: { type: "toggle", key: "includeArabicAliases" },
 					},
 					doc("Transcription guide", "transcription.md", "The Gemini OCR pipeline, its post-processing, status, and reprocessing."),
 					doc("Translation guide", "translation.md", "Translating a finished transcription."),

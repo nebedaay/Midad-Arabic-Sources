@@ -239,7 +239,9 @@ def infer_explicit_volume(name: str):
     An arbitrary user-chosen PDF may have a year or an edition number in its
     name; treating the last number as a volume would be wrong.
     """
-    stem = Path(name).stem
+    stem = Path(name).stem.strip()
+    if re.fullmatch(r"\d{1,3}", stem):
+        return int(stem)
     m = re.search(r'(?:vol(?:ume)?|juz|جزء|ج)\s*[._-]?\s*(\d+)', stem, re.I)
     return int(m.group(1)) if m else None
 
@@ -319,7 +321,8 @@ def resolve_pdfs(note_path):
         if path:
             fn = data.get("filename") or a["filename"]
             found[a["key"]] = {"key": a["key"], "filename": fn, "path": path,
-                               "exists": Path(path).exists(), "volume": infer_volume(fn)}
+                               "exists": Path(path).exists(), "volume": infer_explicit_volume(fn),
+                               "title": data.get("title") or Path(fn).stem}
 
     # The parent's children (covers attachments the note does not list).
     if zkey:
@@ -332,7 +335,8 @@ def resolve_pdfs(note_path):
             if path:
                 fn = data.get("filename") or Path(path).name
                 found[key or path] = {"key": key, "filename": fn, "path": path,
-                                      "exists": Path(path).exists(), "volume": infer_volume(fn)}
+                                      "exists": Path(path).exists(), "volume": infer_explicit_volume(fn),
+                                      "title": data.get("title") or Path(fn).stem}
 
     # (1) ScholarWeft zlinks cache
     zlinks = VAULT / ".scholar-weft" / "zlinks.json"
@@ -342,7 +346,8 @@ def resolve_pdfs(note_path):
             for p in pdfs:
                 if not any(v["path"] == p for v in found.values()):
                     found["zlinks:" + p] = {"key": "", "filename": Path(p).name, "path": p,
-                                            "exists": Path(p).exists(), "volume": infer_volume(p)}
+                                            "exists": Path(p).exists(), "volume": infer_explicit_volume(p),
+                                            "title": Path(p).stem}
         except Exception:
             pass
 
@@ -352,7 +357,8 @@ def resolve_pdfs(note_path):
             continue
         p = ZOTERO_DATA_DIR / "storage" / a["key"] / a["filename"]
         found.setdefault(a["key"], {"key": a["key"], "filename": a["filename"], "path": str(p),
-                                    "exists": p.exists(), "volume": infer_volume(a["filename"])})
+                                    "exists": p.exists(), "volume": infer_explicit_volume(a["filename"]),
+                                    "title": Path(a["filename"]).stem})
 
     items = list(found.values())
     items.sort(key=lambda v: (not v["exists"], v["filename"].lower()))
@@ -451,10 +457,12 @@ def _strip_yaml(text: str) -> str:
     return text
 
 
-def _archive(batch_txt: Path, citekey: str, doc_type: str, volume):
+def _archive(batch_txt: Path, citekey: str, doc_type: str, volume, unit: str | None = None):
     args = [str(batch_txt), "--citekey", citekey]
     if volume:
         args += ["--volume", str(volume)]
+    if unit:
+        args += ["--unit", unit]
     return run_script("archive-batch-files.py", args)
 
 
@@ -467,26 +475,36 @@ def _parse_pdf_arg(value: str):
     return value, None
 
 
-def _read_note_metadata(processed: Path) -> tuple[str | None, list[str] | None]:
-    """Read the title/author sidecar written by transcription-postprocess.py."""
+def _read_note_metadata(processed: Path) -> dict:
+    """Read the cover-metadata sidecar written by transcription-postprocess.py."""
     sidecar = processed.with_suffix(processed.suffix + ".meta.json")
     if not sidecar.exists():
-        return None, None
+        return {}
     try:
         meta = json.loads(sidecar.read_text(encoding="utf-8"))
     except Exception:
-        return None, None
+        return {}
+    return meta if isinstance(meta, dict) else {}
+
+
+def _cover_values(meta: dict) -> tuple[str | None, list[str] | None]:
+    """Title and authors from a cover sidecar, including the legacy shape."""
     title = meta.get("title") if isinstance(meta.get("title"), str) else None
-    author = meta.get("author") if isinstance(meta.get("author"), str) else None
-    authors = [a.strip() for a in author.split(";") if a.strip()] if author else None
-    return title, authors
+    authors = meta.get("authors")
+    if isinstance(authors, list):
+        authors = [str(a).strip() for a in authors if str(a).strip()]
+    else:
+        author = meta.get("author") if isinstance(meta.get("author"), str) else ""
+        authors = [a.strip() for a in author.split(";") if a.strip()]
+    return title, authors or None
 
 
 def cmd_transcribe(args) -> int:
     citekey = args.citekey
     standalone = bool(getattr(args, "standalone", False))
     model = getattr(args, "model", None) or ""
-    specs = [_parse_pdf_arg(v) for v in (args.pdf or [])]
+    explicit_unit = (getattr(args, "unit", None) or "").strip() or None
+    specs = [(*_parse_pdf_arg(v), None) for v in (args.pdf or [])]
 
     if not specs:
         if standalone:
@@ -497,14 +515,14 @@ def cmd_transcribe(args) -> int:
             fail(f"Literature note not found: @{citekey}.md (set the literature-notes folder, or use Transcribe a PDF)")
             return 1
         _, items = resolve_pdfs(note)
-        specs = [(i["path"], i.get("volume")) for i in items if i["exists"]]
+        specs = [(i["path"], i.get("volume"), i.get("title")) for i in items if i["exists"]]
     if not specs:
         fail("No PDF file found for this item.")
         return 1
 
     mv = load_module("transcription-translation-move-to-vault.py")
     results = []
-    for pdf_path, vol in specs:
+    for pdf_path, vol, zotero_title in specs:
         pdf = Path(pdf_path)
         volume = vol
         if volume is None:
@@ -513,7 +531,20 @@ def cmd_transcribe(args) -> int:
             elif standalone:
                 volume = infer_explicit_volume(pdf.name)
             else:
-                volume = infer_volume(pdf.name)
+                volume = None
+        unit = explicit_unit
+        if unit:
+            volume = None
+        if volume is None and not unit:
+            title_value = (zotero_title or pdf.stem).strip()
+            ref = mv.find_zotero(citekey) if not standalone else None
+            work_title = mv.extract_zotero_field(ref.read_text(encoding="utf-8"), "title") if ref else ""
+            normal = lambda value: re.sub(r"[^a-z0-9\u0600-\u06FF]+", "", (value or "").casefold())
+            looks_part = bool(re.search(
+                r"\b(?:introduction|preface|foreword|chapter|part|section|conclusion|appendix|index)\b",
+                title_value, re.I))
+            if title_value and (looks_part or len(specs) > 1 or (work_title and normal(title_value) != normal(work_title))):
+                unit = title_value
         stem = pdf.stem
         # Keep all intermediates inside the plugin cache, not beside the source PDF.
         work = WORK_DIR / f"{_slug(citekey)}-{_slug(stem)}"
@@ -524,15 +555,13 @@ def cmd_transcribe(args) -> int:
 
         save_state(stage="submitting", status="running", doc_type="transcription",
                    pid=os.getpid(), citekey=citekey, pdf=str(pdf), volume=volume,
-                   standalone=standalone, model=model,
+                   unit=unit, standalone=standalone, model=model,
                    work_dir=str(work), log=str(_LOG_PATH) if _LOG_PATH else "",
                    prompt_file=str(args.prompt_file) if getattr(args, "prompt_file", None) else "")
         step("transcribe", "start", f"{pdf.name}" + (f" (vol. {volume})" if volume else ""))
         submit_args = [str(pdf), "--work-dir", str(work)]
         if getattr(args, "prompt_file", None):
             submit_args += ["--prompt-file", str(args.prompt_file)]
-        if standalone:
-            submit_args.append("--metadata")
         if model:
             submit_args += ["--model", model]
         if run_script("transcription-batch-submit.py", submit_args):
@@ -546,24 +575,21 @@ def cmd_transcribe(args) -> int:
             fix_args = [str(batch_txt), "--fix"]
             if getattr(args, "prompt_file", None):
                 fix_args += ["--prompt-file", str(args.prompt_file)]
-            if standalone:
-                fix_args.append("--metadata")
             if model:
                 fix_args += ["--model", model]
             run_script("transcription-process-raw.py", fix_args)
 
         if not processed.exists() or processed.stat().st_mtime < raw.stat().st_mtime:
-            post_args = [str(raw), str(processed)]
-            if standalone:
-                post_args.append("--metadata")
+            post_args = [str(raw), str(processed), "--metadata"]
             run_script("transcription-postprocess.py", post_args)
 
         save_state(stage="writing", status="running")
-        title, authors = _read_note_metadata(processed)
+        cover = _read_note_metadata(processed)
+        title, authors = _cover_values(cover)
         dest = mv.write_note(_strip_yaml(processed.read_text(encoding="utf-8")), citekey,
                              "transcription", volume=volume, standalone=standalone,
-                             title=title, authors=authors)
-        _archive(batch_txt, citekey, "transcription", volume)
+                             title=title, authors=authors, unit=unit, cover=cover)
+        _archive(batch_txt, citekey, "transcription", volume, unit)
         # Only the vault note and the txt/json archive survive.
         shutil.rmtree(work, ignore_errors=True)
         save_state(stage="done", status="done", note=str(dest))
@@ -578,6 +604,7 @@ def _resume_transcription(st: dict) -> int:
     citekey = st.get("citekey")
     pdf = st.get("pdf")
     volume = st.get("volume")
+    unit = st.get("unit")
     standalone = bool(st.get("standalone"))
     model = st.get("model") or ""
     stem = Path(pdf).stem
@@ -586,7 +613,8 @@ def _resume_transcription(st: dict) -> int:
     if not batch_txt.exists():
         return cmd_transcribe(argparse.Namespace(citekey=citekey, pdf=[pdf], volume=volume,
                                                 pages=None, standalone=standalone, model=model,
-                                                prompt_file=st.get("prompt_file") or None))
+                                                prompt_file=st.get("prompt_file") or None,
+                                                unit=unit))
 
     mv = load_module("transcription-translation-move-to-vault.py")
     raw = work / f"{stem}-raw.md"
@@ -597,21 +625,18 @@ def _resume_transcription(st: dict) -> int:
         fix_args = [str(batch_txt), "--fix"]
         if st.get("prompt_file"):
             fix_args += ["--prompt-file", str(st["prompt_file"])]
-        if standalone:
-            fix_args.append("--metadata")
         if model:
             fix_args += ["--model", model]
         run_script("transcription-process-raw.py", fix_args)
     if not processed.exists() or processed.stat().st_mtime < raw.stat().st_mtime:
-        post_args = [str(raw), str(processed)]
-        if standalone:
-            post_args.append("--metadata")
+        post_args = [str(raw), str(processed), "--metadata"]
         run_script("transcription-postprocess.py", post_args)
-    title, authors = _read_note_metadata(processed)
+    cover = _read_note_metadata(processed)
+    title, authors = _cover_values(cover)
     dest = mv.write_note(_strip_yaml(processed.read_text(encoding="utf-8")), citekey,
                          "transcription", volume=volume, standalone=standalone,
-                         title=title, authors=authors)
-    _archive(batch_txt, citekey, "transcription", volume)
+                         title=title, authors=authors, unit=unit, cover=cover)
+    _archive(batch_txt, citekey, "transcription", volume, unit)
     shutil.rmtree(work, ignore_errors=True)
     save_state(stage="done", status="done", note=str(dest))
     emit("result", result={"notes": [str(dest)]})
@@ -664,10 +689,19 @@ def cmd_translate(args) -> int:
             step("translate", "error", src.name); continue
         txt = src.parent / f"{src.stem}.translate.txt"
         run_script("translate-batch-process.py", [str(txt), "--poll", str(POLL_SECONDS)])
-        _archive(txt, citekey, "translation", args.volume)
         vm = re.search(r'vol\.\s*(\d+)', src.stem)
         vol = int(vm.group(1)) if vm else None
-        dest = mv.dest_path(citekey, "translation", args.volume if args.volume is not None else vol)
+        unit = None
+        unit_match = re.match(
+            r'^@?\S+?\s+-\s+(?:transcription|translation)'
+            r'(?:\s+-\s+(?:vol|v)\.\s*\d+)?'
+            r'(?:\s*[-,–—]\s*(.+))?$',
+            src.stem, re.I)
+        if unit_match:
+            unit = (unit_match.group(1) or "").strip() or None
+        final_vol = args.volume if args.volume is not None else vol
+        _archive(txt, citekey, "translation", final_vol, unit)
+        dest = mv.dest_path(citekey, "translation", final_vol, unit=unit)
         step("translate", "done", dest.name)
         results.append(str(dest))
 
@@ -684,24 +718,27 @@ def cmd_reprocess(args) -> int:
 
 
 def _note_identity(note: Path, citekey: str | None, doc_type: str | None,
-                   volume: int | None, standalone: bool):
-    """Resolve a legacy/native transcription note's citekey, type, and volume."""
+                   volume: int | None, standalone: bool, unit: str | None = None):
+    """Resolve a legacy/native note's citekey, type, volume, and partial unit."""
     stem = note.stem
     match = re.match(
         r"^(?:@|mas-)(.+?)\s+-\s+(transcription|translation)"
-        r"(?:\s+-\s+(?:vol|v)\.\s*(\d+))?$",
+        r"(?:\s*-\s*(?:vol|v)\.\s*(\d+))?"
+        r"(?:\s*[-,–—]\s*(.+))?$",
         stem, re.I)
     inferred_citekey = match.group(1) if match else ""
     inferred_type = match.group(2).lower() if match else ""
     inferred_volume = int(match.group(3)) if match and match.group(3) else None
+    inferred_unit = match.group(4).strip() if match and match.group(4) else ""
     key = (citekey or inferred_citekey).strip()
     kind = (doc_type or inferred_type or "transcription").strip().lower()
     vol = inferred_volume if volume is None else volume
+    label = (unit or inferred_unit).strip() or None
     if kind not in ("transcription", "translation"):
         raise ValueError(f"Unknown note type: {kind}")
     if not key:
         raise ValueError("Could not determine the note's citekey; pass --citekey.")
-    return key, kind, vol, standalone or stem.startswith("mas-")
+    return key, kind, vol, standalone or stem.startswith("mas-"), label
 
 
 def _note_body(text: str) -> str:
@@ -900,8 +937,9 @@ def cmd_postprocess_note(args) -> int:
     if not note.exists():
         fail(f"Note not found: {note}")
         return 1
-    citekey, doc_type, volume, standalone = _note_identity(
-        note, args.citekey, args.type, args.volume, args.standalone)
+    citekey, doc_type, volume, standalone, unit = _note_identity(
+        note, args.citekey, args.type, args.volume, args.standalone,
+        getattr(args, "unit", None))
     text = note.read_text(encoding="utf-8")
     body = text
     if text.startswith("---"):
@@ -913,10 +951,11 @@ def cmd_postprocess_note(args) -> int:
     mv = load_module("transcription-translation-move-to-vault.py")
     related = mv._existing_list(note, "related")
     parent = mv.dest_path(citekey, doc_type, None, standalone)
+    mode_source = parent if parent.exists() else note
     tafsir = bool(getattr(args, "tafsir", False))
-    if parent.exists():
-        mode = mv._existing_scalar(parent, "midad-transcription-mode").strip().lower()
-        topics = mv._existing_list(parent, "topics")
+    if mode_source.exists():
+        mode = mv._existing_scalar(mode_source, "midad-transcription-mode").strip().lower()
+        topics = mv._existing_list(mode_source, "topics")
         tafsir = tafsir or mode == "tafsir" or any(
             "tafsir" in topic.lower().replace("ī", "i").replace("ā", "a")
             for topic in topics
@@ -958,7 +997,8 @@ def cmd_postprocess_note(args) -> int:
     with contextlib.redirect_stdout(io.StringIO()):
         dest = mv.write_note(
             processed_body, citekey, doc_type, related=related,
-            volume=volume, standalone=standalone, title=title, authors=authors)
+            volume=volume, standalone=standalone, title=title, authors=authors,
+            unit=unit)
     consolidated = None
     if volume is not None:
         consolidated = _consolidate_parent(
@@ -966,6 +1006,7 @@ def cmd_postprocess_note(args) -> int:
     result = {
         "notes": [str(dest)], "backup": str(backup),
         "metadata_only": bool(args.metadata_only), "tafsir": tafsir,
+        "unit": unit,
     }
     if consolidated:
         result["consolidated"] = consolidated
@@ -987,6 +1028,7 @@ def main() -> int:
     p.add_argument("--citekey", required=True)
     p.add_argument("--pdf", action="append")
     p.add_argument("--volume", type=int)
+    p.add_argument("--unit")
     p.add_argument("--pages", type=int)
     p.add_argument("--standalone", action="store_true")
     p.add_argument("--model")
@@ -1010,6 +1052,7 @@ def main() -> int:
     p.add_argument("--citekey")
     p.add_argument("--type", choices=("transcription", "translation"))
     p.add_argument("--volume", type=int)
+    p.add_argument("--unit", help="Partial-transcription description, e.g. 'West Africa women'.")
     p.add_argument("--standalone", action="store_true")
     p.add_argument("--metadata-only", action="store_true")
     p.add_argument("--tafsir", action="store_true",
