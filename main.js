@@ -9715,11 +9715,16 @@ def _unit_slug(value: str | None) -> str:
 
 
 def _plain_name(value) -> str:
-    """Display text from a plain name or a wikilink."""
+    """Display text from a plain name or a wikilink.
+
+    Author names can themselves contain brackets (\`[[Kan\u016Bn [Gan\u016Bn], \u2026]]\`), so
+    strip the outer \`[[\u2026]]\` rather than stopping at the first \`]\`.
+    """
     text = str(value or "").strip().strip('"').strip("'")
-    match = re.match(r"^\\[\\[([^\\]|]+)(?:\\|([^\\]]+))?\\]\\]$", text)
-    if match:
-        text = (match.group(2) or match.group(1)).strip()
+    if text.startswith("[[") and text.endswith("]]"):
+        text = text[2:-2]
+        if "|" in text:
+            text = text.split("|", 1)[1]
     return text.strip()
 
 
@@ -9775,19 +9780,23 @@ def canonical_citation_aliases(
     base_title = _strip_type_suffix(shorttitle or title).strip() or "Untitled"
     authors_plain = [_plain_name(a) for a in (authors or []) if _plain_name(a)]
     aliases: list[str] = []
-    roman = _alias_label([_author_label(authors_plain), year, base_title], suffix)
-    if unit:
-        roman += f" - {unit}" if roman else unit
-    if roman:
-        aliases.append(roman)
+    roman_author = _author_label(authors_plain)
+    if roman_author:
+        roman = _alias_label([roman_author, year, base_title], suffix)
+        if unit:
+            roman += f" - {unit}" if roman else unit
+        if roman:
+            aliases.append(roman)
     if include_arabic and (title_ar or shorttitle_ar):
         authors_ar_plain = [_plain_name(a) for a in (authors_ar or []) if _plain_name(a)]
-        arabic_title = (shorttitle_ar or title_ar).strip()
-        arabic = _alias_label([_author_label(authors_ar_plain), year, arabic_title], suffix)
-        if unit:
-            arabic += f" - {unit}" if arabic else unit
-        if arabic and arabic not in aliases:
-            aliases.append(arabic)
+        arabic_author = _author_label(authors_ar_plain)
+        if arabic_author:
+            arabic_title = (shorttitle_ar or title_ar).strip()
+            arabic = _alias_label([arabic_author, year, arabic_title], suffix)
+            if unit:
+                arabic += f" - {unit}" if arabic else unit
+            if arabic and arabic not in aliases:
+                aliases.append(arabic)
     return aliases[:2]
 
 
@@ -10080,7 +10089,7 @@ def build_yaml(citekey: str, doc_type: str, related: list[str], volume: int = No
     if ref:
         text = ref.read_text(encoding="utf-8")
         title_base = extract_zotero_field(text, "title") or "Untitled"
-        short_base = extract_zotero_field(text, "shorttitle") or short_base
+        short_base = extract_zotero_field(text, "shorttitle") or (shorttitle or "").strip() or title_base
         author_field = extract_zotero_field(text, "authors")
         if author_field:
             author_list = [author_field.lstrip('- ').strip().strip('"')]
