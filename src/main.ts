@@ -55,7 +55,7 @@ import {
 } from "./sourceImport/history";
 import { BUNDLED_ASSETS } from "./assets.generated";
 import { localDate } from "./time";
-import { BUILTIN_TOPICS, TOPIC_PAGE_PREFIX, topicLabel, topicLink, topicNoteName, topicsFromValue } from "./topics";
+import { BUILTIN_TOPICS, TOPIC_PAGE_PREFIX, genreTopic, normalizeGenre, topicLabel, topicLink, topicNoteName, topicsFromValue, turathGenres } from "./topics";
 import { identityOfFrontmatter, sourceIdToYaml, sourceOfFrontmatter } from "./sourceIds";
 import {
 	ANNOTATIONS_NOTE,
@@ -1893,7 +1893,8 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			return null;
 		}
 		const cat = Number(meta.cat_id ?? 0);
-		const type = TURATH_CAT_TYPES[cat] ?? "other";
+		const genres = turathGenres(cat, "other");
+		const type = genres[0] ?? "other";
 		const authorAr = this.authorFromInfo(meta.info);
 		const [titleRoman, authorRoman] = await Promise.all([
 			this.romanizeName(meta.name),
@@ -1905,7 +1906,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			arabic: meta.name,
 			author: authorRoman || authorAr,
 			type,
-			genres: genresForCat(cat, type),
+			genres,
 			url: `https://app.turath.io/book/${id}`,
 		};
 	}
@@ -7989,44 +7990,18 @@ function formatBytes(n: number | undefined): string {
 	return mb >= 1 ? `${mb.toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`;
 }
 
-/** Recognisable labels for the modal's "Topics" filter. */
-const GENRE_LABELS: Record<string, string> = {
-	tafsir: "Tafsīr",
-	quran: "Qurʾān text and translations",
-	hadith: "Ḥadīth",
-	"hadith-commentary": "Ḥadīth",
-	"quran-text": "Qurʾān text and translations",
-	dictionary: "Dictionaries and Lexicons",
-	fiqh: "Fiqh",
-	usul: "Uṣūl al-Fiqh",
-	aqida: "Doctrine (ʿaqīda)",
-	theology: "Doctrine (ʿaqīda)",
-	tarikh: "History (Tārīkh)",
-	biography: "Tarājim & Ṭabāqāt (Biographies)",
-	language: "Language (lugha)",
-	lexicography: "Dictionaries and Lexicons",
-	grammar: "Grammar (naḥw and ṣarf)",
-	rhetoric: "Rhetoric",
-	adab: "Adab & adhkār",
-	linguistics: "Language (lugha)",
-	maqasid: "Uṣūl al-Fiqh",
-	"quran-sciences": "ʿUlūm al-Qurʾān",
-	other: "Other",
-};
-
-
 /** The genre keys a work belongs to (older works carry only `genre`). */
 function workGenres(w: JsonObject): string[] {
 	const genres = Array.isArray(w.genres)
 		? w.genres.filter((value): value is string => typeof value === "string" && value.trim().length > 0)
 		: [];
-	if (genres.length) return genres.map(normalizeGenre);
+	if (genres.length) return [...new Set(genres.map(normalizeGenre))];
 	return [normalizeGenre(typeof w.genre === "string" && w.genre ? w.genre : "other")];
 }
 
-/** A readable label for a genre key. */
+/** A readable label for a genre/topic key. */
 function genreLabelOf(g: string): string {
-	return GENRE_LABELS[g] || g.replace(/-/g, " ");
+	return genreTopic(g);
 }
 
 /** A user-added Turath work, persisted in `turath-custom-works.json`. */
@@ -8039,26 +8014,6 @@ interface TurathCustomWork {
 	genres: string[];
 	subtitle?: string;
 	url: string;
-}
-
-/** Turath category id → our genre key (used for works added by URL). */
-const TURATH_CAT_TYPES: Record<number, string> = {
-	1: "aqida", 3: "tafsir", 4: "quran-sciences", 6: "hadith", 7: "hadith",
-	11: "usul", 14: "fiqh", 15: "fiqh", 16: "fiqh", 17: "fiqh", 18: "fiqh",
-	19: "fiqh", 20: "fiqh", 21: "fiqh", 22: "fiqh", 23: "adab", 24: "tarikh",
-	25: "tarikh", 26: "biography", 27: "tarikh", 28: "tarikh", 29: "language",
-	30: "language", 31: "language", 32: "adab", 33: "language", 34: "adab",
-	35: "language", 36: "other", 37: "other", 38: "other", 39: "other", 40: "other",
-};
-
-/** Finer genres implied by a Turath category (defaults to the broad type). */
-function genresForCat(cat: number, type: string): string[] {
-	if (cat === 30) return ["language", "lexicography", "dictionary"];
-	if (cat === 31) return ["language", "grammar"];
-	if (cat === 35) return ["language", "rhetoric"];
-	if (cat === 26) return ["biography"];
-	if (cat === 32) return ["adab"];
-	return [type];
 }
 
 /** Proper-name stems that stay capitalised in a sentence-cased title. */
@@ -8077,23 +8032,6 @@ const TITLE_PROPER = new Set([
 	"baghdādī", "qazwīnī", "sijistānī", "nasāʾī", "dārimī", "tibrīzī", "dihlawī",
 	"jalīl", "khaldūn", "zahrī", "ṭaḥāwiyya", "wāsiṭiyya",
 ]);
-
-/** Fold redundant/finer source genres into the topic categories the vault uses. */
-function normalizeGenre(g: string): string {
-	if (g === "grammar-syntax" || g === "grammar-inflection") return "grammar";
-	if (g === "linguistics") return "language";
-	if (g === "lexicography") return "dictionary";
-	if (g === "theology") return "aqida";
-	if (g === "hadith-commentary") return "hadith";
-	if (g === "maqasid") return "usul";
-	if (g === "quran") return "quran-text";
-	return g;
-}
-
-/** The topic label for a source genre (already normalized). */
-function genreTopic(g: string): string {
-	return GENRE_LABELS[normalizeGenre(g)] || "Other";
-}
 
 /**
  * Sentence case for a romanized non-English title: the first word and proper

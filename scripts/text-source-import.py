@@ -98,7 +98,7 @@ COLLECTIONS: dict[str, dict] = {
         "kind": "tafsir",
         "languages": {"ar": "arabic", "en": "english"},
         "shape": "ayah-list",
-        "moc": "Tafsīr Sources",
+        "moc": "Tafsīr",
         "cssclass": "tafsir",
     },
     "tafsir-qul": {
@@ -113,7 +113,7 @@ COLLECTIONS: dict[str, dict] = {
         "kind": "qul-tafsir",
         "languages": {"ar": "arabic", "en": "english"},
         "shape": "qul-tafsir",
-        "moc": "Tafsīr Sources",
+        "moc": "Tafsīr",
         "cssclass": "tafsir",
     },
     "quran": {
@@ -137,7 +137,7 @@ COLLECTIONS: dict[str, dict] = {
         "kind": "hadith",
         "languages": {"ar": "arabic", "en": "english"},
         "shape": "hadith-book",
-        "moc": "Ḥadīth Sources",
+        "moc": "Ḥadīth",
         "cssclass": "hadith",
     },
     "quran-text": {
@@ -161,7 +161,7 @@ COLLECTIONS: dict[str, dict] = {
         "kind": "dictionary",
         "languages": {"ar": "arabic"},
         "shape": "sqlite",
-        "moc": "Dictionaries",
+        "moc": "Dictionaries and Lexicons",
         "cssclass": "dictionary",
         # Entries whose source gives no transliteration are named by romanizing
         # the bare root — that needs the transliteration service, so the plugin
@@ -304,114 +304,21 @@ QURAN_TEXTS: list[dict] = [
 # (see `TURATH_TYPES`); the repository MOC `Turath` is added for every work. Latin
 # titles and authors are hand-checked against the vault's transliteration; the
 # Arabic forms are Turath's own metadata.
-TURATH_TYPES: dict[str, str] = {
-    "tafsir": "Tafsīr",
-    "hadith": "Ḥadīth",
-    "fiqh": "Fiqh",
-    "usul": "Uṣūl al-Fiqh",
-    "aqida": "Doctrine (ʿaqīda)",
-    "tarikh": "History (Tārīkh)",
-    "language": "Language (lugha)",
-    "dictionary": "Dictionaries and Lexicons",
-    "quran-sciences": "ʿUlūm al-Qurʾān",
-}
-
-TOPIC_ALIASES: dict[str, str] = {
-    "ʿAqīda": "Doctrine (ʿaqīda)",
-    "Tārīkh": "History (Tārīkh)",
-    "Language": "Language (lugha)",
-    "Dictionaries": "Dictionaries and Lexicons",
-    "Adab": "Adab & adhkār",
-    "al-Adab": "Adab & adhkār",
-}
-
-# Turath's `cat_id` values (the aqsām list), mapped to the topics we use.
-# The four Fiqh-school categories deliberately carry both the generic Fiqh topic
-# and their school topic.
-GENRE_TOPICS: dict[str, str] = {
-    "tafsir": "Tafsīr",
-    "quran": "Qurʾān text and translations",
-    "quran-text": "Qurʾān text and translations",
-    "hadith": "Ḥadīth",
-    "hadith-commentary": "Ḥadīth",
-    "dictionary": "Dictionaries and Lexicons",
-    "lexicography": "Dictionaries and Lexicons",
-    "fiqh": "Fiqh",
-    "usul": "Uṣūl al-Fiqh",
-    "maqasid": "Uṣūl al-Fiqh",
-    "aqida": "Doctrine (ʿaqīda)",
-    "theology": "Doctrine (ʿaqīda)",
-    "tarikh": "History (Tārīkh)",
-    "biography": "Tarājim & Ṭabāqāt (Biographies)",
-    "language": "Language (lugha)",
-    "linguistics": "Language (lugha)",
-    "grammar": "Grammar (naḥw and ṣarf)",
-    "rhetoric": "Rhetoric",
-    "adab": "Adab & adhkār",
-    "quran-sciences": "ʿUlūm al-Qurʾān",
-    "other": "Other",
+TOPIC_DATA_PATH = (Path(__file__).resolve().parent.parent
+                   / "midad-arabic-sources-import-templates" / "topics.json")
+TOPIC_DATA = json.loads(TOPIC_DATA_PATH.read_text(encoding="utf-8"))
+TURATH_TYPES: dict[str, str] = TOPIC_DATA["turathTypes"]
+TOPIC_ALIASES: dict[str, str] = TOPIC_DATA["aliases"]
+GENRE_TOPICS: dict[str, str] = TOPIC_DATA["genres"]
+GENRE_ALIASES: dict[str, str] = TOPIC_DATA["genreAliases"]
+TURATH_CAT_TOPICS: dict[int, list[str]] = {
+    int(key): list(value) for key, value in TOPIC_DATA["turathCategories"].items()
 }
 
 
 def normalize_genre(name: str) -> str:
     text = str(name or "").strip()
-    if text in ("grammar-syntax", "grammar-inflection"):
-        return "grammar"
-    if text in ("linguistics", "lexicography", "theology", "maqasid", "quran"):
-        return {
-            "linguistics": "language",
-            "lexicography": "dictionary",
-            "theology": "aqida",
-            "maqasid": "usul",
-            "quran": "quran-text",
-        }[text]
-    if text == "hadith-commentary":
-        return "hadith"
-    return text
-
-
-TURATH_CAT_TOPICS: dict[int, list[str]] = {
-    1: ["Doctrine (ʿaqīda)"],
-    2: ["al-Firaq wa-l-Rudūd"],
-    3: ["Tafsīr"],
-    4: ["ʿUlūm al-Qurʾān"],
-    5: ["al-Tajwīd wa-l-Qirāʾāt"],
-    6: ["Kutub al-Sunna"],
-    7: ["Ḥadīth"],
-    8: ["Ḥadīth"],
-    9: ["Ḥadīth"],
-    10: ["Ḥadīth"],
-    11: ["Uṣūl al-Fiqh"],
-    12: ["Fiqh"],
-    13: ["al-Manṭiq (Logic)"],
-    14: ["Fiqh", "Ḥanafī Fiqh"],
-    15: ["Fiqh", "Mālikī Fiqh"],
-    16: ["Fiqh", "Shāfiʿī Fiqh"],
-    17: ["Fiqh", "Ḥanbalī Fiqh"],
-    18: ["Fiqh"],
-    19: ["Fiqh"],
-    20: ["al-Siyāsa al-Sharʿiyya wa-l-Qaḍāʾ"],
-    21: ["al-Farāʾiḍ wa-l-Waṣāyā"],
-    22: ["al-Fatāwā"],
-    23: ["Adab & adhkār"],
-    24: ["Sīra"],
-    25: ["History (Tārīkh)"],
-    26: ["Tarājim & Ṭabāqāt (Biographies)"],
-    27: ["History (Tārīkh)"],
-    28: ["History (Tārīkh)"],
-    29: ["Language (lugha)"],
-    30: ["Dictionaries and Lexicons"],
-    31: ["Grammar (naḥw and ṣarf)"],
-    32: ["Adab & adhkār"],
-    33: ["Prosody (ʿArūḍ and Qāfiya)"],
-    34: ["Poetry collections"],
-    35: ["Rhetoric"],
-    36: ["Collections"],
-    37: ["Catalogs (fahāris)"],
-    38: ["Medicine (Ṭibb)"],
-    39: ["General books"],
-    40: ["Other"],
-}
+    return GENRE_ALIASES.get(text, text)
 
 
 def topic_label(name: str) -> str:
@@ -419,8 +326,6 @@ def topic_label(name: str) -> str:
     text = (name or "").strip()
     if text.startswith("Midad topic - "):
         text = text[len("Midad topic - "):]
-    if text == "Qurʾān (text)" or text == "Qurʾān Translations":
-        return "Qurʾān text and translations"
     if text.endswith(" Sources"):
         text = text[:-len(" Sources")]
     text = text.strip()
@@ -4886,8 +4791,6 @@ def work_model(work: dict, units: list[dict], created: str, layout: str) -> dict
             "section_level": int(work.get("section_level", 1)),
             # Turath's own build date, used by the upstream update check.
             "date_built": work.get("date_built", 0),
-            # Every category MOC this work belongs to (Turath + its type).
-            "mocs": list(work.get("mocs") or ([work["moc"]] if work.get("moc") else [])),
         },
         "units": units,
     }

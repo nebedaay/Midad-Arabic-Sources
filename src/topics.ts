@@ -1,63 +1,48 @@
-/**
- * Topic MOC naming.
- *
- * A topic's display name is the short scholarly label (`Ḥadīth`, `Tafsīr`,
- * `Sufism (taṣawwuf)`). Its note is `Midad topic - <label>` so a topic page never
- * collides with a user note on the same subject. Links carry the short label as
- * their alias: `[[Midad topic - Ḥadīth|Ḥadīth]]`.
- *
- * Older vaults named pages `<label> Sources` (`Tafsīr Sources`, `Ḥadīth Sources`,
- * …). `topicLabel` maps both shapes to the same short label, so generated notes
- * and user-added topics can coexist during the migration.
- */
+import topicData from "../midad-arabic-sources-import-templates/topics.json";
+
+interface TopicData {
+	topics: string[];
+	aliases: Record<string, string>;
+	genreAliases: Record<string, string>;
+	genres: Record<string, string>;
+	turathTypes: Record<string, string>;
+	turathCategories: Record<string, string[]>;
+	turathCatGenres: Record<string, string[]>;
+}
+
 export const TOPIC_PAGE_PREFIX = "Midad topic - ";
 
-/** Topics the built-in repositories can classify a work under. */
-export const BUILTIN_TOPICS = [
-	"Doctrine (ʿaqīda)",
-	"Tafsīr",
-	"ʿUlūm al-Qurʾān",
-	"al-Tajwīd wa-l-Qirāʾāt",
-	"Kutub al-Sunna",
-	"Ḥadīth",
-	"Uṣūl al-Fiqh",
-	"Fiqh",
-	"Ḥanafī Fiqh",
-	"Mālikī Fiqh",
-	"Shāfiʿī Fiqh",
-	"Ḥanbalī Fiqh",
-	"al-Firaq wa-l-Rudūd",
-	"al-Manṭiq (Logic)",
-	"al-Siyāsa al-Sharʿiyya wa-l-Qaḍāʾ",
-	"al-Farāʾiḍ wa-l-Waṣāyā",
-	"al-Fatāwā",
-	"Adab & adhkār",
-	"Sīra",
-	"History (Tārīkh)",
-	"Tarājim & Ṭabāqāt (Biographies)",
-	"Language (lugha)",
-	"Dictionaries and Lexicons",
-	"Grammar (naḥw and ṣarf)",
-	"Prosody (ʿArūḍ and Qāfiya)",
-	"Poetry collections",
-	"Rhetoric",
-	"Collections",
-	"Catalogs (fahāris)",
-	"Medicine (Ṭibb)",
-	"General books",
-	"Other",
-	"Qurʾān text and translations",
-];
+const DATA = topicData as TopicData;
 
-/** Older or shorter labels that now canonicalize to a renamed topic. */
-const TOPIC_ALIASES: Record<string, string> = {
-	"ʿAqīda": "Doctrine (ʿaqīda)",
-	"Tārīkh": "History (Tārīkh)",
-	"Language": "Language (lugha)",
-	"Dictionaries": "Dictionaries and Lexicons",
-	"Adab": "Adab & adhkār",
-	"al-Adab": "Adab & adhkār",
-};
+export const BUILTIN_TOPICS: string[] = DATA.topics;
+export const TOPIC_ALIASES: Record<string, string> = DATA.aliases;
+export const GENRE_TOPICS: Record<string, string> = DATA.genres;
+export const GENRE_ALIASES: Record<string, string> = DATA.genreAliases;
+
+/** Normalize a source genre key to its canonical key. */
+export function normalizeGenre(value: unknown): string {
+	const text = typeof value === "string" ? value.trim() : "";
+	return GENRE_ALIASES[text] ?? text;
+}
+
+/** The topic label for a source genre. */
+export function genreTopic(value: unknown): string {
+	return GENRE_TOPICS[normalizeGenre(value)] || "Other";
+}
+
+/** The genre keys a Turath category contributes, or the broad type. */
+export function turathGenres(category: number, fallback: string): string[] {
+	return DATA.turathCatGenres[String(category)] ?? [fallback];
+}
+
+/** The topics a Turath category contributes. */
+export function turathTopics(category: number): string[] {
+	return DATA.turathCategories[String(category)] ?? [];
+}
+
+export function turathTypeTopic(type: string): string {
+	return DATA.turathTypes[type] ?? genreTopic(type);
+}
 
 
 function plainTopicValue(value: unknown): string {
@@ -68,7 +53,6 @@ function plainTopicValue(value: unknown): string {
 		if (pipe >= 0) text = text.slice(0, pipe);
 	}
 	if (text.startsWith(TOPIC_PAGE_PREFIX)) text = text.slice(TOPIC_PAGE_PREFIX.length);
-	if (text === "Qurʾān (text)" || text === "Qurʾān Translations") return "Qurʾān text and translations";
 	if (text.endsWith(" Sources")) text = text.slice(0, -" Sources".length);
 	text = text.trim();
 	return TOPIC_ALIASES[text] ?? text;

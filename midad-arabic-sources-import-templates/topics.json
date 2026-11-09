@@ -1,0 +1,360 @@
+{
+ "topics": [
+  "Doctrine (ʿaqīda)",
+  "Tafsīr",
+  "ʿUlūm al-Qurʾān",
+  "al-Tajwīd wa-l-Qirāʾāt",
+  "Kutub al-Sunna",
+  "Ḥadīth",
+  "Uṣūl al-Fiqh",
+  "Fiqh",
+  "Ḥanafī Fiqh",
+  "Mālikī Fiqh",
+  "Shāfiʿī Fiqh",
+  "Ḥanbalī Fiqh",
+  "al-Firaq wa-l-Rudūd",
+  "al-Manṭiq (Logic)",
+  "al-Siyāsa al-Sharʿiyya wa-l-Qaḍāʾ",
+  "al-Farāʾiḍ wa-l-Waṣāyā",
+  "al-Fatāwā",
+  "Adab & adhkār",
+  "Sīra",
+  "History (Tārīkh)",
+  "Tarājim & Ṭabāqāt (Biographies)",
+  "Language (lugha)",
+  "Dictionaries and Lexicons",
+  "Grammar (naḥw and ṣarf)",
+  "Prosody (ʿArūḍ and Qāfiya)",
+  "Poetry collections",
+  "Rhetoric",
+  "Collections",
+  "Catalogs (fahāris)",
+  "Medicine (Ṭibb)",
+  "General books",
+  "Other",
+  "Qurʾān text and translations"
+ ],
+ "aliases": {
+  "ʿAqīda": "Doctrine (ʿaqīda)",
+  "Tārīkh": "History (Tārīkh)",
+  "Language": "Language (lugha)",
+  "Dictionaries": "Dictionaries and Lexicons",
+  "Adab": "Adab & adhkār",
+  "al-Adab": "Adab & adhkār",
+  "Qurʾān (text)": "Qurʾān text and translations",
+  "Qurʾān Translations": "Qurʾān text and translations"
+ },
+ "genreAliases": {
+  "grammar-syntax": "grammar",
+  "grammar-inflection": "grammar",
+  "linguistics": "language",
+  "lexicography": "dictionary",
+  "theology": "aqida",
+  "hadith-commentary": "hadith",
+  "maqasid": "usul",
+  "quran": "quran-text"
+ },
+ "genres": {
+  "tafsir": "Tafsīr",
+  "quran": "Qurʾān text and translations",
+  "quran-text": "Qurʾān text and translations",
+  "hadith": "Ḥadīth",
+  "hadith-commentary": "Ḥadīth",
+  "dictionary": "Dictionaries and Lexicons",
+  "lexicography": "Dictionaries and Lexicons",
+  "fiqh": "Fiqh",
+  "usul": "Uṣūl al-Fiqh",
+  "maqasid": "Uṣūl al-Fiqh",
+  "aqida": "Doctrine (ʿaqīda)",
+  "theology": "Doctrine (ʿaqīda)",
+  "tarikh": "History (Tārīkh)",
+  "biography": "Tarājim & Ṭabāqāt (Biographies)",
+  "tarajim": "Tarājim & Ṭabāqāt (Biographies)",
+  "language": "Language (lugha)",
+  "linguistics": "Language (lugha)",
+  "grammar": "Grammar (naḥw and ṣarf)",
+  "rhetoric": "Rhetoric",
+  "adab": "Adab & adhkār",
+  "quran-sciences": "ʿUlūm al-Qurʾān",
+  "firaq": "al-Firaq wa-l-Rudūd",
+  "tajwid": "al-Tajwīd wa-l-Qirāʾāt",
+  "kutub-sunna": "Kutub al-Sunna",
+  "logic": "al-Manṭiq (Logic)",
+  "siyasa": "al-Siyāsa al-Sharʿiyya wa-l-Qaḍāʾ",
+  "faraid": "al-Farāʾiḍ wa-l-Waṣāyā",
+  "fatawa": "al-Fatāwā",
+  "sira": "Sīra",
+  "prosody": "Prosody (ʿArūḍ and Qāfiya)",
+  "poetry": "Poetry collections",
+  "collections": "Collections",
+  "catalogs": "Catalogs (fahāris)",
+  "medicine": "Medicine (Ṭibb)",
+  "general": "General books",
+  "other": "Other"
+ },
+ "turathTypes": {
+  "tafsir": "Tafsīr",
+  "hadith": "Ḥadīth",
+  "fiqh": "Fiqh",
+  "usul": "Uṣūl al-Fiqh",
+  "aqida": "Doctrine (ʿaqīda)",
+  "tarikh": "History (Tārīkh)",
+  "language": "Language (lugha)",
+  "dictionary": "Dictionaries and Lexicons",
+  "quran-sciences": "ʿUlūm al-Qurʾān"
+ },
+ "turathCategories": {
+  "1": [
+   "Doctrine (ʿaqīda)"
+  ],
+  "2": [
+   "al-Firaq wa-l-Rudūd"
+  ],
+  "3": [
+   "Tafsīr"
+  ],
+  "4": [
+   "ʿUlūm al-Qurʾān"
+  ],
+  "5": [
+   "al-Tajwīd wa-l-Qirāʾāt"
+  ],
+  "6": [
+   "Kutub al-Sunna"
+  ],
+  "7": [
+   "Ḥadīth"
+  ],
+  "8": [
+   "Ḥadīth"
+  ],
+  "9": [
+   "Ḥadīth"
+  ],
+  "10": [
+   "Ḥadīth"
+  ],
+  "11": [
+   "Uṣūl al-Fiqh"
+  ],
+  "12": [
+   "Fiqh"
+  ],
+  "13": [
+   "al-Manṭiq (Logic)"
+  ],
+  "14": [
+   "Fiqh",
+   "Ḥanafī Fiqh"
+  ],
+  "15": [
+   "Fiqh",
+   "Mālikī Fiqh"
+  ],
+  "16": [
+   "Fiqh",
+   "Shāfiʿī Fiqh"
+  ],
+  "17": [
+   "Fiqh",
+   "Ḥanbalī Fiqh"
+  ],
+  "18": [
+   "Fiqh"
+  ],
+  "19": [
+   "Fiqh"
+  ],
+  "20": [
+   "al-Siyāsa al-Sharʿiyya wa-l-Qaḍāʾ"
+  ],
+  "21": [
+   "al-Farāʾiḍ wa-l-Waṣāyā"
+  ],
+  "22": [
+   "al-Fatāwā"
+  ],
+  "23": [
+   "Adab & adhkār"
+  ],
+  "24": [
+   "Sīra"
+  ],
+  "25": [
+   "History (Tārīkh)"
+  ],
+  "26": [
+   "Tarājim & Ṭabāqāt (Biographies)"
+  ],
+  "27": [
+   "History (Tārīkh)"
+  ],
+  "28": [
+   "History (Tārīkh)"
+  ],
+  "29": [
+   "Language (lugha)"
+  ],
+  "30": [
+   "Dictionaries and Lexicons"
+  ],
+  "31": [
+   "Grammar (naḥw and ṣarf)"
+  ],
+  "32": [
+   "Adab & adhkār"
+  ],
+  "33": [
+   "Prosody (ʿArūḍ and Qāfiya)"
+  ],
+  "34": [
+   "Poetry collections"
+  ],
+  "35": [
+   "Rhetoric"
+  ],
+  "36": [
+   "Collections"
+  ],
+  "37": [
+   "Catalogs (fahāris)"
+  ],
+  "38": [
+   "Medicine (Ṭibb)"
+  ],
+  "39": [
+   "General books"
+  ],
+  "40": [
+   "Other"
+  ]
+ },
+ "turathCatGenres": {
+  "1": [
+   "aqida"
+  ],
+  "2": [
+   "firaq"
+  ],
+  "3": [
+   "tafsir"
+  ],
+  "4": [
+   "quran-sciences"
+  ],
+  "5": [
+   "tajwid"
+  ],
+  "6": [
+   "kutub-sunna"
+  ],
+  "7": [
+   "hadith"
+  ],
+  "8": [
+   "hadith"
+  ],
+  "9": [
+   "hadith"
+  ],
+  "10": [
+   "hadith"
+  ],
+  "11": [
+   "usul"
+  ],
+  "12": [
+   "fiqh"
+  ],
+  "13": [
+   "logic"
+  ],
+  "14": [
+   "fiqh",
+   "hanafi"
+  ],
+  "15": [
+   "fiqh",
+   "maliki"
+  ],
+  "16": [
+   "fiqh",
+   "shafii"
+  ],
+  "17": [
+   "fiqh",
+   "hanbali"
+  ],
+  "18": [
+   "fiqh"
+  ],
+  "19": [
+   "fiqh"
+  ],
+  "20": [
+   "siyasa"
+  ],
+  "21": [
+   "faraid"
+  ],
+  "22": [
+   "fatawa"
+  ],
+  "23": [
+   "adab"
+  ],
+  "24": [
+   "sira"
+  ],
+  "25": [
+   "tarikh"
+  ],
+  "26": [
+   "tarajim"
+  ],
+  "27": [
+   "tarikh"
+  ],
+  "28": [
+   "tarikh"
+  ],
+  "29": [
+   "language"
+  ],
+  "30": [
+   "language",
+   "dictionary"
+  ],
+  "31": [
+   "language",
+   "grammar"
+  ],
+  "32": [
+   "adab"
+  ],
+  "33": [
+   "prosody"
+  ],
+  "34": [
+   "poetry"
+  ],
+  "35": [
+   "rhetoric"
+  ],
+  "36": [
+   "collections"
+  ],
+  "37": [
+   "catalogs"
+  ],
+  "38": [
+   "medicine"
+  ],
+  "39": [
+   "general"
+  ],
+  "40": [
+   "other"
+  ]
+ }
+}

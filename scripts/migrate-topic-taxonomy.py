@@ -16,23 +16,19 @@ Usage: python3 scripts/migrate-topic-taxonomy.py [--dry-run]
 """
 from __future__ import annotations
 
+import json
 import re
 import shutil
 import sys
 from datetime import datetime
 from pathlib import Path
 
-VAULT = Path(__file__).resolve().parents[3]
+REPO = Path(__file__).resolve().parent.parent
+VAULT = REPO.parents[1]
 SOURCE_ROOT = VAULT / "_7 Sources"
+TOPIC_DATA_PATH = REPO / "midad-arabic-sources-import-templates" / "topics.json"
 PREFIX = "Midad topic - "
-ALIASES = {
-    "ʿAqīda": "Doctrine (ʿaqīda)",
-    "Tārīkh": "History (Tārīkh)",
-    "Language": "Language (lugha)",
-    "Dictionaries": "Dictionaries and Lexicons",
-    "Adab": "Adab & adhkār",
-    "al-Adab": "Adab & adhkār",
-}
+ALIASES = json.loads(TOPIC_DATA_PATH.read_text(encoding="utf-8"))["aliases"]
 
 
 def label(value: str) -> str:
