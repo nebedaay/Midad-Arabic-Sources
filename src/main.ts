@@ -3220,6 +3220,27 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 				);
 			}
 			next = next.replace(/\[\[(Midad topic - ([^\]|]+))\]\]/g, (_, target: string, label: string) => `[[${target}|${label}]]`);
+			const frontmatter = this.app.metadataCache.getFileCache(file)?.frontmatter as Record<string, unknown> | undefined;
+			const topics = topicsFromValue(frontmatter?.["topics"]);
+			if (topics.length) {
+				const missing = topics
+					.filter((topic) => !next.includes(`[[${topicNoteName(topic)}|`))
+					.map((topic) => `  - "${topicLink(topic)}"`);
+				if (missing.length) {
+					let patched = next;
+					const block = /^midad-up:[ \t]*\n((?:[ \t]+-[ \t]*.*\n?)*)/m.exec(patched);
+					if (block && block.index !== undefined) {
+						const insert = block.index + block[0].length;
+						patched = patched.slice(0, insert) + missing.join("\n") + "\n" + patched.slice(insert);
+					} else if (patched.startsWith("---")) {
+						const end = patched.indexOf("\n---", 3);
+						if (end >= 0) {
+							patched = patched.slice(0, end) + "\nmidad-up:\n" + missing.join("\n") + patched.slice(end);
+						}
+					}
+					next = patched;
+				}
+			}
 			if (next !== text) {
 				try {
 					await this.app.vault.modify(file, next);

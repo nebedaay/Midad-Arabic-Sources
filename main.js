@@ -21752,6 +21752,7 @@ var MidadArabicSourcesPlugin = class extends import_obsidian18.Plugin {
     }
   }
   async repairTopicLinks() {
+    var _a2;
     const oldTopics = [
       "Tafs\u012Br Sources",
       "\u1E24ad\u012Bth Sources",
@@ -21778,6 +21779,25 @@ var MidadArabicSourcesPlugin = class extends import_obsidian18.Plugin {
         next = next.replace(new RegExp(`\\[\\[${old.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?:\\|[^\\]]*)?\\]\\]`, "g"), topicLink(label));
       }
       next = next.replace(/\[\[(Midad topic - ([^\]|]+))\]\]/g, (_, target, label) => `[[${target}|${label}]]`);
+      const frontmatter = (_a2 = this.app.metadataCache.getFileCache(file)) == null ? void 0 : _a2.frontmatter;
+      const topics = topicsFromValue(frontmatter == null ? void 0 : frontmatter["topics"]);
+      if (topics.length) {
+        const missing = topics.filter((topic) => !next.includes(`[[${topicNoteName(topic)}|`)).map((topic) => `  - "${topicLink(topic)}"`);
+        if (missing.length) {
+          let patched = next;
+          const block = /^midad-up:[ \t]*\n((?:[ \t]+-[ \t]*.*\n?)*)/m.exec(patched);
+          if (block && block.index !== void 0) {
+            const insert = block.index + block[0].length;
+            patched = patched.slice(0, insert) + missing.join("\n") + "\n" + patched.slice(insert);
+          } else if (patched.startsWith("---")) {
+            const end = patched.indexOf("\n---", 3);
+            if (end >= 0) {
+              patched = patched.slice(0, end) + "\nmidad-up:\n" + missing.join("\n") + patched.slice(end);
+            }
+          }
+          next = patched;
+        }
+      }
       if (next !== text) {
         try {
           await this.app.vault.modify(file, next);
