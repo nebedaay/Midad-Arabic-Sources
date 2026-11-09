@@ -21730,6 +21730,22 @@ var MidadArabicSourcesPlugin = class extends import_obsidian18.Plugin {
       console.error("[midad-arabic-sources] index rename", error);
     }
   }
+  async restoreSourceParentName() {
+    if ((this.settings.sourceMocParent || "").trim() && this.settings.sourceMocParent.trim() !== "Midad Arabic Sources")
+      return;
+    const canonical = this.sourceNotePath("Midad Arabic Sources");
+    if (this.app.vault.getAbstractFileByPath(canonical))
+      return;
+    const wrong = this.sourceNotePath("Midad topic - Midad Arabic");
+    const file = this.app.vault.getAbstractFileByPath(wrong);
+    if (!(file instanceof import_obsidian18.TFile))
+      return;
+    try {
+      await this.app.fileManager.renameFile(file, canonical);
+    } catch (error) {
+      console.error("[midad-arabic-sources] restore source parent", error);
+    }
+  }
   async deleteGeneratedTopicMoc(file) {
     try {
       const raw = await this.app.vault.read(file);
@@ -21762,7 +21778,16 @@ var MidadArabicSourcesPlugin = class extends import_obsidian18.Plugin {
       "T\u0101r\u012Bkh Sources",
       "Language Sources",
       "\u02BFUl\u016Bm al-Qur\u02BE\u0101n Sources",
+      "Tafs\u012Br",
+      "\u1E24ad\u012Bth",
+      "Fiqh",
+      "U\u1E63\u016Bl al-Fiqh",
+      "\u02BFAq\u012Bda",
+      "T\u0101r\u012Bkh",
+      "Language",
+      "\u02BFUl\u016Bm al-Qur\u02BE\u0101n",
       "Dictionaries",
+      "Qur\u02BE\u0101n text and translations",
       "Qur\u02BE\u0101n (text)",
       "Qur\u02BE\u0101n Translations"
     ];
@@ -21778,6 +21803,8 @@ var MidadArabicSourcesPlugin = class extends import_obsidian18.Plugin {
         const label = old === "Qur\u02BE\u0101n (text)" || old === "Qur\u02BE\u0101n Translations" ? "Qur\u02BE\u0101n text and translations" : old === "Dictionaries" ? "Dictionaries" : topicLabel(old);
         next = next.replace(new RegExp(`\\[\\[${old.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?:\\|[^\\]]*)?\\]\\]`, "g"), topicLink(label));
       }
+      next = next.replace(/\[\[Midad topic - Midad Arabic(?:\|Midad Arabic)?\]\]/g, "[[Midad Arabic Sources]]");
+      next = next.replace(/\[\[Midad Arabic(?:\|[^\]]*)?\]\]/g, "[[Midad Arabic Sources]]");
       next = next.replace(/\[\[(Midad topic - ([^\]|]+))\]\]/g, (_, target, label) => `[[${target}|${label}]]`);
       const frontmatter = (_a2 = this.app.metadataCache.getFileCache(file)) == null ? void 0 : _a2.frontmatter;
       const topics = topicsFromValue(frontmatter == null ? void 0 : frontmatter["topics"]);
@@ -21812,8 +21839,15 @@ var MidadArabicSourcesPlugin = class extends import_obsidian18.Plugin {
     const folder = this.app.vault.getAbstractFileByPath((0, import_obsidian18.normalizePath)(root));
     if (!(folder instanceof import_obsidian18.TFolder))
       return;
+    const reserved = new Set([
+      "Midad Arabic Sources",
+      TOPICS_NOTE,
+      REPOSITORIES_NOTE,
+      MY_CONTENT_NOTE,
+      this.settings.sourceMocParent.trim()
+    ]);
     for (const child of folder.children) {
-      if (!(child instanceof import_obsidian18.TFile) || child.extension !== "md")
+      if (!(child instanceof import_obsidian18.TFile) || child.extension !== "md" || reserved.has(child.basename))
         continue;
       const label = child.basename.endsWith(" Sources") ? child.basename.slice(0, -" Sources".length) : child.basename === "Qur\u02BE\u0101n (text)" || child.basename === "Qur\u02BE\u0101n Translations" ? "Qur\u02BE\u0101n text and translations" : "";
       if (!label)
@@ -21848,6 +21882,7 @@ var MidadArabicSourcesPlugin = class extends import_obsidian18.Plugin {
   }
   async refreshSourcesIndex() {
     await this.renameLegacySourceIndex();
+    await this.restoreSourceParentName();
     await this.renameLegacyTopicMocs();
     const templates = await this.loadIndexTemplates();
     if (!templates)
@@ -21927,7 +21962,8 @@ var MidadArabicSourcesPlugin = class extends import_obsidian18.Plugin {
       const target = (_c = (_b2 = (_a2 = /^\[\[([^\]|]+)/.exec(text)) == null ? void 0 : _a2[1]) == null ? void 0 : _b2.trim()) != null ? _c : "";
       if (!target)
         return text;
-      if (target.startsWith("Midad topic - ") || target.endsWith(" Sources") || target === "Dictionaries" || target === "Qur\u02BE\u0101n text and translations" || target === "Qur\u02BE\u0101n (text)" || target === "Qur\u02BE\u0101n Translations") {
+      const reserved = new Set(["Midad Arabic Sources", TOPICS_NOTE, REPOSITORIES_NOTE, MY_CONTENT_NOTE]);
+      if (!reserved.has(target) && (target.startsWith("Midad topic - ") || target.endsWith(" Sources") || target === "Dictionaries" || target === "Qur\u02BE\u0101n text and translations" || target === "Qur\u02BE\u0101n (text)" || target === "Qur\u02BE\u0101n Translations")) {
         return topicLink(target);
       }
       return text;
@@ -21988,6 +22024,13 @@ var MidadArabicSourcesPlugin = class extends import_obsidian18.Plugin {
     });
     const written = [];
     for (const topic of model.topics) {
+      const topicPath = (0, import_obsidian18.normalizePath)(`${this.sourcesRoot()}/${topic.entry.note}.md`);
+      const topicFile = this.app.vault.getAbstractFileByPath(topicPath);
+      if (topic.entry.count === 0) {
+        if (topicFile instanceof import_obsidian18.TFile)
+          await this.deleteGeneratedTopicMoc(topicFile);
+        continue;
+      }
       const sections = buildMocSections(topic.works);
       for (const kind of ["transcription", "translation"]) {
         const entries = topic.local.filter((entry) => entry.kind === kind);
@@ -22529,10 +22572,7 @@ var MidadArabicSourcesPlugin = class extends import_obsidian18.Plugin {
       ].find((value) => value.length > 0)) != null ? _o : file.basename;
       const key = base ? `stem:${docType}:${base.toLocaleLowerCase()}` : entryString("workKey") ? `adopted:${docType}:${entryString("workKey")}:${unitKey2}` : `path:${docType}:${path2}`;
       const topicValues = Array.isArray(fm["topics"]) ? fm["topics"].map((value) => typeof value === "string" ? value : "") : typeof fm["topics"] === "string" ? [String(fm["topics"])] : [];
-      const topics = topicValues.map((value) => {
-        const wikilink = /\[\[([^\]|]+)/.exec(value);
-        return canonicalMocName((wikilink ? wikilink[1] : value).trim());
-      }).filter(Boolean);
+      const topics = topicsFromValue(topicValues);
       let group = groups.get(key);
       if (!group) {
         group = { docType, route, title, parentStem: "", parentTitle: "", volumes: [], topics: [] };
@@ -22687,8 +22727,8 @@ ${lines.join("\n")}`;
     const groups = categories.map((category) => ({
       name: category.note,
       label: category.label,
-      items: category.entries.map((entry) => ({ name: entry.note, label: entry.label, count: entry.count }))
-    }));
+      items: category.entries.filter((entry) => entry.count > 0).map((entry) => ({ name: entry.note, label: entry.label, count: entry.count }))
+    })).filter((group) => group.items.length > 0);
     const out = renderSourcesNote(templates, groups, generated);
     await writeMerged(this.app, file.path, out, false, false);
     return file.path;

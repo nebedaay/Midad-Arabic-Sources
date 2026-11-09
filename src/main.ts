@@ -3175,6 +3175,21 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		}
 	}
 
+	/** Restore a parent note that an earlier migration typoed as a topic page. */
+	private async restoreSourceParentName(): Promise<void> {
+		if ((this.settings.sourceMocParent || "").trim() && this.settings.sourceMocParent.trim() !== "Midad Arabic Sources") return;
+		const canonical = this.sourceNotePath("Midad Arabic Sources");
+		if (this.app.vault.getAbstractFileByPath(canonical)) return;
+		const wrong = this.sourceNotePath("Midad topic - Midad Arabic");
+		const file = this.app.vault.getAbstractFileByPath(wrong);
+		if (!(file instanceof TFile)) return;
+		try {
+			await this.app.fileManager.renameFile(file, canonical);
+		} catch (error) {
+			console.error("[midad-arabic-sources] restore source parent", error);
+		}
+	}
+
 	/** Delete an old generated topic MOC when its replacement already exists. */
 	private async deleteGeneratedTopicMoc(file: TFile): Promise<boolean> {
 		try {
@@ -3200,7 +3215,9 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		const oldTopics = [
 			"Tafsīr Sources", "Ḥadīth Sources", "Fiqh Sources", "Uṣūl al-Fiqh Sources",
 			"ʿAqīda Sources", "Tārīkh Sources", "Language Sources", "ʿUlūm al-Qurʾān Sources",
-			"Dictionaries", "Qurʾān (text)", "Qurʾān Translations",
+			"Tafsīr", "Ḥadīth", "Fiqh", "Uṣūl al-Fiqh", "ʿAqīda", "Tārīkh", "Language",
+			"ʿUlūm al-Qurʾān", "Dictionaries", "Qurʾān text and translations",
+			"Qurʾān (text)", "Qurʾān Translations",
 		];
 		for (const file of this.app.vault.getMarkdownFiles()) {
 			let text: string;
@@ -3219,6 +3236,8 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 					topicLink(label),
 				);
 			}
+			next = next.replace(/\[\[Midad topic - Midad Arabic(?:\|Midad Arabic)?\]\]/g, "[[Midad Arabic Sources]]");
+			next = next.replace(/\[\[Midad Arabic(?:\|[^\]]*)?\]\]/g, "[[Midad Arabic Sources]]");
 			next = next.replace(/\[\[(Midad topic - ([^\]|]+))\]\]/g, (_, target: string, label: string) => `[[${target}|${label}]]`);
 			const frontmatter = this.app.metadataCache.getFileCache(file)?.frontmatter as Record<string, unknown> | undefined;
 			const topics = topicsFromValue(frontmatter?.["topics"]);
@@ -3256,8 +3275,12 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		const root = this.sourcesRoot();
 		const folder = this.app.vault.getAbstractFileByPath(normalizePath(root));
 		if (!(folder instanceof TFolder)) return;
+		const reserved = new Set([
+			"Midad Arabic Sources", TOPICS_NOTE, REPOSITORIES_NOTE, MY_CONTENT_NOTE,
+			this.settings.sourceMocParent.trim(),
+		]);
 		for (const child of folder.children) {
-			if (!(child instanceof TFile) || child.extension !== "md") continue;
+			if (!(child instanceof TFile) || child.extension !== "md" || reserved.has(child.basename)) continue;
 			const label = child.basename.endsWith(" Sources")
 				? child.basename.slice(0, -" Sources".length)
 				: child.basename === "Qurʾān (text)" || child.basename === "Qurʾān Translations"
@@ -3295,6 +3318,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 
 	async refreshSourcesIndex(): Promise<string[]> {
 		await this.renameLegacySourceIndex();
+		await this.restoreSourceParentName();
 		await this.renameLegacyTopicMocs();
 		const templates = await this.loadIndexTemplates();
 		if (!templates) return [];
@@ -3380,12 +3404,14 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			const text = String(item);
 			const target = /^\[\[([^\]|]+)/.exec(text)?.[1]?.trim() ?? "";
 			if (!target) return text;
-			if (target.startsWith("Midad topic - ")
+			const reserved = new Set(["Midad Arabic Sources", TOPICS_NOTE, REPOSITORIES_NOTE, MY_CONTENT_NOTE]);
+			if (!reserved.has(target) && (
+				target.startsWith("Midad topic - ")
 				|| target.endsWith(" Sources")
 				|| target === "Dictionaries"
 				|| target === "Qurʾān text and translations"
 				|| target === "Qurʾān (text)"
-				|| target === "Qurʾān Translations") {
+				|| target === "Qurʾān Translations")) {
 				return topicLink(target);
 			}
 			return text;
@@ -3454,6 +3480,12 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		const written: string[] = [];
 
 		for (const topic of model.topics) {
+			const topicPath = normalizePath(`${this.sourcesRoot()}/${topic.entry.note}.md`);
+			const topicFile = this.app.vault.getAbstractFileByPath(topicPath);
+			if (topic.entry.count === 0) {
+				if (topicFile instanceof TFile) await this.deleteGeneratedTopicMoc(topicFile);
+				continue;
+			}
 			const sections = buildMocSections(topic.works);
 			for (const kind of ["transcription", "translation"] as const) {
 				const entries = topic.local.filter((entry) => entry.kind === kind);
@@ -4111,12 +4143,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 				: typeof fm["topics"] === "string"
 					? [String(fm["topics"])]
 					: [];
-			const topics = topicValues
-				.map((value) => {
-					const wikilink = /\[\[([^\]|]+)/.exec(value);
-					return canonicalMocName((wikilink ? wikilink[1] : value).trim());
-				})
-				.filter(Boolean);
+			const topics = topicsFromValue(topicValues);
 			let group = groups.get(key);
 			if (!group) {
 				group = { docType, route, title, parentStem: "", parentTitle: "", volumes: [], topics: [] };
@@ -4271,11 +4298,15 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 				return null;
 			}
 		}
-		const groups: SourcesMocGroup[] = categories.map((category) => ({
-			name: category.note,
-			label: category.label,
-			items: category.entries.map((entry) => ({ name: entry.note, label: entry.label, count: entry.count })),
-		}));
+		const groups: SourcesMocGroup[] = categories
+			.map((category) => ({
+				name: category.note,
+				label: category.label,
+				items: category.entries
+					.filter((entry) => entry.count > 0)
+					.map((entry) => ({ name: entry.note, label: entry.label, count: entry.count })),
+			}))
+			.filter((group) => group.items.length > 0);
 		const out = renderSourcesNote(templates, groups, generated);
 		// append (not replace) so a user-written note keeps its own content.
 		await writeMerged(this.app, file.path, out, false, false);
