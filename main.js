@@ -6065,7 +6065,7 @@ def main() -> int:
                     existing = fm[block[0]:block[1]]
                     additions = [f'  - "{v}"' for v in wanted if v and f'"{v}"' not in existing]
                     if additions:
-                        fm = fm[:block[1]] + "\\n".join(additions) + "\\n" + fm[block[1]:]
+                        fm = fm[:block[1]].rstrip("\\n") + "\\n" + "\\n".join(additions) + "\\n" + fm[block[1]:]
                 else:
                     fm = fm.rstrip("\\n") + "\\naliases:\\n" + "".join(f'  - "{v}"\\n' for v in wanted if v)
                 target.write_text(fm + body, encoding="utf-8")
