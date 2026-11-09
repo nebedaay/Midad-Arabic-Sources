@@ -23,7 +23,7 @@ For each PDF the pipeline:
 
 The intermediates live under `.midad-arabic-sources/work/` and are removed once the vault note is written; the batch archive under `.midad-arabic-sources/archive/` is kept, and it is what **Reprocess from archive…** re-runs without resubmitting.
 
-Arabic metadata is kept in `title-ar`, `shorttitle-ar`, `authors-ar`, and `editors-ar`; an Arabic work carries `title-ar` even when the cover did not supply it, with an empty value the user can fill later. The **Include Arabic aliases** setting (on by default) adds the Arabic-script alias when an Arabic title and author are known; each note gets at most one romanized and one Arabic alias.
+Arabic metadata is kept in `title-ar`, `shorttitle-ar`, `authors-ar`, and `editors-ar`; an Arabic work carries `title-ar` even when the cover did not supply it, with an empty value the user can fill later. The **Include Arabic aliases** setting (on by default) adds the Arabic-script alias when an Arabic title and author are known; each note gets at most one romanized and one Arabic alias. A `topics:` entry (for example `Tafsīr`) is also added to the note's `midad-up` as `[[Midad topic - Tafsīr|Tafsīr]]`.
 
 The finished note is written to `<Sources>/Transcriptions/` as `@<citekey> - transcription.md` when it belongs to a Zotero item, with one `#### p. N` heading per page. A standalone PDF, with no Zotero citekey, uses `mas-<slug> - transcription.md`. Transcriptions and translations are automatically made annotatable; multi-volume series share one annotation note. A multi-volume item gets `@<citekey> - transcription - vol. N.md` (or the `mas-` form for a standalone series), and the volume number is inferred from the PDF filename when the dialog does not supply one.
 

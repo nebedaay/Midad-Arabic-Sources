@@ -20,6 +20,7 @@ import {
 	SettingDefinitionItem,
 	TAbstractFile,
 	TFile,
+	TFolder,
 	TextComponent,
 	setIcon,
 	normalizePath,
@@ -54,6 +55,7 @@ import {
 } from "./sourceImport/history";
 import { BUNDLED_ASSETS } from "./assets.generated";
 import { localDate } from "./time";
+import { BUILTIN_TOPICS, topicLabel, topicLink, topicNoteName, topicsFromValue } from "./topics";
 import { identityOfFrontmatter, sourceIdToYaml, sourceOfFrontmatter } from "./sourceIds";
 import {
 	ANNOTATIONS_NOTE,
@@ -3172,8 +3174,71 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		}
 	}
 
+	/** Delete an old generated topic MOC when its replacement already exists. */
+	private async deleteGeneratedTopicMoc(file: TFile): Promise<boolean> {
+		try {
+			const raw = await this.app.vault.read(file);
+			const managed = /<span class="mas-managed">mas-managed<\/span>[\s\S]*?<span class="mas-managed">\/mas-managed<\/span>/;
+			if (!managed.test(raw)) return false;
+			let outside = raw.replace(managed, "");
+			if (outside.startsWith("---")) {
+				const end = outside.indexOf("\n---", 3);
+				if (end >= 0) outside = outside.slice(end + 4);
+			}
+			if (outside.trim()) return false;
+			await this.app.fileManager.trashFile(file);
+			return true;
+		} catch (error) {
+			console.error("[midad-arabic-sources] topic MOC cleanup", error);
+			return false;
+		}
+	}
+
+	/** Rename old `<Topic> Sources` MOCs to `Midad topic - <Topic>`. */
+	private async renameLegacyTopicMocs(): Promise<void> {
+		const root = this.sourcesRoot();
+		const folder = this.app.vault.getAbstractFileByPath(normalizePath(root));
+		if (!(folder instanceof TFolder)) return;
+		for (const child of folder.children) {
+			if (!(child instanceof TFile) || child.extension !== "md") continue;
+			const label = child.basename.endsWith(" Sources")
+				? child.basename.slice(0, -" Sources".length)
+				: child.basename === "Qurʾān (text)" || child.basename === "Qurʾān Translations"
+					? "Qurʾān text and translations"
+					: "";
+			if (!label) continue;
+			const next = `${topicNoteName(label)}.md`;
+			if (next === child.name) continue;
+			const target = normalizePath(`${root}/${next}`);
+			const existing = this.app.vault.getAbstractFileByPath(target);
+			if (existing instanceof TFile) {
+				await this.deleteGeneratedTopicMoc(child);
+				continue;
+			}
+			try {
+				const oldName = child.basename;
+				await this.app.fileManager.renameFile(child, target);
+				const moved = this.app.vault.getAbstractFileByPath(target);
+				if (moved instanceof TFile) {
+					await this.app.fileManager.processFrontMatter(moved, (fm: Record<string, unknown>) => {
+						const aliases = Array.isArray(fm["aliases"])
+							? (fm["aliases"] as unknown[]).filter((value): value is string => typeof value === "string")
+							: typeof fm["aliases"] === "string" ? [String(fm["aliases"])] : [];
+						for (const alias of [topicLabel(label), oldName]) {
+							if (alias && !aliases.includes(alias)) aliases.push(alias);
+						}
+						fm["aliases"] = aliases;
+					});
+				}
+			} catch (error) {
+				console.error("[midad-arabic-sources] topic MOC rename", error);
+			}
+		}
+	}
+
 	async refreshSourcesIndex(): Promise<string[]> {
 		await this.renameLegacySourceIndex();
+		await this.renameLegacyTopicMocs();
 		const templates = await this.loadIndexTemplates();
 		if (!templates) return [];
 		const manifest = await this.loadSourceManifest();
@@ -3217,6 +3282,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 
 	/** Rebuild just the model and the MOCs it drives (local content changed). */
 	async refreshResourceIndex(): Promise<string[]> {
+		await this.renameLegacyTopicMocs();
 		const templates = await this.loadIndexTemplates();
 		if (!templates) return [];
 		const manifest = await this.loadSourceManifest();
@@ -3250,21 +3316,50 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		return [...groups.values()];
 	}
 
-	/** Canonical topic MOC names for a repository work (never a repository MOC). */
+	/** Normalize cached model topic links to the current topic MOC names. */
+	normalizeUpLinks(value: unknown): string[] {
+		const items = Array.isArray(value) ? value : typeof value === "string" ? [value] : [];
+		return items.map((item) => {
+			const text = String(item);
+			const target = /^\[\[([^\]|]+)/.exec(text)?.[1]?.trim() ?? "";
+			if (!target) return text;
+			if (target.startsWith("Midad topic - ")
+				|| target.endsWith(" Sources")
+				|| target === "Dictionaries"
+				|| target === "Qurʾān text and translations"
+				|| target === "Qurʾān (text)"
+				|| target === "Qurʾān Translations") {
+				return topicLink(target);
+			}
+			return text;
+		});
+	}
+
+	/** User-added `topics` on a repository work's hub, as short labels. */
+	userTopicsForWork(work: JsonObject): string[] {
+		const dir = String(work.dir ?? "").trim();
+		if (!dir) return [];
+		const path = normalizePath(`${this.installedSourcesRoot()}/${dir}.md`);
+		const file = this.app.vault.getAbstractFileByPath(path);
+		if (!(file instanceof TFile)) return [];
+		const frontmatter = this.app.metadataCache.getFileCache(file)?.frontmatter as Record<string, unknown> | undefined;
+		return topicsFromValue(frontmatter?.["topics"]);
+	}
+
+	/** Canonical topic labels for a repository work (JSON classification + user topics). */
 	topicsForWork(work: JsonObject): string[] {
 		const names = Array.isArray(work.mocs) ? (work.mocs as string[]) : (typeof work.moc === "string" ? [work.moc] : []);
 		const repositories = new Set(this.repositoryMocNames);
-		return names.map(canonicalMocName).filter((name) => name && name !== ANNOTATIONS_NOTE && !repositories.has(name));
+		const json = names
+			.map((name) => topicLabel(canonicalMocName(name)))
+			.filter((name) => name && name !== ANNOTATIONS_NOTE && !repositories.has(name));
+		const user = this.userTopicsForWork(work);
+		return [...new Set([...json.filter((name) => !repositories.has(name)), ...user])];
 	}
 
 	/** A short display label for a category MOC. */
 	mocLabel(name: string): string {
-		return this.repositoryMocLabels[name] ?? (
-			name === "Tafsīr Sources" ? "Tafsīr"
-				: name === "Ḥadīth Sources" ? "Ḥadīth"
-					: name === "Language Sources" ? "Language"
-						: name
-		);
+		return this.repositoryMocLabels[name] ?? topicLabel(name);
 	}
 
 	/**
@@ -3284,6 +3379,9 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			count: Object.values(summary).reduce((total, entry) => total + entry.count, 0),
 			works: Object.values(summary).filter((entry) => entry.count > 0).length,
 		};
+		const knownTopics = new Set(BUILTIN_TOPICS);
+		for (const work of installed) for (const topic of this.topicsForWork(work)) knownTopics.add(topic);
+		for (const resource of local) for (const topic of resource.topics) knownTopics.add(topic);
 		const model = buildResourceModel({
 			installed,
 			repositories,
@@ -3291,7 +3389,9 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			annotations,
 			generated: today,
 			topicsForWork: (work) => this.topicsForWork(work),
+			knownTopics: [...knownTopics],
 			topicLabel: (name) => this.mocLabel(name),
+			topicNote: (name) => topicNoteName(name),
 			repositoryLabel: (name) => this.repositoryMocLabels[name] ?? name,
 		});
 		const written: string[] = [];
@@ -3339,7 +3439,15 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 	): Promise<string> {
 		return renderMocIndex(
 			this.app, templates, name,
-			[{ name: section, works: category.entries.map((entry) => ({ dir: entry.note, title: entry.label })) }],
+			[{
+				name: section,
+				works: category.entries.map((entry) => ({
+					dir: entry.note,
+					title: entry.label,
+					count: entry.count,
+					linked: entry.kind !== "topic" || entry.count > 0,
+				})),
+			}],
 			this.sourcesRoot(), "Midad Arabic Sources", generated, true
 		);
 	}
@@ -3737,6 +3845,8 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			// `extra` does.
 			const pub = pubs[this.workKey(model.work)] ?? {};
 			model.work.publication = { ...pub, mas_note: this.masNote(pub) };
+			model.work.up = this.normalizeUpLinks(model.work.up);
+			model.work.user_topics = this.userTopicsForWork(model.work);
 			const work = String(model.work.title || model.work.dir || model.work.id);
 			const emit = (step: number, steps: number) =>
 				onProgress?.({ index: i, total: batch.length, work, step, steps });

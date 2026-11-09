@@ -177,7 +177,7 @@ async function mocEntry(
 		return [`- ${annotationLink} — ${entry.count} ${plural}${orphan}${sourceLink}`];
 	}
 	const lines = [`- ${annotationLink} — ${entry.count} ${plural}${orphan}`];
-	for (const unit of units) lines.push(`  - ${noteHeadingLink(unit.entry.note, "", unitLabel(work, unit.entry))}`);
+	for (const unit of units) lines.push(`\t- ${noteHeadingLink(unit.entry.note, "", unitLabel(work, unit.entry))}`);
 	return lines;
 }
 

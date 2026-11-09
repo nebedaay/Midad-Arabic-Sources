@@ -123,10 +123,14 @@ export interface BuildResourceModelInput {
 	local: LocalResource[];
 	annotations: { count: number; works: number };
 	generated: string;
-	/** Canonical topic MOC names for a repository work. */
+	/** Canonical topic labels for a repository work. */
 	topicsForWork: (work: JsonObject) => string[];
-	/** Display label for a topic MOC. */
+	/** Every known topic label, including ones no installed work uses. */
+	knownTopics: string[];
+	/** Display label for a topic label. */
 	topicLabel: (name: string) => string;
+	/** Page name for a topic label. */
+	topicNote: (name: string) => string;
 	/** Display label for a repository MOC. */
 	repositoryLabel: (name: string) => string;
 }
@@ -145,7 +149,13 @@ export function buildResourceModel(input: BuildResourceModelInput): ResourceMode
 		let topic = topics.get(name);
 		if (!topic) {
 			topic = {
-				entry: { id: `topic:${name}`, kind: "topic", label: input.topicLabel(name) || name, note: name, count: 0 },
+				entry: {
+					id: `topic:${name}`,
+					kind: "topic",
+					label: input.topicLabel(name) || name,
+					note: input.topicNote(name) || name,
+					count: 0,
+				},
 				works: [],
 				local: [],
 			};
@@ -153,6 +163,12 @@ export function buildResourceModel(input: BuildResourceModelInput): ResourceMode
 		}
 		return topic;
 	};
+
+	// Start with every official/user-visible topic so the Topics MOC can show
+	// unused subjects too, not only the ones an installed work happens to use.
+	for (const name of input.knownTopics) {
+		if (name) ensureTopic(name);
+	}
 
 	for (const work of input.installed) {
 		for (const name of input.topicsForWork(work)) {
@@ -171,7 +187,9 @@ export function buildResourceModel(input: BuildResourceModelInput): ResourceMode
 		}
 	}
 
-	const topicList = byLabel([...topics.values()]);
+	const topicList = byLabel([...topics.values()]).sort((a, b) =>
+		Number(b.entry.count > 0) - Number(a.entry.count > 0)
+		|| a.entry.label.localeCompare(b.entry.label, undefined, { sensitivity: "base", numeric: true }));
 	const repositoryList = byLabel(
 		input.repositories.map((group) => ({
 			entry: {

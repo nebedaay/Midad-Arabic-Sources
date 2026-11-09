@@ -4,7 +4,20 @@
 <% add_property('updated', updated()); -%>
 <% const pub = work.publication || {}; -%>
 <% const yamlId = (value) => String(value).replace(/:/g, '/'); -%>
-<% add_property('midad-up', [...work.up, '[[Midad Arabic Sources]]']); -%>
+<% const topicLink = (name) => {
+  let label = String(name || '').trim();
+  if (label.startsWith('Midad topic - ')) label = label.slice('Midad topic - '.length);
+  if (label === 'Qurʾān (text)' || label === 'Qurʾān Translations') label = 'Qurʾān text and translations';
+  if (label.endsWith(' Sources')) label = label.slice(0, -' Sources'.length);
+  return `[[Midad topic - ${label}|${label}]]`;
+}; -%>
+<% const upLinks = [...work.up]; -%>
+<% for (const topic of (work.user_topics || [])) {
+  const link = topicLink(topic);
+  if (!upLinks.includes(link)) upLinks.push(link);
+} -%>
+<% upLinks.push('[[Midad Arabic Sources]]'); -%>
+<% add_property('midad-up', upLinks); -%>
 <% add_property('midad-id', yamlId('repo:' + work.key)); -%>
 <% /* The id now carries the kind; the retired separate properties are removed
    from older notes on re-render. */ -%>

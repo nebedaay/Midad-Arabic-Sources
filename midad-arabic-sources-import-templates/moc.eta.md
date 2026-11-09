@@ -9,7 +9,11 @@
 # <%= s.name %>
 
 <% for (const w of s.works) { -%>
-- <%= wikilink(w.dir, w.title) %>
+<% if (w.linked === false) { -%>
+- <%= w.title %><% if (w.count != null) { %> (<%= w.count %>)<% } %>
+<% } else { -%>
+- <%= wikilink(w.dir, w.title) %><% if (w.count != null) { %> (<%= w.count %>)<% } %>
+<% } -%>
 <% } -%>
 
 <% } -%>

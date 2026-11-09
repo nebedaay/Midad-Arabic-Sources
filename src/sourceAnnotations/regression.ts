@@ -2,6 +2,8 @@ import { TFile, normalizePath, type App } from "obsidian";
 import { AdoptedNotesRegistry } from "./adopted";
 import { buildNavigationData } from "./navigation";
 import { identityOfFrontmatter, parseMidadId, sourceOfFrontmatter } from "../sourceIds";
+import { topicLabel, topicLink, topicNoteName } from "../topics";
+import { buildResourceModel } from "../resourceModel";
 import { findNormalized, resolveAnnotations, visibleSegments } from "./resolve";
 import { reanchorAnnotation } from "./reanchor";
 import {
@@ -165,6 +167,26 @@ export async function runAnnotationRegressionTests(): Promise<RegressionResult> 
 	const fuzzyMatch = reanchorAnnotation(changed, annotation);
 	check("re-anchor recovers a changed word", !!fuzzyMatch && changed.slice(fuzzyMatch.start, fuzzyMatch.end) === "study the Qur’an and teach it");
 	check("re-anchor refuses a deleted quote", reanchorAnnotation("Nothing here.", annotation) === null);
+
+	check("topic labels drop the old Sources suffix", topicLabel("Tafsīr Sources") === "Tafsīr");
+	check("topic links use the short alias", topicLink("Ḥadīth Sources") === "[[Midad topic - Ḥadīth|Ḥadīth]]");
+	check("topic pages use the Midad prefix", topicNoteName("Dictionaries") === "Midad topic - Dictionaries");
+
+	const topicModel = buildResourceModel({
+		installed: [],
+		repositories: [],
+		local: [],
+		annotations: { count: 0, works: 0 },
+		generated: "2026-01-01",
+		topicsForWork: () => [],
+		knownTopics: ["Tafsīr", "Ḥadīth"],
+		topicLabel: (name) => name,
+		topicNote: (name) => `Midad topic - ${name}`,
+		repositoryLabel: (name) => name,
+	});
+	check("unused topics are listed", topicModel.topics.length === 2
+		&& topicModel.topics.every((topic) => topic.entry.count === 0)
+		&& topicModel.topics.every((topic) => topic.entry.note.startsWith("Midad topic - ")));
 
 	const volumeIdentity = parseMidadId("zotero/ABC123/transcription/vol.2");
 	check("id parser derives a transcription volume", !!volumeIdentity

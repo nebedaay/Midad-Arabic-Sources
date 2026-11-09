@@ -316,6 +316,23 @@ TURATH_TYPES: dict[str, str] = {
     "quran-sciences": "ʿUlūm al-Qurʾān Sources",
 }
 
+def topic_label(name: str) -> str:
+    """Short topic label used for topic MOC pages and links."""
+    text = (name or "").strip()
+    if text.startswith("Midad topic - "):
+        text = text[len("Midad topic - "):]
+    if text == "Qurʾān (text)" or text == "Qurʾān Translations":
+        return "Qurʾān text and translations"
+    if text.endswith(" Sources"):
+        text = text[:-len(" Sources")]
+    return text.strip()
+
+
+def topic_link(name: str) -> str:
+    label = topic_label(name)
+    return f"[[Midad topic - {label}|{label}]]" if label else ""
+
+
 TURATH_BOOKS: list[dict] = [
     # ── Tafsīr ───────────────────────────────────────────────────────────────
     {"id": "7798", "title": "Tafsīr al-Ṭabarī", "arabic": "تفسير الطبري", "author": "Abū Jaʿfar al-Ṭabarī", "type": "tafsir"},
@@ -1754,11 +1771,11 @@ def apply_overrides(work: dict, overrides: dict[str, dict]) -> dict:
                 type_mocs.append(type_moc)
         merged["moc"] = type_mocs[0] if type_mocs else "Turath"
         merged["mocs"] = ["Turath", *type_mocs]
-        merged["up"] = ["[[Turath]]", *[f"[[{moc}]]" for moc in type_mocs]]
+        merged["up"] = ["[[Turath]]", *[topic_link(moc) for moc in type_mocs]]
     else:
         merged["moc"] = spec["moc"]
         merged["mocs"] = [spec["moc"]]
-        merged["up"] = [f"[[{spec['moc']}]]"]
+        merged["up"] = [topic_link(spec["moc"])]
     o = overrides.get(work["key"])
     if o:
         merged.update({k: v for k, v in o.items() if v is not None})

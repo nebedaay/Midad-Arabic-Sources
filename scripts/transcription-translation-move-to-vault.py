@@ -106,6 +106,23 @@ def _note_prefix(standalone: bool) -> str:
     return "mas-" if standalone else "@"
 
 
+def _topic_label(value: str | None) -> str:
+    """Short topic label: `Tafsīr Sources` and `Midad topic - Tafsīr` -> `Tafsīr`."""
+    text = (value or "").strip()
+    if text.startswith("Midad topic - "):
+        text = text[len("Midad topic - "):]
+    if text == "Qurʾān (text)" or text == "Qurʾān Translations":
+        return "Qurʾān text and translations"
+    if text.endswith(" Sources"):
+        text = text[:-len(" Sources")]
+    return text.strip()
+
+
+def _topic_link(value: str | None) -> str:
+    label = _topic_label(value)
+    return f"[[Midad topic - {label}|{label}]]" if label else ""
+
+
 def _unit_slug(value: str | None) -> str:
     """A stable midad-unit / midad-id slug for a partial transcription."""
     text = re.sub(r"[^a-z0-9]+", "-", (value or "").lower()).strip("-")
@@ -514,6 +531,16 @@ def build_yaml(citekey: str, doc_type: str, related: list[str], volume: int = No
             mas_up_items.append(f'  - "[[{prefix}{citekey} - {doc_type}]]"')
     if not volume:
         mas_up_items.append('  - "[[Midad Arabic Sources]]"')
+    topic_labels: list[str] = []
+    for topic in topics or []:
+        label = _topic_label(topic)
+        if label and label not in topic_labels:
+            topic_labels.append(label)
+    for label in topic_labels:
+        link = _topic_link(label)
+        item = f'  - "{link}"'
+        if item not in mas_up_items:
+            mas_up_items.append(item)
 
     source_id = _source_id(citekey, ref)
     mas_work = f"{source_id}:{doc_type}"
@@ -580,9 +607,9 @@ title: "{_yaml_quote(title)}"
     # Topics are user-assigned: the resource model counts this note under each
     # topic MOC named here, and the topic MOC lists it. A re-transcription keeps
     # the existing list.
-    if topics:
+    if topic_labels:
         yaml += "topics:\n"
-        for topic in topics:
+        for topic in topic_labels:
             yaml += f'  - "{_yaml_quote(topic)}"\n'
     else:
         yaml += "topics: []\n"
