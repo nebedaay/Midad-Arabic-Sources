@@ -2,7 +2,7 @@ import { App, TFile, normalizePath } from "obsidian";
 import { makeEngine, SourceTemplateEngine } from "./engine";
 import { YamlFieldSpec } from "./yaml";
 import { joinNote, mergeFrontmatter, mergeNote, splitNote, substantiveContentDiffers } from "./merge";
-import { ensureFolder } from "../sourcePaths";
+import { ensureFolder, safeFileSegment } from "../sourcePaths";
 
 /** Loosely-typed JSON data: importer work/unit models (fields are template-driven). */
 export type JsonObject = Record<string, any>;
@@ -210,11 +210,12 @@ export function expectedNotePaths(
 	const singleUnit = model.units.length === 1 ? model.units[0] : undefined;
 	if (singleUnit && !isQuranText) return paths;
 	for (const unit of model.units) {
+		const base = safeFileSegment(String(unit.base), "section", 100);
 		const path = isCanonical && canonicalRoot
-			? `${canonicalRoot}/${unit.base}.md`
+			? `${canonicalRoot}/${base}.md`
 			: unprefixed(unit)
-				? `${outRoot}/${dir}/${unit.base}.md`
-				: `${outRoot}/${dir}/${dir} - ${unit.base}.md`;
+				? `${outRoot}/${dir}/${base}.md`
+				: `${outRoot}/${dir}/${dir} - ${base}.md`;
 		paths.push(path);
 	}
 	return paths;
@@ -376,19 +377,19 @@ export async function renderModelToVault(
 	// stem is set even for a scoped render, because the hub links to all of them.
 	for (const unit of model.units) {
 		const dictRoot = model.work.collection === "dictionary" && unit.kind === "dict";
-		const base = String(unit.base);
+		const base = safeFileSegment(String(unit.base), "section", 100);
 		unit.note_stem = (isCanonical || dictRoot) ? base : `${dir} - ${base}`;
 		unit.note_folder = isCanonical && canonicalRoot ? canonicalRoot : folder;
 		// A book volume note lists its chapters; give each the same authoritative
 		// stem the chapter note itself is written under.
 		for (const ch of (unit.chapters as Array<JsonObject> | undefined) ?? []) {
-			ch.note_stem = `${dir} - ${String(ch.base)}`;
+			ch.note_stem = `${dir} - ${safeFileSegment(String(ch.base), "section", 100)}`;
 		}
 	}
 
 	if (singleUnit && !isQuranText) {
 		// A one-unit non-Qur'ān work keeps its content in the work note.
-		await deleteNote(app, `${folder}/${dir} - ${singleUnit.base}.md`);
+		await deleteNote(app, `${folder}/${dir} - ${safeFileSegment(String(singleUnit.base), "section", 100)}.md`);
 	} else {
 		if (!(isCanonical && canonicalRoot)) await ensureFolder(app, folder);
 		if (isCanonical && canonicalRoot) await ensureFolder(app, canonicalRoot);
@@ -423,7 +424,8 @@ export async function renderModelToVault(
 			written.push(path);
 			// Remove the opposite naming variant so switching canonical is clean.
 			if (isQuranText) {
-				const alt = isCanonical ? `${folder}/${dir} - ${unit.base}.md` : `${folder}/${unit.base}.md`;
+				const altBase = safeFileSegment(String(unit.base), "section", 100);
+				const alt = isCanonical ? `${folder}/${dir} - ${altBase}.md` : `${folder}/${altBase}.md`;
 				await deleteNote(app, alt);
 			}
 			tick();

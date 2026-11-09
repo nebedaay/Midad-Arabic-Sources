@@ -4244,7 +4244,14 @@ def _turath_decode(raw: dict) -> dict:
 
 
 def _turath_trim(text: str) -> str:
-    """Cap a file-name stem at a word boundary (the full title is kept separately)."""
+    """Make a safe, capped file-name stem (the full title is kept separately).
+
+    Turath headings routinely contain a colon (e.g. ``القسم الأول: في العبادات``),
+    which Obsidian/macOS reject in a path component. Replace the characters that
+    cannot appear in a note name before applying the word-boundary cap.
+    """
+    text = re.sub(r'[<>:"/\\|?*#^\[\]]', "-", str(text))
+    text = re.sub(r"\s+", " ", text).strip(" .-_")
     if len(text) <= _TURATH_MAX_BASE:
         return text
     cut = text[:_TURATH_MAX_BASE].rsplit(" ", 1)[0].rstrip(" ،:؛-")
