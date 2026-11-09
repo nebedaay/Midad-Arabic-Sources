@@ -22637,9 +22637,10 @@ ${lines.join("\n")}`;
       base = file.basename;
     }
     await ensureFolder(this.app, folder);
-    const target = this.uniquePath(folder, base);
-    if ((0, import_obsidian18.normalizePath)(target) === (0, import_obsidian18.normalizePath)(file.path))
+    const canonical = (0, import_obsidian18.normalizePath)(`${(0, import_obsidian18.normalizePath)(folder)}/${base}.md`);
+    if (canonical === (0, import_obsidian18.normalizePath)(file.path))
       return file;
+    const target = this.uniquePath(folder, base);
     await this.app.fileManager.renameFile(file, target);
     const moved = this.app.vault.getAbstractFileByPath(target);
     if (moved instanceof import_obsidian18.TFile)

@@ -4635,8 +4635,9 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			base = file.basename;
 		}
 		await ensureFolder(this.app, folder);
+		const canonical = normalizePath(`${normalizePath(folder)}/${base}.md`);
+		if (canonical === normalizePath(file.path)) return file;
 		const target = this.uniquePath(folder, base);
-		if (normalizePath(target) === normalizePath(file.path)) return file;
 		await this.app.fileManager.renameFile(file, target);
 		const moved = this.app.vault.getAbstractFileByPath(target);
 		if (moved instanceof TFile) return moved;
