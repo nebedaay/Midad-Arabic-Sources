@@ -706,6 +706,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		// a whole-vault registry pass and a MOC re-render. OnLayoutReady fires
 		// immediately if the layout is already up.
 		this.app.workspace.onLayoutReady(() => {
+			void this.repairTopicLinks();
 			void this.refreshSourceRegistry();
 			void this.refreshSourcesIndex();
 		});
@@ -3191,6 +3192,40 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		} catch (error) {
 			console.error("[midad-arabic-sources] topic MOC cleanup", error);
 			return false;
+		}
+	}
+
+	/** Repair old topic links left in midad-up by an earlier plugin version. */
+	private async repairTopicLinks(): Promise<void> {
+		const oldTopics = [
+			"Tafsīr Sources", "Ḥadīth Sources", "Fiqh Sources", "Uṣūl al-Fiqh Sources",
+			"ʿAqīda Sources", "Tārīkh Sources", "Language Sources", "ʿUlūm al-Qurʾān Sources",
+			"Dictionaries", "Qurʾān (text)", "Qurʾān Translations",
+		];
+		for (const file of this.app.vault.getMarkdownFiles()) {
+			let text: string;
+			try {
+				text = await this.app.vault.read(file);
+			} catch {
+				continue;
+			}
+			let next = text;
+			for (const old of oldTopics) {
+				const label = old === "Qurʾān (text)" || old === "Qurʾān Translations"
+					? "Qurʾān text and translations"
+					: old === "Dictionaries" ? "Dictionaries" : topicLabel(old);
+				next = next.replace(
+					new RegExp(`\\[\\[${old.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?:\\|[^\\]]*)?\\]\\]`, "g"),
+					topicLink(label),
+				);
+			}
+			if (next !== text) {
+				try {
+					await this.app.vault.modify(file, next);
+				} catch (error) {
+					console.error("[midad-arabic-sources] topic link repair", error);
+				}
+			}
 		}
 	}
 

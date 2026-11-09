@@ -19489,6 +19489,7 @@ var MidadArabicSourcesPlugin = class extends import_obsidian18.Plugin {
       new import_obsidian18.Notice("The annotation layer could not start. See the developer console for details.");
     }
     this.app.workspace.onLayoutReady(() => {
+      void this.repairTopicLinks();
       void this.refreshSourceRegistry();
       void this.refreshSourcesIndex();
     });
@@ -21748,6 +21749,41 @@ var MidadArabicSourcesPlugin = class extends import_obsidian18.Plugin {
     } catch (error) {
       console.error("[midad-arabic-sources] topic MOC cleanup", error);
       return false;
+    }
+  }
+  async repairTopicLinks() {
+    const oldTopics = [
+      "Tafs\u012Br Sources",
+      "\u1E24ad\u012Bth Sources",
+      "Fiqh Sources",
+      "U\u1E63\u016Bl al-Fiqh Sources",
+      "\u02BFAq\u012Bda Sources",
+      "T\u0101r\u012Bkh Sources",
+      "Language Sources",
+      "\u02BFUl\u016Bm al-Qur\u02BE\u0101n Sources",
+      "Dictionaries",
+      "Qur\u02BE\u0101n (text)",
+      "Qur\u02BE\u0101n Translations"
+    ];
+    for (const file of this.app.vault.getMarkdownFiles()) {
+      let text;
+      try {
+        text = await this.app.vault.read(file);
+      } catch (e) {
+        continue;
+      }
+      let next = text;
+      for (const old of oldTopics) {
+        const label = old === "Qur\u02BE\u0101n (text)" || old === "Qur\u02BE\u0101n Translations" ? "Qur\u02BE\u0101n text and translations" : old === "Dictionaries" ? "Dictionaries" : topicLabel(old);
+        next = next.replace(new RegExp(`\\[\\[${old.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?:\\|[^\\]]*)?\\]\\]`, "g"), topicLink(label));
+      }
+      if (next !== text) {
+        try {
+          await this.app.vault.modify(file, next);
+        } catch (error) {
+          console.error("[midad-arabic-sources] topic link repair", error);
+        }
+      }
     }
   }
   async renameLegacyTopicMocs() {
