@@ -20,7 +20,7 @@ Turath has far more books than any catalogue can list. **Add by URL** (a tab in 
 ## Collections
 
 - **Qurʾān commentaries (tafsīr)** — `spa5k/tafsir_api` (a mirror of quran.com / altafsir.com): about 60 Arabic and 13 English commentaries (al-Jalālayn, al-Ṭabarī, al-Qurṭubī, al-Baghawī, Ibn Kathīr, al-Saʿdī, al-Muyassar, al-Kashshāf, and more).
-- **Qurʾān commentaries (QUL)** — the Qurʾānic Universal Library (`qul.tarteel.ai`): 111 further tafsīrs across Arabic and 30+ languages. Keyless, fetched one sūra at a time; shares the **Tafsīr Sources** MOC with the spa5k collection.
+- **Qurʾān commentaries (QUL)** — the Qurʾānic Universal Library (`qul.tarteel.ai`): 111 further tafsīrs across Arabic and 30+ languages. Keyless, fetched one sūra at a time; shares the **Midad topic - Tafsīr** MOC with the spa5k collection.
 - **Qurʾān translations** — `fawazahmed0/quran-api`: 50+ English translations.
 - **Ḥadīth collections** — `AhmedBaset/hadith-json`: 17 collections (Bukhārī, Muslim, Abū Dāwūd, Tirmidhī, Nasāʾī, Ibn Mājah, Mālik, Aḥmad, and the forties), Arabic and English.
 - **Qurʾān texts (riwāyāt)** — `risan/quran-json`: Warsh, Qālūn, al-Dūrī, Shuʿbah, al-Sūsī, plus canonical Ḥafṣ.

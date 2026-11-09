@@ -55,7 +55,7 @@ import {
 } from "./sourceImport/history";
 import { BUNDLED_ASSETS } from "./assets.generated";
 import { localDate } from "./time";
-import { BUILTIN_TOPICS, topicLabel, topicLink, topicNoteName, topicsFromValue } from "./topics";
+import { BUILTIN_TOPICS, TOPIC_PAGE_PREFIX, topicLabel, topicLink, topicNoteName, topicsFromValue } from "./topics";
 import { identityOfFrontmatter, sourceIdToYaml, sourceOfFrontmatter } from "./sourceIds";
 import {
 	ANNOTATIONS_NOTE,
@@ -3283,7 +3283,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			"Tafsīr Sources", "Ḥadīth Sources", "Fiqh Sources", "Uṣūl al-Fiqh Sources",
 			"ʿAqīda Sources", "Tārīkh Sources", "Language Sources", "ʿUlūm al-Qurʾān Sources",
 			"Tafsīr", "Ḥadīth", "Fiqh", "Uṣūl al-Fiqh", "ʿAqīda", "Tārīkh", "Language",
-			"ʿUlūm al-Qurʾān", "Dictionaries", "Qurʾān text and translations",
+			"ʿUlūm al-Qurʾān", "Dictionaries", "Adab", "al-Adab", "Qurʾān text and translations",
 			"Qurʾān (text)", "Qurʾān Translations",
 		];
 		for (const file of this.app.vault.getMarkdownFiles()) {
@@ -3305,7 +3305,10 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			}
 			next = next.replace(/\[\[Midad topic - Midad Arabic(?:\|Midad Arabic)?\]\]/g, "[[Midad Arabic Sources]]");
 			next = next.replace(/\[\[Midad Arabic(?:\|[^\]]*)?\]\]/g, "[[Midad Arabic Sources]]");
-			next = next.replace(/\[\[(Midad topic - ([^\]|]+))\]\]/g, (_, target: string, label: string) => `[[${target}|${label}]]`);
+			next = next.replace(
+				/\[\[Midad topic - ([^\]|]+)(?:\|[^\]]*)?\]\]/g,
+				(_, target: string) => topicLink(target),
+			);
 			const frontmatter = this.app.metadataCache.getFileCache(file)?.frontmatter as Record<string, unknown> | undefined;
 			next = this.withTopicUpLinks(next, topicsFromValue(frontmatter?.["topics"]));
 			if (next !== text) {
@@ -3329,11 +3332,13 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		]);
 		for (const child of folder.children) {
 			if (!(child instanceof TFile) || child.extension !== "md" || reserved.has(child.basename)) continue;
-			const label = child.basename.endsWith(" Sources")
-				? child.basename.slice(0, -" Sources".length)
-				: child.basename === "Qurʾān (text)" || child.basename === "Qurʾān Translations"
-					? "Qurʾān text and translations"
-					: "";
+			const label = child.basename.startsWith(TOPIC_PAGE_PREFIX)
+				? topicLabel(child.basename)
+				: child.basename.endsWith(" Sources")
+					? child.basename.slice(0, -" Sources".length)
+					: child.basename === "Qurʾān (text)" || child.basename === "Qurʾān Translations"
+						? "Qurʾān text and translations"
+						: "";
 			if (!label) continue;
 			const next = `${topicNoteName(label)}.md`;
 			if (next === child.name) continue;

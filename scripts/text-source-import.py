@@ -305,16 +305,72 @@ QURAN_TEXTS: list[dict] = [
 # titles and authors are hand-checked against the vault's transliteration; the
 # Arabic forms are Turath's own metadata.
 TURATH_TYPES: dict[str, str] = {
-    "tafsir": "Tafsīr Sources",
-    "hadith": "Ḥadīth Sources",
-    "fiqh": "Fiqh Sources",
-    "usul": "Uṣūl al-Fiqh Sources",
-    "aqida": "ʿAqīda Sources",
-    "tarikh": "Tārīkh Sources",
-    "language": "Language Sources",
-    "dictionary": "Dictionaries",
-    "quran-sciences": "ʿUlūm al-Qurʾān Sources",
+    "tafsir": "Tafsīr",
+    "hadith": "Ḥadīth",
+    "fiqh": "Fiqh",
+    "usul": "Uṣūl al-Fiqh",
+    "aqida": "Doctrine (ʿaqīda)",
+    "tarikh": "History (Tārīkh)",
+    "language": "Language (lugha)",
+    "dictionary": "Dictionaries and Lexicons",
+    "quran-sciences": "ʿUlūm al-Qurʾān",
 }
+
+TOPIC_ALIASES: dict[str, str] = {
+    "ʿAqīda": "Doctrine (ʿaqīda)",
+    "Tārīkh": "History (Tārīkh)",
+    "Language": "Language (lugha)",
+    "Dictionaries": "Dictionaries and Lexicons",
+    "Adab": "Adab & adhkār",
+    "al-Adab": "Adab & adhkār",
+}
+
+# Turath's `cat_id` values (the aqsām list), mapped to the topics we use.
+# The four Fiqh-school categories deliberately carry both the generic Fiqh topic
+# and their school topic.
+TURATH_CAT_TOPICS: dict[int, list[str]] = {
+    1: ["Doctrine (ʿaqīda)"],
+    2: ["al-Firaq wa-l-Rudūd"],
+    3: ["Tafsīr"],
+    4: ["ʿUlūm al-Qurʾān"],
+    5: ["al-Tajwīd wa-l-Qirāʾāt"],
+    6: ["Kutub al-Sunna"],
+    7: ["Ḥadīth"],
+    8: ["Ḥadīth"],
+    9: ["Ḥadīth"],
+    10: ["Ḥadīth"],
+    11: ["Uṣūl al-Fiqh"],
+    12: ["Fiqh"],
+    13: ["al-Manṭiq (Logic)"],
+    14: ["Fiqh", "Ḥanafī Fiqh"],
+    15: ["Fiqh", "Mālikī Fiqh"],
+    16: ["Fiqh", "Shāfiʿī Fiqh"],
+    17: ["Fiqh", "Ḥanbalī Fiqh"],
+    18: ["Fiqh"],
+    19: ["Fiqh"],
+    20: ["al-Siyāsa al-Sharʿiyya wa-l-Qaḍāʾ"],
+    21: ["al-Farāʾiḍ wa-l-Waṣāyā"],
+    22: ["al-Fatāwā"],
+    23: ["Adab & adhkār"],
+    24: ["Sīra"],
+    25: ["History (Tārīkh)"],
+    26: ["Tarājim & Ṭabāqāt (Biographies)"],
+    27: ["History (Tārīkh)"],
+    28: ["History (Tārīkh)"],
+    29: ["Language (lugha)"],
+    30: ["Dictionaries and Lexicons"],
+    31: ["Grammar (naḥw and ṣarf)"],
+    32: ["Adab & adhkār"],
+    33: ["Prosody (ʿArūḍ and Qāfiya)"],
+    34: ["Poetry collections"],
+    35: ["Rhetoric"],
+    36: ["Collections"],
+    37: ["Catalogs (fahāris)"],
+    38: ["Medicine (Ṭibb)"],
+    39: ["General books"],
+    40: ["Other"],
+}
+
 
 def topic_label(name: str) -> str:
     """Short topic label used for topic MOC pages and links."""
@@ -325,7 +381,8 @@ def topic_label(name: str) -> str:
         return "Qurʾān text and translations"
     if text.endswith(" Sources"):
         text = text[:-len(" Sources")]
-    return text.strip()
+    text = text.strip()
+    return TOPIC_ALIASES.get(text, text)
 
 
 def topic_link(name: str) -> str:
@@ -4416,6 +4473,20 @@ def build_turath_units(work: dict, args: argparse.Namespace) -> list[dict]:
     url = COLLECTIONS["turath"]["data"].format(id=work["id"])
     emit("step", name=work["title"], status="downloading", detail="whole book")
     book = _turath_decode(fetch_json(url, cache=not args.no_cache))
+    cat_id = _int_or(book["meta"].get("cat_id"), 0)
+    if cat_id:
+        work["cat_id"] = cat_id
+        extra_topics = TURATH_CAT_TOPICS.get(cat_id, [])
+        mocs = list(work.get("mocs") or [])
+        up = list(work.get("up") or [])
+        for topic in extra_topics:
+            if topic not in mocs:
+                mocs.append(topic)
+            link = topic_link(topic)
+            if link and link not in up:
+                up.append(link)
+        work["mocs"] = mocs
+        work["up"] = up
     # Turath rebuilds each book file, so its `date_built` is the update signal;
     # the volume count drives the hub's volume-index layer.
     work["date_built"] = book["meta"].get("date_built")

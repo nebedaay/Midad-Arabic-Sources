@@ -23,13 +23,13 @@ Because the model is cached, editing a template and running **“Re-render impor
    - `book-volume.eta.md` — one volume index per volume of a multi-volume book
    - `book-letter.eta.md` — one letter index for a classical dictionary (the work hub lists letters; each letter page lists its fasl notes under volume headings)
    - `hub.eta.md` — the per-work hub note that lists all units
-   - `moc.eta.md` — the skeleton for a category MOC (e.g. `Tafsīr Sources`)
+   - `moc.eta.md` — the skeleton for a category MOC (e.g. `Midad topic - Tafsīr`)
    - `sources.eta.md` — the managed region of the top-level parent note (`Midad Arabic Sources`)
 3. Edit the copies, then run **“Re-render imported sources”**.
 
 The plugin reads your copies first and falls back to the bundled defaults.
 
-Each work’s entry in its category MOC is just `- [[Work]]` — the work hub note, which carries the `repository:` property for provenance. A Turath work appears in the repository MOC `Turath` and in **one or more** work-type MOCs (e.g. `Fiqh Sources`; Lisān al-ʿArab is in both `Language Sources` and `Dictionaries`), and carries all of them in the hub’s `midad-up:`. The category MOC’s generated region is also a managed region: it is rebuilt from the full set of imported works on every render, so entries never duplicate, and a language heading (`# Arabic Texts`, `# English Texts`) appears only when it has content.
+Each work’s entry in its category MOC is just `- [[Work]]` — the work hub note, which carries the `repository:` property for provenance. A Turath work appears in the repository MOC `Turath` and in **one or more** work-type MOCs (e.g. `Midad topic - Fiqh`; Lisān al-ʿArab is in both `Midad topic - Language (lugha)` and `Midad topic - Dictionaries and Lexicons`), and carries all of them in the hub’s `midad-up:`. The category MOC’s generated region is also a managed region: it is rebuilt from the full set of imported works on every render, so entries never duplicate, and a language heading (`# Arabic Texts`, `# English Texts`) appears only when it has content.
 
 Every category MOC points up to one **parent note** (the setting **“Sources parent note”**, default `Midad Arabic Sources`). The plugin reuses an existing `Midad Arabic Sources` note wherever it lives in the vault, or creates one in the sources folder. It writes only its own managed region there: a `>[!mas-sources-list]` callout listing **Topics**, **Repositories**, and **My Midad Content**, with the per-entry source counts. The generated **Midad Arabic Sources - Topics**, **Midad Arabic Sources - Repositories**, and **Midad Arabic Sources - My Midad Content** notes are themselves managed MOCs, as are the category, repository, transcription, and translation MOCs they link. Both the parent note and the sidebar’s resource browser are rendered from `.midad-arabic-sources/resource-model.json`; the note is only the fallback for the sidebar when that file is absent. The callout type and its styling are the plugin’s own (`mas-sources-list` in `styles.css`), so nothing depends on a callout defined elsewhere in your vault.
 
@@ -99,9 +99,9 @@ Every template receives a data object. The engine destructures it for you, so yo
 | `languages` | `["ar", "en"]` | every language the work contains (ḥadīth are bilingual) |
 | `language_links` | `["Arabic", "English"]` | the `language:` property (`[[Arabic]]` alone, or a list) |
 | `cssclass` | `tafsir` | drives CSS (`tafsir`, `hadith`, …); Qur'ān notes use `quran-ar` (Arabic, RTL) or `quran-en` (translation, LTR), so each direction, face, size, and leading is set independently |
-| `moc` | `Tafsīr Sources` | category MOC note name |
+| `moc` | `Midad topic - Tafsīr` | category MOC note name |
 | `moc_sections` | `["Arabic Texts", …]` | MOC headings, derived from `languages` |
-| `up` | `["[[Tafsīr Sources]]"]` | internal model field; rendered as `midad-up` |
+| `up` | `["[[Midad topic - Tafsīr|Tafsīr]]"]` | internal model field; rendered as `midad-up` |
 | `source` | `https://qul.tarteel.ai/…` | provenance URL |
 | `repository_name` | `qul.tarteel.ai` | short name for the `repository:` property |
 | `repository_updated` | `2026-06-04` | the repository’s own last-updated date for this item |
@@ -117,7 +117,7 @@ Every template receives a data object. The engine destructures it for you, so yo
 | `supplement_from` | `49881` or `0` | the id at which the source stops being one book and starts being a second (Lane’s Supplement) |
 | `volumes` | `1` or `8` | a book work’s volume count; the hub lists volume indexes when greater than 1 unless the work uses a letter index, whose letter pages carry the volume headings |
 | `section_level` | `1` or `2` | the TOC level that defines a chapter in a book work; `2` for the classical dictionaries, where it is the `فصل` |
-| `mocs` | `["Turath", "Fiqh Sources"]` | every category MOC the work belongs to (the hub’s `midad-up`) |
+| `mocs` | `["Turath", "Fiqh"]` | every category MOC the work belongs to (the hub’s `midad-up`) |
 
 Names follow ScholarWeft’s convention: `Last, First` for Western-style names (`Wehr, Hans`, `Lane, Edward William`), and one name for classical Arabic names (`Ibn Manẓūr`, `Abū Jaʿfar al-Ṭabarī`, `Muḥammad b. Ismāʿīl al-Bukhārī`). `authors-ar` is the source’s own Arabic forms, a list even for one author, and is never split. The hub’s `authors` / `translators` / `editors` / `contributors` links go through `scholarName`; a transcription/translation parent copies its literature note’s citation fields wholesale, so the source title/authors replace the descriptive versions while the aliases keep them.
 

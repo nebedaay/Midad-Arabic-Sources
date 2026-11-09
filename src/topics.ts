@@ -14,17 +14,51 @@ export const TOPIC_PAGE_PREFIX = "Midad topic - ";
 
 /** Topics the built-in repositories can classify a work under. */
 export const BUILTIN_TOPICS = [
+	"Doctrine (ʿaqīda)",
 	"Tafsīr",
-	"Ḥadīth",
-	"Fiqh",
-	"Uṣūl al-Fiqh",
-	"ʿAqīda",
-	"Tārīkh",
-	"Language",
 	"ʿUlūm al-Qurʾān",
-	"Dictionaries",
+	"al-Tajwīd wa-l-Qirāʾāt",
+	"Kutub al-Sunna",
+	"Ḥadīth",
+	"Uṣūl al-Fiqh",
+	"Fiqh",
+	"Ḥanafī Fiqh",
+	"Mālikī Fiqh",
+	"Shāfiʿī Fiqh",
+	"Ḥanbalī Fiqh",
+	"al-Firaq wa-l-Rudūd",
+	"al-Manṭiq (Logic)",
+	"al-Siyāsa al-Sharʿiyya wa-l-Qaḍāʾ",
+	"al-Farāʾiḍ wa-l-Waṣāyā",
+	"al-Fatāwā",
+	"Adab & adhkār",
+	"Sīra",
+	"History (Tārīkh)",
+	"Tarājim & Ṭabāqāt (Biographies)",
+	"Language (lugha)",
+	"Dictionaries and Lexicons",
+	"Grammar (naḥw and ṣarf)",
+	"Prosody (ʿArūḍ and Qāfiya)",
+	"Poetry collections",
+	"Rhetoric",
+	"Collections",
+	"Catalogs (fahāris)",
+	"Medicine (Ṭibb)",
+	"General books",
+	"Other",
 	"Qurʾān text and translations",
 ];
+
+/** Older or shorter labels that now canonicalize to a renamed topic. */
+const TOPIC_ALIASES: Record<string, string> = {
+	"ʿAqīda": "Doctrine (ʿaqīda)",
+	"Tārīkh": "History (Tārīkh)",
+	"Language": "Language (lugha)",
+	"Dictionaries": "Dictionaries and Lexicons",
+	"Adab": "Adab & adhkār",
+	"al-Adab": "Adab & adhkār",
+};
+
 
 function plainTopicValue(value: unknown): string {
 	let text = typeof value === "string" ? value.trim() : "";
@@ -36,7 +70,8 @@ function plainTopicValue(value: unknown): string {
 	if (text.startsWith(TOPIC_PAGE_PREFIX)) text = text.slice(TOPIC_PAGE_PREFIX.length);
 	if (text === "Qurʾān (text)" || text === "Qurʾān Translations") return "Qurʾān text and translations";
 	if (text.endsWith(" Sources")) text = text.slice(0, -" Sources".length);
-	return text.trim();
+	text = text.trim();
+	return TOPIC_ALIASES[text] ?? text;
 }
 
 export function topicLabel(value: unknown): string {

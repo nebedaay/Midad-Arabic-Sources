@@ -170,7 +170,10 @@ export async function runAnnotationRegressionTests(): Promise<RegressionResult> 
 
 	check("topic labels drop the old Sources suffix", topicLabel("Tafsīr Sources") === "Tafsīr");
 	check("topic links use the short alias", topicLink("Ḥadīth Sources") === "[[Midad topic - Ḥadīth|Ḥadīth]]");
-	check("topic pages use the Midad prefix", topicNoteName("Dictionaries") === "Midad topic - Dictionaries");
+	check("topic pages use the Midad prefix", topicNoteName("Dictionaries") === "Midad topic - Dictionaries and Lexicons");
+	check("renamed topics canonicalize", topicLabel("ʿAqīda") === "Doctrine (ʿaqīda)"
+		&& topicLabel("Tārīkh") === "History (Tārīkh)"
+		&& topicLabel("Language") === "Language (lugha)");
 
 	const topicModel = buildResourceModel({
 		installed: [],
