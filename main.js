@@ -19455,6 +19455,7 @@ var MidadArabicSourcesPlugin = class extends import_obsidian18.Plugin {
     this.repositoryMocNames = [];
     this.repositoryMocLabels = {};
     this.transcriptionMocTimer = null;
+    this.topicSyncTimers = new Map();
     this.pythonPromise = null;
     this.serverPythonPromise = null;
     this.promptDefaults = null;
@@ -19817,15 +19818,28 @@ var MidadArabicSourcesPlugin = class extends import_obsidian18.Plugin {
       if (this.transcriptionNotePath(file.path))
         this.scheduleTranscriptionMocRefresh();
     };
+    const watchTopics = (file) => {
+      if (!(file instanceof import_obsidian18.TFile) || file.extension !== "md")
+        return;
+      if (!file.path.startsWith(`${this.sourcesRoot()}/`))
+        return;
+      this.scheduleTopicUpSync(file);
+    };
     this.registerEvent(this.app.vault.on("create", watchTranscription));
     this.registerEvent(this.app.vault.on("modify", watchTranscription));
     this.registerEvent(this.app.vault.on("delete", watchTranscription));
     this.registerEvent(this.app.vault.on("rename", watchTranscription));
+    this.registerEvent(this.app.vault.on("create", watchTopics));
+    this.registerEvent(this.app.vault.on("modify", watchTopics));
+    this.registerEvent(this.app.vault.on("rename", watchTopics));
   }
   onunload() {
     var _a2, _b2;
     if (this.transcriptionMocTimer !== null)
       window.clearTimeout(this.transcriptionMocTimer);
+    for (const timer of this.topicSyncTimers.values())
+      window.clearTimeout(timer);
+    this.topicSyncTimers.clear();
     (_a2 = this.annotations) == null ? void 0 : _a2.dispose();
     this.sourceCancelled = true;
     this.sourceOperationId += 1;
@@ -21770,6 +21784,55 @@ var MidadArabicSourcesPlugin = class extends import_obsidian18.Plugin {
       return false;
     }
   }
+  scheduleTopicUpSync(file) {
+    const existing = this.topicSyncTimers.get(file.path);
+    if (existing !== void 0)
+      window.clearTimeout(existing);
+    const timer = window.setTimeout(() => {
+      this.topicSyncTimers.delete(file.path);
+      void this.syncTopicUpLinks(file);
+    }, 700);
+    this.topicSyncTimers.set(file.path, timer);
+  }
+  async syncTopicUpLinks(file) {
+    var _a2;
+    const frontmatter = (_a2 = this.app.metadataCache.getFileCache(file)) == null ? void 0 : _a2.frontmatter;
+    const topics = topicsFromValue(frontmatter == null ? void 0 : frontmatter["topics"]);
+    if (!topics.length)
+      return;
+    this.scheduleTranscriptionMocRefresh();
+    let text;
+    try {
+      text = await this.app.vault.read(file);
+    } catch (e) {
+      return;
+    }
+    const next = this.withTopicUpLinks(text, topics);
+    if (next === text)
+      return;
+    try {
+      await this.app.vault.modify(file, next);
+    } catch (error) {
+      console.error("[midad-arabic-sources] topic midad-up sync", error);
+    }
+  }
+  withTopicUpLinks(text, topics) {
+    const missing = topics.filter((topic) => !text.includes(`[[${topicNoteName(topic)}|`)).map((topic) => `  - "${topicLink(topic)}"`);
+    if (!missing.length)
+      return text;
+    const block = /^midad-up:[ \t]*\n((?:[ \t]+-[ \t]*.*\n?)*)/m.exec(text);
+    if (block && block.index !== void 0) {
+      const insert = block.index + block[0].length;
+      return text.slice(0, insert) + missing.join("\n") + "\n" + text.slice(insert);
+    }
+    if (text.startsWith("---")) {
+      const end = text.indexOf("\n---", 3);
+      if (end >= 0) {
+        return text.slice(0, end) + "\nmidad-up:\n" + missing.join("\n") + text.slice(end);
+      }
+    }
+    return text;
+  }
   async repairTopicLinks() {
     var _a2;
     const oldTopics = [
@@ -21810,24 +21873,7 @@ var MidadArabicSourcesPlugin = class extends import_obsidian18.Plugin {
       next = next.replace(/\[\[Midad Arabic(?:\|[^\]]*)?\]\]/g, "[[Midad Arabic Sources]]");
       next = next.replace(/\[\[(Midad topic - ([^\]|]+))\]\]/g, (_, target, label) => `[[${target}|${label}]]`);
       const frontmatter = (_a2 = this.app.metadataCache.getFileCache(file)) == null ? void 0 : _a2.frontmatter;
-      const topics = topicsFromValue(frontmatter == null ? void 0 : frontmatter["topics"]);
-      if (topics.length) {
-        const missing = topics.filter((topic) => !next.includes(`[[${topicNoteName(topic)}|`)).map((topic) => `  - "${topicLink(topic)}"`);
-        if (missing.length) {
-          let patched = next;
-          const block = /^midad-up:[ \t]*\n((?:[ \t]+-[ \t]*.*\n?)*)/m.exec(patched);
-          if (block && block.index !== void 0) {
-            const insert = block.index + block[0].length;
-            patched = patched.slice(0, insert) + missing.join("\n") + "\n" + patched.slice(insert);
-          } else if (patched.startsWith("---")) {
-            const end = patched.indexOf("\n---", 3);
-            if (end >= 0) {
-              patched = patched.slice(0, end) + "\nmidad-up:\n" + missing.join("\n") + patched.slice(end);
-            }
-          }
-          next = patched;
-        }
-      }
+      next = this.withTopicUpLinks(next, topicsFromValue(frontmatter == null ? void 0 : frontmatter["topics"]));
       if (next !== text) {
         try {
           await this.app.vault.modify(file, next);

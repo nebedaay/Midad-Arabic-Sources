@@ -676,6 +676,8 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 	repositoryMocLabels: Record<string, string> = {};
 	/** Debounced refresh after a transcription/translation note changes. */
 	transcriptionMocTimer: number | null = null;
+	/** Debounced midad-up repair after a note's topics property changes. */
+	topicSyncTimers = new Map<string, number>();
 
 	async onload() {
 		await this.loadSettings();
@@ -1020,14 +1022,24 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		const watchTranscription = (file: TAbstractFile): void => {
 			if (this.transcriptionNotePath(file.path)) this.scheduleTranscriptionMocRefresh();
 		};
+		const watchTopics = (file: TAbstractFile): void => {
+			if (!(file instanceof TFile) || file.extension !== "md") return;
+			if (!file.path.startsWith(`${this.sourcesRoot()}/`)) return;
+			this.scheduleTopicUpSync(file);
+		};
 		this.registerEvent(this.app.vault.on("create", watchTranscription));
 		this.registerEvent(this.app.vault.on("modify", watchTranscription));
 		this.registerEvent(this.app.vault.on("delete", watchTranscription));
 		this.registerEvent(this.app.vault.on("rename", watchTranscription));
+		this.registerEvent(this.app.vault.on("create", watchTopics));
+		this.registerEvent(this.app.vault.on("modify", watchTopics));
+		this.registerEvent(this.app.vault.on("rename", watchTopics));
 	}
 
 	onunload(): void {
 		if (this.transcriptionMocTimer !== null) window.clearTimeout(this.transcriptionMocTimer);
+		for (const timer of this.topicSyncTimers.values()) window.clearTimeout(timer);
+		this.topicSyncTimers.clear();
 		this.annotations?.dispose();
 		// Invalidate this instance's source operation before a re-enable creates a
 		// new one: the old render loop checks the generation per note, and the
@@ -3213,6 +3225,58 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		}
 	}
 
+	/** Debounce the small midad-up repair while a topics property is being edited. */
+	private scheduleTopicUpSync(file: TFile): void {
+		const existing = this.topicSyncTimers.get(file.path);
+		if (existing !== undefined) window.clearTimeout(existing);
+		const timer = window.setTimeout(() => {
+			this.topicSyncTimers.delete(file.path);
+			void this.syncTopicUpLinks(file);
+		}, 700);
+		this.topicSyncTimers.set(file.path, timer);
+	}
+
+	/** Add a topic's MOC to midad-up without re-rendering the note body. */
+	private async syncTopicUpLinks(file: TFile): Promise<void> {
+		const frontmatter = this.app.metadataCache.getFileCache(file)?.frontmatter as Record<string, unknown> | undefined;
+		const topics = topicsFromValue(frontmatter?.["topics"]);
+		if (!topics.length) return;
+		this.scheduleTranscriptionMocRefresh();
+		let text: string;
+		try {
+			text = await this.app.vault.read(file);
+		} catch {
+			return;
+		}
+		const next = this.withTopicUpLinks(text, topics);
+		if (next === text) return;
+		try {
+			await this.app.vault.modify(file, next);
+		} catch (error) {
+			console.error("[midad-arabic-sources] topic midad-up sync", error);
+		}
+	}
+
+	/** Return text with every topic linked from its midad-up block. */
+	private withTopicUpLinks(text: string, topics: string[]): string {
+		const missing = topics
+			.filter((topic) => !text.includes(`[[${topicNoteName(topic)}|`))
+			.map((topic) => `  - "${topicLink(topic)}"`);
+		if (!missing.length) return text;
+		const block = /^midad-up:[ \t]*\n((?:[ \t]+-[ \t]*.*\n?)*)/m.exec(text);
+		if (block && block.index !== undefined) {
+			const insert = block.index + block[0].length;
+			return text.slice(0, insert) + missing.join("\n") + "\n" + text.slice(insert);
+		}
+		if (text.startsWith("---")) {
+			const end = text.indexOf("\n---", 3);
+			if (end >= 0) {
+				return text.slice(0, end) + "\nmidad-up:\n" + missing.join("\n") + text.slice(end);
+			}
+		}
+		return text;
+	}
+
 	/** Repair old topic links left in midad-up by an earlier plugin version. */
 	private async repairTopicLinks(): Promise<void> {
 		const oldTopics = [
@@ -3243,26 +3307,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			next = next.replace(/\[\[Midad Arabic(?:\|[^\]]*)?\]\]/g, "[[Midad Arabic Sources]]");
 			next = next.replace(/\[\[(Midad topic - ([^\]|]+))\]\]/g, (_, target: string, label: string) => `[[${target}|${label}]]`);
 			const frontmatter = this.app.metadataCache.getFileCache(file)?.frontmatter as Record<string, unknown> | undefined;
-			const topics = topicsFromValue(frontmatter?.["topics"]);
-			if (topics.length) {
-				const missing = topics
-					.filter((topic) => !next.includes(`[[${topicNoteName(topic)}|`))
-					.map((topic) => `  - "${topicLink(topic)}"`);
-				if (missing.length) {
-					let patched = next;
-					const block = /^midad-up:[ \t]*\n((?:[ \t]+-[ \t]*.*\n?)*)/m.exec(patched);
-					if (block && block.index !== undefined) {
-						const insert = block.index + block[0].length;
-						patched = patched.slice(0, insert) + missing.join("\n") + "\n" + patched.slice(insert);
-					} else if (patched.startsWith("---")) {
-						const end = patched.indexOf("\n---", 3);
-						if (end >= 0) {
-							patched = patched.slice(0, end) + "\nmidad-up:\n" + missing.join("\n") + patched.slice(end);
-						}
-					}
-					next = patched;
-				}
-			}
+			next = this.withTopicUpLinks(next, topicsFromValue(frontmatter?.["topics"]));
 			if (next !== text) {
 				try {
 					await this.app.vault.modify(file, next);
