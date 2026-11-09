@@ -28,7 +28,7 @@ VAULT = REPO.parents[1]
 SOURCE_ROOT = VAULT / "_7 Sources"
 TOPIC_DATA_PATH = REPO / "midad-arabic-sources-import-templates" / "topics.json"
 PREFIX = "Midad topic - "
-ALIASES = json.loads(TOPIC_DATA_PATH.read_text(encoding="utf-8"))["legacyAliases"]
+ALIASES = json.loads(TOPIC_DATA_PATH.read_text(encoding="utf-8"))["aliases"]
 
 
 def label(value: str) -> str:

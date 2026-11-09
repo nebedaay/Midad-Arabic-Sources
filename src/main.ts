@@ -3590,13 +3590,14 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			this.app, templates, name,
 			[{
 				name: section,
-				works: category.entries
-					.filter((entry) => entry.count > 0)
+				works: (category.id === "topics"
+					? category.entries
+					: category.entries.filter((entry) => entry.count > 0))
 					.map((entry) => ({
 						dir: entry.note,
 						title: entry.label,
 						count: entry.count,
-						linked: true,
+						linked: entry.kind !== "topic" || entry.count > 0,
 					})),
 			}],
 			this.sourcesRoot(), "Midad Arabic Sources", generated, true

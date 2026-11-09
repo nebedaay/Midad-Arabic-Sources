@@ -308,7 +308,7 @@ TOPIC_DATA_PATH = (Path(__file__).resolve().parent.parent
                    / "midad-arabic-sources-import-templates" / "topics.json")
 TOPIC_DATA = json.loads(TOPIC_DATA_PATH.read_text(encoding="utf-8"))
 TURATH_TYPES: dict[str, str] = TOPIC_DATA["turathTypes"]
-TOPIC_ALIASES: dict[str, str] = TOPIC_DATA["legacyAliases"]
+TOPIC_ALIASES: dict[str, str] = TOPIC_DATA["aliases"]
 GENRE_TOPICS: dict[str, str] = TOPIC_DATA["genres"]
 GENRE_ALIASES: dict[str, str] = TOPIC_DATA["legacyGenreAliases"]
 TURATH_CAT_TOPICS: dict[int, list[str]] = {
@@ -321,15 +321,31 @@ def normalize_genre(name: str) -> str:
     return GENRE_ALIASES.get(text, text)
 
 
-def topic_label(name: str) -> str:
-    """Short topic label used for topic MOC pages and links."""
-    text = (name or "").strip()
+def _topic_key(value: str) -> str:
+    text = str(value or "").strip()
+    if text.startswith("[[") and text.endswith("]]"):
+        text = text[2:-2].split("|", 1)[0]
     if text.startswith("Midad topic - "):
         text = text[len("Midad topic - "):]
     if text.endswith(" Sources"):
         text = text[:-len(" Sources")]
-    text = text.strip()
-    return TOPIC_ALIASES.get(text, text)
+    text = unicodedata.normalize("NFKD", text)
+    text = "".join(ch for ch in text if not unicodedata.combining(ch))
+    text = re.sub(r"[\u064B-\u065F\u0670]", "", text)
+    text = text.replace("ʿ", "").replace("ʾ", "").replace("'", "").replace("’", "").replace("`", "")
+    text = text.lower()
+    return re.sub(r"[^a-z0-9\u0600-\u06FF]+", "", text)
+
+
+_ALIAS_BY_KEY = {_topic_key(key): value for key, value in TOPIC_ALIASES.items()}
+_CANONICAL_BY_KEY = {_topic_key(value): value for value in TOPIC_DATA["topics"]}
+
+
+def topic_label(name: str) -> str:
+    """Case/diacritic-insensitive canonical topic label."""
+    text = (name or "").strip()
+    key = _topic_key(text)
+    return _ALIAS_BY_KEY.get(key) or _CANONICAL_BY_KEY.get(key) or text
 
 
 def topic_link(name: str) -> str:

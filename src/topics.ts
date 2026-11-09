@@ -2,7 +2,7 @@ import topicData from "../midad-arabic-sources-import-templates/topics.json";
 
 interface TopicData {
 	topics: string[];
-	legacyAliases: Record<string, string>;
+	aliases: Record<string, string>;
 	legacyGenreAliases: Record<string, string>;
 	genres: Record<string, string>;
 	turathTypes: Record<string, string>;
@@ -15,9 +15,25 @@ export const TOPIC_PAGE_PREFIX = "Midad topic - ";
 const DATA = topicData as TopicData;
 
 export const BUILTIN_TOPICS: string[] = DATA.topics;
-export const TOPIC_ALIASES: Record<string, string> = DATA.legacyAliases;
+export const TOPIC_ALIASES: Record<string, string> = DATA.aliases;
 export const GENRE_TOPICS: Record<string, string> = DATA.genres;
 export const GENRE_ALIASES: Record<string, string> = DATA.legacyGenreAliases;
+
+/** Case- and diacritic-insensitive key used to match topic aliases. */
+function topicKey(value: unknown): string {
+	let text = typeof value === "string" ? value.trim() : "";
+	if (text.startsWith("[[") && text.endsWith("]]")) {
+		text = text.slice(2, -2).split("|", 1)[0];
+	}
+	if (text.startsWith(TOPIC_PAGE_PREFIX)) text = text.slice(TOPIC_PAGE_PREFIX.length);
+	if (text.endsWith(" Sources")) text = text.slice(0, -" Sources".length);
+	text = text.normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/[\u064B-\u065F\u0670]/g, "");
+	text = text.replace(/[ʿʾ'’`]/g, "").toLowerCase();
+	return text.replace(/[^a-z0-9\u0600-\u06FF]+/g, "");
+}
+
+const ALIAS_BY_KEY = new Map(Object.entries(TOPIC_ALIASES).map(([key, value]) => [topicKey(key), value]));
+const CANONICAL_BY_KEY = new Map(BUILTIN_TOPICS.map((value) => [topicKey(value), value]));
 
 /** Normalize a source genre key to its canonical key. */
 export function normalizeGenre(value: unknown): string {
@@ -52,10 +68,9 @@ function plainTopicValue(value: unknown): string {
 		const pipe = text.indexOf("|");
 		if (pipe >= 0) text = text.slice(0, pipe);
 	}
-	if (text.startsWith(TOPIC_PAGE_PREFIX)) text = text.slice(TOPIC_PAGE_PREFIX.length);
-	if (text.endsWith(" Sources")) text = text.slice(0, -" Sources".length);
 	text = text.trim();
-	return TOPIC_ALIASES[text] ?? text;
+	const key = topicKey(text);
+	return ALIAS_BY_KEY.get(key) ?? CANONICAL_BY_KEY.get(key) ?? text;
 }
 
 export function topicLabel(value: unknown): string {
