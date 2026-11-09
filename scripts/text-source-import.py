@@ -311,6 +311,7 @@ TURATH_TYPES: dict[str, str] = TOPIC_DATA["turathTypes"]
 TOPIC_ALIASES: dict[str, str] = TOPIC_DATA["aliases"]
 GENRE_TOPICS: dict[str, str] = TOPIC_DATA["genres"]
 GENRE_ALIASES: dict[str, str] = TOPIC_DATA["legacyGenreAliases"]
+BOOK_CATEGORIES: dict[str, int] = {k: int(v) for k, v in TOPIC_DATA["bookCategories"].items()}
 TURATH_CAT_TOPICS: dict[int, list[str]] = {
     int(key): list(value) for key, value in TOPIC_DATA["turathCategories"].items()
 }
@@ -384,25 +385,25 @@ TURATH_BOOKS: list[dict] = [
     {"id": "2348", "title": "Riyāḍ al-Ṣāliḥīn", "arabic": "رياض الصالحين", "author": "Yaḥyā al-Nawawī", "type": "hadith"},
     {"id": "12836", "title": "al-Arbaʿūn al-Nawawiyya", "arabic": "الأربعون النووية", "author": "Yaḥyā al-Nawawī", "type": "hadith"},
     # ── Fiqh ─────────────────────────────────────────────────────────────────
-    {"id": "1655", "title": "al-Umm", "arabic": "الأم", "author": "Muḥammad b. Idrīs al-Shāfiʿī", "type": "fiqh"},
-    {"id": "6910", "title": "al-Mughnī", "arabic": "المغني", "author": "Muwaffaq al-Dīn Ibn Qudāma", "type": "fiqh"},
-    {"id": "2186", "title": "al-Majmūʿ Sharḥ al-Muhadhdhab", "arabic": "المجموع شرح المهذب", "author": "Yaḥyā al-Nawawī", "type": "fiqh"},
-    {"id": "8183", "title": "Badāʾiʿ al-Ṣanāʾiʿ", "arabic": "بدائع الصنائع", "author": "ʿAlāʾ al-Dīn al-Kāsānī", "type": "fiqh"},
-    {"id": "11820", "title": "al-Hidāya", "arabic": "الهداية", "author": "Burhān al-Dīn al-Marghīnānī", "type": "fiqh"},
-    {"id": "587", "title": "al-Mudawwana", "arabic": "المدونة", "author": "Mālik b. Anas", "type": "fiqh"},
-    {"id": "21739", "title": "Bidāyat al-Mujtahid", "arabic": "بداية المجتهد", "author": "Ibn Rushd", "type": "fiqh"},
-    {"id": "1679", "title": "al-Rawḍ al-Murabbaʿ", "arabic": "الروض المربع", "author": "Manṣūr al-Buhūtī", "type": "fiqh"},
-    {"id": "11373", "title": "al-Risāla al-Qayrawāniyya", "arabic": "الرسالة", "author": "Ibn Abī Zayd al-Qayrawānī", "type": "fiqh"},
-    {"id": "9548", "title": "Mukhtaṣar al-Akhḍarī", "arabic": "متن الأخضري في العبادات", "author": "al-Akhḍarī", "type": "fiqh"},
-    {"id": "124336", "title": "Mukhtaṣar al-Qudūrī", "arabic": "مختصر القدوري", "author": "al-Qudūrī", "type": "fiqh"},
-    {"id": "6125", "title": "al-Muqaddima al-Ḥaḍramiyya", "arabic": "المقدمة الحضرمية", "author": "ʿAbdallāh Bā Faḍl al-Ḥaḍramī", "type": "fiqh"},
-    {"id": "11315", "title": "ʿUmdat al-Fiqh", "arabic": "عمدة الفقه", "author": "Ibn Qudāma", "type": "fiqh"},
-    {"id": "11355", "title": "Mukhtaṣar Khalīl", "arabic": "مختصر خليل", "author": "Khalīl b. Isḥāq", "type": "fiqh"},
-    {"id": "91", "title": "Sharḥ al-Kharashī", "arabic": "شرح الخرشي على مختصر خليل", "author": "al-Kharashī", "type": "fiqh"},
-    {"id": "569", "title": "Mawāhib al-Jalīl", "arabic": "مواهب الجليل في شرح مختصر خليل", "author": "al-Ḥaṭṭāb", "type": "fiqh"},
-    {"id": "21611", "title": "al-Tāj wa-l-Iklīl", "arabic": "التاج والإكليل لمختصر خليل", "author": "al-Mawwāq", "type": "fiqh"},
-    {"id": "21614", "title": "Manḥ al-Jalīl", "arabic": "منح الجليل شرح مختصر خليل", "author": "ʿUlaysh", "type": "fiqh"},
-    {"id": "95864", "title": "al-Kawkab al-Zahrī", "arabic": "الكوكب الزهري نظم مختصر الأخضري", "author": "Muḥammad Bāy Bilʿālam", "type": "fiqh"},
+    {"id": "1655", "title": "al-Umm", "arabic": "الأم", "author": "Muḥammad b. Idrīs al-Shāfiʿī", "type": "fiqh", "cat_id": 16, "genres": ["fiqh", "shafii"]},
+    {"id": "6910", "title": "al-Mughnī", "arabic": "المغني", "author": "Muwaffaq al-Dīn Ibn Qudāma", "type": "fiqh", "cat_id": 17, "genres": ["fiqh", "hanbali"]},
+    {"id": "2186", "title": "al-Majmūʿ Sharḥ al-Muhadhdhab", "arabic": "المجموع شرح المهذب", "author": "Yaḥyā al-Nawawī", "type": "fiqh", "cat_id": 16, "genres": ["fiqh", "shafii"]},
+    {"id": "8183", "title": "Badāʾiʿ al-Ṣanāʾiʿ", "arabic": "بدائع الصنائع", "author": "ʿAlāʾ al-Dīn al-Kāsānī", "type": "fiqh", "cat_id": 14, "genres": ["fiqh", "hanafi"]},
+    {"id": "11820", "title": "al-Hidāya", "arabic": "الهداية", "author": "Burhān al-Dīn al-Marghīnānī", "type": "fiqh", "cat_id": 14, "genres": ["fiqh", "hanafi"]},
+    {"id": "587", "title": "al-Mudawwana", "arabic": "المدونة", "author": "Mālik b. Anas", "type": "fiqh", "cat_id": 15, "genres": ["fiqh", "maliki"]},
+    {"id": "21739", "title": "Bidāyat al-Mujtahid", "arabic": "بداية المجتهد", "author": "Ibn Rushd", "type": "fiqh", "cat_id": 15, "genres": ["fiqh", "maliki"]},
+    {"id": "1679", "title": "al-Rawḍ al-Murabbaʿ", "arabic": "الروض المربع", "author": "Manṣūr al-Buhūtī", "type": "fiqh", "cat_id": 17, "genres": ["fiqh", "hanbali"]},
+    {"id": "11373", "title": "al-Risāla al-Qayrawāniyya", "arabic": "الرسالة", "author": "Ibn Abī Zayd al-Qayrawānī", "type": "fiqh", "cat_id": 15, "genres": ["fiqh", "maliki"]},
+    {"id": "9548", "title": "Mukhtaṣar al-Akhḍarī", "arabic": "متن الأخضري في العبادات", "author": "al-Akhḍarī", "type": "fiqh", "cat_id": 15, "genres": ["fiqh", "maliki"]},
+    {"id": "124336", "title": "Mukhtaṣar al-Qudūrī", "arabic": "مختصر القدوري", "author": "al-Qudūrī", "type": "fiqh", "cat_id": 14, "genres": ["fiqh", "hanafi"]},
+    {"id": "6125", "title": "al-Muqaddima al-Ḥaḍramiyya", "arabic": "المقدمة الحضرمية", "author": "ʿAbdallāh Bā Faḍl al-Ḥaḍramī", "type": "fiqh", "cat_id": 16, "genres": ["fiqh", "shafii"]},
+    {"id": "11315", "title": "ʿUmdat al-Fiqh", "arabic": "عمدة الفقه", "author": "Ibn Qudāma", "type": "fiqh", "cat_id": 17, "genres": ["fiqh", "hanbali"]},
+    {"id": "11355", "title": "Mukhtaṣar Khalīl", "arabic": "مختصر خليل", "author": "Khalīl b. Isḥāq", "type": "fiqh", "cat_id": 15, "genres": ["fiqh", "maliki"]},
+    {"id": "91", "title": "Sharḥ al-Kharashī", "arabic": "شرح الخرشي على مختصر خليل", "author": "al-Kharashī", "type": "fiqh", "cat_id": 15, "genres": ["fiqh", "maliki"]},
+    {"id": "569", "title": "Mawāhib al-Jalīl", "arabic": "مواهب الجليل في شرح مختصر خليل", "author": "al-Ḥaṭṭāb", "type": "fiqh", "cat_id": 15, "genres": ["fiqh", "maliki"]},
+    {"id": "21611", "title": "al-Tāj wa-l-Iklīl", "arabic": "التاج والإكليل لمختصر خليل", "author": "al-Mawwāq", "type": "fiqh", "cat_id": 15, "genres": ["fiqh", "maliki"]},
+    {"id": "21614", "title": "Manḥ al-Jalīl", "arabic": "منح الجليل شرح مختصر خليل", "author": "ʿUlaysh", "type": "fiqh", "cat_id": 15, "genres": ["fiqh", "maliki"]},
+    {"id": "95864", "title": "al-Kawkab al-Zahrī", "arabic": "الكوكب الزهري نظم مختصر الأخضري", "author": "Muḥammad Bāy Bilʿālam", "type": "fiqh", "cat_id": 15, "genres": ["fiqh", "maliki"]},
     # ── Uṣūl al-fiqh ─────────────────────────────────────────────────────────
     {"id": "8180", "title": "al-Risāla", "arabic": "الرسالة", "author": "Muḥammad b. Idrīs al-Shāfiʿī", "type": "usul"},
     {"id": "5459", "title": "al-Mustaṣfā", "arabic": "المستصفى", "author": "Abū Ḥāmid al-Ghazālī", "type": "usul"},
@@ -1501,6 +1502,7 @@ def load_catalog(collection: str, *, use_cache: bool = True) -> list[dict]:
                 "author_ar": b.get("author_ar", ""),
                 "authors_ar": b.get("authors_ar", []),
                 "source": b.get("url") or f"https://app.turath.io/book/{b['id']}",
+                "cat_id": b.get("cat_id") or detail.get("cat_id") or BOOK_CATEGORIES.get(str(b["id"])),
                 # A repository MOC plus one or more work-type MOCs (see TURATH_TYPES).
                 "kind_type": type_key,
                 "kind_types": type_keys,
@@ -4441,7 +4443,7 @@ def build_turath_units(work: dict, args: argparse.Namespace) -> list[dict]:
     url = COLLECTIONS["turath"]["data"].format(id=work["id"])
     emit("step", name=work["title"], status="downloading", detail="whole book")
     book = _turath_decode(fetch_json(url, cache=not args.no_cache))
-    cat_id = _int_or(book["meta"].get("cat_id"), 0)
+    cat_id = _int_or(work.get("cat_id") or book["meta"].get("cat_id"), 0)
     if cat_id:
         work["cat_id"] = cat_id
         extra_topics = TURATH_CAT_TOPICS.get(cat_id, [])

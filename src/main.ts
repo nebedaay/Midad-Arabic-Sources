@@ -55,7 +55,7 @@ import {
 } from "./sourceImport/history";
 import { BUNDLED_ASSETS } from "./assets.generated";
 import { localDate } from "./time";
-import { BUILTIN_TOPICS, TOPIC_PAGE_PREFIX, genreTopic, normalizeGenre, topicLabel, topicLink, topicNoteName, topicsFromValue, turathGenres } from "./topics";
+import { BUILTIN_TOPICS, TOPIC_PAGE_PREFIX, genreTopic, normalizeGenre, topicLabel, topicLink, topicNoteName, topicsFromValue, turathGenres, turathTopicsForWork } from "./topics";
 import { identityOfFrontmatter, sourceIdToYaml, sourceOfFrontmatter } from "./sourceIds";
 import {
 	ANNOTATIONS_NOTE,
@@ -1907,6 +1907,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			author: authorRoman || authorAr,
 			type,
 			genres,
+			cat_id: cat,
 			url: `https://app.turath.io/book/${id}`,
 		};
 	}
@@ -3492,10 +3493,12 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			.map((name) => topicLabel(canonicalMocName(name)))
 			.filter((name) => name && name !== ANNOTATIONS_NOTE && !repositories.has(name) && known.has(name));
 		const genres = workGenres(work).map(genreTopic);
+		const categories = turathTopicsForWork(work);
 		const user = this.userTopicsForWork(work);
 		return [...new Set([
 			...json.filter((name) => !repositories.has(name)),
 			...genres.filter((name) => !repositories.has(name)),
+			...categories,
 			...user,
 		])];
 	}
@@ -8016,6 +8019,7 @@ interface TurathCustomWork {
 	author: string;
 	type: string;
 	genres: string[];
+	cat_id?: number;
 	subtitle?: string;
 	url: string;
 }
@@ -8338,28 +8342,23 @@ class ManageSourcesModal extends Modal {
 
 		side.createDiv({ cls: "mas-manage__group", text: "Topics" });
 		const genreToggles = side.createDiv({ cls: "mas-manage__toggles" });
-		const genres: string[] = [];
-		const genreLabel = new Map<string, string>();
-		for (const w of this.works) {
-			for (const topic of this.plugin.topicsForWork(w)) {
-				if (genreLabel.has(topic)) continue;
-				genres.push(topic);
-				genreLabel.set(topic, topic);
+		const renderTopicToggles = (available: Set<string>): void => {
+			for (const topic of [...this.activeGenres]) {
+				if (!available.has(topic)) this.activeGenres.delete(topic);
 			}
-		}
-		for (const g of [...this.activeGenres]) if (!genreLabel.has(g)) this.activeGenres.delete(g);
-		for (const g of genres) {
-			const btn = genreToggles.createEl("button", { cls: "mas-manage__toggle", text: genreLabel.get(g) || g });
-			btn.classList.toggle("is-on", this.activeGenres.has(g));
-			btn.onclick = () => {
-				if (this.activeGenres.has(g)) this.activeGenres.delete(g);
-				else this.activeGenres.add(g);
-				btn.classList.toggle("is-on", this.activeGenres.has(g));
-				this.plugin.settings.manageGenreFilter = [...this.activeGenres];
-				void this.plugin.saveSettings();
-				this.updateFilter();
-			};
-		}
+			genreToggles.empty();
+			for (const topic of [...available].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }))) {
+				const btn = genreToggles.createEl("button", { cls: "mas-manage__toggle", text: topic });
+				btn.classList.toggle("is-on", this.activeGenres.has(topic));
+				btn.onclick = () => {
+					if (this.activeGenres.has(topic)) this.activeGenres.delete(topic);
+					else this.activeGenres.add(topic);
+					this.plugin.settings.manageGenreFilter = [...this.activeGenres];
+					void this.plugin.saveSettings();
+					this.updateFilter();
+				};
+			}
+		};
 
 		side.createDiv({ cls: "mas-manage__group", text: "Repositories" });
 		const repoList = side.createDiv({ cls: "mas-manage__repo-list" });
@@ -8589,6 +8588,7 @@ class ManageSourcesModal extends Modal {
 		this.updateFilter = () => {
 			const q = search.value.trim().toLowerCase();
 			const lg = langSel.value;
+			const availableTopics = new Set<string>();
 			for (const r of this.rows) {
 				const w = r.work;
 				const hay = `${w.title} ${w.name} ${w.title_ar ?? ""} ${w.short_ar ?? ""} ${(w.aliases ?? []).join(" ")} ${w.author} ${w.subtitle ?? ""} ${w.id} ${w.repository || ""}`.toLowerCase();
@@ -8601,11 +8601,14 @@ class ManageSourcesModal extends Modal {
 							: this.show === "archived"
 								? r.isArchived || r.isArchiving
 								: r.annotationCount > 0;
-				const genreOk = !this.activeGenres.size || r.topics.some((topic) => this.activeGenres.has(topic));
 				const repoOk = !this.offRepos.has(r.repo);
-				const visible = showOk && genreOk && repoOk && (!q || hay.includes(q)) && (!lg || w.language === lg);
+				const otherOk = showOk && repoOk && (!q || hay.includes(q)) && (!lg || w.language === lg);
+				if (otherOk) for (const topic of r.topics) availableTopics.add(topic);
+				const genreOk = !this.activeGenres.size || r.topics.some((topic) => this.activeGenres.has(topic));
+				const visible = otherOk && genreOk;
 				r.el.classList.toggle("is-hidden", !visible);
 			}
+			renderTopicToggles(availableTopics);
 			// A collection heading is only meaningful while it still has a visible row.
 			for (const [coll, heading] of this.headings) {
 				const anyVisible = this.rows.some((r) => r.collection === coll && !r.el.classList.contains("is-hidden"));

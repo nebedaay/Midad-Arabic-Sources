@@ -8,6 +8,7 @@ interface TopicData {
 	turathTypes: Record<string, string>;
 	turathCategories: Record<string, string[]>;
 	turathCatGenres: Record<string, string[]>;
+	bookCategories: Record<string, number>;
 }
 
 export const TOPIC_PAGE_PREFIX = "Midad topic - ";
@@ -54,6 +55,19 @@ export function turathGenres(category: number, fallback: string): string[] {
 /** The topics a Turath category contributes. */
 export function turathTopics(category: number): string[] {
 	return DATA.turathCategories[String(category)] ?? [];
+}
+
+/** The Turath category for a catalogue/model work, including cached models. */
+export function turathCategory(work: Record<string, unknown>): number {
+	const explicit = Number(work.cat_id ?? 0);
+	if (explicit) return explicit;
+	const raw = work.id;
+	const id = typeof raw === "string" || typeof raw === "number" ? String(raw).trim() : "";
+	return Number(DATA.bookCategories[id] ?? 0);
+}
+
+export function turathTopicsForWork(work: Record<string, unknown>): string[] {
+	return turathTopics(turathCategory(work));
 }
 
 export function turathTypeTopic(type: string): string {
