@@ -544,6 +544,8 @@ export interface SourcesMocItem {
 export interface SourcesMocGroup {
 	name: string;
 	label: string;
+	/** Number of works behind the category, shown next to its link. */
+	count?: number;
 	items: SourcesMocItem[];
 }
 

@@ -3590,12 +3590,14 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			this.app, templates, name,
 			[{
 				name: section,
-				works: category.entries.map((entry) => ({
-					dir: entry.note,
-					title: entry.label,
-					count: entry.count,
-					linked: entry.kind !== "topic" || entry.count > 0,
-				})),
+				works: category.entries
+					.filter((entry) => entry.count > 0)
+					.map((entry) => ({
+						dir: entry.note,
+						title: entry.label,
+						count: entry.count,
+						linked: true,
+					})),
 			}],
 			this.sourcesRoot(), "Midad Arabic Sources", generated, true
 		);
@@ -4364,13 +4366,17 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			}
 		}
 		const groups: SourcesMocGroup[] = categories
-			.map((category) => ({
-				name: category.note,
-				label: category.label,
-				items: category.entries
+			.map((category) => {
+				const items = category.entries
 					.filter((entry) => entry.count > 0)
-					.map((entry) => ({ name: entry.note, label: entry.label, count: entry.count })),
-			}))
+					.map((entry) => ({ name: entry.note, label: entry.label, count: entry.count }));
+				return {
+					name: category.note,
+					label: category.label,
+					count: items.reduce((total, item) => total + (item.count ?? 0), 0),
+					items,
+				};
+			})
 			.filter((group) => group.items.length > 0);
 		const out = renderSourcesNote(templates, groups, generated);
 		// append (not replace) so a user-written note keeps its own content.
@@ -7997,7 +8003,8 @@ function workGenres(w: JsonObject): string[] {
 		? w.genres.filter((value): value is string => typeof value === "string" && value.trim().length > 0)
 		: [];
 	if (genres.length) return [...new Set(genres.map(normalizeGenre))];
-	return [normalizeGenre(typeof w.genre === "string" && w.genre ? w.genre : "other")];
+	const genre = typeof w.genre === "string" ? w.genre.trim() : "";
+	return genre ? [normalizeGenre(genre)] : [];
 }
 
 /** A user-added Turath work, persisted in `turath-custom-works.json`. */

@@ -6,7 +6,7 @@
 
 >[!mas-sources-list]
 <% for (const g of groups) { -%>
->- <%= wikilink(g.name, g.label) %>
+>- <%= wikilink(g.name, g.count != null ? `${g.label} (${g.count})` : g.label) %>
 <% for (const item of g.items) { -%>
 >	- <%= wikilink(item.name, item.count != null ? `${item.label} (${item.count})` : item.label) %>
 <% } -%>
