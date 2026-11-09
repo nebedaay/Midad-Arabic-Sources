@@ -6,10 +6,11 @@
 <% const yamlId = (value) => String(value).replace(/:/g, '/'); -%>
 <% add_property('midad-up', [...work.up, '[[Midad Arabic Sources]]']); -%>
 <% add_property('midad-id', yamlId('repo:' + work.key)); -%>
-<% add_property('midad-kind', 'repo-work'); -%>
-<% /* Retired properties. The source is derived from midad-id/midad-kind/midad-work,
-   and the raw key is midad-id without its `repo/` prefix. Declared empty with
-   `remove` so a re-render deletes either one from an older note. */ -%>
+<% /* The id now carries the kind; the retired separate properties are removed
+   from older notes on re-render. */ -%>
+<% add_property('midad-kind', '', { merge: 'remove' }); -%>
+<% add_property('midad-work', '', { merge: 'remove' }); -%>
+<% add_property('midad-unit', '', { merge: 'remove' }); -%>
 <% add_property('midad-source', '', { merge: 'remove' }); -%>
 <% add_property('midad-key', '', { merge: 'remove' }); -%>
 <% if (pub.mas_note) { add_property('midad-note', pub.mas_note); } -%>

@@ -35,7 +35,7 @@ Every category MOC points up to one **parent note** (the setting **“Sources pa
 
 Top-level source notes (work hubs, MOCs, and transcription/translation parents) carry `[[Midad Arabic Sources]]` in `midad-up`, so the corpus is traceable without giving every individual sūra, chapter, root, or volume note a backlink to the parent.
 
-All plugin-managed frontmatter properties use the `midad-` prefix and are written together at the start of the generated property block (`midad-up`, `midad-id`, `midad-kind`, `midad-note`; transcriptions and translations add `midad-work` and `midad-unit`). The plain `up` property is never generated, so it remains available for the user. `midad-source` and `midad-key` were retired: the source a note belongs to is derived from `midad-id` / `midad-kind` / `midad-work`, and the raw work key is the `midad-id` without its `repo/` prefix.
+All plugin-managed frontmatter properties use the `midad-` prefix and are written together at the start of the generated property block (`midad-up`, `midad-id`, `midad-note`). The plain `up` property is never generated, so it remains available for the user. `midad-kind`, `midad-work`, `midad-unit`, `midad-source`, and `midad-key` were retired: the kind, work, unit, and source are parsed from the comprehensive `midad-id` (see [Source identity](./setup.md#where-state-lives)). Templates declare the retired keys with `merge: 'remove'` so a re-render deletes them.
 
 Language sections in every category and repository MOC use one shared order: **Arabic Texts** first, then any other languages alphabetically, then **English Texts**. This keeps bilingual works and the consolidated Qurʾān MOC consistent.
 

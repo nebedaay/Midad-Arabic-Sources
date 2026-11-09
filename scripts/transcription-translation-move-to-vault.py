@@ -525,9 +525,6 @@ created: {datetime.now().strftime('%Y-%m-%d %H:%M')}
 midad-up:
 {chr(10).join(mas_up_items)}
 midad-id: "{_yaml_id(mas_id)}"
-midad-kind: "{doc_type}"
-midad-work: "{_yaml_id(mas_work)}"
-midad-unit: "{unit_id}"
 title: "{_yaml_quote(title)}"
 """
     if not shorttitle_ar and title_ar:
@@ -734,7 +731,8 @@ def sync_collection_property(citekey: str, doc_type: str, standalone: bool = Fal
 def write_note(body: str, citekey: str, doc_type: str, related: list[str] = None,
                volume: int = None, standalone: bool = False,
                title: str | None = None, authors: list[str] | None = None,
-               unit: str | None = None, cover: dict | None = None) -> Path:
+               unit: str | None = None, cover: dict | None = None,
+               dest_override: Path | None = None) -> Path:
     """Build the YAML and write the finished note. Returns its path."""
     related = related or []
     cover = cover or {}
@@ -756,7 +754,7 @@ def write_note(body: str, citekey: str, doc_type: str, related: list[str] = None
         cover_shorttitle = None
     if not standalone and volume:
         ensure_parent(citekey, doc_type, related, volume, standalone, title_ar, authors_ar)
-    dest = dest_path(citekey, doc_type, volume, standalone, unit=unit)
+    dest = dest_override or dest_path(citekey, doc_type, volume, standalone, unit=unit)
     # A user's own Arabic metadata and editors win, exactly like `topics`.
     title_ar = _existing_scalar(dest, "title-ar") or title_ar
     authors_ar = _existing_list(dest, "authors-ar") or authors_ar

@@ -885,7 +885,12 @@ def _consolidate_parent(native_parent: Path, mv) -> dict | None:
         return None
     legacy = candidates[0]
     legacy_text = legacy.read_text(encoding="utf-8")
-    if not re.search(r'^midad-kind:\s*"?adopted"?\s*$', legacy_text, re.M):
+    legacy_id = re.search(r'^midad-id:\s*"?(.*?)"?\s*$', legacy_text, re.M)
+    adopted = bool(
+        re.search(r'^midad-kind:\s*"?adopted"?\s*$', legacy_text, re.M)
+        or (legacy_id and re.match(r'^(?:adopted|note)/', legacy_id.group(1).strip()))
+    )
+    if not adopted:
         return None
     # Only a parent/index note. A full transcription that happens to share the
     # name is not safe to absorb and delete.
@@ -998,7 +1003,8 @@ def cmd_postprocess_note(args) -> int:
         dest = mv.write_note(
             processed_body, citekey, doc_type, related=related,
             volume=volume, standalone=standalone, title=title, authors=authors,
-            unit=unit)
+            unit=unit,
+            dest_override=note if getattr(args, "in_place", False) else None)
     consolidated = None
     if volume is not None:
         consolidated = _consolidate_parent(
@@ -1055,6 +1061,8 @@ def main() -> int:
     p.add_argument("--unit", help="Partial-transcription description, e.g. 'West Africa women'.")
     p.add_argument("--standalone", action="store_true")
     p.add_argument("--metadata-only", action="store_true")
+    p.add_argument("--in-place", action="store_true",
+                   help="Upgrade metadata at the note's current path instead of moving/writing the canonical default path.")
     p.add_argument("--tafsir", action="store_true",
                    help="Treat quotes as continuous with the verse under discussion.")
     p.set_defaults(func=cmd_postprocess_note)

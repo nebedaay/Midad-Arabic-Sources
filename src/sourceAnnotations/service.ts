@@ -54,7 +54,9 @@ import {
 	type SelectionExclusion,
 } from "./text";
 import { MANAGED_CLOSE, MANAGED_OPEN, joinNote, splitNote } from "../sourceImport/merge";
+import { identityOfFrontmatter, sourceIdToYaml } from "../sourceIds";
 import type {
+	AdoptionOptions,
 	AnnotationColor,
 	AnnotationSettings,
 	AnnotationTarget,
@@ -73,6 +75,12 @@ export interface AnnotationHost {
 	refreshRegistry?: () => Promise<void>;
 	/** Upgrade a transcription/translation note's metadata to the native form. */
 	upgradeTranscription?: (file: TFile) => Promise<void>;
+	/** Upgrade metadata without moving the note to its canonical path. */
+	upgradeTranscriptionInPlace?: (file: TFile) => Promise<void>;
+	/** Ask whether to apply metadata defaults / move a legacy note. */
+	confirmAdoption?: (file: TFile) => Promise<AdoptionOptions | null>;
+	/** Move a legacy note to its canonical folder and return the moved file. */
+	moveAdoptionFile?: (file: TFile) => Promise<TFile | null>;
 }
 
 function cmOf(view: MarkdownView): EditorView | null {
@@ -369,10 +377,6 @@ export class AnnotationService {
 
 	private async adoptNote(file: TFile): Promise<void> {
 		if (file.extension !== "md") return;
-		if (this.adoption.has(file.path)) {
-			new Notice("This note is already in the annotation system.");
-			return;
-		}
 		const frontmatter = this.app.metadataCache.getFileCache(file)?.frontmatter as Record<string, unknown> | undefined;
 		const rawType = frontmatter?.["document-type"];
 		const type = typeof rawType === "string" ? rawType : "";
@@ -384,24 +388,47 @@ export class AnnotationService {
 		// generic adopted note; upgrade its metadata (and the literature note's
 		// transcriptions list) instead. This keeps legacy notes looking like the
 		// notes the current pipeline writes.
-		const masKind = frontmatter?.["midad-kind"];
+		const masKind = identityOfFrontmatter(frontmatter)?.kind ?? frontmatter?.["midad-kind"];
 		const legacyTranscription = /^(?:@|mas-).+?\s+-\s+(?:transcription|translation)(?:\s+-\s+(?:vol|v)\.\s*\d+)?(?:\s*[-,–—]\s*.+)?$/i.test(file.basename);
 		if (masKind === "transcription" || masKind === "translation" || legacyTranscription) {
-			if (this.host.upgradeTranscription) {
-				new Notice("Upgrading transcription metadata…");
-				await this.host.upgradeTranscription(file);
-			} else {
-				new Notice("This is a Midad transcription/translation; use post-process or re-render to update it.");
+			const choice = this.host.confirmAdoption
+				? await this.host.confirmAdoption(file)
+				: { metadata: true, move: false, remember: false };
+			if (!choice) return;
+			if (!choice.metadata && !choice.move) {
+				new Notice("The note is already registered for annotations; no metadata changes were made.");
+				return;
 			}
+			let target = file;
+			if (choice.move && this.host.moveAdoptionFile) {
+				target = await this.host.moveAdoptionFile(file) ?? file;
+			}
+			if (choice.metadata) {
+				const upgrade = this.host.upgradeTranscriptionInPlace ?? this.host.upgradeTranscription;
+				if (upgrade) {
+					new Notice("Upgrading transcription metadata…");
+					await upgrade(target);
+				} else {
+					new Notice("This is a Midad transcription/translation; use post-process or re-render to update it.");
+				}
+			} else if (choice.move) {
+				new Notice("Note moved to its Midad folder.");
+			}
+			return;
+		}
+		if (this.adoption.has(file.path)) {
+			new Notice("This note is already in the annotation system.");
 			return;
 		}
 		const key = newAdoptedNoteKey();
 		await this.app.fileManager.processFrontMatter(file, (fm: Record<string, unknown>) => {
-			if (!fm["midad-id"]) fm["midad-id"] = key;
-			fm["midad-kind"] = "adopted";
-			fm["midad-source"] = "adopted";
-			fm["midad-work"] = key;
-			if (!fm["midad-unit"]) fm["midad-unit"] = "note";
+			if (!fm["midad-id"]) fm["midad-id"] = sourceIdToYaml(key);
+			// The id now encodes the kind and unit; the separate properties are
+			// retired and are removed if an older note still carries them.
+			delete fm["midad-kind"];
+			delete fm["midad-work"];
+			delete fm["midad-unit"];
+			delete fm["midad-source"];
 			if (!fm["title"]) fm["title"] = file.basename;
 		});
 		const text = await this.app.vault.adapter.read(normalizePath(file.path));
@@ -1175,7 +1202,7 @@ export class AnnotationService {
 		if (!file) return null;
 		const cache = this.app.metadataCache.getFileCache(file);
 		const frontmatter = cache?.frontmatter as Record<string, unknown> | undefined;
-		const adopted = !!frontmatter?.["midad-work"] || this.adoption.has(file.path);
+		const adopted = identityOfFrontmatter(frontmatter)?.kind === "adopted" || this.adoption.has(file.path);
 		if (!adopted && !isSourceFrontmatter(frontmatter)) return null;
 		const value = editor.getValue();
 		const bounds = managedBounds(value) ?? (adopted ? bodyBounds(value) : null);

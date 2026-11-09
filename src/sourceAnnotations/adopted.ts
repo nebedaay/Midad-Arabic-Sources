@@ -35,7 +35,7 @@ function uuid(): string {
 }
 
 export function newAdoptedNoteKey(): string {
-	return `note:${uuid()}`;
+	return `adopted:${uuid()}`;
 }
 
 function baseName(path: string): string {

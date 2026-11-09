@@ -1,5 +1,5 @@
 import { App, normalizePath, TFile } from "obsidian";
-import { sourceIdFromYaml, sourceOfFrontmatter } from "../sourceIds";
+import { identityOfFrontmatter, sourceIdFromYaml, sourceOfFrontmatter } from "../sourceIds";
 
 export const SOURCE_REGISTRY = ".midad-arabic-sources/sources.json";
 
@@ -85,16 +85,17 @@ export async function buildSourceRegistry(app: App, paths: RegistryPaths): Promi
 	// translations, adopted notes, and any user note adopted into the system).
 	for (const file of app.vault.getMarkdownFiles().filter((f) => indexed(f.path))) {
 		const frontmatter = app.metadataCache.getFileCache(file)?.frontmatter as Record<string, unknown> | undefined;
-		const masId = sourceIdFromYaml(stringField(frontmatter, "midad-id"));
+		const identity = identityOfFrontmatter(frontmatter);
+		const masId = identity?.id ?? sourceIdFromYaml(stringField(frontmatter, "midad-id"));
 		if (!masId) continue;
 		add({
 			masId,
-			kind: sourceKind(stringField(frontmatter, "midad-kind")),
+			kind: sourceKind(identity?.kind ?? stringField(frontmatter, "midad-kind")),
 			title: stringField(frontmatter, "title") || file.basename,
 			path: file.path,
 			source: sourceOfFrontmatter(frontmatter),
-			workKey: sourceIdFromYaml(stringField(frontmatter, "midad-work")) || undefined,
-			unitKey: stringField(frontmatter, "midad-unit") || undefined,
+			workKey: identity?.work,
+			unitKey: identity?.unit,
 			status: stringField(frontmatter, "status") || undefined,
 		});
 	}
@@ -145,10 +146,11 @@ export async function buildSourceRegistry(app: App, paths: RegistryPaths): Promi
 			const file = app.vault.getAbstractFileByPath(normalizePath(path));
 			if (!(file instanceof TFile)) continue;
 			const frontmatter = app.metadataCache.getFileCache(file)?.frontmatter as Record<string, unknown> | undefined;
-			const masId = sourceIdFromYaml(stringField(frontmatter, "midad-id")) || `note:${entry.workKey || path}`;
+			const identity = identityOfFrontmatter(frontmatter);
+			const masId = identity?.id || sourceIdFromYaml(stringField(frontmatter, "midad-id")) || `adopted:${entry.workKey || path}`;
 			add({
 				masId,
-				kind: sourceKind(stringField(frontmatter, "midad-kind") || String(entry.kind ?? "adopted")),
+				kind: sourceKind(identity?.kind ?? (stringField(frontmatter, "midad-kind") || String(entry.kind ?? "adopted"))),
 				title: String(entry.workTitle ?? entry.unitTitle ?? file.basename),
 				path: file.path,
 				source: String(entry.sourceKey ?? "adopted"),

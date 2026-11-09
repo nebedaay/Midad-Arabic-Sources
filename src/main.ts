@@ -54,7 +54,7 @@ import {
 } from "./sourceImport/history";
 import { BUNDLED_ASSETS } from "./assets.generated";
 import { localDate } from "./time";
-import { sourceIdToYaml, sourceOfFrontmatter } from "./sourceIds";
+import { identityOfFrontmatter, sourceIdToYaml, sourceOfFrontmatter } from "./sourceIds";
 import {
 	ANNOTATIONS_NOTE,
 	MY_CONTENT_LABEL,
@@ -77,6 +77,7 @@ import { registerAnnotations, AnnotationService } from "./sourceAnnotations/serv
 import { buildSourceRegistry, writeSourceRegistry } from "./sourceRegistry/registry";
 import { YamlBuilder } from "./sourceImport/yaml";
 import { ConfirmModal } from "./sourceAnnotations/modal";
+import type { AdoptionOptions } from "./sourceAnnotations/types";
 import { AnnotationTrashModal } from "./sourceAnnotations/trashModal";
 import type { AnnotationColor } from "./sourceAnnotations/types";
 
@@ -190,6 +191,12 @@ interface MidadArabicSourcesSettings {
 	geminiApiKey: string;
 	/** Include the Arabic-script alias (when Arabic metadata is known). */
 	includeArabicAliases?: boolean;
+	/** Remembered adoption choices. */
+	adoptionApplyMetadata?: boolean;
+	adoptionMoveFiles?: boolean;
+	adoptionRemember?: boolean;
+	/** Where arbitrary adopted notes are moved when requested. */
+	adoptedNoteFolder?: string;
 	// General
 	sourceRoot: string;
 	sourceLayoutMigrated?: boolean;
@@ -597,6 +604,10 @@ const DEFAULT_SETTINGS: MidadArabicSourcesSettings = {
 	literatureNoteFolder: "",
 	geminiApiKey: "",
 	includeArabicAliases: true,
+	adoptionApplyMetadata: false,
+	adoptionMoveFiles: false,
+	adoptionRemember: false,
+	adoptedNoteFolder: "",
 	sourceImportScript: "scripts/text-source-import.py",
 	sourceRoot: "Midad Arabic Sources",
 	sourceLayoutMigrated: false,
@@ -679,6 +690,9 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 				refreshParent: () => this.refreshAnnotationParent(),
 				refreshRegistry: () => this.refreshSourceRegistry(),
 				upgradeTranscription: (file) => this.postprocessTranscriptionNote(file, undefined, true),
+				upgradeTranscriptionInPlace: (file) => this.postprocessTranscriptionNote(file, undefined, true, true),
+				confirmAdoption: (file) => this.confirmAdoption(file),
+				moveAdoptionFile: (file) => this.moveAdoptionFile(file),
 			});
 			await this.refreshAnnotationParent();
 		} catch (error) {
@@ -3877,7 +3891,8 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			const fm = (this.app.metadataCache.getFileCache(file)?.frontmatter ?? {}) as Record<string, unknown>;
 			const entryString = (key: string): string => typeof entry?.[key] === "string" ? String(entry[key]) : "";
 			const source = sourceOfFrontmatter(fm);
-			const kind = typeof fm["midad-kind"] === "string" ? String(fm["midad-kind"]) : "";
+			const kind = identityOfFrontmatter(fm)?.kind
+				?? (typeof fm["midad-kind"] === "string" ? String(fm["midad-kind"]) : "");
 			const rawBase = (match?.[1] ?? "").trim();
 			const baseVolume = /^(.*?)\s+(?:vol\.?|v\.?|volume)\s*(\d+)$/i.exec(rawBase);
 			const base = baseVolume ? baseVolume[1].trim() : rawBase;
@@ -4503,7 +4518,8 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 	async postprocessTranscriptionNote(
 		file?: TAbstractFile | null,
 		infoOverride?: ArchivedNoteInfo,
-		metadataOnly = false
+		metadataOnly = false,
+		inPlace = false
 	): Promise<void> {
 		const target = file ?? this.app.workspace.getActiveFile();
 		if (!(target instanceof TFile) || target.extension !== "md") {
@@ -4528,6 +4544,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		if (info.unit) args.push("--unit", info.unit);
 		if (target.basename.startsWith("mas-")) args.push("--standalone");
 		if (metadataOnly) args.push("--metadata-only");
+		if (inPlace) args.push("--in-place");
 		const result = await this.runWithProgress(
 			metadataOnly ? `Upgrading ${target.basename}` : `Post-processing ${target.basename}`,
 			args,
@@ -4543,6 +4560,88 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		if (result?.notes?.length && !metadataOnly) {
 			new Notice(`Post-processed ${target.basename}.`);
 		}
+	}
+
+	/** The remembered adoption choices, or explicit unchecked defaults. */
+	private adoptionDefaults(): AdoptionOptions {
+		return {
+			metadata: this.settings.adoptionApplyMetadata === true,
+			move: this.settings.adoptionMoveFiles === true,
+			remember: this.settings.adoptionRemember === true,
+		};
+	}
+
+	/** Ask how a legacy transcription/translation should be adopted. */
+	async confirmAdoption(file: TFile): Promise<AdoptionOptions | null> {
+		if (this.settings.adoptionRemember === true) return this.adoptionDefaults();
+		return new Promise((resolve) => {
+			new AdoptionModal(this.app, file.basename, ({ metadata, move, remember }) => {
+				if (remember) {
+					this.settings.adoptionApplyMetadata = metadata;
+					this.settings.adoptionMoveFiles = move;
+					this.settings.adoptionRemember = true;
+					void this.saveSettings();
+					if (metadata || move) {
+						window.setTimeout(() => { void this.applyAdoptionDefaultsToExisting({ metadata, move, remember }); }, 200);
+					}
+				}
+				resolve({ metadata, move, remember });
+			}, () => resolve(null)).open();
+		});
+	}
+
+	/** Apply remembered choices to legacy notes already outside the default folders. */
+	private async applyAdoptionDefaultsToExisting(options: AdoptionOptions): Promise<void> {
+		if (!options.remember || (!options.metadata && !options.move)) return;
+		const targets = this.app.vault.getMarkdownFiles().filter((file) => {
+			const info = archivedNoteInfo(file.path);
+			if (!info?.type) return false;
+			const folder = info.type === "translation" ? this.translationsFolder() : this.transcriptionsFolder();
+			return !normalizePath(file.path).startsWith(`${normalizePath(folder)}/`);
+		});
+		if (!targets.length) return;
+		new ConfirmModal(this.app, {
+			title: "Apply adoption defaults",
+			message: `Apply the remembered adoption choices to ${targets.length} existing legacy transcription/translation note(s) outside the default folders?`,
+			confirmText: "Apply",
+			onConfirm: async () => {
+				for (const file of targets) {
+					let target: TFile | null = file;
+					if (options.move) target = await this.moveAdoptionFile(file);
+					if (target && options.metadata) {
+						await this.postprocessTranscriptionNote(target, undefined, true, true);
+					}
+				}
+				new Notice(`Applied adoption defaults to ${targets.length} note(s).`);
+			},
+		}).open();
+	}
+
+	/** Move a legacy transcription/translation (or arbitrary note) to its
+	 * default folder, returning the moved file. Obsidian updates inbound links. */
+	async moveAdoptionFile(file: TFile): Promise<TFile | null> {
+		const info = archivedNoteInfo(file.path);
+		let folder: string;
+		let base: string;
+		if (info?.type) {
+			folder = info.type === "translation" ? this.translationsFolder() : this.transcriptionsFolder();
+			const prefix = file.basename.startsWith("mas-") ? "mas-" : "@";
+			const suffix = info.volume != null
+				? ` - vol. ${info.volume}`
+				: info.unit ? ` - ${info.unit}` : "";
+			base = `${prefix}${info.citekey} - ${info.type}${suffix}`;
+		} else {
+			folder = (this.settings.adoptedNoteFolder || "").trim() || `${this.sourcesRoot()}/Adopted Notes`;
+			base = file.basename;
+		}
+		await ensureFolder(this.app, folder);
+		const target = this.uniquePath(folder, base);
+		if (normalizePath(target) === normalizePath(file.path)) return file;
+		await this.app.fileManager.renameFile(file, target);
+		const moved = this.app.vault.getAbstractFileByPath(target);
+		if (moved instanceof TFile) return moved;
+		new Notice(`Moved to ${target}.`);
+		return null;
 	}
 
 	/**
@@ -5976,6 +6075,26 @@ class MidadArabicSourcesSettingTab extends PluginSettingTab {
 						name: "Include Arabic aliases",
 						desc: "Add an Arabic-script alias to transcriptions and translations whose Arabic title and author are known (at most one romanized and one Arabic alias).",
 						control: { type: "toggle", key: "includeArabicAliases" },
+					},
+					{
+						name: "Adoption: apply metadata defaults",
+						desc: "Remembered default for adopting a legacy transcription/translation: normalize its midad-id, title, aliases, and native metadata. Unchecked by default.",
+						control: { type: "toggle", key: "adoptionApplyMetadata" },
+					},
+					{
+						name: "Adoption: move files",
+						desc: "Remembered default for moving an adopted legacy note to Transcriptions/Translations (or another note to the adopted-notes folder). Unchecked by default.",
+						control: { type: "toggle", key: "adoptionMoveFiles" },
+					},
+					{
+						name: "Adoption: remember choices",
+						desc: "Skip the adoption dialog and use the two defaults above for future adoptions.",
+						control: { type: "toggle", key: "adoptionRemember" },
+					},
+					{
+						name: "Adopted notes folder",
+						desc: "Folder for arbitrary notes moved during adoption. Leave blank for <Sources folder>/Adopted Notes.",
+						control: { type: "text", key: "adoptedNoteFolder", placeholder: "<Sources folder>/Adopted Notes" },
 					},
 					doc("Transcription guide", "transcription.md", "The Gemini OCR pipeline, its post-processing, status, and reprocessing."),
 					doc("Translation guide", "translation.md", "Translating a finished transcription."),
@@ -7416,6 +7535,66 @@ class TranscriptionTopicModal extends Modal {
 			.addButton((button) => button
 				.setButtonText("Cancel")
 				.onClick(() => this.close()));
+	}
+
+	onClose(): void {
+		this.contentEl.empty();
+	}
+}
+
+class AdoptionModal extends Modal {
+	private metadata = false;
+	private move = false;
+	private remember = false;
+	private readonly onSubmit: (options: AdoptionOptions) => void;
+	private readonly onCancel: () => void;
+	private readonly name: string;
+
+	constructor(app: App, name: string, onSubmit: (options: AdoptionOptions) => void, onCancel: () => void) {
+		super(app);
+		this.name = name;
+		this.onSubmit = onSubmit;
+		this.onCancel = onCancel;
+	}
+
+	onOpen(): void {
+		const { contentEl } = this;
+		this.setTitle("Adopt note");
+		contentEl.createEl("p", {
+			text: `Adopt “${this.name}” for annotations. The three options below are independent and start unchecked.`,
+		});
+		new Setting(contentEl)
+			.setName("Apply Midad metadata defaults")
+			.setDesc("Normalize the note's Midad-id, title, aliases, and native transcription/translation metadata.")
+			.addToggle((toggle) => toggle
+				.setValue(this.metadata)
+				.onChange((value) => { this.metadata = value; }));
+		new Setting(contentEl)
+			.setName("Move to the default location")
+			.setDesc("Move a legacy transcription/translation to transcriptions/translations. Other notes go to the adopted-notes folder.")
+			.addToggle((toggle) => toggle
+				.setValue(this.move)
+				.onChange((value) => { this.move = value; }));
+		new Setting(contentEl)
+			.setName("Remember these choices")
+			.setDesc("Use them for future adoptions, including the choice to apply them to existing notes.")
+			.addToggle((toggle) => toggle
+				.setValue(this.remember)
+				.onChange((value) => { this.remember = value; }));
+		new Setting(contentEl)
+			.addButton((button) => button
+				.setButtonText("Adopt")
+				.setCta()
+				.onClick(() => {
+					this.close();
+					this.onSubmit({ metadata: this.metadata, move: this.move, remember: this.remember });
+				}))
+			.addButton((button) => button
+				.setButtonText("Cancel")
+				.onClick(() => {
+					this.close();
+					this.onCancel();
+				}));
 	}
 
 	onClose(): void {

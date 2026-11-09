@@ -100,6 +100,13 @@ export interface ResolvedAnnotation extends SourceAnnotation {
 	ranges: Array<{ start: number; end: number }>;
 }
 
+/** Choices offered when manually adopting a legacy transcription/translation. */
+export interface AdoptionOptions {
+	metadata: boolean;
+	move: boolean;
+	remember: boolean;
+}
+
 /** Settings the annotation layer reads; the plugin's settings are a superset. */
 export interface AnnotationSettings {
 	sourceRoot: string;

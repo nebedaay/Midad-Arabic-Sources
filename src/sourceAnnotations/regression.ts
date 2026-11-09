@@ -1,6 +1,7 @@
 import { TFile, normalizePath, type App } from "obsidian";
 import { AdoptedNotesRegistry } from "./adopted";
 import { buildNavigationData } from "./navigation";
+import { identityOfFrontmatter, parseMidadId, sourceOfFrontmatter } from "../sourceIds";
 import { findNormalized, resolveAnnotations, visibleSegments } from "./resolve";
 import { reanchorAnnotation } from "./reanchor";
 import {
@@ -164,6 +165,26 @@ export async function runAnnotationRegressionTests(): Promise<RegressionResult> 
 	const fuzzyMatch = reanchorAnnotation(changed, annotation);
 	check("re-anchor recovers a changed word", !!fuzzyMatch && changed.slice(fuzzyMatch.start, fuzzyMatch.end) === "study the Qur’an and teach it");
 	check("re-anchor refuses a deleted quote", reanchorAnnotation("Nothing here.", annotation) === null);
+
+	const volumeIdentity = parseMidadId("zotero/ABC123/transcription/vol.2");
+	check("id parser derives a transcription volume", !!volumeIdentity
+		&& volumeIdentity.kind === "transcription"
+		&& volumeIdentity.work === "zotero:ABC123:transcription"
+		&& volumeIdentity.unit === "vol.2"
+		&& volumeIdentity.source === "zotero:ABC123");
+	const partialIdentity = parseMidadId("zotero/ABC123/transcription/west-africa-women");
+	check("id parser keeps a partial unit", !!partialIdentity && partialIdentity.unit === "west-africa-women");
+	const legacyIdentity = identityOfFrontmatter({ "midad-id": "zotero/ABC123/transcription", "midad-unit": "vol.3" });
+	check("legacy unit folds into the id at read time", !!legacyIdentity
+		&& legacyIdentity.unit === "vol.3"
+		&& legacyIdentity.yamlId === "zotero/ABC123/transcription/vol.3");
+	const repoIdentity = parseMidadId("repo/tafsir/demo");
+	check("repo hub uses the manifest work key", !!repoIdentity
+		&& repoIdentity.kind === "repo-work"
+		&& repoIdentity.work === "tafsir:demo"
+		&& repoIdentity.unit === "");
+	check("repo hub id is its own source", sourceOfFrontmatter({ "midad-id": "repo/tafsir/demo" }) === "repo:tafsir:demo");
+	check("adopted id source is adopted", sourceOfFrontmatter({ "midad-id": "adopted/01J" }) === "adopted");
 
 	const known = {
 		"_2 Bibliographic notes/@demo - transcription.md": "---\ntitle: Demo Book\n---\n",
