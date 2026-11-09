@@ -1,6 +1,7 @@
 <% start_YAML(); -%>
 <% add_property('document-type', '[[text-source]]'); -%>
-<% add_property('tags', ['quran'], { quote: 'never' }); -%>
+<% /* Retired: quran notes are identified by their template/model and path. */ -%>
+<% add_property('tags', '', { merge: 'remove' }); -%>
 <% add_property('total_verses', unit.blocks.length); -%>
 <% add_property('created', generated); -%>
 <% add_property('updated', updated()); -%>
