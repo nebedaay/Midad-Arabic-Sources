@@ -344,6 +344,11 @@ _CANONICAL_BY_KEY = {_topic_key(value): value for value in TOPIC_DATA["topics"]}
 def topic_label(name: str) -> str:
     """Case/diacritic-insensitive canonical topic label."""
     text = (name or "").strip()
+    while text.startswith("Midad topic - "):
+        text = text[len("Midad topic - "):]
+    while text.endswith(" Sources"):
+        text = text[:-len(" Sources")]
+    text = text.strip()
     key = _topic_key(text)
     return _ALIAS_BY_KEY.get(key) or _CANONICAL_BY_KEY.get(key) or text
 

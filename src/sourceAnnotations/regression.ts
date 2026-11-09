@@ -174,7 +174,7 @@ export async function runAnnotationRegressionTests(): Promise<RegressionResult> 
 	check("renamed topics canonicalize", topicLabel("ʿAqīda") === "Doctrine (ʿaqīda)"
 		&& topicLabel("Tārīkh") === "History (Tārīkh)"
 		&& topicLabel("Language") === "Language (lugha)");
-	check("topic aliases are case-insensitive", topicLabel("biographies") === "Tarājim & Ṭabāqāt (Biographies)"
+	check("topic aliases are case-insensitive", topicLabel("biographies") === "Biographies (Tarājim & Ṭabāqāt)"
 		&& topicLabel("LUGHA") === "Language (lugha)"
 		&& topicLabel("adhkar") === "Adab & adhkār"
 		&& topicLabel("quran") === "Qurʾān text and translations");

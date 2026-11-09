@@ -25,8 +25,8 @@ function topicKey(value: unknown): string {
 	if (text.startsWith("[[") && text.endsWith("]]")) {
 		text = text.slice(2, -2).split("|", 1)[0];
 	}
-	if (text.startsWith(TOPIC_PAGE_PREFIX)) text = text.slice(TOPIC_PAGE_PREFIX.length);
-	if (text.endsWith(" Sources")) text = text.slice(0, -" Sources".length);
+	while (text.startsWith(TOPIC_PAGE_PREFIX)) text = text.slice(TOPIC_PAGE_PREFIX.length);
+	while (text.endsWith(" Sources")) text = text.slice(0, -" Sources".length);
 	text = text.normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/[\u064B-\u065F\u0670]/g, "");
 	text = text.replace(/[ʿʾ'’`]/g, "").toLowerCase();
 	return text.replace(/[^a-z0-9\u0600-\u06FF]+/g, "");
