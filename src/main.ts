@@ -3219,6 +3219,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 					topicLink(label),
 				);
 			}
+			next = next.replace(/\[\[(Midad topic - ([^\]|]+))\]\]/g, (_, target: string, label: string) => `[[${target}|${label}]]`);
 			if (next !== text) {
 				try {
 					await this.app.vault.modify(file, next);
