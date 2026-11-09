@@ -4743,8 +4743,14 @@ def work_model(work: dict, units: list[dict], created: str, layout: str) -> dict
     authors_ar = list(authors_ar or ([work["author_ar"]] if work.get("author_ar") else []))
     mocs = list(work.get("mocs") or ([work["moc"]] if work.get("moc") else []))
     up = list(work.get("up") or [])
+    cat_id = _int_or(work.get("cat_id") or BOOK_CATEGORIES.get(str(work.get("id"))), 0)
+    if cat_id and cat_id != 40:
+        mocs = [topic for topic in mocs if topic != "Other"]
+        up = [link for link in up if "Midad topic - Other" not in str(link)]
     for genre in work.get("genres", []):
         topic = GENRE_TOPICS.get(normalize_genre(str(genre)))
+        if cat_id and cat_id != 40 and topic == "Other":
+            continue
         if topic and topic not in mocs:
             mocs.append(topic)
         link = topic_link(topic)

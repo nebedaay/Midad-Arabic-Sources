@@ -55,7 +55,7 @@ import {
 } from "./sourceImport/history";
 import { BUNDLED_ASSETS } from "./assets.generated";
 import { localDate } from "./time";
-import { BUILTIN_TOPICS, TOPIC_PAGE_PREFIX, genreTopic, normalizeGenre, topicLabel, topicLink, topicNoteName, topicsFromValue, turathGenres, turathTopicsForWork } from "./topics";
+import { BUILTIN_TOPICS, TOPIC_PAGE_PREFIX, genreTopic, normalizeGenre, topicLabel, topicLink, topicNoteName, topicsFromValue, turathCategory, turathGenres, turathTopicsForWork } from "./topics";
 import { identityOfFrontmatter, sourceIdToYaml, sourceOfFrontmatter } from "./sourceIds";
 import {
 	ANNOTATIONS_NOTE,
@@ -3492,7 +3492,10 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		const json = names
 			.map((name) => topicLabel(canonicalMocName(name)))
 			.filter((name) => name && name !== ANNOTATIONS_NOTE && !repositories.has(name) && known.has(name));
-		const genres = workGenres(work).map(genreTopic);
+		const cat = turathCategory(work);
+		const genres = workGenres(work)
+			.map(genreTopic)
+			.filter((name) => !(cat && cat !== 40 && name === "Other"));
 		const categories = turathTopicsForWork(work);
 		const user = this.userTopicsForWork(work);
 		return [...new Set([
@@ -3500,7 +3503,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			...genres.filter((name) => !repositories.has(name)),
 			...categories,
 			...user,
-		])];
+		].filter((name) => !(cat && cat !== 40 && name === "Other")))];
 	}
 
 	/** A short display label for a category MOC. */

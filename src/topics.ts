@@ -82,6 +82,8 @@ function plainTopicValue(value: unknown): string {
 		const pipe = text.indexOf("|");
 		if (pipe >= 0) text = text.slice(0, pipe);
 	}
+	while (text.startsWith(TOPIC_PAGE_PREFIX)) text = text.slice(TOPIC_PAGE_PREFIX.length);
+	while (text.endsWith(" Sources")) text = text.slice(0, -" Sources".length);
 	text = text.trim();
 	const key = topicKey(text);
 	return ALIAS_BY_KEY.get(key) ?? CANONICAL_BY_KEY.get(key) ?? text;
