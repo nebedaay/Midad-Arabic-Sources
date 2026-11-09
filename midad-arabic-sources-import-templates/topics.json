@@ -34,44 +34,18 @@
   "Other",
   "Qurʾān text and translations"
  ],
- "aliases": {
-  "ʿAqīda": "Doctrine (ʿaqīda)",
-  "Tārīkh": "History (Tārīkh)",
-  "Language": "Language (lugha)",
-  "Dictionaries": "Dictionaries and Lexicons",
-  "Adab": "Adab & adhkār",
-  "al-Adab": "Adab & adhkār",
-  "Qurʾān (text)": "Qurʾān text and translations",
-  "Qurʾān Translations": "Qurʾān text and translations"
- },
- "genreAliases": {
-  "grammar-syntax": "grammar",
-  "grammar-inflection": "grammar",
-  "linguistics": "language",
-  "lexicography": "dictionary",
-  "theology": "aqida",
-  "hadith-commentary": "hadith",
-  "maqasid": "usul",
-  "quran": "quran-text"
- },
  "genres": {
   "tafsir": "Tafsīr",
-  "quran": "Qurʾān text and translations",
   "quran-text": "Qurʾān text and translations",
   "hadith": "Ḥadīth",
-  "hadith-commentary": "Ḥadīth",
   "dictionary": "Dictionaries and Lexicons",
-  "lexicography": "Dictionaries and Lexicons",
   "fiqh": "Fiqh",
   "usul": "Uṣūl al-Fiqh",
-  "maqasid": "Uṣūl al-Fiqh",
   "aqida": "Doctrine (ʿaqīda)",
-  "theology": "Doctrine (ʿaqīda)",
   "tarikh": "History (Tārīkh)",
   "biography": "Tarājim & Ṭabāqāt (Biographies)",
   "tarajim": "Tarājim & Ṭabāqāt (Biographies)",
   "language": "Language (lugha)",
-  "linguistics": "Language (lugha)",
   "grammar": "Grammar (naḥw and ṣarf)",
   "rhetoric": "Rhetoric",
   "adab": "Adab & adhkār",
@@ -356,5 +330,25 @@
   "40": [
    "other"
   ]
+ },
+ "legacyAliases": {
+  "ʿAqīda": "Doctrine (ʿaqīda)",
+  "Tārīkh": "History (Tārīkh)",
+  "Language": "Language (lugha)",
+  "Dictionaries": "Dictionaries and Lexicons",
+  "Adab": "Adab & adhkār",
+  "al-Adab": "Adab & adhkār",
+  "Qurʾān (text)": "Qurʾān text and translations",
+  "Qurʾān Translations": "Qurʾān text and translations"
+ },
+ "legacyGenreAliases": {
+  "grammar-syntax": "grammar",
+  "grammar-inflection": "grammar",
+  "linguistics": "language",
+  "lexicography": "dictionary",
+  "theology": "aqida",
+  "hadith-commentary": "hadith",
+  "maqasid": "usul",
+  "quran": "quran-text"
  }
 }

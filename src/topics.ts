@@ -2,8 +2,8 @@ import topicData from "../midad-arabic-sources-import-templates/topics.json";
 
 interface TopicData {
 	topics: string[];
-	aliases: Record<string, string>;
-	genreAliases: Record<string, string>;
+	legacyAliases: Record<string, string>;
+	legacyGenreAliases: Record<string, string>;
 	genres: Record<string, string>;
 	turathTypes: Record<string, string>;
 	turathCategories: Record<string, string[]>;
@@ -15,9 +15,9 @@ export const TOPIC_PAGE_PREFIX = "Midad topic - ";
 const DATA = topicData as TopicData;
 
 export const BUILTIN_TOPICS: string[] = DATA.topics;
-export const TOPIC_ALIASES: Record<string, string> = DATA.aliases;
+export const TOPIC_ALIASES: Record<string, string> = DATA.legacyAliases;
 export const GENRE_TOPICS: Record<string, string> = DATA.genres;
-export const GENRE_ALIASES: Record<string, string> = DATA.genreAliases;
+export const GENRE_ALIASES: Record<string, string> = DATA.legacyGenreAliases;
 
 /** Normalize a source genre key to its canonical key. */
 export function normalizeGenre(value: unknown): string {
