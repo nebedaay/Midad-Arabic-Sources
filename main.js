@@ -21734,10 +21734,13 @@ var MidadArabicSourcesPlugin = class extends import_obsidian18.Plugin {
     if ((this.settings.sourceMocParent || "").trim() && this.settings.sourceMocParent.trim() !== "Midad Arabic Sources")
       return;
     const canonical = this.sourceNotePath("Midad Arabic Sources");
-    if (this.app.vault.getAbstractFileByPath(canonical))
-      return;
     const wrong = this.sourceNotePath("Midad topic - Midad Arabic");
     const file = this.app.vault.getAbstractFileByPath(wrong);
+    if (this.app.vault.getAbstractFileByPath(canonical)) {
+      if (file instanceof import_obsidian18.TFile)
+        await this.deleteGeneratedTopicMoc(file);
+      return;
+    }
     if (!(file instanceof import_obsidian18.TFile))
       return;
     try {
