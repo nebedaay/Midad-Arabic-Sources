@@ -2,7 +2,7 @@ import { App, TFile, normalizePath } from "obsidian";
 import type { SourceModel } from "../sourceImport/render";
 import type { AdoptedNotesRegistry } from "./adopted";
 import type { AnnotationTarget, AnnotationSettings, SourceStatus } from "./types";
-import { canonicalQuranFolder, installedSourcesRoot } from "../sourcePaths";
+import { canonicalQuranFolder, installedSourcesRoot, safeFileSegment } from "../sourcePaths";
 import { identityOfFrontmatter, sourceIdFromYaml } from "../sourceIds";
 
 interface ManifestWork {
@@ -123,7 +123,7 @@ export class AnnotationTargetResolver {
 		const normalized = normalizePath(path);
 		for (const unit of model.units) {
 			const dictRoot = model.work.collection === "dictionary" && unit.kind === "dict";
-			const base = String(unit.base ?? "");
+			const base = safeFileSegment(String(unit.base ?? ""), "section", 100);
 			const stem = canonical || dictRoot ? base : `${dir} - ${base}`;
 			const folder = canonical ? this.canonicalRoot() : `${this.outRoot()}/${dir}`;
 			if (normalizePath(`${folder}/${stem}.md`) === normalized) return unitKey(unit);
@@ -144,7 +144,7 @@ export class AnnotationTargetResolver {
 		for (const unit of model.units) {
 			if (unitKey(unit) !== unitKeyValue) continue;
 			const dictRoot = model.work.collection === "dictionary" && unit.kind === "dict";
-			const base = String(unit.base ?? "");
+			const base = safeFileSegment(String(unit.base ?? ""), "section", 100);
 			const stem = canonical || dictRoot ? base : `${dir} - ${base}`;
 			const folder = canonical ? this.canonicalRoot() : `${this.outRoot()}/${dir}`;
 			return normalizePath(`${folder}/${stem}.md`);

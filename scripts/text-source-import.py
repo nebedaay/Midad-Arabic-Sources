@@ -1102,6 +1102,31 @@ def link_quote_citations(
     return text
 
 
+def _escape_literal_brackets(text: str) -> str:
+    """Escape source square brackets without touching actual links.
+
+    Obsidian treats a bare ``[`` as the start of a link, but a single bracket
+    pair is not Markdown link syntax. Escape only those lone opening brackets;
+    ``[[wikilinks]]`` and Markdown ``[text](url)`` / ``[text][ref]`` links are
+    left intact. This is applied to acquired source text only; transcription
+    and translation post-processing are separate and are not changed here.
+    """
+    def repl(match: re.Match) -> str:
+        token = match.group(0)
+        if token.startswith("[["):
+            return token
+        following = text[match.end():match.end() + 1]
+        if following in ("!", "^"):
+            return token
+        # A genuine Markdown link or image is a source link, not a citation.
+        close = text.find("]", match.end())
+        if close >= 0 and text[close + 1:close + 2] in ("(", "["):
+            return token
+        return "\\["
+
+    return re.sub(r"\[\[[^\]]*\]\]|(?<!\\)\[", repl, text)
+
+
 def link_source_content(
     text: str, *, surah: int = 0, ayah: int = 0,
     linear: bool = False, skip_current: bool = False,
@@ -1129,7 +1154,7 @@ def link_source_content(
         text = link_quote_citations(
             text, surah=surah, ayah=ayah, delims=delims, linear=linear,
         )
-    return text
+    return _escape_literal_brackets(text)
 
 
 def canonical_aliases(work: dict) -> list[str]:
@@ -4258,6 +4283,39 @@ def _turath_trim(text: str) -> str:
     return cut or text[:_TURATH_MAX_BASE]
 
 
+_TURATH_FOOTNOTE_RULE = re.compile(r"^\s*_{3,}\s*$")
+_TURATH_FOOTNOTE_LINE = re.compile(r"^\s*([٠-٩0-9]+)\s*[-–—]\s*(.+?)\s*$")
+
+
+def _western_digits(value: str) -> str:
+    """Normalize Arabic-Indic digits for comparing footnote markers."""
+    return value.translate(str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789"))
+
+
+def _turath_mark_footnote_markers(text: str, numbers: set[str]) -> str:
+    """Put a footnote anchor attached to a word in a superscript.
+
+    Turath's page text carries footnote anchors as bare digits attached to the
+    preceding word (``الطاقة٢.``), while citations use spaced digits and are
+    left alone. Only numbers that have a definition on this page are converted.
+    """
+    if not numbers:
+        return text
+
+    def repl(match: re.Match) -> str:
+        raw = match.group(2)
+        if _western_digits(raw) not in numbers:
+            return match.group(0)
+        return f"{match.group(1)}<sup>{raw}</sup>"
+
+    # Include a following vowel/diacritic in the captured prefix: the anchor in
+    # ``رِيئَتْ٧`` follows a sukūn, not the base letter directly.
+    return re.sub(
+        r"([\u0621-\u064A\u0671-\u06D3][\u064B-\u065F\u0670]*)([٠-٩0-9]{1,3})(?=(?:[.,،؛:]|\s|$))",
+        repl, text,
+    )
+
+
 def _turath_page(text: str, headings: list[dict], section_level: int,
                  drop: set[int]) -> str:
     """A page's HTML as markdown, with `toc-N` spans as H2/H3 headings.
@@ -4265,6 +4323,10 @@ def _turath_page(text: str, headings: list[dict], section_level: int,
     `drop` holds the section's own heading: the note title already carries it, so
     its inline anchor vanishes. Deeper anchors become headings that can never
     collide with the `#### p. N` page marks.
+
+    Turath pages keep one paragraph per source line and put footnotes after a
+    row of underscores. Those are rendered as a separate ``arabic-footnotes``
+    callout so they are not folded into the last paragraph of the page.
     """
     out: list[str] = []
     pos = 0
@@ -4282,16 +4344,50 @@ def _turath_page(text: str, headings: list[dict], section_level: int,
         out.append(f"\n\n{hashes} {m.group(2).strip()}\n\n")
     out.append(text[pos:])
 
-    body = html.unescape(re.sub(r"<[^>]+>", "", "".join(out)))
+    raw = "".join(out)
+    raw = re.sub(r"<br\s*/?>", "\n", raw, flags=re.IGNORECASE)
+    raw = re.sub(r"</?(?:p|div|li|blockquote|tr|section)[^>]*>", "\n", raw, flags=re.IGNORECASE)
+    raw = html.unescape(re.sub(r"<[^>]+>", "", raw)).replace("\r\n", "\n").replace("\r", "\n")
+
+    body_lines: list[str] = []
+    foot_lines: list[str] = []
+    in_footnotes = False
+    for line in raw.split("\n"):
+        line = re.sub(r"\s+", " ", line).strip()
+        if not line:
+            continue
+        if not in_footnotes and _TURATH_FOOTNOTE_RULE.match(line):
+            in_footnotes = True
+            continue
+        if in_footnotes:
+            if _TURATH_FOOTNOTE_LINE.match(line):
+                foot_lines.append(line)
+            elif foot_lines:
+                # A wrapped footnote continues the previous item.
+                foot_lines[-1] = f"{foot_lines[-1]} {line}"
+            continue
+        body_lines.append(line)
+
+    body = "\n\n".join(body_lines)
     # Qur'ān quotes get the vault's marker. Smart quotes run here, before any
     # wikilink is generated: a curly apostrophe must never enter a link target
     # (`Al-An’am` would no longer match `Al-An'am`).
     body = re.sub(r"﴿(.+?)﴾", lambda m: f"*﴿{m.group(1)}﴾{{.quran-quote}}*",
                   body, flags=re.DOTALL)
     body = smart_quotes(body)
-    paragraphs = [re.sub(r"\s+", " ", p).strip() for p in re.split(r"\n\s*\n", body)]
-    paragraphs = [re.sub(r"\s*\n\s*", " ", p) for p in paragraphs if p.strip()]
-    body = "\n\n".join(paragraphs)
+
+    numbers = {
+        _western_digits(m.group(1))
+        for line in foot_lines
+        for m in [_TURATH_FOOTNOTE_LINE.match(line)]
+        if m
+    }
+    body = _turath_mark_footnote_markers(body, numbers)
+    if foot_lines:
+        foot_lines = [smart_quotes(line) for line in foot_lines]
+        callout = ">[!arabic-footnotes]\n" + "\n".join(f">- {line}" for line in foot_lines)
+        body = f"{body}\n\n{callout}" if body.strip() else callout
+
     # The same citation pass as every other collection. A Turath book is not a
     # tafsīr, so quotes are looked up independently rather than in verse order.
     return link_source_content(body, language="ar", linear=False)
