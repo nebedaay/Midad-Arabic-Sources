@@ -3487,9 +3487,10 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 	topicsForWork(work: JsonObject): string[] {
 		const names = Array.isArray(work.mocs) ? (work.mocs as string[]) : (typeof work.moc === "string" ? [work.moc] : []);
 		const repositories = new Set(this.repositoryMocNames);
+		const known = new Set(BUILTIN_TOPICS);
 		const json = names
 			.map((name) => topicLabel(canonicalMocName(name)))
-			.filter((name) => name && name !== ANNOTATIONS_NOTE && !repositories.has(name));
+			.filter((name) => name && name !== ANNOTATIONS_NOTE && !repositories.has(name) && known.has(name));
 		const genres = workGenres(work).map(genreTopic);
 		const user = this.userTopicsForWork(work);
 		return [...new Set([
@@ -7999,11 +8000,6 @@ function workGenres(w: JsonObject): string[] {
 	return [normalizeGenre(typeof w.genre === "string" && w.genre ? w.genre : "other")];
 }
 
-/** A readable label for a genre/topic key. */
-function genreLabelOf(g: string): string {
-	return genreTopic(g);
-}
-
 /** A user-added Turath work, persisted in `turath-custom-works.json`. */
 interface TurathCustomWork {
 	id: string;
@@ -8235,7 +8231,7 @@ class ManageSourcesModal extends Modal {
 	onReload?: () => void;
 	initial: Map<string, boolean>;
 	zoteroStatus: Map<string, string>;
-	rows: Array<{ work: SourceWork; el: HTMLElement; stateEl: HTMLElement; isInstalled: boolean; isArchived: boolean; isArchiving: boolean; annotationCount: number; genres: string[]; repo: string; collection: string }> = [];
+	rows: Array<{ work: SourceWork; el: HTMLElement; stateEl: HTMLElement; isInstalled: boolean; isArchived: boolean; isArchiving: boolean; annotationCount: number; topics: string[]; repo: string; collection: string }> = [];
 	headings: Map<string, HTMLElement> = new Map();
 	/** The works the user has highlighted; Apply acts on the difference. */
 	selected = new Set<string>();
@@ -8270,7 +8266,12 @@ class ManageSourcesModal extends Modal {
 			? saved
 			: "all");
 		this.mode = initialMode;
-		this.activeGenres = new Set(plugin.settings.manageGenreFilter || []);
+		this.activeGenres = new Set(
+			(plugin.settings.manageGenreFilter || []).map((value) => {
+				const topic = genreTopic(value);
+				return topic === "Other" && value !== "other" ? topicLabel(value) : topic;
+			}).filter(Boolean)
+		);
 	}
 
 	onOpen(): void {
@@ -8332,10 +8333,10 @@ class ManageSourcesModal extends Modal {
 		const genres: string[] = [];
 		const genreLabel = new Map<string, string>();
 		for (const w of this.works) {
-			for (const g of workGenres(w)) {
-				if (genreLabel.has(g)) continue;
-				genres.push(g);
-				genreLabel.set(g, genreLabelOf(g));
+			for (const topic of this.plugin.topicsForWork(w)) {
+				if (genreLabel.has(topic)) continue;
+				genres.push(topic);
+				genreLabel.set(topic, topic);
 			}
 		}
 		for (const g of [...this.activeGenres]) if (!genreLabel.has(g)) this.activeGenres.delete(g);
@@ -8404,7 +8405,7 @@ class ManageSourcesModal extends Modal {
 				badge.createSpan({ cls: "mas-manage__ann-count", text: String(annotationCount) });
 				badge.title = `${annotationCount} annotation(s)`;
 			}
-			row.createSpan({ cls: "mas-manage__kind", text: workGenres(w).map(genreLabelOf).join(", ") });
+			row.createSpan({ cls: "mas-manage__kind", text: this.plugin.topicsForWork(w).join(", ") });
 			row.createSpan({ cls: "mas-manage__mut", text: w.repository || "" });
 			const known = this.sizes.get(w.key);
 			const size = row.createSpan({
@@ -8501,7 +8502,7 @@ class ManageSourcesModal extends Modal {
 			};
 			this.rows.push({
 				work: w, el: row, stateEl, isInstalled, isArchived, isArchiving, annotationCount,
-				genres: workGenres(w),
+				topics: this.plugin.topicsForWork(w),
 				repo: w.repository || "Other",
 				collection: w.collection,
 			});
@@ -8592,7 +8593,7 @@ class ManageSourcesModal extends Modal {
 							: this.show === "archived"
 								? r.isArchived || r.isArchiving
 								: r.annotationCount > 0;
-				const genreOk = !this.activeGenres.size || r.genres.some((g) => this.activeGenres.has(g));
+				const genreOk = !this.activeGenres.size || r.topics.some((topic) => this.activeGenres.has(topic));
 				const repoOk = !this.offRepos.has(r.repo);
 				const visible = showOk && genreOk && repoOk && (!q || hay.includes(q)) && (!lg || w.language === lg);
 				r.el.classList.toggle("is-hidden", !visible);

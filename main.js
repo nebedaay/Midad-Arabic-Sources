@@ -22567,7 +22567,8 @@ var MidadArabicSourcesPlugin = class extends import_obsidian18.Plugin {
   topicsForWork(work) {
     const names = Array.isArray(work.mocs) ? work.mocs : typeof work.moc === "string" ? [work.moc] : [];
     const repositories = new Set(this.repositoryMocNames);
-    const json = names.map((name) => topicLabel(canonicalMocName(name))).filter((name) => name && name !== ANNOTATIONS_NOTE && !repositories.has(name));
+    const known = new Set(BUILTIN_TOPICS);
+    const json = names.map((name) => topicLabel(canonicalMocName(name))).filter((name) => name && name !== ANNOTATIONS_NOTE && !repositories.has(name) && known.has(name));
     const genres2 = workGenres(work).map(genreTopic);
     const user = this.userTopicsForWork(work);
     return [...new Set([
@@ -26346,9 +26347,6 @@ function workGenres(w) {
     return [...new Set(genres2.map(normalizeGenre))];
   return [normalizeGenre(typeof w.genre === "string" && w.genre ? w.genre : "other")];
 }
-function genreLabelOf(g) {
-  return genreTopic(g);
-}
 var TITLE_PROPER = new Set([
   "ibn",
   "ab\u012B",
@@ -26642,7 +26640,10 @@ var ManageSourcesModal = class extends import_obsidian18.Modal {
     const saved = plugin.settings.manageShowFilter;
     this.show = showFilter != null ? showFilter : saved === "installed" || saved === "not-installed" || saved === "archived" || saved === "annotated" ? saved : "all";
     this.mode = initialMode;
-    this.activeGenres = new Set(plugin.settings.manageGenreFilter || []);
+    this.activeGenres = new Set((plugin.settings.manageGenreFilter || []).map((value) => {
+      const topic = genreTopic(value);
+      return topic === "Other" && value !== "other" ? topicLabel(value) : topic;
+    }).filter(Boolean));
   }
   onOpen() {
     var _a2;
@@ -26699,11 +26700,11 @@ var ManageSourcesModal = class extends import_obsidian18.Modal {
     const genres2 = [];
     const genreLabel = new Map();
     for (const w of this.works) {
-      for (const g of workGenres(w)) {
-        if (genreLabel.has(g))
+      for (const topic of this.plugin.topicsForWork(w)) {
+        if (genreLabel.has(topic))
           continue;
-        genres2.push(g);
-        genreLabel.set(g, genreLabelOf(g));
+        genres2.push(topic);
+        genreLabel.set(topic, topic);
       }
     }
     for (const g of [...this.activeGenres])
@@ -26777,7 +26778,7 @@ var ManageSourcesModal = class extends import_obsidian18.Modal {
         badge.createSpan({ cls: "mas-manage__ann-count", text: String(annotationCount) });
         badge.title = `${annotationCount} annotation(s)`;
       }
-      row.createSpan({ cls: "mas-manage__kind", text: workGenres(w).map(genreLabelOf).join(", ") });
+      row.createSpan({ cls: "mas-manage__kind", text: this.plugin.topicsForWork(w).join(", ") });
       row.createSpan({ cls: "mas-manage__mut", text: w.repository || "" });
       const known = this.sizes.get(w.key);
       const size = row.createSpan({
@@ -26873,7 +26874,7 @@ var ManageSourcesModal = class extends import_obsidian18.Modal {
         isArchived,
         isArchiving,
         annotationCount,
-        genres: workGenres(w),
+        topics: this.plugin.topicsForWork(w),
         repo: w.repository || "Other",
         collection: w.collection
       });
@@ -26958,7 +26959,7 @@ var ManageSourcesModal = class extends import_obsidian18.Modal {
         const w = r.work;
         const hay = `${w.title} ${w.name} ${(_a3 = w.title_ar) != null ? _a3 : ""} ${(_b2 = w.short_ar) != null ? _b2 : ""} ${((_c = w.aliases) != null ? _c : []).join(" ")} ${w.author} ${(_d = w.subtitle) != null ? _d : ""} ${w.id} ${w.repository || ""}`.toLowerCase();
         const showOk = this.show === "all" ? true : this.show === "installed" ? r.isInstalled : this.show === "not-installed" ? !r.isInstalled && !r.isArchived && !r.isArchiving : this.show === "archived" ? r.isArchived || r.isArchiving : r.annotationCount > 0;
-        const genreOk = !this.activeGenres.size || r.genres.some((g) => this.activeGenres.has(g));
+        const genreOk = !this.activeGenres.size || r.topics.some((topic) => this.activeGenres.has(topic));
         const repoOk = !this.offRepos.has(r.repo);
         const visible = showOk && genreOk && repoOk && (!q || hay.includes(q)) && (!lg || w.language === lg);
         r.el.classList.toggle("is-hidden", !visible);
