@@ -328,6 +328,48 @@ TOPIC_ALIASES: dict[str, str] = {
 # Turath's `cat_id` values (the aqsām list), mapped to the topics we use.
 # The four Fiqh-school categories deliberately carry both the generic Fiqh topic
 # and their school topic.
+GENRE_TOPICS: dict[str, str] = {
+    "tafsir": "Tafsīr",
+    "quran": "Qurʾān text and translations",
+    "quran-text": "Qurʾān text and translations",
+    "hadith": "Ḥadīth",
+    "hadith-commentary": "Ḥadīth",
+    "dictionary": "Dictionaries and Lexicons",
+    "lexicography": "Dictionaries and Lexicons",
+    "fiqh": "Fiqh",
+    "usul": "Uṣūl al-Fiqh",
+    "maqasid": "Uṣūl al-Fiqh",
+    "aqida": "Doctrine (ʿaqīda)",
+    "theology": "Doctrine (ʿaqīda)",
+    "tarikh": "History (Tārīkh)",
+    "biography": "Tarājim & Ṭabāqāt (Biographies)",
+    "language": "Language (lugha)",
+    "linguistics": "Language (lugha)",
+    "grammar": "Grammar (naḥw and ṣarf)",
+    "rhetoric": "Rhetoric",
+    "adab": "Adab & adhkār",
+    "quran-sciences": "ʿUlūm al-Qurʾān",
+    "other": "Other",
+}
+
+
+def normalize_genre(name: str) -> str:
+    text = str(name or "").strip()
+    if text in ("grammar-syntax", "grammar-inflection"):
+        return "grammar"
+    if text in ("linguistics", "lexicography", "theology", "maqasid", "quran"):
+        return {
+            "linguistics": "language",
+            "lexicography": "dictionary",
+            "theology": "aqida",
+            "maqasid": "usul",
+            "quran": "quran-text",
+        }[text]
+    if text == "hadith-commentary":
+        return "hadith"
+    return text
+
+
 TURATH_CAT_TOPICS: dict[int, list[str]] = {
     1: ["Doctrine (ʿaqīda)"],
     2: ["al-Firaq wa-l-Rudūd"],
@@ -4771,6 +4813,15 @@ def work_model(work: dict, units: list[dict], created: str, layout: str) -> dict
     # `author_ar` remains an internal catalogue/publication-map spelling; the
     # render model and every note expose the single standard `authors-ar` list.
     authors_ar = list(authors_ar or ([work["author_ar"]] if work.get("author_ar") else []))
+    mocs = list(work.get("mocs") or ([work["moc"]] if work.get("moc") else []))
+    up = list(work.get("up") or [])
+    for genre in work.get("genres", []):
+        topic = GENRE_TOPICS.get(normalize_genre(str(genre)))
+        if topic and topic not in mocs:
+            mocs.append(topic)
+        link = topic_link(topic)
+        if link and link not in up:
+            up.append(link)
     return {
         "schema": MODEL_SCHEMA.get(work["collection"], BASE_MODEL_SCHEMA),
         "generated": created,
@@ -4799,7 +4850,8 @@ def work_model(work: dict, units: list[dict], created: str, layout: str) -> dict
             "cssclass": work["cssclass"],
             "moc": work["moc"],
             "moc_sections": work["moc_sections"],
-            "up": work["up"],
+            "mocs": mocs,
+            "up": up,
             "source": work.get("source", ""),
             "repository_name": repository_name(work.get("source", "")),
             "repo": repo_url(work),

@@ -3489,8 +3489,13 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		const json = names
 			.map((name) => topicLabel(canonicalMocName(name)))
 			.filter((name) => name && name !== ANNOTATIONS_NOTE && !repositories.has(name));
+		const genres = workGenres(work).map(genreTopic);
 		const user = this.userTopicsForWork(work);
-		return [...new Set([...json.filter((name) => !repositories.has(name)), ...user])];
+		return [...new Set([
+			...json.filter((name) => !repositories.has(name)),
+			...genres.filter((name) => !repositories.has(name)),
+			...user,
+		])];
 	}
 
 	/** A short display label for a category MOC. */
@@ -3987,7 +3992,12 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			// `extra` does.
 			const pub = pubs[this.workKey(model.work)] ?? {};
 			model.work.publication = { ...pub, mas_note: this.masNote(pub) };
-			model.work.up = this.normalizeUpLinks(model.work.up);
+			const up = this.normalizeUpLinks(model.work.up);
+			for (const topic of workGenres(model.work).map(genreTopic)) {
+				const link = topicLink(topic);
+				if (!up.includes(link)) up.push(link);
+			}
+			model.work.up = up;
 			model.work.user_topics = this.userTopicsForWork(model.work);
 			const work = String(model.work.title || model.work.dir || model.work.id);
 			const emit = (step: number, steps: number) =>
@@ -7979,35 +7989,39 @@ function formatBytes(n: number | undefined): string {
 	return mb >= 1 ? `${mb.toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`;
 }
 
-/** Recognisable genre labels for the modal's "Kinds of sources". */
+/** Recognisable labels for the modal's "Topics" filter. */
 const GENRE_LABELS: Record<string, string> = {
 	tafsir: "Tafsīr",
-	quran: "Translations",
+	quran: "Qurʾān text and translations",
 	hadith: "Ḥadīth",
-	"hadith-commentary": "Ḥadīth commentary",
-	"quran-text": "Qurʾān text",
-	dictionary: "Dictionaries",
+	"hadith-commentary": "Ḥadīth",
+	"quran-text": "Qurʾān text and translations",
+	dictionary: "Dictionaries and Lexicons",
 	fiqh: "Fiqh",
 	usul: "Uṣūl al-Fiqh",
 	aqida: "Doctrine (ʿaqīda)",
-	theology: "Theology",
-	tarikh: "Tārīkh",
-	biography: "Biography (rijāl)",
+	theology: "Doctrine (ʿaqīda)",
+	tarikh: "History (Tārīkh)",
+	biography: "Tarājim & Ṭabāqāt (Biographies)",
 	language: "Language (lugha)",
-	lexicography: "Lexicography",
+	lexicography: "Dictionaries and Lexicons",
 	grammar: "Grammar (naḥw and ṣarf)",
 	rhetoric: "Rhetoric",
-	adab: "Adab",
-	linguistics: "Linguistics",
-	maqasid: "Maqāṣid",
+	adab: "Adab & adhkār",
+	linguistics: "Language (lugha)",
+	maqasid: "Uṣūl al-Fiqh",
 	"quran-sciences": "ʿUlūm al-Qurʾān",
 	other: "Other",
 };
 
+
 /** The genre keys a work belongs to (older works carry only `genre`). */
-function workGenres(w: SourceWork): string[] {
-	if (Array.isArray(w.genres) && w.genres.length) return w.genres.map(normalizeGenre);
-	return [normalizeGenre(w.genre || "other")];
+function workGenres(w: JsonObject): string[] {
+	const genres = Array.isArray(w.genres)
+		? w.genres.filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+		: [];
+	if (genres.length) return genres.map(normalizeGenre);
+	return [normalizeGenre(typeof w.genre === "string" && w.genre ? w.genre : "other")];
 }
 
 /** A readable label for a genre key. */
@@ -8064,9 +8078,21 @@ const TITLE_PROPER = new Set([
 	"jalīl", "khaldūn", "zahrī", "ṭaḥāwiyya", "wāsiṭiyya",
 ]);
 
-/** Fold the former split grammar keys into the combined category. */
+/** Fold redundant/finer source genres into the topic categories the vault uses. */
 function normalizeGenre(g: string): string {
-	return g === "grammar-syntax" || g === "grammar-inflection" ? "grammar" : g;
+	if (g === "grammar-syntax" || g === "grammar-inflection") return "grammar";
+	if (g === "linguistics") return "language";
+	if (g === "lexicography") return "dictionary";
+	if (g === "theology") return "aqida";
+	if (g === "hadith-commentary") return "hadith";
+	if (g === "maqasid") return "usul";
+	if (g === "quran") return "quran-text";
+	return g;
+}
+
+/** The topic label for a source genre (already normalized). */
+function genreTopic(g: string): string {
+	return GENRE_LABELS[normalizeGenre(g)] || "Other";
 }
 
 /**
@@ -8363,7 +8389,7 @@ class ManageSourcesModal extends Modal {
 		const body = contentEl.createDiv({ cls: "mas-manage__body" });
 		const side = body.createDiv({ cls: "mas-manage__side" });
 
-		side.createDiv({ cls: "mas-manage__group", text: "Kinds of sources" });
+		side.createDiv({ cls: "mas-manage__group", text: "Topics" });
 		const genreToggles = side.createDiv({ cls: "mas-manage__toggles" });
 		const genres: string[] = [];
 		const genreLabel = new Map<string, string>();
@@ -8415,7 +8441,7 @@ class ManageSourcesModal extends Modal {
 		const COLS = "6ch minmax(80px,0.8fr) minmax(160px,1.8fr) minmax(90px,0.9fr) minmax(90px,0.8fr) 68px 80px";
 		const head = list.createDiv({ cls: "mas-manage__head" });
 		head.style.gridTemplateColumns = COLS;
-		for (const label of ["Lang", "Author", "Title", "Kind", "Repository", "Size", "State"]) head.createSpan({ text: label });
+		for (const label of ["Lang", "Author", "Title", "Topic", "Repository", "Size", "State"]) head.createSpan({ text: label });
 
 		let lastCollection = "";
 		for (const w of this.works) {
