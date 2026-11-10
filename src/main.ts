@@ -3286,7 +3286,6 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 	private async syncTopicUpLinks(file: TFile): Promise<void> {
 		const frontmatter = this.app.metadataCache.getFileCache(file)?.frontmatter as Record<string, unknown> | undefined;
 		const topics = topicsFromValue(frontmatter?.["topics"]);
-		if (!topics.length) return;
 		this.scheduleTranscriptionMocRefresh();
 		let text: string;
 		try {
@@ -3303,17 +3302,25 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		}
 	}
 
-	/** Return text with every topic linked from its midad-up block. */
+	/** Keep midad-up topic links in sync with the user's topics property. */
 	private withTopicUpLinks(text: string, topics: string[]): string {
-		const missing = topics
-			.filter((topic) => !text.includes(`[[${topicNoteName(topic)}|`))
-			.map((topic) => `  - "${topicLink(topic)}"`);
-		if (!missing.length) return text;
+		const active = new Set(topics.map((topic) => topicNoteName(topic)));
 		const block = /^midad-up:[ \t]*\n((?:[ \t]+-[ \t]*.*\n?)*)/m.exec(text);
 		if (block && block.index !== undefined) {
-			const insert = block.index + block[0].length;
-			return text.slice(0, insert) + missing.join("\n") + "\n" + text.slice(insert);
+			const lines = block[1]
+				.split("\n")
+				.filter((line) => {
+					const target = /\[\[(Midad topic - [^\]|]+)/.exec(line);
+					return !target || active.has(target[1]);
+				});
+			const missing = topics
+				.filter((topic) => !lines.some((line) => line.includes(`[[${topicNoteName(topic)}|`)))
+				.map((topic) => `  - "${topicLink(topic)}"`);
+			const nextBlock = `midad-up:\n${[...lines, ...missing].join("\n")}${lines.length || missing.length ? "\n" : ""}`;
+			return text.slice(0, block.index) + nextBlock + text.slice(block.index + block[0].length);
 		}
+		const missing = topics.map((topic) => `  - "${topicLink(topic)}"`);
+		if (!missing.length) return text;
 		if (text.startsWith("---")) {
 			const end = text.indexOf("\n---", 3);
 			if (end >= 0) {

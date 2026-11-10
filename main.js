@@ -24298,8 +24298,6 @@ var MidadArabicSourcesPlugin = class extends import_obsidian19.Plugin {
     var _a2;
     const frontmatter = (_a2 = this.app.metadataCache.getFileCache(file)) == null ? void 0 : _a2.frontmatter;
     const topics2 = topicsFromValue(frontmatter == null ? void 0 : frontmatter["topics"]);
-    if (!topics2.length)
-      return;
     this.scheduleTranscriptionMocRefresh();
     let text;
     try {
@@ -24317,14 +24315,21 @@ var MidadArabicSourcesPlugin = class extends import_obsidian19.Plugin {
     }
   }
   withTopicUpLinks(text, topics2) {
-    const missing = topics2.filter((topic) => !text.includes(`[[${topicNoteName(topic)}|`)).map((topic) => `  - "${topicLink(topic)}"`);
-    if (!missing.length)
-      return text;
+    const active = new Set(topics2.map((topic) => topicNoteName(topic)));
     const block = /^midad-up:[ \t]*\n((?:[ \t]+-[ \t]*.*\n?)*)/m.exec(text);
     if (block && block.index !== void 0) {
-      const insert = block.index + block[0].length;
-      return text.slice(0, insert) + missing.join("\n") + "\n" + text.slice(insert);
+      const lines = block[1].split("\n").filter((line) => {
+        const target = /\[\[(Midad topic - [^\]|]+)/.exec(line);
+        return !target || active.has(target[1]);
+      });
+      const missing2 = topics2.filter((topic) => !lines.some((line) => line.includes(`[[${topicNoteName(topic)}|`))).map((topic) => `  - "${topicLink(topic)}"`);
+      const nextBlock = `midad-up:
+${[...lines, ...missing2].join("\n")}${lines.length || missing2.length ? "\n" : ""}`;
+      return text.slice(0, block.index) + nextBlock + text.slice(block.index + block[0].length);
     }
+    const missing = topics2.map((topic) => `  - "${topicLink(topic)}"`);
+    if (!missing.length)
+      return text;
     if (text.startsWith("---")) {
       const end = text.indexOf("\n---", 3);
       if (end >= 0) {
