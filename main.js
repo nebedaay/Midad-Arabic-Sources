@@ -13880,10 +13880,7 @@ var ManageVersionsModal = class extends import_obsidian3.Modal {
             await this.setSelectedWithPrompt(version, !version.selected);
             this.selectionDirty = true;
           };
-          const main = row.createDiv({ cls: "mas-versions-main" });
-          const labelLine = main.createDiv({ cls: "mas-versions-label-line" });
-          labelLine.createSpan({ cls: "mas-versions-label", text: versionLabel(version) });
-          const rename = labelLine.createEl("button", { cls: "mas-versions-rename", attr: { "aria-label": "Rename version" } });
+          const rename = row.createEl("button", { cls: "mas-versions-rename", attr: { "aria-label": "Rename version" } });
           (0, import_obsidian3.setIcon)(rename, "pencil");
           rename.onclick = (event) => {
             event.stopPropagation();
@@ -13892,6 +13889,9 @@ var ManageVersionsModal = class extends import_obsidian3.Modal {
                 await this.refresh();
             }).open();
           };
+          const main = row.createDiv({ cls: "mas-versions-main" });
+          const labelLine = main.createDiv({ cls: "mas-versions-label-line" });
+          labelLine.createSpan({ cls: "mas-versions-label", text: versionLabel(version) });
           main.createDiv({ cls: "mas-versions-date", text: new Date(version.savedAt).toLocaleString() });
           const status = row.createDiv({ cls: "mas-versions-status" });
           if (version.id === this.entry.defaultId) {

@@ -2317,3 +2317,12 @@ body .callout[data-callout^="mas-annotation-comment"] {
     color: var(--interactive-accent);
     background: transparent !important;
 }
+
+.mas-versions-rename {
+    flex: 0 0 auto;
+    width: 1.4rem;
+    height: 1.4rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
