@@ -13510,7 +13510,7 @@ function setFrontmatterList(content, key, values) {
     for (const value of values)
       out.push(`  - "${value.replace(/"/g, '\\"')}"`);
   }
-  return joinNote(out.join("\n"), prior.body);
+  return ensureManagedRegion(joinNote(out.join("\n"), prior.body));
 }
 function sanitizeFrontmatter(content) {
   if (!content.startsWith("---"))
@@ -13549,6 +13549,19 @@ function sanitizeFrontmatter(content) {
     out.push(line);
   }
   return out.join("\n") + body;
+}
+function ensureManagedRegion(content) {
+  const prior = splitNote(content);
+  if (findManagedRegion(prior.body))
+    return content;
+  const body = prior.body.trim();
+  if (!body)
+    return content;
+  const wrapped = `${MANAGED_OPEN}
+${body}
+${MANAGED_CLOSE}
+`;
+  return prior.frontmatter == null ? wrapped : joinNote(prior.frontmatter, wrapped);
 }
 function addVersionFrontmatter(content, id, otherLinks, label) {
   var _a2;
@@ -13833,7 +13846,7 @@ var VersionStore = class {
     const defaultText = await this.versionText(entry, defaultVersion.id);
     if (!defaultText)
       return 0;
-    const defaultBody = setFrontmatterList(sanitizeFrontmatter(defaultText), "other-versions", otherLinks);
+    const defaultBody = setFrontmatterList(ensureManagedRegion(sanitizeFrontmatter(defaultText)), "other-versions", otherLinks);
     let written = await this.writeLive(file.path, defaultBody) ? 1 : 0;
     const defaultLink = versionLink(entry, defaultVersion);
     for (const version of entry.versions) {
@@ -19806,7 +19819,7 @@ ${MANAGED_CLOSE}
     }
     this.resolver.invalidate();
     void ((_h = (_g = this.host).refreshRegistry) == null ? void 0 : _h.call(_g));
-    new import_obsidian17.Notice("Note adopted. Select text to annotate it.");
+    new import_obsidian17.Notice("Note adopted. Select text to annotate it; move the mas-managed tags if you want some content outside the generated region.");
     window.setTimeout(() => {
       void this.refreshViews();
       refreshReadingViews(this.app);

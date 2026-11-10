@@ -3,7 +3,7 @@ import { strFromU8, strToU8, unzipSync, zipSync } from "fflate";
 import * as fs from "fs";
 import { hashString } from "./sourceImport/history";
 import { ensureFolder, safeFileSegment } from "./sourcePaths";
-import { findManagedRegion, joinNote, splitNote } from "./sourceImport/merge";
+import { MANAGED_CLOSE, MANAGED_OPEN, findManagedRegion, joinNote, splitNote } from "./sourceImport/merge";
 
 export interface SavedVersion {
 	id: string;
@@ -147,7 +147,7 @@ function setFrontmatterList(content: string, key: string, values: string[]): str
 		out.push(`${key}:`);
 		for (const value of values) out.push(`  - "${value.replace(/"/g, '\\"')}"`);
 	}
-	return joinNote(out.join("\n"), prior.body);
+	return ensureManagedRegion(joinNote(out.join("\n"), prior.body));
 }
 
 function sanitizeFrontmatter(content: string): string {
@@ -183,6 +183,15 @@ function sanitizeFrontmatter(content: string): string {
 		out.push(line);
 	}
 	return out.join("\n") + body;
+}
+
+function ensureManagedRegion(content: string): string {
+	const prior = splitNote(content);
+	if (findManagedRegion(prior.body)) return content;
+	const body = prior.body.trim();
+	if (!body) return content;
+	const wrapped = `${MANAGED_OPEN}\n${body}\n${MANAGED_CLOSE}\n`;
+	return prior.frontmatter == null ? wrapped : joinNote(prior.frontmatter, wrapped);
 }
 
 function addVersionFrontmatter(content: string, id: string, otherLinks: string[], label: string): string {
@@ -472,7 +481,7 @@ export class VersionStore {
 		const otherLinks = otherVersionReferences(file, entry, defaultVersion.id);
 		const defaultText = await this.versionText(entry, defaultVersion.id);
 		if (!defaultText) return 0;
-		const defaultBody = setFrontmatterList(sanitizeFrontmatter(defaultText), "other-versions", otherLinks);
+		const defaultBody = setFrontmatterList(ensureManagedRegion(sanitizeFrontmatter(defaultText)), "other-versions", otherLinks);
 		let written = (await this.writeLive(file.path, defaultBody)) ? 1 : 0;
 		const defaultLink = versionLink(entry, defaultVersion);
 		for (const version of entry.versions) {

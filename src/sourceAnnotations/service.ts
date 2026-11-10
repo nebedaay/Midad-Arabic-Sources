@@ -447,7 +447,7 @@ export class AnnotationService {
 		}
 		this.resolver.invalidate();
 		void this.host.refreshRegistry?.();
-		new Notice("Note adopted. Select text to annotate it.");
+		new Notice("Note adopted. Select text to annotate it; move the mas-managed tags if you want some content outside the generated region.");
 		window.setTimeout(() => {
 			void this.refreshViews();
 			refreshReadingViews(this.app);
