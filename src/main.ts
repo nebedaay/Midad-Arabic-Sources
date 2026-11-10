@@ -4063,6 +4063,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 				const w = await renderModelToVault(this.app, templates, model, outRoot, force, emit,
 					undefined, seen, shouldCancel);
 				written.push(...w);
+				await this.applySavedVersions(w);
 				// A full render brings every template the work uses up to date.
 				const key = this.workKey(model.work);
 				const now = Date.now();
@@ -5127,7 +5128,18 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		for (const entry of chosen) {
 			await this.runWithProgress(`Re-rendering @${info.citekey}`, ["reprocess", "--zip", entry.zip.path]);
 		}
+		await this.applySavedVersions([file.path]);
 		new Notice(`Re-rendered ${chosen.length} archived batch(es) for @${info.citekey}.`);
+	}
+
+	/** Restore saved user versions over freshly rendered model notes. */
+	private async applySavedVersions(paths: string[]): Promise<void> {
+		const store = new VersionStore(this.app, this.vaultPath());
+		const entries = await store.entriesForPaths(paths);
+		for (const entry of entries) {
+			const file = this.app.vault.getAbstractFileByPath(normalizePath(entry.path));
+			if (file instanceof TFile) await store.apply(file, entry);
+		}
 	}
 
 	/** Apply the non-destructive content migration to cached models, then re-render them. */
@@ -5151,6 +5163,11 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		const file = this.app.workspace.getActiveFile();
 		if (!(file instanceof TFile) || file.extension !== "md") {
 			new Notice("Open a Markdown note first.");
+			return;
+		}
+		const frontmatter = this.app.metadataCache.getFileCache(file)?.frontmatter as Record<string, unknown> | undefined;
+		if (typeof frontmatter?.["midad-version"] === "string") {
+			new Notice("Open the canonical note to manage its versions.");
 			return;
 		}
 		const store = new VersionStore(this.app, this.vaultPath());

@@ -53,19 +53,40 @@ function versionNotePath(file: TFile, version: SavedVersion): string {
 	return normalizePath(`${folder}/${stem}.Version${versionNumber(version.id)}.md`);
 }
 
-function addVersionFrontmatter(content: string, id: string): string {
-	const line = `midad-version: "${id}"`;
-	if (content.startsWith("---")) {
-		const end = content.indexOf("\n---", 3);
-		if (end >= 0) {
-			return `${content.slice(0, end + 1)}${line}\n${content.slice(end + 1)}`;
-		}
-	}
-	return `---\n${line}\n---\n\n${content}`;
+function removeFrontmatterProperty(content: string, key: string): string {
+	if (!content.startsWith("---")) return content;
+	const end = content.indexOf("\n---", 3);
+	if (end < 0) return content;
+	const front = content.slice(0, end);
+	const body = content.slice(end);
+	const re = new RegExp(`^${key}:[^\\n]*\\n(?:[ \\t]+-[^\\n]*\\n)*`, "m");
+	return front.replace(re, "") + body;
 }
 
-function hasVersionFrontmatter(content: string, id: string): boolean {
-	return new RegExp(`^midad-version:\\s*["']?${id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}["']?\\s*$`, "m").test(content);
+function setFrontmatterProperty(content: string, key: string, value: string): string {
+	const clean = removeFrontmatterProperty(content, key);
+	const line = `${key}: ${value}`;
+	if (clean.startsWith("---")) {
+		const end = clean.indexOf("\n---", 3);
+		if (end >= 0) return `${clean.slice(0, end + 1)}${line}\n${clean.slice(end + 1)}`;
+	}
+	return `---\n${line}\n---\n\n${clean}`;
+}
+
+function setFrontmatterList(content: string, key: string, values: string[]): string {
+	const clean = removeFrontmatterProperty(content, key);
+	if (!values.length) return clean;
+	const block = `${key}:\n${values.map((value) => `  - "${value.replace(/"/g, '\\"')}"`).join("\n")}\n`;
+	if (clean.startsWith("---")) {
+		const end = clean.indexOf("\n---", 3);
+		if (end >= 0) return `${clean.slice(0, end + 1)}${block}${clean.slice(end + 1)}`;
+	}
+	return `---\n${block}---\n\n${clean}`;
+}
+
+function addVersionFrontmatter(content: string, id: string, otherLinks: string[]): string {
+	const withVersion = setFrontmatterProperty(content, "midad-version", `"${id}"`);
+	return setFrontmatterList(withVersion, "other-versions", otherLinks);
 }
 
 export class VersionStore {
@@ -199,22 +220,49 @@ export class VersionStore {
 		return content ? strFromU8(content) : null;
 	}
 
+	async entriesForPaths(paths: string[]): Promise<NoteVersionEntry[]> {
+		const wanted = new Set(paths.map((path) => normalizePath(path)));
+		return Object.values(this.load().notes).filter((entry) => wanted.has(normalizePath(entry.path)));
+	}
+
 	async apply(file: TFile, entry: NoteVersionEntry): Promise<number> {
 		const defaultVersion = entry.versions.find((v) => v.id === entry.defaultId);
 		if (!defaultVersion) return 0;
+		const selected = entry.versions.filter((v) => v.selected);
+		const otherLinks = selected
+			.filter((v) => v.id !== defaultVersion.id)
+			.map((v) => `[[${versionNotePath(file, v).replace(/\.md$/, "")}|${v.id.toUpperCase()}]]`);
 		const defaultText = await this.versionText(entry, defaultVersion.id);
 		if (!defaultText) return 0;
-		await this.writeLive(file.path, defaultText);
+		await this.writeLive(file.path, setFrontmatterList(defaultText, "other-versions", otherLinks));
 		let written = 1;
 		for (const version of entry.versions) {
-			if (!version.selected || version.id === entry.defaultId) continue;
+			const path = versionNotePath(file, version);
+			if (!version.selected || version.id === entry.defaultId) {
+				await this.deleteVersionNote(path, version.id);
+				continue;
+			}
 			const text = await this.versionText(entry, version.id);
 			if (!text) continue;
-			const path = versionNotePath(file, version);
-			await this.writeLive(path, addVersionFrontmatter(text, version.id));
+			const links = selected
+				.filter((v) => v.id !== version.id)
+				.map((v) => `[[${versionNotePath(file, v).replace(/\.md$/, "")}|${v.id.toUpperCase()}]]`);
+			await this.writeLive(path, addVersionFrontmatter(text, version.id, links));
 			written += 1;
 		}
 		return written;
+	}
+
+	private async deleteVersionNote(path: string, id: string): Promise<void> {
+		const normalized = normalizePath(path);
+		const existing = this.app.vault.getAbstractFileByPath(normalized);
+		if (!(existing instanceof TFile)) return;
+		try {
+			const text = await this.app.vault.read(existing);
+			if (new RegExp(`^midad-version:\\s*["']?${id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}["']?\\s*$`, "m").test(text)) {
+				await this.app.vault.delete(existing);
+			}
+		} catch { /* leave a note we cannot verify */ }
 	}
 
 	private async writeLive(path: string, text: string): Promise<void> {
@@ -256,6 +304,12 @@ export class ManageVersionsModal extends Modal {
 	}
 
 	private hasChanges(): boolean {
+		if (!this.entry?.versions.length) return true;
+		const latest = [...this.entry.versions].sort((a, b) => versionNumber(a.id) - versionNumber(b.id)).at(-1);
+		return !latest || latest.hash !== this.currentHash;
+	}
+
+	private differsFromDefault(): boolean {
 		if (!this.entry) return true;
 		const version = this.entry.versions.find((v) => v.id === this.entry?.defaultId);
 		return !version || version.hash !== this.currentHash;
@@ -333,7 +387,7 @@ export class ManageVersionsModal extends Modal {
 			new Notice("There are no saved versions to apply.");
 			return;
 		}
-		if (this.hasChanges()) {
+		if (this.differsFromDefault()) {
 			new UnsavedVersionModal(this.app, {
 				onDiscard: async () => {
 					await this.options.store.apply(this.options.file, this.entry!);

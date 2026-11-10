@@ -97,6 +97,8 @@ async function isStaleWorkNote(app: App, path: string, dir: string): Promise<boo
 	const text = await readVaultFile(app, path);
 	if (!text) return false;
 	if (!text.includes("text-source") || !text.includes("mas-managed")) return false;
+	// A saved-version note is a user copy, not a stale model render.
+	if (/^midad-version:\s*/m.test(text)) return false;
 	if (!text.includes("midad-up:")) return false;
 	return text.includes(`[[${dir}]]`) || text.includes(`[[${dir}|`);
 }
