@@ -683,6 +683,8 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 	transcriptionMocTimer: number | null = null;
 	/** Debounced midad-up repair after a note's topics property changes. */
 	topicSyncTimers = new Map<string, number>();
+	/** Debounced sync of a version note's user-facing name to its manifest label. */
+	versionNameTimers = new Map<string, number>();
 
 	async onload() {
 		await this.loadSettings();
@@ -1073,6 +1075,11 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			if (!file.path.startsWith(`${this.sourcesRoot()}/`)) return;
 			this.scheduleTopicUpSync(file);
 		};
+		const watchVersionName = (file: TAbstractFile): void => {
+			if (!(file instanceof TFile) || file.extension !== "md") return;
+			if (!/\.Version\d+\.md$/i.test(file.path)) return;
+			this.scheduleVersionNameSync(file);
+		};
 		this.registerEvent(this.app.vault.on("create", watchTranscription));
 		this.registerEvent(this.app.vault.on("modify", watchTranscription));
 		this.registerEvent(this.app.vault.on("delete", watchTranscription));
@@ -1080,12 +1087,16 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		this.registerEvent(this.app.vault.on("create", watchTopics));
 		this.registerEvent(this.app.vault.on("modify", watchTopics));
 		this.registerEvent(this.app.vault.on("rename", watchTopics));
+		this.registerEvent(this.app.vault.on("create", watchVersionName));
+		this.registerEvent(this.app.vault.on("modify", watchVersionName));
 	}
 
 	onunload(): void {
 		if (this.transcriptionMocTimer !== null) window.clearTimeout(this.transcriptionMocTimer);
 		for (const timer of this.topicSyncTimers.values()) window.clearTimeout(timer);
 		this.topicSyncTimers.clear();
+		for (const timer of this.versionNameTimers.values()) window.clearTimeout(timer);
+		this.versionNameTimers.clear();
 		this.annotations?.dispose();
 		// Invalidate this instance's source operation before a re-enable creates a
 		// new one: the old render loop checks the generation per note, and the
@@ -3282,6 +3293,25 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			void this.syncTopicUpLinks(file);
 		}, 700);
 		this.topicSyncTimers.set(file.path, timer);
+	}
+
+	private scheduleVersionNameSync(file: TFile): void {
+		const existing = this.versionNameTimers.get(file.path);
+		if (existing !== undefined) window.clearTimeout(existing);
+		const timer = window.setTimeout(() => {
+			this.versionNameTimers.delete(file.path);
+			void this.syncVersionName(file);
+		}, 700);
+		this.versionNameTimers.set(file.path, timer);
+	}
+
+	private async syncVersionName(file: TFile): Promise<void> {
+		try {
+			const changed = await new VersionStore(this.app, this.vaultPath()).syncVersionName(file);
+			if (changed) void this.refreshSourcesIndex();
+		} catch (error) {
+			console.error("[midad-arabic-sources] version name sync", error);
+		}
 	}
 
 	/** Add a topic's MOC to midad-up without re-rendering the note body. */

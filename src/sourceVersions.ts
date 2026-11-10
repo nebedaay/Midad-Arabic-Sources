@@ -185,7 +185,7 @@ function sanitizeFrontmatter(content: string): string {
 	return out.join("\n") + body;
 }
 
-function addVersionFrontmatter(content: string, id: string, otherLinks: string[]): string {
+function addVersionFrontmatter(content: string, id: string, otherLinks: string[], label: string): string {
 	const prior = splitNote(content);
 	const lines = (prior.frontmatter ?? "").split("\n");
 	const out: string[] = [];
@@ -193,7 +193,7 @@ function addVersionFrontmatter(content: string, id: string, otherLinks: string[]
 	for (const line of lines) {
 		const property = /^([A-Za-z][\w-]*):/.exec(line);
 		if (property) {
-			skip = property[1] === "midad-version" || property[1] === "other-versions";
+			skip = property[1] === "midad-version" || property[1] === "midad-version-name" || property[1] === "other-versions";
 			if (!skip) out.push(line);
 			continue;
 		}
@@ -202,6 +202,7 @@ function addVersionFrontmatter(content: string, id: string, otherLinks: string[]
 	}
 	while (out.length && out[out.length - 1].trim() === "") out.pop();
 	out.push(`midad-version: "${id}"`);
+	out.push(`midad-version-name: "${label.replace(/"/g, '\\"')}"`);
 	if (otherLinks.length) {
 		out.push("other-versions:");
 		for (const link of otherLinks) out.push(`  - "${link.replace(/"/g, '\\"')}"`);
@@ -335,7 +336,7 @@ export class VersionStore {
 		if (options.activeVersionId) {
 			const live = await this.app.vault.read(file);
 			const links = otherVersionReferences(file, entry, version.id);
-			await this.writeLive(file.path, addVersionFrontmatter(live, version.id, links));
+			await this.writeLive(file.path, addVersionFrontmatter(live, version.id, links, versionLabel(version)));
 		}
 		return entry;
 	}
@@ -360,6 +361,12 @@ export class VersionStore {
 		}
 		version.label = value;
 		this.save();
+		const path = normalizePath(versionNotePath(entry, version));
+		const file = this.app.vault.getAbstractFileByPath(path);
+		if (file instanceof TFile) {
+			const text = await this.app.vault.read(file);
+			await this.app.vault.modify(file, setFrontmatterProperty(text, "midad-version-name", `"${value.replace(/"/g, '\\"')}"`));
+		}
 		return true;
 	}
 
@@ -421,6 +428,21 @@ export class VersionStore {
 		return !saved || managedHash(live) !== managedHash(saved);
 	}
 
+	async syncVersionName(file: TFile): Promise<boolean> {
+		const text = await this.app.vault.read(file);
+		const versionMatch = /^midad-version:[ \t]*["']?([^"'\n]+)["']?[ \t]*$/m.exec(text);
+		const nameMatch = /^midad-version-name:[ \t]*["']?([^"'\n]+)["']?[ \t]*$/m.exec(text);
+		if (!versionMatch || !nameMatch) return false;
+		const key = noteKeyFromText(file, text);
+		const entry = this.load().notes[key];
+		const version = entry?.versions.find((v) => v.id === versionMatch[1].trim());
+		const label = nameMatch[1].trim();
+		if (!version || !label || version.label === label) return false;
+		version.label = label;
+		this.save();
+		return true;
+	}
+
 	async entriesForPaths(paths: string[]): Promise<NoteVersionEntry[]> {
 		const wanted = new Set(paths.map((path) => normalizePath(path)));
 		return Object.values(this.load().notes).filter((entry) => wanted.has(normalizePath(entry.path)));
@@ -445,7 +467,7 @@ export class VersionStore {
 			const text = await this.versionText(entry, version.id);
 			if (!text) continue;
 			const links = otherVersionReferences(file, entry, version.id);
-			const withVersion = addVersionFrontmatter(text, version.id, links);
+			const withVersion = addVersionFrontmatter(text, version.id, links, versionLabel(version));
 			if (await this.writeLive(path, addUpLink(withVersion, defaultLink))) written += 1;
 		}
 		return written;

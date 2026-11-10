@@ -13442,6 +13442,32 @@ function addUpLink(content, link) {
   return `${content.slice(0, insert)}  - "${link}"
 ${content.slice(insert)}`;
 }
+function removeFrontmatterProperty(content, key) {
+  if (!content.startsWith("---"))
+    return content;
+  const end = content.indexOf("\n---", 3);
+  if (end < 0)
+    return content;
+  const front = content.slice(0, end);
+  const body = content.slice(end);
+  const re = new RegExp(`^${key}:[^\\n]*\\n(?:[ \\t]+-[^\\n]*\\n)*`, "m");
+  return front.replace(re, "") + body;
+}
+function setFrontmatterProperty(content, key, value) {
+  const clean3 = removeFrontmatterProperty(content, key);
+  const line = `${key}: ${value}`;
+  if (clean3.startsWith("---")) {
+    const end = clean3.indexOf("\n---", 3);
+    if (end >= 0)
+      return `${clean3.slice(0, end + 1)}${line}
+${clean3.slice(end + 1)}`;
+  }
+  return `---
+${line}
+---
+
+${clean3}`;
+}
 function setFrontmatterList(content, key, values) {
   var _a2;
   const prior = splitNote(content);
@@ -13507,7 +13533,7 @@ function sanitizeFrontmatter(content) {
   }
   return out.join("\n") + body;
 }
-function addVersionFrontmatter(content, id, otherLinks) {
+function addVersionFrontmatter(content, id, otherLinks, label) {
   var _a2;
   const prior = splitNote(content);
   const lines = ((_a2 = prior.frontmatter) != null ? _a2 : "").split("\n");
@@ -13516,7 +13542,7 @@ function addVersionFrontmatter(content, id, otherLinks) {
   for (const line of lines) {
     const property = /^([A-Za-z][\w-]*):/.exec(line);
     if (property) {
-      skip = property[1] === "midad-version" || property[1] === "other-versions";
+      skip = property[1] === "midad-version" || property[1] === "midad-version-name" || property[1] === "other-versions";
       if (!skip)
         out.push(line);
       continue;
@@ -13528,6 +13554,7 @@ function addVersionFrontmatter(content, id, otherLinks) {
   while (out.length && out[out.length - 1].trim() === "")
     out.pop();
   out.push(`midad-version: "${id}"`);
+  out.push(`midad-version-name: "${label.replace(/"/g, '\\"')}"`);
   if (otherLinks.length) {
     out.push("other-versions:");
     for (const link of otherLinks)
@@ -13647,7 +13674,7 @@ var VersionStore = class {
     if (options.activeVersionId) {
       const live = await this.app.vault.read(file);
       const links = otherVersionReferences(file, entry, version.id);
-      await this.writeLive(file.path, addVersionFrontmatter(live, version.id, links));
+      await this.writeLive(file.path, addVersionFrontmatter(live, version.id, links, versionLabel(version)));
     }
     return entry;
   }
@@ -13671,6 +13698,12 @@ var VersionStore = class {
     }
     version.label = value;
     this.save();
+    const path2 = (0, import_obsidian3.normalizePath)(versionNotePath(entry, version));
+    const file = this.app.vault.getAbstractFileByPath(path2);
+    if (file instanceof import_obsidian3.TFile) {
+      const text = await this.app.vault.read(file);
+      await this.app.vault.modify(file, setFrontmatterProperty(text, "midad-version-name", `"${value.replace(/"/g, '\\"')}"`));
+    }
     return true;
   }
   async setSelected(entry, id, selected) {
@@ -13733,6 +13766,22 @@ var VersionStore = class {
     const saved = await this.versionText(entry, id);
     return !saved || managedHash(live) !== managedHash(saved);
   }
+  async syncVersionName(file) {
+    const text = await this.app.vault.read(file);
+    const versionMatch = /^midad-version:[ \t]*["']?([^"'\n]+)["']?[ \t]*$/m.exec(text);
+    const nameMatch = /^midad-version-name:[ \t]*["']?([^"'\n]+)["']?[ \t]*$/m.exec(text);
+    if (!versionMatch || !nameMatch)
+      return false;
+    const key = noteKeyFromText(file, text);
+    const entry = this.load().notes[key];
+    const version = entry == null ? void 0 : entry.versions.find((v) => v.id === versionMatch[1].trim());
+    const label = nameMatch[1].trim();
+    if (!version || !label || version.label === label)
+      return false;
+    version.label = label;
+    this.save();
+    return true;
+  }
   async entriesForPaths(paths) {
     const wanted = new Set(paths.map((path2) => (0, import_obsidian3.normalizePath)(path2)));
     return Object.values(this.load().notes).filter((entry) => wanted.has((0, import_obsidian3.normalizePath)(entry.path)));
@@ -13759,7 +13808,7 @@ var VersionStore = class {
       if (!text)
         continue;
       const links = otherVersionReferences(file, entry, version.id);
-      const withVersion = addVersionFrontmatter(text, version.id, links);
+      const withVersion = addVersionFrontmatter(text, version.id, links, versionLabel(version));
       if (await this.writeLive(path2, addUpLink(withVersion, defaultLink)))
         written += 1;
     }
@@ -22032,6 +22081,7 @@ var MidadArabicSourcesPlugin = class extends import_obsidian19.Plugin {
     this.repositoryMocLabels = {};
     this.transcriptionMocTimer = null;
     this.topicSyncTimers = new Map();
+    this.versionNameTimers = new Map();
     this.pythonPromise = null;
     this.serverPythonPromise = null;
     this.promptDefaults = null;
@@ -22452,6 +22502,13 @@ var MidadArabicSourcesPlugin = class extends import_obsidian19.Plugin {
         return;
       this.scheduleTopicUpSync(file);
     };
+    const watchVersionName = (file) => {
+      if (!(file instanceof import_obsidian19.TFile) || file.extension !== "md")
+        return;
+      if (!/\.Version\d+\.md$/i.test(file.path))
+        return;
+      this.scheduleVersionNameSync(file);
+    };
     this.registerEvent(this.app.vault.on("create", watchTranscription));
     this.registerEvent(this.app.vault.on("modify", watchTranscription));
     this.registerEvent(this.app.vault.on("delete", watchTranscription));
@@ -22459,6 +22516,8 @@ var MidadArabicSourcesPlugin = class extends import_obsidian19.Plugin {
     this.registerEvent(this.app.vault.on("create", watchTopics));
     this.registerEvent(this.app.vault.on("modify", watchTopics));
     this.registerEvent(this.app.vault.on("rename", watchTopics));
+    this.registerEvent(this.app.vault.on("create", watchVersionName));
+    this.registerEvent(this.app.vault.on("modify", watchVersionName));
   }
   onunload() {
     var _a2, _b2;
@@ -22467,6 +22526,9 @@ var MidadArabicSourcesPlugin = class extends import_obsidian19.Plugin {
     for (const timer of this.topicSyncTimers.values())
       window.clearTimeout(timer);
     this.topicSyncTimers.clear();
+    for (const timer of this.versionNameTimers.values())
+      window.clearTimeout(timer);
+    this.versionNameTimers.clear();
     (_a2 = this.annotations) == null ? void 0 : _a2.dispose();
     this.sourceCancelled = true;
     this.sourceOperationId += 1;
@@ -24422,6 +24484,25 @@ var MidadArabicSourcesPlugin = class extends import_obsidian19.Plugin {
       void this.syncTopicUpLinks(file);
     }, 700);
     this.topicSyncTimers.set(file.path, timer);
+  }
+  scheduleVersionNameSync(file) {
+    const existing = this.versionNameTimers.get(file.path);
+    if (existing !== void 0)
+      window.clearTimeout(existing);
+    const timer = window.setTimeout(() => {
+      this.versionNameTimers.delete(file.path);
+      void this.syncVersionName(file);
+    }, 700);
+    this.versionNameTimers.set(file.path, timer);
+  }
+  async syncVersionName(file) {
+    try {
+      const changed = await new VersionStore(this.app, this.vaultPath()).syncVersionName(file);
+      if (changed)
+        void this.refreshSourcesIndex();
+    } catch (error) {
+      console.error("[midad-arabic-sources] version name sync", error);
+    }
   }
   async syncTopicUpLinks(file) {
     var _a2;
