@@ -13453,21 +13453,6 @@ function removeFrontmatterProperty(content, key) {
   const re = new RegExp(`^${key}:[^\\n]*\\n(?:[ \\t]+-[^\\n]*\\n)*`, "m");
   return front.replace(re, "") + body;
 }
-function setFrontmatterProperty(content, key, value) {
-  const clean3 = removeFrontmatterProperty(content, key);
-  const line = `${key}: ${value}`;
-  if (clean3.startsWith("---")) {
-    const end = clean3.indexOf("\n---", 3);
-    if (end >= 0)
-      return `${clean3.slice(0, end + 1)}${line}
-${clean3.slice(end + 1)}`;
-  }
-  return `---
-${line}
----
-
-${clean3}`;
-}
 function setFrontmatterList(content, key, values) {
   const clean3 = removeFrontmatterProperty(content, key);
   if (!values.length)
@@ -13524,8 +13509,32 @@ function sanitizeFrontmatter(content) {
   return out.join("\n") + body;
 }
 function addVersionFrontmatter(content, id, otherLinks) {
-  const withVersion = setFrontmatterProperty(sanitizeFrontmatter(content), "midad-version", `"${id}"`);
-  return setFrontmatterList(withVersion, "other-versions", otherLinks);
+  var _a2;
+  const prior = splitNote(content);
+  const lines = ((_a2 = prior.frontmatter) != null ? _a2 : "").split("\n");
+  const out = [];
+  let skip = false;
+  for (const line of lines) {
+    const property = /^([A-Za-z][\w-]*):/.exec(line);
+    if (property) {
+      skip = property[1] === "midad-version" || property[1] === "other-versions";
+      if (!skip)
+        out.push(line);
+      continue;
+    }
+    if (skip && /^\s/.test(line))
+      continue;
+    out.push(line);
+  }
+  while (out.length && out[out.length - 1].trim() === "")
+    out.pop();
+  out.push(`midad-version: "${id}"`);
+  if (otherLinks.length) {
+    out.push("other-versions:");
+    for (const link of otherLinks)
+      out.push(`  - "${link.replace(/"/g, '\\"')}"`);
+  }
+  return joinNote(out.join("\n"), prior.body);
 }
 var VersionStore = class {
   constructor(app, vaultPath) {

@@ -174,9 +174,29 @@ function sanitizeFrontmatter(content: string): string {
 }
 
 function addVersionFrontmatter(content: string, id: string, otherLinks: string[]): string {
-	const withVersion = setFrontmatterProperty(sanitizeFrontmatter(content), "midad-version", `"${id}"`);
-	return setFrontmatterList(withVersion, "other-versions", otherLinks);
+	const prior = splitNote(content);
+	const lines = (prior.frontmatter ?? "").split("\n");
+	const out: string[] = [];
+	let skip = false;
+	for (const line of lines) {
+		const property = /^([A-Za-z][\w-]*):/.exec(line);
+		if (property) {
+			skip = property[1] === "midad-version" || property[1] === "other-versions";
+			if (!skip) out.push(line);
+			continue;
+		}
+		if (skip && /^\s/.test(line)) continue;
+		out.push(line);
+	}
+	while (out.length && out[out.length - 1].trim() === "") out.pop();
+	out.push(`midad-version: "${id}"`);
+	if (otherLinks.length) {
+		out.push("other-versions:");
+		for (const link of otherLinks) out.push(`  - "${link.replace(/"/g, '\\"')}"`);
+	}
+	return joinNote(out.join("\n"), prior.body);
 }
+
 
 export class VersionStore {
 	private readonly app: App;
