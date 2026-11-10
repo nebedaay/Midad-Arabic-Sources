@@ -54,6 +54,50 @@ def load_corrections(src: Path) -> dict:
         return {}
 
 
+def fnv1a(value: str) -> str:
+    """Match the plugin's 32-bit FNV-1a hash over UTF-16 code units."""
+    data = value.encode("utf-16-le")
+    h = 0x811C9DC5
+    for i in range(0, len(data), 2):
+        unit = data[i] | (data[i + 1] << 8)
+        h ^= unit
+        h = (h * 0x01000193) & 0xFFFFFFFF
+    return format(h, "x")
+
+
+def baseline_path(src: Path) -> Path:
+    return Path(str(src) + ".rendered.json")
+
+
+def page_sections(content: str) -> list[tuple[str, str]]:
+    """Return [(printed number, body)] in page order."""
+    lines = content.split("\n")
+    headings = [i for i, line in enumerate(lines) if PAGE_HEADER.match(line)]
+    pages: list[tuple[str, str]] = []
+    for pos, start in enumerate(headings):
+        match = PAGE_HEADER.match(lines[start])
+        if not match:
+            continue
+        end = headings[pos + 1] if pos + 1 < len(headings) else len(lines)
+        section = "\n".join(lines[start + 1:end]).strip("\n")
+        section = re.sub(r"\n\s*---\s*$", "", section).strip()
+        pages.append((match.group(1), section))
+    return pages
+
+
+def write_render_baseline(src: Path, content: str) -> None:
+    pages = page_sections(content)
+    if not pages:
+        return
+    payload = {
+        "schema": 1,
+        "pages": [
+            {"index": i, "number": number, "hash": fnv1a(f"{number}\n{body}")}
+            for i, (number, body) in enumerate(pages)
+        ],
+    }
+    baseline_path(src).write_text(json.dumps(payload, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
+
 def apply_page_corrections(content: str, corrections: dict, update=None) -> str:
     """Replace processed page bodies with the user's committed corrections.
 
@@ -65,6 +109,15 @@ def apply_page_corrections(content: str, corrections: dict, update=None) -> str:
     if not isinstance(pages, list) or not pages:
         return content
     lines = content.split("\n")
+    by_index = {}
+    sequential = []
+    for entry in pages:
+        if not isinstance(entry, dict):
+            continue
+        try:
+            by_index[int(entry.get("index"))] = entry
+        except (TypeError, ValueError):
+            sequential.append(entry)
     out: list[str] = []
     page_index = 0
     i = 0
@@ -74,7 +127,9 @@ def apply_page_corrections(content: str, corrections: dict, update=None) -> str:
             out.append(lines[i])
             i += 1
             continue
-        correction = pages[page_index] if page_index < len(pages) else None
+        correction = by_index.get(page_index)
+        if correction is None and page_index < len(sequential):
+            correction = sequential[page_index]
         page_index += 1
         if not isinstance(correction, dict):
             out.append(lines[i])
@@ -287,6 +342,11 @@ def main():
                                      unit=unit, cover=cover)
 
         print(f"\nReprocessed -> {dest}")
+        try:
+            final_text = Path(dest).read_text(encoding="utf-8")
+            write_render_baseline(src, final_text)
+        except Exception:
+            pass
     finally:
         shutil.rmtree(workdir, ignore_errors=True)
 

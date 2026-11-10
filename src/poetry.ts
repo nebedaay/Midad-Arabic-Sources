@@ -43,7 +43,14 @@ export function formatPoetrySelection(text: string, maxLength = POETRY_MAX_LINE)
 	for (const block of blocks) {
 		let short: string[] = [];
 		for (const line of block) {
-			if (line.length > maxLength) {
+			if (/^#{1,6}\s/.test(line)) {
+				if (short.length) {
+					groups.push(short);
+					short = [];
+				}
+				flush();
+				sections.push(line);
+			} else if (line.length > maxLength) {
 				if (short.length) {
 					groups.push(short);
 					short = [];

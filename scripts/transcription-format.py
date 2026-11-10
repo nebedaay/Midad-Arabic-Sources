@@ -434,6 +434,52 @@ def remove_pdf_headings(text):
     return text
 
 
+TOC_BARE = re.compile(r"^>-\s+([0-9\u0660-\u0669]+)\s+(.+)$")
+TOC_LINK = re.compile(r"^>-\s+\[\[#\s*p\.\s*[0-9\u0660-\u0669]+\|")
+
+
+def _western_numeral(value: str) -> str:
+    return value.translate(str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789"))
+
+
+def format_toc_entries(text: str) -> str:
+    """Link bare Arabic/Western TOC page items, leaving existing links alone.
+
+    A fihris often arrives as ``>- ٢ مقدمة لكتاب الإعتقاد`` with no links. Add
+    ``[[#p. 2|٢]]`` without adding invisible direction characters; Obsidian's
+    CSS already renders Arabic callouts RTL outside the editing cursor.
+    """
+    lines = text.split("\n")
+    out: list[str] = []
+    in_toc = False
+    for line in lines:
+        s = line.strip()
+        if s == ">[!TOC]":
+            in_toc = True
+            out.append(line)
+            continue
+        if in_toc and s.startswith(">- "):
+            if "[[" not in s:
+                match = TOC_BARE.match(s)
+                if match:
+                    label = match.group(1)
+                    page = _western_numeral(label)
+                    title = match.group(2).strip()
+                    out.append(f">- [[#p. {page}|{label}]] {title}")
+                    continue
+            elif TOC_LINK.match(s):
+                # Normalize an older ``[[# p. N|N]]`` spelling; the space after
+                # `#` is not part of the heading anchor.
+                out.append(re.sub(r"^(>-\s+)\[\[#\s*p\.", r"\1[[#p.", line))
+                continue
+            out.append(line)
+            continue
+        if in_toc and s and not s.startswith(">"):
+            in_toc = False
+        out.append(line)
+    return "\n".join(out)
+
+
 def process(input_path):
     """Apply all post-processing fixes to a Gemini batch output file."""
     path = Path(input_path)
@@ -728,6 +774,7 @@ def process(input_path):
         in_toc = False
         out.append(line)
     c = '\n'.join(out)
+    c = format_toc_entries(c)
     # Ensure blank line between فهرس heading and [!TOC]
     c = re.sub(r'(#+ .*?[فف]هر[سست][^\n]*)\n(>\[!TOC\])', r'\1\n\n\2', c)
     print(f"  TOC: {c.count('>[!TOC]')} callouts")

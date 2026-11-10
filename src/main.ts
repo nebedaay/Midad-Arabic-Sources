@@ -5185,17 +5185,29 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		const text = await this.app.vault.read(file);
 		const body = text.replace(/^---[\s\S]*?\n---\s*/, "").replace(/<span class="mas-managed">\/?mas-managed<\/span>/g, "");
 		const headings = [...body.matchAll(/^####\s+p\.\s*([0-9:]+)\s*$/gm)];
-		const pages = headings.map((match, index) => {
+		const allPages = headings.map((match, index) => {
 			const start = (match.index ?? 0) + match[0].length;
 			const end = index + 1 < headings.length ? headings[index + 1].index ?? body.length : body.length;
 			let section = body.slice(start, end);
 			section = section.replace(/\n\s*---\s*$/, "").trim();
-			return { number: match[1], body: section };
+			return { index, number: match[1], body: section };
 		});
-		if (!pages.length) {
+		if (!allPages.length) {
 			new Notice("No page sections were found in this note.");
 			return;
 		}
+		// Compare with the last assembled note, not with every page from scratch.
+		// The baseline lets us store only pages the user actually changed.
+		let baseline: { pages?: Array<{ index?: number; hash?: string }> } | null = null;
+		try {
+			const baselinePath = `${archive.zip.path}.rendered.json`;
+			if (fs.existsSync(baselinePath)) baseline = JSON.parse(fs.readFileSync(baselinePath, "utf8"));
+		} catch { baseline = null; }
+		const baselinePages = new Map((baseline?.pages ?? []).map((entry) => [Number(entry.index), entry.hash]));
+		const pages = allPages.filter((page) => {
+			const previous = baselinePages.get(page.index);
+			return !previous || previous !== hashString(`${page.number}\n${page.body}`);
+		});
 		const path = `${archive.zip.path}.corrections.json`;
 		fs.writeFileSync(path, JSON.stringify({
 			schema: 1,
@@ -5204,7 +5216,9 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			archive: archive.zip.name,
 			pages,
 		}, null, 1) + "\n", "utf8");
-		new Notice(`Saved ${pages.length} page correction(s) for ${archive.zip.name}.`);
+		new Notice(pages.length
+			? `Saved ${pages.length} changed page correction(s) for ${archive.zip.name}.`
+			: `No changed pages to save for ${archive.zip.name}.`);
 	}
 
 	/** Apply only the safe bracket migration to recognized transcription/translation notes. */

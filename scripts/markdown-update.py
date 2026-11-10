@@ -55,6 +55,48 @@ def _restore_fences(text: str, fences: list[str]) -> str:
     return text
 
 
+
+def normalize_markdown_spacing(text: str) -> str:
+    """Collapse blank runs and keep block boundaries separated.
+
+    This is deliberately not the raw-render spacing pass: that one inserts
+    page separators and can join a separator to the next heading. Here the
+    note is already rendered, so separators and headings are preserved
+    verbatim, fenced code is untouched, and runs of blank lines collapse to
+    one.
+    """
+    lines = text.split("\n")
+    out: list[str] = []
+    in_fence = False
+    fence = ""
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith(("```", "~~~")):
+            marker = stripped[:3]
+            if not in_fence:
+                in_fence = True
+                fence = marker
+            elif marker == fence:
+                in_fence = False
+        if in_fence:
+            out.append(line)
+            continue
+        if not stripped:
+            if out and out[-1] != "":
+                out.append("")
+            continue
+        is_heading = bool(re.match(r"^#{1,6}\s", stripped))
+        is_callout = bool(re.match(r"^>\[!", stripped))
+        is_separator = stripped == "---"
+        if (is_heading or is_callout or is_separator) and out and out[-1] != "":
+            out.append("")
+        out.append(line)
+        if is_heading or is_separator:
+            if out and out[-1] != "":
+                out.append("")
+    while len(out) > 1 and out[-1] == "" and out[-2] == "":
+        out.pop()
+    return "\n".join(out)
 def update_markdown(text: str, *, quran: bool = True, tafsir: bool = False) -> str:
     """Apply the guarded Markdown-update layer."""
     body, fences = _protect_fences(text)
@@ -64,11 +106,14 @@ def update_markdown(text: str, *, quran: bool = True, tafsir: bool = False) -> s
         body, _ = tfq.add_missing_refs(body)
         body, _ = tfq.fix_wikilinks(body)
     body = escape_literal_brackets(body)
+    # Add links to bare Arabic/Western TOC entries and force Arabic TOC lines
+    # RTL without touching existing TOC links.
+    fmt = _load("transcription-format.py")
+    body = fmt.format_toc_entries(body)
     # The source formatter's spacing rules are block-level and idempotent; the
     # raw-only page-number, OCR-heading, poetry, footnote, and TOC conversions
     # deliberately do not run here.
-    fmt = _load("transcription-format.py")
-    body = fmt.normalize_spacing(body)
+    body = normalize_markdown_spacing(body)
     body = _restore_fences(body, fences)
     return body
 
@@ -86,7 +131,7 @@ def main(argv: list[str] | None = None) -> int:
     original = note.read_text(encoding="utf-8")
     yaml, body = _split_frontmatter(original)
     updated = update_markdown(body, quran=not args.no_quran, tafsir=args.tafsir)
-    result = yaml + updated
+    result = (yaml.rstrip("\n") + "\n\n" + updated) if yaml else updated
     changed = result != original
     if changed:
         if args.backup_dir:
