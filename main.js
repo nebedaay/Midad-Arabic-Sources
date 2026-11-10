@@ -13736,6 +13736,7 @@ var ManageVersionsModal = class extends import_obsidian3.Modal {
     this.renderFingerprint = "";
     this.renderChanged = false;
     this.matchesSaved = false;
+    this.outsideContent = "";
     this.selectionDirty = false;
     this.options = options;
   }
@@ -13746,7 +13747,11 @@ var ManageVersionsModal = class extends import_obsidian3.Modal {
   async refresh() {
     var _a2;
     this.entry = await this.options.store.entryFor(this.options.file);
-    this.currentHash = normalizedHash(await this.options.app.vault.read(this.options.file));
+    const liveText = await this.options.app.vault.read(this.options.file);
+    this.currentHash = normalizedHash(liveText);
+    const prior = splitNote(liveText);
+    const region = findManagedRegion(prior.body);
+    this.outsideContent = region ? `${prior.body.slice(0, region.start)}${prior.body.slice(region.end)}`.trim() : "";
     this.renderFingerprint = this.options.getFingerprint ? await this.options.getFingerprint() : "";
     this.renderChanged = !!((_a2 = this.entry) == null ? void 0 : _a2.renderHash) && this.entry.renderHash !== this.renderFingerprint;
     this.matchesSaved = this.entry ? await this.options.store.matchesSavedVersion(this.entry, this.currentHash) : false;
@@ -13771,8 +13776,17 @@ var ManageVersionsModal = class extends import_obsidian3.Modal {
     if (this.options.activeVersionId) {
       contentEl.createEl("p", {
         cls: "mas-versions-help",
-        text: `This is not the default version (${this.options.activeVersionId.toUpperCase()}). Saving here will not update or replace the main note.`
+        text: `This is not the default version (${this.options.activeVersionId.toUpperCase()}). Saving here will not update or replace the main note. To manage versions, run this command from the default version.`
       });
+      if (this.outsideContent) {
+        const detach = contentEl.createEl("button", {
+          cls: "mas-versions-detach",
+          text: "Detach user-written content into a separate note\u2026"
+        });
+        detach.onclick = () => {
+          this.detach();
+        };
+      }
     }
     contentEl.createEl("p", {
       cls: "mas-versions-help",
@@ -13854,6 +13868,36 @@ var ManageVersionsModal = class extends import_obsidian3.Modal {
       };
     }
   }
+  detach() {
+    if (!this.outsideContent)
+      return;
+    new DetachVersionModal(this.app, {
+      defaultName: `${this.options.file.basename.replace(/\.Version\d+$/i, "")} - detached notes`,
+      onSubmit: async (name) => {
+        var _a2, _b2;
+        const text = await this.options.app.vault.read(this.options.file);
+        const prior = splitNote(text);
+        const region = findManagedRegion(prior.body);
+        if (!region)
+          return;
+        const frontmatter = (_a2 = prior.frontmatter) != null ? _a2 : "".replace(/^midad-id:[^\n]*\n/gm, "").replace(/^midad-version:[^\n]*\n/gm, "").replace(/^other-versions:[^\n]*\n(?:[ \t]+-[^\n]*\n)*/gm, "");
+        const folder = this.options.file.path.includes("/") ? this.options.file.path.slice(0, this.options.file.path.lastIndexOf("/")) : "";
+        const target = (0, import_obsidian3.normalizePath)(`${folder}/${name.trim().replace(/\.md$/i, "")}.md`);
+        if (this.options.app.vault.getAbstractFileByPath(target)) {
+          new import_obsidian3.Notice("A note with that name already exists.");
+          return;
+        }
+        await this.options.app.vault.create(target, joinNote(frontmatter, `
+${this.outsideContent.trim()}
+`));
+        await this.options.app.vault.modify(this.options.file, joinNote((_b2 = prior.frontmatter) != null ? _b2 : "", `
+${prior.body.slice(region.start, region.end).trim()}
+`));
+        new import_obsidian3.Notice(`Detached user content to ${target}.`);
+        await this.refresh();
+      }
+    }).open();
+  }
   async apply() {
     var _a2;
     if (!((_a2 = this.entry) == null ? void 0 : _a2.versions.length)) {
@@ -13887,6 +13931,38 @@ var ManageVersionsModal = class extends import_obsidian3.Modal {
     if (!written)
       new import_obsidian3.Notice("No changes to apply.");
     this.close();
+  }
+};
+var DetachVersionModal = class extends import_obsidian3.Modal {
+  constructor(app, options) {
+    super(app);
+    this.options = options;
+  }
+  onOpen() {
+    const { contentEl } = this;
+    contentEl.createEl("h2", { text: "Detach user content" });
+    contentEl.createEl("p", { text: "Save the text outside the managed region as a separate note. It will be removed from this version note." });
+    let name = this.options.defaultName;
+    new import_obsidian3.Setting(contentEl).setName("Note name").addText((text) => {
+      text.setValue(name).onChange((value) => {
+        name = value;
+      });
+    });
+    const buttons = contentEl.createDiv({ cls: "mas-versions-conflict-actions" });
+    const save = buttons.createEl("button", { text: "Detach", cls: "mod-cta" });
+    save.onclick = async () => {
+      if (!name.trim()) {
+        new import_obsidian3.Notice("Enter a note name.");
+        return;
+      }
+      await this.options.onSubmit(name);
+      this.close();
+    };
+    const cancel = buttons.createEl("button", { text: "Cancel" });
+    cancel.onclick = () => this.close();
+  }
+  onClose() {
+    this.contentEl.empty();
   }
 };
 var UnsavedVersionModal = class extends import_obsidian3.Modal {

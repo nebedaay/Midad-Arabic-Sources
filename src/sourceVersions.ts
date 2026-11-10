@@ -3,6 +3,7 @@ import { strFromU8, strToU8, unzipSync, zipSync } from "fflate";
 import * as fs from "fs";
 import { hashString } from "./sourceImport/history";
 import { ensureFolder, safeFileSegment } from "./sourcePaths";
+import { findManagedRegion, joinNote, splitNote } from "./sourceImport/merge";
 
 export interface SavedVersion {
 	id: string;
@@ -401,6 +402,7 @@ export class ManageVersionsModal extends Modal {
 	private renderFingerprint = "";
 	private renderChanged = false;
 	private matchesSaved = false;
+	private outsideContent = "";
 	private selectionDirty = false;
 
 	constructor(options: VersionModalOptions) {
@@ -415,7 +417,13 @@ export class ManageVersionsModal extends Modal {
 
 	private async refresh(): Promise<void> {
 		this.entry = await this.options.store.entryFor(this.options.file);
-		this.currentHash = normalizedHash(await this.options.app.vault.read(this.options.file));
+		const liveText = await this.options.app.vault.read(this.options.file);
+		this.currentHash = normalizedHash(liveText);
+		const prior = splitNote(liveText);
+		const region = findManagedRegion(prior.body);
+		this.outsideContent = region
+			? `${prior.body.slice(0, region.start)}${prior.body.slice(region.end)}`.trim()
+			: "";
 		this.renderFingerprint = this.options.getFingerprint ? await this.options.getFingerprint() : "";
 		this.renderChanged = !!this.entry?.renderHash && this.entry.renderHash !== this.renderFingerprint;
 		this.matchesSaved = this.entry ? await this.options.store.matchesSavedVersion(this.entry, this.currentHash) : false;
@@ -441,8 +449,15 @@ export class ManageVersionsModal extends Modal {
 		if (this.options.activeVersionId) {
 			contentEl.createEl("p", {
 				cls: "mas-versions-help",
-				text: `This is not the default version (${this.options.activeVersionId.toUpperCase()}). Saving here will not update or replace the main note.`,
+				text: `This is not the default version (${this.options.activeVersionId.toUpperCase()}). Saving here will not update or replace the main note. To manage versions, run this command from the default version.`,
 			});
+			if (this.outsideContent) {
+				const detach = contentEl.createEl("button", {
+					cls: "mas-versions-detach",
+					text: "Detach user-written content into a separate note…",
+				});
+				detach.onclick = () => { this.detach(); };
+			}
 		}
 		contentEl.createEl("p", {
 			cls: "mas-versions-help",
@@ -520,6 +535,40 @@ export class ManageVersionsModal extends Modal {
 		}
 	}
 
+	private detach(): void {
+		if (!this.outsideContent) return;
+		new DetachVersionModal(this.app, {
+			defaultName: `${this.options.file.basename.replace(/\.Version\d+$/i, "")} - detached notes`,
+			onSubmit: async (name) => {
+				const text = await this.options.app.vault.read(this.options.file);
+				const prior = splitNote(text);
+				const region = findManagedRegion(prior.body);
+				if (!region) return;
+				const frontmatter = prior.frontmatter ?? ""
+					.replace(/^midad-id:[^\n]*\n/gm, "")
+					.replace(/^midad-version:[^\n]*\n/gm, "")
+					.replace(/^other-versions:[^\n]*\n(?:[ \t]+-[^\n]*\n)*/gm, "");
+				const folder = this.options.file.path.includes("/")
+					? this.options.file.path.slice(0, this.options.file.path.lastIndexOf("/"))
+					: "";
+				const target = normalizePath(`${folder}/${name.trim().replace(/\.md$/i, "")}.md`);
+				if (this.options.app.vault.getAbstractFileByPath(target)) {
+					new Notice("A note with that name already exists.");
+					return;
+				}
+				await this.options.app.vault.create(target, joinNote(frontmatter, `\n${this.outsideContent.trim()}\n`));
+				// Remove the detached text from the version note, leaving its managed
+				// region as the generated-version body.
+				await this.options.app.vault.modify(
+					this.options.file,
+					joinNote(prior.frontmatter ?? "", `\n${prior.body.slice(region.start, region.end).trim()}\n`)
+				);
+				new Notice(`Detached user content to ${target}.`);
+				await this.refresh();
+			},
+		}).open();
+	}
+
 	private async apply(): Promise<void> {
 		if (!this.entry?.versions.length) {
 			new Notice("There are no saved versions to apply.");
@@ -551,6 +600,41 @@ export class ManageVersionsModal extends Modal {
 		this.selectionDirty = false;
 		if (!written) new Notice("No changes to apply.");
 		this.close();
+	}
+}
+
+class DetachVersionModal extends Modal {
+	private readonly options: { defaultName: string; onSubmit: (name: string) => Promise<void> };
+
+	constructor(app: App, options: DetachVersionModal["options"]) {
+		super(app);
+		this.options = options;
+	}
+
+	onOpen(): void {
+		const { contentEl } = this;
+		contentEl.createEl("h2", { text: "Detach user content" });
+		contentEl.createEl("p", { text: "Save the text outside the managed region as a separate note. It will be removed from this version note." });
+		let name = this.options.defaultName;
+		new Setting(contentEl).setName("Note name").addText((text) => {
+			text.setValue(name).onChange((value) => { name = value; });
+		});
+		const buttons = contentEl.createDiv({ cls: "mas-versions-conflict-actions" });
+		const save = buttons.createEl("button", { text: "Detach", cls: "mod-cta" });
+		save.onclick = async () => {
+			if (!name.trim()) {
+				new Notice("Enter a note name.");
+				return;
+			}
+			await this.options.onSubmit(name);
+			this.close();
+		};
+		const cancel = buttons.createEl("button", { text: "Cancel" });
+		cancel.onclick = () => this.close();
+	}
+
+	onClose(): void {
+		this.contentEl.empty();
 	}
 }
 
