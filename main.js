@@ -14857,6 +14857,9 @@ function topicsFromValue(value) {
   const values = Array.isArray(value) ? value : typeof value === "string" ? [value] : [];
   const out = [];
   for (const item of values) {
+    const raw = typeof item === "string" ? item.trim() : "";
+    if (!raw || raw.startsWith("[[") || raw.includes("/") || /\.Version\d+/i.test(raw))
+      continue;
     const label = topicLabel(item);
     if (label && !out.includes(label))
       out.push(label);

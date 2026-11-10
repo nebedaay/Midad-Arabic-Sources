@@ -112,6 +112,11 @@ export function topicsFromValue(value: unknown): string[] {
 	const values = Array.isArray(value) ? value : typeof value === "string" ? [value] : [];
 	const out: string[] = [];
 	for (const item of values) {
+		const raw = typeof item === "string" ? item.trim() : "";
+		// A topics entry is a label, not a wikilink or a note path. Ignore
+		// version links and accidentally pasted paths rather than turning them
+		// into bogus `Midad topic - …` links.
+		if (!raw || raw.startsWith("[[") || raw.includes("/") || /\.Version\d+/i.test(raw)) continue;
 		const label = topicLabel(item);
 		if (label && !out.includes(label)) out.push(label);
 	}
