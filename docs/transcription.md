@@ -79,6 +79,7 @@ The editor holds only the **text-specific** part. The pipeline appends it to a s
 - **Transcribe a PDF…** — choose any PDF on disk, with no Zotero item, then verify the guessed title and author.
 - **Re-render this source** — re-run post-processing for the active transcription/translation from its archived JSON. On a volume note, choose only that volume or all volumes. If there is no archive, it falls back to in-place post-processing.
 - **Post-process this transcription/translation** — run the current local post-processing scripts over the open note, without an archive or Gemini.
+- **Commit edits to archived transcription/translation** — save the current note’s page bodies as corrections for its archived batch; a later re-render from the archive reapplies them.
 - **Re-render transcriptions of this item’s attachments** — from a literature note, re-render all of its transcription/translation notes, using archives where present and in-place post-processing for legacy notes.
 - **Check transcription pipeline** — list the archived batches on disk.
 - **Show pipeline status** — reveal the live status panel while a job runs, resume a job that was interrupted, or open the last log when nothing is running.

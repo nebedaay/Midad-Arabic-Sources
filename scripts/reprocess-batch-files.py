@@ -36,6 +36,65 @@ def load(name: str):
     return SourceFileLoader(path.stem, str(path)).load_module()
 
 
+PAGE_HEADER = re.compile(r"^####\s+p\.\s*([0-9:]+)\s*$")
+
+
+def corrections_path(src: Path) -> Path:
+    return Path(str(src) + ".corrections.json")
+
+
+def load_corrections(src: Path) -> dict:
+    p = corrections_path(src)
+    if not p.exists():
+        return {}
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def apply_page_corrections(content: str, corrections: dict) -> str:
+    """Replace processed page bodies with the user's committed corrections.
+
+    Pages are matched by their order in the note, not by printed page number, so
+    a corrected page number survives a reprocess. Separators and all unmatched
+    prose are left as the postprocessor wrote them.
+    """
+    pages = corrections.get("pages") if isinstance(corrections, dict) else None
+    if not isinstance(pages, list) or not pages:
+        return content
+    lines = content.split("\n")
+    out: list[str] = []
+    page_index = 0
+    i = 0
+    while i < len(lines):
+        match = PAGE_HEADER.match(lines[i])
+        if not match:
+            out.append(lines[i])
+            i += 1
+            continue
+        correction = pages[page_index] if page_index < len(pages) else None
+        page_index += 1
+        if not isinstance(correction, dict):
+            out.append(lines[i])
+            i += 1
+            continue
+        number = str(correction.get("number") or match.group(1)).strip()
+        out.append(f"#### p. {number}")
+        out.append("")
+        # Find the original page body; keep the separator that follows it.
+        j = i + 1
+        while j < len(lines) and not PAGE_HEADER.match(lines[j]) and lines[j].strip() != "---":
+            j += 1
+        body = str(correction.get("body") or "").strip("\n")
+        if body:
+            out.extend(body.split("\n"))
+        if j < len(lines) and lines[j].strip() == "---":
+            out.append("")
+        i = j
+    return "\n".join(out)
+
 def vault_name(stem: str, doc_type: str) -> str:
     m = re.match(r'(@\S+)', stem)
     citekey = m.group(1) if m else stem
@@ -153,6 +212,7 @@ def main():
                 sys.exit(1)
             result = tbp.read_output_jsonl(jsonl)
             result = tbp.postprocess_translation(result)
+            result = apply_page_corrections(result, load_corrections(src))
             if out_override:
                 out_override.write_text(tbp.build_translation(stem, result), encoding="utf-8")
                 dest = out_override
@@ -177,6 +237,10 @@ def main():
             standalone = mv.find_zotero(citekey) is None
             tpp = load("transcription-postprocess.py")
             tpp.run(raw_path, out_path=processed, metadata=True)
+            processed.write_text(
+                apply_page_corrections(processed.read_text(encoding="utf-8"), load_corrections(src)),
+                encoding="utf-8",
+            )
 
             if out_override:
                 out_override.write_text(processed.read_text(encoding="utf-8"), encoding="utf-8")

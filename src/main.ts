@@ -55,6 +55,7 @@ import {
 } from "./sourceImport/history";
 import { BUNDLED_ASSETS } from "./assets.generated";
 import { localDate } from "./time";
+import { formatPoetrySelection } from "./poetry";
 import { BUILTIN_TOPICS, TOPIC_PAGE_PREFIX, genreTopic, normalizeGenre, topicLabel, topicLink, topicNoteName, topicsFromValue, turathCategory, turathGenres, turathTopicsForWork } from "./topics";
 import { identityOfFrontmatter, sourceIdToYaml, sourceOfFrontmatter } from "./sourceIds";
 import {
@@ -806,6 +807,11 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			name: "Escape literal brackets in transcriptions and translations",
 			callback: async () => { await this.escapeTranscriptionBrackets(); },
 		});
+		this.addCommand({
+			id: "commit-archived-corrections",
+			name: "Commit edits to archived transcription/translation",
+			callback: async () => { await this.commitArchivedCorrections(); },
+		});
 
 		this.addCommand({
 			id: "assign-transcription-topic",
@@ -813,6 +819,12 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			callback: async () => {
 				await this.assignTranscriptionTopic(this.app.workspace.getActiveFile());
 			},
+		});
+
+		this.addCommand({
+			id: "put-selection-in-poetry-callout",
+			name: "Put selected text in a poetry callout",
+			callback: () => { this.putSelectionInPoetryCallout(); },
 		});
 
 		this.addCommand({
@@ -4804,6 +4816,24 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		}).open();
 	}
 
+	/** Format the current selection as poetry callouts, leaving long lines as prose. */
+	putSelectionInPoetryCallout(): void {
+		const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+		if (!view) {
+			new Notice("Open a note first.");
+			return;
+		}
+		const editor = view.editor;
+		const selection = editor.getSelection();
+		if (!selection.trim()) {
+			new Notice("Select the poem first.");
+			return;
+		}
+		const formatted = formatPoetrySelection(selection);
+		if (!formatted || formatted === selection.trim()) return;
+		editor.replaceSelection(formatted);
+	}
+
 	/**
 	 * Run the current local post-processing scripts over an existing
 	 * transcription/translation note. This is the no-archive path: it does not
@@ -5079,6 +5109,57 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		}
 		const written = await this.renderWithProgress(models, true, "Re-rendering post-processed sources");
 		new Notice(`Post-processed ${models.length} model(s); re-rendered ${written.length} note(s).`);
+	}
+
+	/** Save the active note's page bodies as corrections to its archived batch. */
+	async commitArchivedCorrections(): Promise<void> {
+		const file = this.app.workspace.getActiveFile();
+		if (!(file instanceof TFile) || file.extension !== "md") {
+			new Notice("Open a transcription or translation note first.");
+			return;
+		}
+		const info = archivedNoteInfo(file.path);
+		if (!info?.type) {
+			new Notice("That note is not recognised as a transcription or translation.");
+			return;
+		}
+		const all = (await this.pipelineResult(["list-archive"]))?.zips ?? [];
+		const matching = all
+			.map((zip) => ({ zip, info: archivedBatchInfo(zip.name) }))
+			.filter((entry): entry is { zip: ArchiveZip; info: ArchivedBatchInfo } =>
+				!!entry.info && entry.info.citekey === info.citekey && entry.info.type === info.type);
+		const archive = info.volume != null
+			? matching.find((entry) => entry.info.volume === info.volume)
+			: matching.length === 1 ? matching[0] : null;
+		if (!archive) {
+			new Notice(matching.length
+				? "Open the specific volume note whose archive you want to update."
+				: "No archived batch was found for this note.");
+			return;
+		}
+		const text = await this.app.vault.read(file);
+		const body = text.replace(/^---[\s\S]*?\n---\s*/, "").replace(/<span class="mas-managed">\/?mas-managed<\/span>/g, "");
+		const headings = [...body.matchAll(/^####\s+p\.\s*([0-9:]+)\s*$/gm)];
+		const pages = headings.map((match, index) => {
+			const start = (match.index ?? 0) + match[0].length;
+			const end = index + 1 < headings.length ? headings[index + 1].index ?? body.length : body.length;
+			let section = body.slice(start, end);
+			section = section.replace(/\n\s*---\s*$/, "").trim();
+			return { number: match[1], body: section };
+		});
+		if (!pages.length) {
+			new Notice("No page sections were found in this note.");
+			return;
+		}
+		const path = `${archive.zip.path}.corrections.json`;
+		fs.writeFileSync(path, JSON.stringify({
+			schema: 1,
+			savedAt: new Date().toISOString(),
+			note: file.path,
+			archive: archive.zip.name,
+			pages,
+		}, null, 1) + "\n", "utf8");
+		new Notice(`Saved ${pages.length} page correction(s) for ${archive.zip.name}.`);
 	}
 
 	/** Apply only the safe bracket migration to recognized transcription/translation notes. */

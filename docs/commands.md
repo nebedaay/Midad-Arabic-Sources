@@ -27,6 +27,8 @@ See [Transcription](./transcription.md) and [Translation](./translation.md).
 - **Post-process this transcription/translation** — run the current local post-processing scripts over the open note, without an archive or Gemini. Also rebuilds the native YAML, volume parent, and literature-note list.
 - **Post-process all transcriptions and translations** — run that same post-processor over every recognised note, with a confirmation and per-note backup.
 - **Escape literal brackets in transcriptions and translations** — apply the shared bracket pass alone, without re-running every other formatting step; useful for a large batch.
+- **Put selected text in a poetry callout** — format the selection as Arabic-poetry callouts: blank-line-separated verse groups become nested hemistich items, single short lines become direct items, and lines over 80 characters stay as ordinary paragraphs.
+- **Commit edits to archived transcription/translation** — save the current note’s page bodies beside its archive, so a later re-render from that archive keeps your corrections (poetry, page numbers, and body text).
 - **Assign topic and post-process this transcription…** — write a topic onto the parent transcription note and re-process it. A topic containing “tafsīr” switches quote discovery to commentary mode, where short fragments are checked against the verse under discussion.
 - **Re-render transcriptions of this item’s attachments** — run the same re-render for every transcription/translation attached to the open literature note, using archives where present and in-place post-processing for legacy notes.
 - **Check transcription pipeline** — list archived batches.
