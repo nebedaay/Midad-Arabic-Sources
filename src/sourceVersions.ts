@@ -72,14 +72,15 @@ function versionFile(key: string, id: string): string {
 	return `versions/${folder}-${hash}/${id}.md`;
 }
 
-function versionNotePath(file: TFile, version: SavedVersion): string {
-	const folder = file.path.includes("/") ? file.path.slice(0, file.path.lastIndexOf("/")) : "";
-	const stem = file.basename;
+function versionNotePath(entry: NoteVersionEntry, version: SavedVersion): string {
+	const path = entry.path;
+	const folder = path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : "";
+	const stem = path.split("/").pop()?.replace(/\.md$/i, "") ?? entry.title;
 	return normalizePath(`${folder}/${stem}.Version${versionNumber(version.id)}.md`);
 }
 
 function versionLink(file: TFile, entry: NoteVersionEntry, version: SavedVersion): string {
-	const path = version.id === entry.defaultId ? file.path : versionNotePath(file, version);
+	const path = version.id === entry.defaultId ? entry.path : versionNotePath(entry, version);
 	const label = version.id === entry.defaultId ? "Default version" : versionLabel(version);
 	return `[[${path.replace(/\.md$/, "")}|${label}]]`;
 }
@@ -355,7 +356,7 @@ export class VersionStore {
 		const version = entry.versions.find((v) => v.id === id);
 		if (!version) return;
 		delete this.files[version.file];
-		if (file && id !== entry.defaultId) await this.deleteVersionNote(versionNotePath(file, version), id);
+		if (file && id !== entry.defaultId) await this.deleteVersionNote(versionNotePath(entry, version), id);
 		entry.versions = entry.versions.filter((v) => v.id !== id);
 		this.save();
 	}
@@ -380,7 +381,7 @@ export class VersionStore {
 	async versionModified(file: TFile, entry: NoteVersionEntry, id: string): Promise<boolean> {
 		const version = entry.versions.find((v) => v.id === id);
 		if (!version) return false;
-		const path = versionNotePath(file, version);
+		const path = versionNotePath(entry, version);
 		const existing = this.app.vault.getAbstractFileByPath(normalizePath(path));
 		if (!(existing instanceof TFile)) return false;
 		const live = await this.app.vault.read(existing);
@@ -404,7 +405,7 @@ export class VersionStore {
 		let written = (await this.writeLive(file.path, defaultBody)) ? 1 : 0;
 		const defaultLink = versionLink(file, entry, defaultVersion);
 		for (const version of entry.versions) {
-			const path = versionNotePath(file, version);
+			const path = versionNotePath(entry, version);
 			if (!version.selected || version.id === entry.defaultId) {
 				await this.deleteVersionNote(path, version.id);
 				continue;
@@ -672,7 +673,7 @@ export class ManageVersionsModal extends Modal {
 	}
 
 	private async saveVersionNote(version: SavedVersion, overwrite: boolean): Promise<void> {
-		const path = versionNotePath(this.options.file, version);
+		const path = versionNotePath(this.entry!, version);
 		const note = this.options.app.vault.getAbstractFileByPath(normalizePath(path));
 		if (!(note instanceof TFile)) return;
 		await this.options.store.saveVersion(note, overwrite, this.renderFingerprint, { activeVersionId: version.id });

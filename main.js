@@ -13410,13 +13410,15 @@ function versionFile(key, id) {
   const folder = safeFileSegment(key.replace(/^[^:]+:/, ""), "note", 60);
   return `versions/${folder}-${hash}/${id}.md`;
 }
-function versionNotePath(file, version) {
-  const folder = file.path.includes("/") ? file.path.slice(0, file.path.lastIndexOf("/")) : "";
-  const stem = file.basename;
+function versionNotePath(entry, version) {
+  var _a2, _b2;
+  const path2 = entry.path;
+  const folder = path2.includes("/") ? path2.slice(0, path2.lastIndexOf("/")) : "";
+  const stem = (_b2 = (_a2 = path2.split("/").pop()) == null ? void 0 : _a2.replace(/\.md$/i, "")) != null ? _b2 : entry.title;
   return (0, import_obsidian3.normalizePath)(`${folder}/${stem}.Version${versionNumber(version.id)}.md`);
 }
 function versionLink(file, entry, version) {
-  const path2 = version.id === entry.defaultId ? file.path : versionNotePath(file, version);
+  const path2 = version.id === entry.defaultId ? entry.path : versionNotePath(entry, version);
   const label = version.id === entry.defaultId ? "Default version" : versionLabel(version);
   return `[[${path2.replace(/\.md$/, "")}|${label}]]`;
 }
@@ -13690,7 +13692,7 @@ var VersionStore = class {
       return;
     delete this.files[version.file];
     if (file && id !== entry.defaultId)
-      await this.deleteVersionNote(versionNotePath(file, version), id);
+      await this.deleteVersionNote(versionNotePath(entry, version), id);
     entry.versions = entry.versions.filter((v) => v.id !== id);
     this.save();
   }
@@ -13715,7 +13717,7 @@ var VersionStore = class {
     const version = entry.versions.find((v) => v.id === id);
     if (!version)
       return false;
-    const path2 = versionNotePath(file, version);
+    const path2 = versionNotePath(entry, version);
     const existing = this.app.vault.getAbstractFileByPath((0, import_obsidian3.normalizePath)(path2));
     if (!(existing instanceof import_obsidian3.TFile))
       return false;
@@ -13740,7 +13742,7 @@ var VersionStore = class {
     let written = await this.writeLive(file.path, defaultBody) ? 1 : 0;
     const defaultLink = versionLink(file, entry, defaultVersion);
     for (const version of entry.versions) {
-      const path2 = versionNotePath(file, version);
+      const path2 = versionNotePath(entry, version);
       if (!version.selected || version.id === entry.defaultId) {
         await this.deleteVersionNote(path2, version.id);
         continue;
@@ -14004,7 +14006,7 @@ var ManageVersionsModal = class extends import_obsidian3.Modal {
     }).open();
   }
   async saveVersionNote(version, overwrite) {
-    const path2 = versionNotePath(this.options.file, version);
+    const path2 = versionNotePath(this.entry, version);
     const note = this.options.app.vault.getAbstractFileByPath((0, import_obsidian3.normalizePath)(path2));
     if (!(note instanceof import_obsidian3.TFile))
       return;
