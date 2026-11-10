@@ -4219,6 +4219,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		const note = normalizePath(path);
 		if (!note.endsWith(".md")) return false;
 		if (note.startsWith("tmp/") || note.startsWith(".midad-") || note.startsWith(".trash/") || note.includes("/tmp/")) return false;
+		if (/\.Version\d+\.md$/i.test(note)) return false;
 		if (note.startsWith(`${this.transcriptionsFolder()}/`) || note.startsWith(`${this.translationsFolder()}/`)) return true;
 		return /(?:^|\s[-–—]\s).*?(?:transcription|translation)(?:[,\s–—-]|$)/i.test(note.split("/").pop() ?? "");
 	}
@@ -4260,6 +4261,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		for (const file of this.app.vault.getMarkdownFiles()) {
 			const path = normalizePath(file.path);
 			if (path.startsWith("tmp/") || path.startsWith(".midad-") || path.startsWith(".trash/") || path.includes("/tmp/")) continue;
+			if (/\.Version\d+\.md$/i.test(path)) continue;
 			const entry = adopted.get(path);
 			const match = notePattern.exec(file.basename);
 			if (!inFolder(path) && !entry && !(match && /^(?:@|mas-)/.test(file.basename))) continue;

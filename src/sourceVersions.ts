@@ -355,6 +355,7 @@ export class VersionStore {
 		const version = entry.versions.find((v) => v.id === id);
 		const value = label.trim();
 		if (!version || !value) return false;
+		if (version.label === value) return true;
 		if (entry.versions.some((v) => v.id !== id && versionLabel(v).toLowerCase() === value.toLowerCase())) {
 			new Notice("That version name is already in use.");
 			return false;

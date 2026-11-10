@@ -13692,6 +13692,8 @@ var VersionStore = class {
     const value = label.trim();
     if (!version || !value)
       return false;
+    if (version.label === value)
+      return true;
     if (entry.versions.some((v) => v.id !== id && versionLabel(v).toLowerCase() === value.toLowerCase())) {
       new import_obsidian3.Notice("That version name is already in use.");
       return false;
@@ -25303,6 +25305,8 @@ var MidadArabicSourcesPlugin = class extends import_obsidian19.Plugin {
       return false;
     if (note.startsWith("tmp/") || note.startsWith(".midad-") || note.startsWith(".trash/") || note.includes("/tmp/"))
       return false;
+    if (/\.Version\d+\.md$/i.test(note))
+      return false;
     if (note.startsWith(`${this.transcriptionsFolder()}/`) || note.startsWith(`${this.translationsFolder()}/`))
       return true;
     return /(?:^|\s[-–—]\s).*?(?:transcription|translation)(?:[,\s–—-]|$)/i.test((_a2 = note.split("/").pop()) != null ? _a2 : "");
@@ -25334,6 +25338,8 @@ var MidadArabicSourcesPlugin = class extends import_obsidian19.Plugin {
     for (const file of this.app.vault.getMarkdownFiles()) {
       const path2 = (0, import_obsidian19.normalizePath)(file.path);
       if (path2.startsWith("tmp/") || path2.startsWith(".midad-") || path2.startsWith(".trash/") || path2.includes("/tmp/"))
+        continue;
+      if (/\.Version\d+\.md$/i.test(path2))
         continue;
       const entry = adopted.get(path2);
       const match = notePattern.exec(file.basename);
