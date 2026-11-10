@@ -2071,12 +2071,13 @@ def clean_text(raw: str, *, english: bool) -> str:
     # links we add ourselves come later and are not touched.
     body = re.sub(
         r"\[\[(.+?)\]\]",
-        lambda m: f'<sup class="mas-src-note">\\[{html.escape(m.group(1))}]</sup>',
+        lambda m: f'<sup class="mas-src-note">({html.escape(m.group(1))})</sup>',
         body,
     )
-    # Keep literal single brackets intact until the shared postprocessor runs;
-    # it escapes them after Qur'ān citation linking. Generated links are added
-    # later and are protected from that pass.
+    # Double-bracketed text in this source is its editorial apparatus, not a
+    # link. It keeps its source-specific superscript-aside rendering above.
+    # Literal single brackets stay intact until the shared postprocessor runs;
+    # it escapes them after Qur'ān citation linking.
     return body
 
 
