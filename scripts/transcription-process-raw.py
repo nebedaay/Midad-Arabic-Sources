@@ -169,7 +169,7 @@ def postprocess(input_path: Path) -> str:
     if pp_path.exists():
         loader = SourceFileLoader("postprocess", str(pp_path))
         pp = loader.load_module()
-        return pp.process(str(input_path))
+        return pp.escape_literal_brackets(pp.process(str(input_path)))
     
     # Fallback: inline processing
     c = open(input_path, encoding='utf-8').read()

@@ -46,6 +46,12 @@ import urllib.request
 from datetime import datetime
 from pathlib import Path
 
+_SCRIPTS_DIR = Path(__file__).resolve().parent
+if str(_SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS_DIR))
+
+from text_postprocess import escape_literal_brackets
+
 
 # ── Paths ────────────────────────────────────────────────────────────────────
 
@@ -1102,31 +1108,6 @@ def link_quote_citations(
     return text
 
 
-def _escape_literal_brackets(text: str) -> str:
-    """Escape source square brackets without touching actual links.
-
-    Obsidian treats a bare ``[`` as the start of a link, but a single bracket
-    pair is not Markdown link syntax. Escape only those lone opening brackets;
-    ``[[wikilinks]]`` and Markdown ``[text](url)`` / ``[text][ref]`` links are
-    left intact. This is applied to acquired source text only; transcription
-    and translation post-processing are separate and are not changed here.
-    """
-    def repl(match: re.Match) -> str:
-        token = match.group(0)
-        if token.startswith("[["):
-            return token
-        following = text[match.end():match.end() + 1]
-        if following in ("!", "^"):
-            return token
-        # A genuine Markdown link or image is a source link, not a citation.
-        close = text.find("]", match.end())
-        if close >= 0 and text[close + 1:close + 2] in ("(", "["):
-            return token
-        return "\\["
-
-    return re.sub(r"\[\[[^\]]*\]\]|(?<!\\)\[", repl, text)
-
-
 def link_source_content(
     text: str, *, surah: int = 0, ayah: int = 0,
     linear: bool = False, skip_current: bool = False,
@@ -1154,7 +1135,7 @@ def link_source_content(
         text = link_quote_citations(
             text, surah=surah, ayah=ayah, delims=delims, linear=linear,
         )
-    return _escape_literal_brackets(text)
+    return escape_literal_brackets(text)
 
 
 def canonical_aliases(work: dict) -> list[str]:
@@ -2090,17 +2071,12 @@ def clean_text(raw: str, *, english: bool) -> str:
     # links we add ourselves come later and are not touched.
     body = re.sub(
         r"\[\[(.+?)\]\]",
-        lambda m: f'<sup class="mas-src-note">({html.escape(m.group(1))})</sup>',
+        lambda m: f'<sup class="mas-src-note">\\[{html.escape(m.group(1))}]</sup>',
         body,
     )
-    # Added words in single brackets (`[قَوْلُهُ]`, `[وَاصْبِرْ]`) become round
-    # brackets: square brackets are avoided entirely, because Obsidian's renderer
-    # mishandles them — they read as links, and they break a preceding
-    # `{.quran-quote}`. Our own `[[…]]` links are added later, after this runs.
-    body = re.sub(r"\[(.+?)\]", lambda m: f"({m.group(1)})", body)
-    # A stray, unpaired bracket is rare but does occur; nothing in the vault text
-    # should carry a square bracket, so fold any that remain into round brackets.
-    body = body.replace("[", "(").replace("]", ")")
+    # Keep literal single brackets intact until the shared postprocessor runs;
+    # it escapes them after Qur'ān citation linking. Generated links are added
+    # later and are protected from that pass.
     return body
 
 
@@ -2137,7 +2113,7 @@ def parse_work_file(data, shape: str) -> list[tuple[int, str]]:
 # entry, because a re-render only replays the model and cannot apply an
 # acquisition change. Bump the affected entry whenever this file's output for a
 # collection changes, and mirror it in the plugin's `COLLECTION_MODEL_SCHEMA`.
-MODEL_SCHEMA: dict[str, int] = {"dictionary": 6, "turath": 2}
+MODEL_SCHEMA: dict[str, int] = {"dictionary": 6, "turath": 3}
 BASE_MODEL_SCHEMA = 1
 
 
@@ -3605,14 +3581,13 @@ def _hw_prose(definition: str, convention: str = DEFAULT_ROMANIZATION) -> list[s
 
     paragraphs = [_collapse(p) for p in re.split(r"\n\s*\n", text)]
     paragraphs = [p for p in paragraphs if p]
-    # The vault uses curly quotes, and never a square bracket.
+    # The vault uses curly quotes. Literal source brackets are escaped, not
+    # folded into parentheses, so every source type renders brackets the same way.
     paragraphs = [_hw_prose_quotes(p) for p in paragraphs]
-    # ...except the poetry callout's own `[!type]`, which the bracket rule below
-    # would otherwise turn into `(!type)` and destroy the callout. Park it.
+    # Park the poetry callout's own `[!type]` while source brackets are handled.
     paragraphs = [p.replace(_HW_POETRY_CALLOUT, "\x03") for p in paragraphs]
-    paragraphs = [p.replace("[[", "(").replace("]]", ")") for p in paragraphs]
-    paragraphs = [re.sub(r"\[(.+?)\]", r"(\1)", p) for p in paragraphs]
-    paragraphs = [p.replace("[", "(").replace("]", ")") for p in paragraphs]
+    paragraphs = [re.sub(r"\[\[(.+?)\]\]", r"\\[\1]", p) for p in paragraphs]
+    paragraphs = [escape_literal_brackets(p) for p in paragraphs]
     paragraphs = [p.replace("\x03", _HW_POETRY_CALLOUT) for p in paragraphs]
     # Mark the headword so the callout CSS can size it as Arabic, not as prose.
     if paragraphs:
@@ -4930,6 +4905,52 @@ def work_model(work: dict, units: list[dict], created: str, layout: str) -> dict
 
 # ── Commands ─────────────────────────────────────────────────────────────────
 
+_MODEL_CONTENT_KEYS = {"body", "english", "arabic", "paragraphs", "bullets"}
+
+
+def _postprocess_model_value(value, key: str | None = None):
+    """Apply idempotent text passes to model content fields only.
+
+    Metadata, filenames, link targets, and unit refs are deliberately excluded.
+    The bracket pass is the migration step for cached models written before
+    literal source brackets were escaped; acquisition already applies the
+    other content passes.
+    """
+    if isinstance(value, str):
+        return escape_literal_brackets(value) if key in _MODEL_CONTENT_KEYS else value
+    if isinstance(value, list):
+        return [_postprocess_model_value(item, key) for item in value]
+    if isinstance(value, dict):
+        return {k: _postprocess_model_value(v, k) for k, v in value.items()}
+    return value
+
+
+def cmd_postprocess(args: argparse.Namespace) -> int:
+    """Apply the safe content migration pass to cached models, without fetching."""
+    wanted = set(args.key or [])
+    written: list[str] = []
+    for path in sorted(MODEL_DIR.rglob("*.json")):
+        try:
+            model = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        work = model.get("work") or {}
+        key = work.get("key") or f"{work.get('collection')}:{work.get('id')}"
+        if wanted and key not in wanted:
+            continue
+        units = model.get("units") or []
+        next_units = _postprocess_model_value(units)
+        if next_units == units:
+            continue
+        model["units"] = next_units
+        path.write_text(json.dumps(model, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
+        written.append(str(path))
+        emit("step", name=str(work.get("title") or key), status="postprocessed",
+             detail=f"{len(units)} units")
+    emit("result", result={"models": written})
+    return 0
+
+
 def cmd_list(args: argparse.Namespace) -> int:
     overrides = load_overrides()
     works = list(all_works(
@@ -5120,6 +5141,10 @@ def build_parser() -> argparse.ArgumentParser:
     fp.add_argument("--no-transliteration", action="store_true",
                     help="Skip transliteration; name such entries from their radicals.")
     fp.set_defaults(func=cmd_fetch)
+
+    pp = sub.add_parser("postprocess", help="Apply safe content passes to cached models without fetching.")
+    pp.add_argument("--key", action="append", help="<collection>:<id> (repeatable; default: all cached models).")
+    pp.set_defaults(func=cmd_postprocess)
 
     cp = sub.add_parser("check-updates", help="Report works whose source repository has changed.")
     cp.add_argument("--key", action="append", help="<collection>:<id> (repeatable).")

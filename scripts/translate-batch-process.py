@@ -18,8 +18,8 @@ Post-processing passes (in order):
      that lost their ">" prefix; wrap orphan footnote runs (with guards so
      ordinary numbered body lists are left alone).
   4. Page breaks: ensure "---" immediately precedes every "#### p. N".
-  5. Interpolations: [square brackets] -> (parentheses), leaving callout
-     markers, wikilinks, images and footnote refs untouched.
+  5. Literal brackets: escape lone [square brackets], leaving callout markers,
+     wikilinks, Markdown links, images and footnote refs untouched.
   6. Blank lines: one blank line between block elements (vault convention).
 """
 import json
@@ -33,6 +33,10 @@ from importlib.machinery import SourceFileLoader
 
 VAULT = Path(os.environ.get("OBSIDIAN_VAULT", os.path.expanduser("~/Documents/Obsidian Vault")))
 SCRIPTS = Path(__file__).resolve().parent
+if str(SCRIPTS) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS))
+
+from text_postprocess import escape_literal_brackets
 
 API_KEY = os.environ.get("GEMINI_API_KEY", os.environ.get("GOOGLE_API_KEY", ""))
 API_KEY = API_KEY.replace("\u2011", "-")
@@ -507,22 +511,12 @@ def normalize_page_breaks(text: str) -> str:
 
 
 def normalize_brackets(text: str) -> str:
-    """Convert [interpolations] to (parentheses).
+    """Escape lone [brackets] while preserving genuine links.
 
-    Leaves callout markers ([!poetry]), wikilinks ([[..]]), images,
-    markdown links and footnote refs ([^1]) untouched.
+    The shared postprocessor is deliberately the same one used by text sources
+    and transcriptions, so bracket rendering never depends on the note type.
     """
-    def repl(m):
-        inner = m.group(1)
-        if inner.startswith("!"):        # callout marker
-            return m.group(0)
-        if inner.startswith("^"):        # footnote reference
-            return m.group(0)
-        if m.string[m.end():m.end() + 1] == "(":   # markdown link
-            return m.group(0)
-        return f"({inner})"
-
-    return BRACKET.sub(repl, text)
+    return escape_literal_brackets(text)
 
 
 def normalize_blank_lines(text: str) -> str:

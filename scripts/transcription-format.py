@@ -24,6 +24,12 @@ import sys
 from pathlib import Path
 from datetime import datetime
 
+SCRIPT_DIR = Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+
+from text_postprocess import escape_literal_brackets
+
 LQ = '\uFD3F'
 LQE = '\uFD3E'
 NBSP = '\u202f'
@@ -872,7 +878,7 @@ if __name__ == '__main__':
         print("Usage: python3 postprocess-gemini-batch.py <input.md>")
         sys.exit(1)
 
-    result = process(sys.argv[1])
+    result = escape_literal_brackets(process(sys.argv[1]))
     
     ts = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     stem = Path(sys.argv[1]).stem

@@ -274,6 +274,9 @@ def run(input_path, out_path=None, metadata=False, tafsir=False):
     print(f"  Qur'an link displays normalised: {display_fixed}")
     content, repeated_links = tfq.dedupe_same_verse_links(content)
     print(f"  Repeated same-verse links removed: {repeated_links}")
+
+    # Escape source citations last, after every citation/link pass has run.
+    content = pp.escape_literal_brackets(content)
     
     # Save
     if out_path is None:

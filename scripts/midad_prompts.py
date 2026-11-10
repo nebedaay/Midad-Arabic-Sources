@@ -79,7 +79,7 @@ TRANSLATION_BASE_PROMPT = (
     "FOOTNOTES: preserve footnote callouts exactly as they appear in the input, including the label '>[!arabic-footnotes]' "
     "and the '>-' list structure. Do not rename them.\n\n"
 
-    "INTERPOLATIONS: use (parentheses), never [square brackets].\n\n"
+    "INTERPOLATIONS: preserve the source's square brackets; use [square brackets], not (parentheses). The vault escapes literal brackets at render time.\n\n"
 
     "ITALICS: use *asterisks* attached to words, never underscores. QUOTES: use curly single and double quotes/apostrophes, never straight quotes."
 )

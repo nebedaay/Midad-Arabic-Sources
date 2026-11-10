@@ -512,12 +512,15 @@ const SOURCE_CATALOG_SCHEMA = 5;
  * dropping the generated form-label parenthetical (`<b>III</b> (اَاَخَذَ)`).
  * `turath` → 2: the shared content postprocessor links Qur'ān quotes in general
  * works and no longer smart-quotes link targets.
+ * `turath` → 3: one source line per paragraph, footnote callouts after the
+ * underscore divider, footnote-marker superscripts, and escaped literal
+ * brackets in body text.
  * Bump only the affected entries, and in step with `MODEL_SCHEMA` in
  * `scripts/text-source-import.py`.
  */
 const COLLECTION_MODEL_SCHEMA: Record<string, number> = {
 	dictionary: 6,
-	turath: 2,
+	turath: 3,
 };
 
 /**
@@ -793,6 +796,18 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		});
 
 		this.addCommand({
+			id: "postprocess-all-transcription-notes",
+			name: "Post-process all transcriptions and translations",
+			callback: async () => { await this.postprocessAllTranscriptionNotes(); },
+		});
+
+		this.addCommand({
+			id: "escape-transcription-brackets",
+			name: "Escape literal brackets in transcriptions and translations",
+			callback: async () => { await this.escapeTranscriptionBrackets(); },
+		});
+
+		this.addCommand({
 			id: "assign-transcription-topic",
 			name: "Assign topic and post-process this transcription…",
 			callback: async () => {
@@ -883,6 +898,12 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			id: "rerender-sources",
 			name: "Re-render imported sources",
 			callback: async () => { await this.rerenderAllSources(); },
+		});
+
+		this.addCommand({
+			id: "postprocess-source-models",
+			name: "Post-process cached source models",
+			callback: async () => { await this.postprocessCachedSourceModels(); },
 		});
 
 		this.addCommand({
@@ -5042,6 +5063,65 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			await this.runWithProgress(`Re-rendering @${info.citekey}`, ["reprocess", "--zip", entry.zip.path]);
 		}
 		new Notice(`Re-rendered ${chosen.length} archived batch(es) for @${info.citekey}.`);
+	}
+
+	/** Apply the non-destructive content migration to cached models, then re-render them. */
+	async postprocessCachedSourceModels(): Promise<void> {
+		const result = await this.runWithProgress(
+			"Post-processing source models",
+			["postprocess"],
+			this.settings.sourceImportScript
+		);
+		const models = (result?.models as string[] | undefined) ?? [];
+		if (!models.length) {
+			new Notice("Cached source models are already normalized.");
+			return;
+		}
+		const written = await this.renderWithProgress(models, true, "Re-rendering post-processed sources");
+		new Notice(`Post-processed ${models.length} model(s); re-rendered ${written.length} note(s).`);
+	}
+
+	/** Apply only the safe bracket migration to recognized transcription/translation notes. */
+	async escapeTranscriptionBrackets(): Promise<void> {
+		const roots = [this.transcriptionsFolder(), this.translationsFolder()].map((folder) => normalizePath(folder));
+		const files = this.app.vault.getMarkdownFiles().filter((file) => {
+			const path = normalizePath(file.path);
+			return roots.some((root) => path.startsWith(`${root}/`));
+		});
+		if (!files.length) {
+			new Notice("No transcription or translation notes were found.");
+			return;
+		}
+		const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+		const backup = `${this.vaultPath()}/.midad-arabic-sources/backups/bracket-migration-${stamp}`;
+		await this.runWithProgress(
+			"Escaping source brackets",
+			["--backup-dir", backup, ...files.map((file) => `${this.vaultPath()}/${file.path}`)],
+			"scripts/text_postprocess.py"
+		);
+		new Notice(`Checked ${files.length} note(s) for literal brackets.`);
+	}
+
+	/** Run the current transcription/translation postprocessor over every recognized note. */
+	async postprocessAllTranscriptionNotes(): Promise<void> {
+		const files = this.app.vault.getMarkdownFiles().filter((file) => !!archivedNoteInfo(file.path)?.type);
+		if (!files.length) {
+			new Notice("No transcription or translation notes were found.");
+			return;
+		}
+		new ConfirmModal(this.app, {
+			title: "Post-process all transcriptions and translations",
+			message: `Run the current local post-processor over ${files.length} note(s)? Each note gets a backup first. This can take a while.`,
+			confirmText: "Post-process all",
+			onConfirm: async () => {
+				let done = 0;
+				for (const file of files) {
+					await this.postprocessTranscriptionNote(file);
+					done += 1;
+				}
+				new Notice(`Post-processed ${done} note(s).`);
+			},
+		}).open();
 	}
 
 	async rerenderAllSources(): Promise<string[]> {
