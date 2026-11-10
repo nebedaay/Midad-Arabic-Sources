@@ -13426,6 +13426,9 @@ function versionReference(file, entry, version) {
   }
   return versionLabel(version);
 }
+function otherVersionReferences(file, entry, excludeId) {
+  return entry.versions.filter((v) => v.id !== excludeId).sort((a, b) => a.id === entry.defaultId ? -1 : b.id === entry.defaultId ? 1 : versionNumber(a.id) - versionNumber(b.id)).map((v) => versionReference(file, entry, v));
+}
 function addUpLink(content, link) {
   var _a2;
   const match = /^midad-up:[ \t]*\n((?:[ \t]+-[^\n]*\n)*)/m.exec(content);
@@ -13556,7 +13559,7 @@ var VersionStore = class {
     return (_a2 = manifest.notes[key]) != null ? _a2 : null;
   }
   async saveVersion(file, overwrite, renderHash, options = {}) {
-    var _a2;
+    var _a2, _b2;
     const manifest = this.load();
     const text = await this.app.vault.read(file);
     const cleanText = sanitizeFrontmatter(text);
@@ -13598,7 +13601,7 @@ var VersionStore = class {
       const id = `v${highest + 1}`;
       version = {
         id,
-        label: `Version ${highest + 1}`,
+        label: ((_b2 = options.label) == null ? void 0 : _b2.trim()) || `Version ${highest + 1}`,
         kind: "user",
         savedAt: new Date().toISOString(),
         hash,
@@ -13627,6 +13630,11 @@ var VersionStore = class {
     }
     this.files[version.file] = strToU8(cleanText);
     this.save();
+    if (options.activeVersionId) {
+      const live = await this.app.vault.read(file);
+      const links = otherVersionReferences(file, entry, version.id);
+      await this.writeLive(file.path, addVersionFrontmatter(live, version.id, links));
+    }
     return entry;
   }
   async setDefault(entry, id) {
@@ -13720,7 +13728,7 @@ var VersionStore = class {
     if (!defaultVersion)
       return 0;
     const selected = entry.versions.filter((v) => v.selected);
-    const otherLinks = entry.versions.filter((v) => v.id !== defaultVersion.id).sort((a, b) => versionNumber(a.id) - versionNumber(b.id)).map((v) => versionReference(file, entry, v));
+    const otherLinks = otherVersionReferences(file, entry, defaultVersion.id);
     const defaultText = await this.versionText(entry, defaultVersion.id);
     if (!defaultText)
       return 0;
@@ -13736,7 +13744,7 @@ var VersionStore = class {
       const text = await this.versionText(entry, version.id);
       if (!text)
         continue;
-      const links = entry.versions.filter((v) => v.id !== version.id).sort((a, b) => a.id === entry.defaultId ? -1 : b.id === entry.defaultId ? 1 : versionNumber(a.id) - versionNumber(b.id)).map((v) => versionReference(file, entry, v));
+      const links = otherVersionReferences(file, entry, version.id);
       const withVersion = addVersionFrontmatter(text, version.id, links);
       if (await this.writeLive(path2, addUpLink(withVersion, defaultLink)))
         written += 1;
@@ -13853,7 +13861,7 @@ var ManageVersionsModal = class extends import_obsidian3.Modal {
     const changed = this.hasChanges();
     const hasVersions = !!((_b2 = this.entry) == null ? void 0 : _b2.versions.length);
     if (changed && hasVersions) {
-      const overwrite = top.createEl("button", { text: this.activeVersionId ? "Overwrite this version" : "Save the current version" });
+      const overwrite = top.createEl("button", { text: "Save the current version" });
       overwrite.onclick = async () => {
         var _a3, _b3;
         await this.options.store.saveVersion(this.options.file, true, this.renderFingerprint, { activeVersionId: this.activeVersionId });
@@ -13864,12 +13872,8 @@ var ManageVersionsModal = class extends import_obsidian3.Modal {
     }
     if (changed || !hasVersions) {
       const save = top.createEl("button", { text: "Save new version" });
-      save.onclick = async () => {
-        var _a3, _b3;
-        await this.options.store.saveVersion(this.options.file, false, this.renderFingerprint, { activeVersionId: this.activeVersionId });
-        this.selectionDirty = false;
-        await this.refresh();
-        (_b3 = (_a3 = this.options).onChanged) == null ? void 0 : _b3.call(_a3);
+      save.onclick = () => {
+        this.promptNewVersion();
       };
     }
     if (!this.activeVersionId) {
@@ -14030,6 +14034,27 @@ ${prior.body.slice(region.start, region.end).trim()}
       }
     }).open();
   }
+  promptNewVersion() {
+    var _a2, _b2;
+    const versions = (_b2 = (_a2 = this.entry) == null ? void 0 : _a2.versions) != null ? _b2 : [];
+    const highest = versions.reduce((n, v) => Math.max(n, versionNumber(v.id)), -1);
+    const active = this.activeVersionId ? versions.find((v) => v.id === this.activeVersionId) : null;
+    let suggestion = active ? `${versionLabel(active)}.1` : `Version ${highest + 1}`;
+    let suffix = 2;
+    while (versions.some((v) => versionLabel(v).toLowerCase() === suggestion.toLowerCase())) {
+      suggestion = active ? `${versionLabel(active)}.${suffix++}` : `Version ${highest + suffix++}`;
+    }
+    new VersionNameModal(this.app, suggestion, async (name) => {
+      var _a3, _b3;
+      await this.options.store.saveVersion(this.options.file, false, this.renderFingerprint, {
+        activeVersionId: this.activeVersionId,
+        label: name
+      });
+      this.selectionDirty = false;
+      await this.refresh();
+      (_b3 = (_a3 = this.options).onChanged) == null ? void 0 : _b3.call(_a3);
+    }).open();
+  }
   async apply() {
     var _a2;
     if (!((_a2 = this.entry) == null ? void 0 : _a2.versions.length)) {
@@ -14087,6 +14112,38 @@ var ManagedVersionChangesModal = class extends import_obsidian3.Modal {
       add("Overwrite this version", this.options.onOverwrite);
     add("Discard changes", this.options.onDiscard);
     add("Cancel", async () => void 0);
+  }
+  onClose() {
+    this.contentEl.empty();
+  }
+};
+var VersionNameModal = class extends import_obsidian3.Modal {
+  constructor(app, suggestion, onSubmit) {
+    super(app);
+    this.suggestion = suggestion;
+    this.onSubmit = onSubmit;
+  }
+  onOpen() {
+    const { contentEl } = this;
+    contentEl.createEl("h2", { text: "Name new version" });
+    let name = this.suggestion;
+    new import_obsidian3.Setting(contentEl).setName("Version name").addText((text) => {
+      text.setValue(name).onChange((value) => {
+        name = value;
+      });
+    });
+    const buttons = contentEl.createDiv({ cls: "mas-versions-conflict-actions" });
+    const save = buttons.createEl("button", { text: "Save new version", cls: "mod-cta" });
+    save.onclick = async () => {
+      if (!name.trim()) {
+        new import_obsidian3.Notice("Enter a version name.");
+        return;
+      }
+      await this.onSubmit(name);
+      this.close();
+    };
+    const cancel = buttons.createEl("button", { text: "Cancel" });
+    cancel.onclick = () => this.close();
   }
   onClose() {
     this.contentEl.empty();

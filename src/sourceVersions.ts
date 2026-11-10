@@ -91,6 +91,13 @@ function versionReference(file: TFile, entry: NoteVersionEntry, version: SavedVe
 	return versionLabel(version);
 }
 
+function otherVersionReferences(file: TFile, entry: NoteVersionEntry, excludeId?: string): string[] {
+	return entry.versions
+		.filter((v) => v.id !== excludeId)
+		.sort((a, b) => a.id === entry.defaultId ? -1 : b.id === entry.defaultId ? 1 : versionNumber(a.id) - versionNumber(b.id))
+		.map((v) => versionReference(file, entry, v));
+}
+
 function addUpLink(content: string, link: string): string {
 	const match = /^midad-up:[ \t]*\n((?:[ \t]+-[^\n]*\n)*)/m.exec(content);
 	if (!match) return content;
@@ -212,6 +219,7 @@ export class VersionStore {
 
 	async saveVersion(file: TFile, overwrite: boolean, renderHash?: string, options: {
 		activeVersionId?: string;
+		label?: string;
 	} = {}): Promise<NoteVersionEntry> {
 		const manifest = this.load();
 		const text = await this.app.vault.read(file);
@@ -257,7 +265,7 @@ export class VersionStore {
 			const id = `v${highest + 1}`;
 			version = {
 				id,
-				label: `Version ${highest + 1}`,
+				label: options.label?.trim() || `Version ${highest + 1}`,
 				kind: "user",
 				savedAt: new Date().toISOString(),
 				hash,
@@ -288,6 +296,11 @@ export class VersionStore {
 		}
 		this.files[version.file] = strToU8(cleanText);
 		this.save();
+		if (options.activeVersionId) {
+			const live = await this.app.vault.read(file);
+			const links = otherVersionReferences(file, entry, version.id);
+			await this.writeLive(file.path, addVersionFrontmatter(live, version.id, links));
+		}
 		return entry;
 	}
 
@@ -381,10 +394,7 @@ export class VersionStore {
 		const defaultVersion = entry.versions.find((v) => v.id === entry.defaultId);
 		if (!defaultVersion) return 0;
 		const selected = entry.versions.filter((v) => v.selected);
-		const otherLinks = entry.versions
-			.filter((v) => v.id !== defaultVersion.id)
-			.sort((a, b) => versionNumber(a.id) - versionNumber(b.id))
-			.map((v) => versionReference(file, entry, v));
+		const otherLinks = otherVersionReferences(file, entry, defaultVersion.id);
 		const defaultText = await this.versionText(entry, defaultVersion.id);
 		if (!defaultText) return 0;
 		const defaultBody = setFrontmatterList(sanitizeFrontmatter(defaultText), "other-versions", otherLinks);
@@ -398,10 +408,7 @@ export class VersionStore {
 			}
 			const text = await this.versionText(entry, version.id);
 			if (!text) continue;
-			const links = entry.versions
-				.filter((v) => v.id !== version.id)
-				.sort((a, b) => a.id === entry.defaultId ? -1 : b.id === entry.defaultId ? 1 : versionNumber(a.id) - versionNumber(b.id))
-				.map((v) => versionReference(file, entry, v));
+			const links = otherVersionReferences(file, entry, version.id);
 			const withVersion = addVersionFrontmatter(text, version.id, links);
 			if (await this.writeLive(path, addUpLink(withVersion, defaultLink))) written += 1;
 		}
@@ -530,7 +537,7 @@ export class ManageVersionsModal extends Modal {
 		const changed = this.hasChanges();
 		const hasVersions = !!this.entry?.versions.length;
 		if (changed && hasVersions) {
-			const overwrite = top.createEl("button", { text: this.activeVersionId ? "Overwrite this version" : "Save the current version" });
+			const overwrite = top.createEl("button", { text: "Save the current version" });
 			overwrite.onclick = async () => {
 				await this.options.store.saveVersion(this.options.file, true, this.renderFingerprint, { activeVersionId: this.activeVersionId });
 				this.selectionDirty = false;
@@ -540,12 +547,7 @@ export class ManageVersionsModal extends Modal {
 		}
 		if (changed || !hasVersions) {
 			const save = top.createEl("button", { text: "Save new version" });
-			save.onclick = async () => {
-				await this.options.store.saveVersion(this.options.file, false, this.renderFingerprint, { activeVersionId: this.activeVersionId });
-				this.selectionDirty = false;
-				await this.refresh();
-				this.options.onChanged?.();
-			};
+			save.onclick = () => { this.promptNewVersion(); };
 		}
 
 		if (!this.activeVersionId) {
@@ -704,6 +706,26 @@ export class ManageVersionsModal extends Modal {
 		}).open();
 	}
 
+	private promptNewVersion(): void {
+		const versions = this.entry?.versions ?? [];
+		const highest = versions.reduce((n, v) => Math.max(n, versionNumber(v.id)), -1);
+		const active = this.activeVersionId ? versions.find((v) => v.id === this.activeVersionId) : null;
+		let suggestion = active ? `${versionLabel(active)}.1` : `Version ${highest + 1}`;
+		let suffix = 2;
+		while (versions.some((v) => versionLabel(v).toLowerCase() === suggestion.toLowerCase())) {
+			suggestion = active ? `${versionLabel(active)}.${suffix++}` : `Version ${highest + suffix++}`;
+		}
+		new VersionNameModal(this.app, suggestion, async (name) => {
+			await this.options.store.saveVersion(this.options.file, false, this.renderFingerprint, {
+				activeVersionId: this.activeVersionId,
+				label: name,
+			});
+			this.selectionDirty = false;
+			await this.refresh();
+			this.options.onChanged?.();
+		}).open();
+	}
+
 	private async apply(): Promise<void> {
 		if (!this.entry?.versions.length) {
 			new Notice("There are no saved versions to apply.");
@@ -768,6 +790,40 @@ class ManagedVersionChangesModal extends Modal {
 	onClose(): void {
 		this.contentEl.empty();
 	}
+}
+
+class VersionNameModal extends Modal {
+	private readonly suggestion: string;
+	private readonly onSubmit: (name: string) => Promise<void>;
+
+	constructor(app: App, suggestion: string, onSubmit: (name: string) => Promise<void>) {
+		super(app);
+		this.suggestion = suggestion;
+		this.onSubmit = onSubmit;
+	}
+
+	onOpen(): void {
+		const { contentEl } = this;
+		contentEl.createEl("h2", { text: "Name new version" });
+		let name = this.suggestion;
+		new Setting(contentEl).setName("Version name").addText((text) => {
+			text.setValue(name).onChange((value) => { name = value; });
+		});
+		const buttons = contentEl.createDiv({ cls: "mas-versions-conflict-actions" });
+		const save = buttons.createEl("button", { text: "Save new version", cls: "mod-cta" });
+		save.onclick = async () => {
+			if (!name.trim()) {
+				new Notice("Enter a version name.");
+				return;
+			}
+			await this.onSubmit(name);
+			this.close();
+		};
+		const cancel = buttons.createEl("button", { text: "Cancel" });
+		cancel.onclick = () => this.close();
+	}
+
+	onClose(): void { this.contentEl.empty(); }
 }
 
 class RenameVersionModal extends Modal {
