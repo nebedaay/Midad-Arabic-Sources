@@ -13417,19 +13417,19 @@ function versionNotePath(entry, version) {
   const stem = (_b2 = (_a2 = path2.split("/").pop()) == null ? void 0 : _a2.replace(/\.md$/i, "")) != null ? _b2 : entry.title;
   return (0, import_obsidian3.normalizePath)(`${folder}/${stem}.Version${versionNumber(version.id)}.md`);
 }
-function versionLink(file, entry, version) {
+function versionLink(entry, version) {
   const path2 = version.id === entry.defaultId ? entry.path : versionNotePath(entry, version);
   const label = version.id === entry.defaultId ? "Default version" : versionLabel(version);
   return `[[${path2.replace(/\.md$/, "")}|${label}]]`;
 }
-function versionReference(file, entry, version) {
+function versionReference(entry, version) {
   if (version.id === entry.defaultId || version.selected) {
-    return versionLink(file, entry, version);
+    return versionLink(entry, version);
   }
   return versionLabel(version);
 }
 function otherVersionReferences(file, entry, excludeId) {
-  return entry.versions.filter((v) => v.id !== excludeId).sort((a, b) => a.id === entry.defaultId ? -1 : b.id === entry.defaultId ? 1 : versionNumber(a.id) - versionNumber(b.id)).map((v) => versionReference(file, entry, v));
+  return entry.versions.filter((v) => v.id !== excludeId).sort((a, b) => a.id === entry.defaultId ? -1 : b.id === entry.defaultId ? 1 : versionNumber(a.id) - versionNumber(b.id)).map((v) => versionReference(entry, v));
 }
 function addUpLink(content, link) {
   var _a2;
@@ -13441,32 +13441,6 @@ function addUpLink(content, link) {
   const insert = ((_a2 = match.index) != null ? _a2 : 0) + match[0].length;
   return `${content.slice(0, insert)}  - "${link}"
 ${content.slice(insert)}`;
-}
-function removeFrontmatterProperty(content, key) {
-  if (!content.startsWith("---"))
-    return content;
-  const end = content.indexOf("\n---", 3);
-  if (end < 0)
-    return content;
-  const front = content.slice(0, end);
-  const body = content.slice(end);
-  const re = new RegExp(`^${key}:[^\\n]*\\n(?:[ \\t]+-[^\\n]*\\n)*`, "m");
-  return front.replace(re, "") + body;
-}
-function setFrontmatterProperty(content, key, value) {
-  const clean3 = removeFrontmatterProperty(content, key);
-  const line = `${key}: ${value}`;
-  if (clean3.startsWith("---")) {
-    const end = clean3.indexOf("\n---", 3);
-    if (end >= 0)
-      return `${clean3.slice(0, end + 1)}${line}
-${clean3.slice(end + 1)}`;
-  }
-  return `---
-${line}
----
-
-${clean3}`;
 }
 function setFrontmatterList(content, key, values) {
   var _a2;
@@ -13698,13 +13672,32 @@ var VersionStore = class {
       new import_obsidian3.Notice("That version name is already in use.");
       return false;
     }
+    const oldLabel = version.label;
     version.label = value;
     this.save();
-    const path2 = (0, import_obsidian3.normalizePath)(versionNotePath(entry, version));
-    const file = this.app.vault.getAbstractFileByPath(path2);
-    if (file instanceof import_obsidian3.TFile) {
-      const text = await this.app.vault.read(file);
-      await this.app.vault.modify(file, setFrontmatterProperty(text, "midad-version-name", `"${value.replace(/"/g, '\\"')}"`));
+    const targetPath = version.id === entry.defaultId ? entry.path : versionNotePath(entry, version);
+    const targetLink = versionLink(entry, version);
+    const paths = [entry.path, ...entry.versions.filter((v) => v.selected && v.id !== entry.defaultId).map((v) => versionNotePath(entry, v))];
+    for (const path2 of new Set(paths)) {
+      const file = this.app.vault.getAbstractFileByPath((0, import_obsidian3.normalizePath)(path2));
+      if (!(file instanceof import_obsidian3.TFile))
+        continue;
+      await this.app.fileManager.processFrontMatter(file, (fm) => {
+        if ((0, import_obsidian3.normalizePath)(file.path) === (0, import_obsidian3.normalizePath)(targetPath))
+          fm["midad-version-name"] = value;
+        const current = Array.isArray(fm["other-versions"]) ? fm["other-versions"] : [];
+        const next = current.map((item) => {
+          const text = String(item);
+          if (text === oldLabel)
+            return value;
+          if (text.includes(targetPath.replace(/\.md$/, "")) || text.includes(targetPath)) {
+            return targetLink;
+          }
+          return text;
+        });
+        if (next.length)
+          fm["other-versions"] = next;
+      });
     }
     return true;
   }
@@ -13799,7 +13792,7 @@ var VersionStore = class {
       return 0;
     const defaultBody = setFrontmatterList(sanitizeFrontmatter(defaultText), "other-versions", otherLinks);
     let written = await this.writeLive(file.path, defaultBody) ? 1 : 0;
-    const defaultLink = versionLink(file, entry, defaultVersion);
+    const defaultLink = versionLink(entry, defaultVersion);
     for (const version of entry.versions) {
       const path2 = versionNotePath(entry, version);
       if (!version.selected || version.id === entry.defaultId) {

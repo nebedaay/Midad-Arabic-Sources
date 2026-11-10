@@ -79,15 +79,15 @@ function versionNotePath(entry: NoteVersionEntry, version: SavedVersion): string
 	return normalizePath(`${folder}/${stem}.Version${versionNumber(version.id)}.md`);
 }
 
-function versionLink(file: TFile, entry: NoteVersionEntry, version: SavedVersion): string {
+function versionLink(entry: NoteVersionEntry, version: SavedVersion): string {
 	const path = version.id === entry.defaultId ? entry.path : versionNotePath(entry, version);
 	const label = version.id === entry.defaultId ? "Default version" : versionLabel(version);
 	return `[[${path.replace(/\.md$/, "")}|${label}]]`;
 }
 
-function versionReference(file: TFile, entry: NoteVersionEntry, version: SavedVersion): string {
+function versionReference(entry: NoteVersionEntry, version: SavedVersion): string {
 	if (version.id === entry.defaultId || version.selected) {
-		return versionLink(file, entry, version);
+		return versionLink(entry, version);
 	}
 	return versionLabel(version);
 }
@@ -96,7 +96,7 @@ function otherVersionReferences(file: TFile, entry: NoteVersionEntry, excludeId?
 	return entry.versions
 		.filter((v) => v.id !== excludeId)
 		.sort((a, b) => a.id === entry.defaultId ? -1 : b.id === entry.defaultId ? 1 : versionNumber(a.id) - versionNumber(b.id))
-		.map((v) => versionReference(file, entry, v));
+		.map((v) => versionReference(entry, v));
 }
 
 function addUpLink(content: string, link: string): string {
@@ -360,13 +360,29 @@ export class VersionStore {
 			new Notice("That version name is already in use.");
 			return false;
 		}
+		const oldLabel = version.label;
 		version.label = value;
 		this.save();
-		const path = normalizePath(versionNotePath(entry, version));
-		const file = this.app.vault.getAbstractFileByPath(path);
-		if (file instanceof TFile) {
-			const text = await this.app.vault.read(file);
-			await this.app.vault.modify(file, setFrontmatterProperty(text, "midad-version-name", `"${value.replace(/"/g, '\\"')}"`));
+
+		const targetPath = version.id === entry.defaultId ? entry.path : versionNotePath(entry, version);
+		const targetLink = versionLink(entry, version);
+		const paths = [entry.path, ...entry.versions.filter((v) => v.selected && v.id !== entry.defaultId).map((v) => versionNotePath(entry, v))];
+		for (const path of new Set(paths)) {
+			const file = this.app.vault.getAbstractFileByPath(normalizePath(path));
+			if (!(file instanceof TFile)) continue;
+			await this.app.fileManager.processFrontMatter(file, (fm: Record<string, unknown>) => {
+				if (normalizePath(file.path) === normalizePath(targetPath)) fm["midad-version-name"] = value;
+				const current = Array.isArray(fm["other-versions"]) ? fm["other-versions"] as unknown[] : [];
+				const next = current.map((item) => {
+					const text = String(item);
+					if (text === oldLabel) return value;
+					if (text.includes(targetPath.replace(/\.md$/, "")) || text.includes(targetPath)) {
+						return targetLink;
+					}
+					return text;
+				});
+				if (next.length) fm["other-versions"] = next;
+			});
 		}
 		return true;
 	}
@@ -458,7 +474,7 @@ export class VersionStore {
 		if (!defaultText) return 0;
 		const defaultBody = setFrontmatterList(sanitizeFrontmatter(defaultText), "other-versions", otherLinks);
 		let written = (await this.writeLive(file.path, defaultBody)) ? 1 : 0;
-		const defaultLink = versionLink(file, entry, defaultVersion);
+		const defaultLink = versionLink(entry, defaultVersion);
 		for (const version of entry.versions) {
 			const path = versionNotePath(entry, version);
 			if (!version.selected || version.id === entry.defaultId) {
