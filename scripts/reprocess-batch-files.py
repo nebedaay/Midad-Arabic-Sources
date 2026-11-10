@@ -54,7 +54,7 @@ def load_corrections(src: Path) -> dict:
         return {}
 
 
-def apply_page_corrections(content: str, corrections: dict) -> str:
+def apply_page_corrections(content: str, corrections: dict, update=None) -> str:
     """Replace processed page bodies with the user's committed corrections.
 
     Pages are matched by their order in the note, not by printed page number, so
@@ -88,6 +88,8 @@ def apply_page_corrections(content: str, corrections: dict) -> str:
         while j < len(lines) and not PAGE_HEADER.match(lines[j]) and lines[j].strip() != "---":
             j += 1
         body = str(correction.get("body") or "").strip("\n")
+        if body and update is not None:
+            body = update(body)
         if body:
             out.extend(body.split("\n"))
         if j < len(lines) and lines[j].strip() == "---":
@@ -212,7 +214,9 @@ def main():
                 sys.exit(1)
             result = tbp.read_output_jsonl(jsonl)
             result = tbp.postprocess_translation(result)
-            result = apply_page_corrections(result, load_corrections(src))
+            corrections = load_corrections(src)
+            update = load("markdown-update.py").update_markdown if corrections else None
+            result = apply_page_corrections(result, corrections, update)
             if out_override:
                 out_override.write_text(tbp.build_translation(stem, result), encoding="utf-8")
                 dest = out_override
@@ -237,8 +241,10 @@ def main():
             standalone = mv.find_zotero(citekey) is None
             tpp = load("transcription-postprocess.py")
             tpp.run(raw_path, out_path=processed, metadata=True)
+            corrections = load_corrections(src)
+            update = load("markdown-update.py").update_markdown if corrections else None
             processed.write_text(
-                apply_page_corrections(processed.read_text(encoding="utf-8"), load_corrections(src)),
+                apply_page_corrections(processed.read_text(encoding="utf-8"), corrections, update),
                 encoding="utf-8",
             )
 

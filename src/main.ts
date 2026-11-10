@@ -812,6 +812,11 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			name: "Commit edits to archived transcription/translation",
 			callback: async () => { await this.commitArchivedCorrections(); },
 		});
+		this.addCommand({
+			id: "update-markdown-note",
+			name: "Update Markdown formatting in this note",
+			callback: async () => { await this.updateMarkdownNote(); },
+		});
 
 		this.addCommand({
 			id: "assign-transcription-topic",
@@ -4824,14 +4829,38 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			return;
 		}
 		const editor = view.editor;
-		const selection = editor.getSelection();
-		if (!selection.trim()) {
+		// Live Preview can shrink a selection when the annotation popup appears.
+		// Use the annotation service's remembered larger range when available.
+		const range = this.annotations?.selectionForEditor(editor);
+		let from = range ? editor.offsetToPos(range.from) : editor.getCursor("from");
+		let to = range ? editor.offsetToPos(range.to) : editor.getCursor("to");
+		if (from.line === to.line && from.ch === to.ch) {
 			new Notice("Select the poem first.");
 			return;
 		}
-		const formatted = formatPoetrySelection(selection);
-		if (!formatted || formatted === selection.trim()) return;
-		editor.replaceSelection(formatted);
+		// The command formats whole verse lines. If a rendered link or the
+		// annotation popup trimmed the edges, recover the complete first and last
+		// lines instead of silently dropping them.
+		from = { line: from.line, ch: 0 };
+		if (to.ch === 0 && to.line > from.line) to = { line: to.line - 1, ch: editor.getLine(to.line - 1).length };
+		else to = { line: to.line, ch: editor.getLine(to.line).length };
+		const selected = editor.getRange(from, to);
+		if (!selected.trim()) {
+			new Notice("Select the poem first.");
+			return;
+		}
+		const formatted = formatPoetrySelection(selected);
+		if (!formatted) return;
+		const doc = editor.getValue();
+		const start = editor.posToOffset(from);
+		const end = editor.posToOffset(to);
+		const before = doc.slice(0, start);
+		const after = doc.slice(end);
+		const lead = !before ? "" : before.endsWith("\n\n") ? "" : before.endsWith("\n") ? "\n" : "\n\n";
+		const tail = !after ? "" : after.startsWith("\n\n") ? "" : after.startsWith("\n") ? "\n" : "\n\n";
+		const replacement = `${lead}${formatted}${tail}`;
+		if (replacement === selected) return;
+		editor.replaceRange(replacement, from, to);
 	}
 
 	/**
@@ -5109,6 +5138,22 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		}
 		const written = await this.renderWithProgress(models, true, "Re-rendering post-processed sources");
 		new Notice(`Post-processed ${models.length} model(s); re-rendered ${written.length} note(s).`);
+	}
+
+	/** Apply the safe Markdown-update layer to the active note. */
+	async updateMarkdownNote(): Promise<void> {
+		const file = this.app.workspace.getActiveFile();
+		if (!(file instanceof TFile) || file.extension !== "md") {
+			new Notice("Open a Markdown note first.");
+			return;
+		}
+		const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+		const backup = `${this.vaultPath()}/.midad-arabic-sources/backups/markdown-update-${stamp}`;
+		await this.runWithProgress(
+			"Updating Markdown",
+			[`${this.vaultPath()}/${file.path}`, "--in-place", "--backup-dir", backup],
+			"scripts/markdown-update.py"
+		);
 	}
 
 	/** Save the active note's page bodies as corrections to its archived batch. */

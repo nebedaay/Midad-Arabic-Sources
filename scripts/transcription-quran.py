@@ -8,7 +8,18 @@ import sqlite3
 from pathlib import Path
 
 VAULT = Path(os.environ.get("OBSIDIAN_VAULT", os.path.expanduser("~/Documents/Obsidian Vault")))
-QURAN_DIR = VAULT / os.environ.get("MIDAD_CANONICAL_QURAN_DIR", "_7 Sources/Quran")
+QURAN_DIR = VAULT / os.environ.get("MIDAD_CANONICAL_QURAN_DIR", "")
+if not os.environ.get("MIDAD_CANONICAL_QURAN_DIR"):
+    for _candidate in (
+        "_7 Sources/Installed Sources/Quran",
+        "Midad Arabic Sources/Installed Sources/Quran",
+        "_7 Sources/Quran",
+    ):
+        if (VAULT / _candidate).is_dir():
+            QURAN_DIR = VAULT / _candidate
+            break
+    else:
+        QURAN_DIR = VAULT / "_7 Sources/Installed Sources/Quran"
 SQLITE_DB = QURAN_DIR / ".quran.sqlite"
 
 def load_verse(surah_num: int, verse: int) -> str | None:

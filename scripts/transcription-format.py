@@ -712,6 +712,13 @@ def process(input_path):
     in_toc = False
     for line in lines:
         s = line.strip()
+        if s == '>[!TOC]':
+            # A note that is already formatted must not acquire a second TOC
+            # header when the full renderer is run over it.
+            if not in_toc:
+                out.append(line)
+                in_toc = True
+            continue
         if s.startswith('>- ') and '[[#p.' in s:
             if not in_toc: out.append('>[!TOC]'); in_toc = True
             out.append(line); continue

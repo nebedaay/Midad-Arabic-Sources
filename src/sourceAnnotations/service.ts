@@ -1181,6 +1181,16 @@ export class AnnotationService {
 		} catch { /* a widget node may not map to a document position */ }
 	}
 
+	/** The live selection, widened to the last deliberate range when Obsidian
+	 * shrank it around a rendered wikilink. Used by editor commands that need
+	 * the user's full selection. */
+	selectionForEditor(editor: Editor): { from: number; to: number } | null {
+		const view = (editor as unknown as { cm?: EditorView }).cm;
+		if (!view) return null;
+		const range = this.effectiveSelection(view);
+		return range.from === range.to ? null : range;
+	}
+
 	private effectiveSelection(view: EditorView): { from: number; to: number } {
 		const current = view.state.selection.main;
 		const last = this.lastSelection;
