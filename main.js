@@ -13390,8 +13390,7 @@ function versionLabel(version) {
   return version.label || `Version ${Math.max(0, versionNumber(version.id))}`;
 }
 function normalizedHash(text) {
-  const clean3 = text.replace(/^other-versions:[^\n]*\n(?:[ \t]+-[^\n]*\n)*/gm, "").replace(/^midad-version:[^\n]*\n/gm, "");
-  return hashString(clean3);
+  return managedHash(text);
 }
 function managedHash(text) {
   const prior = splitNote(text);
@@ -13418,6 +13417,12 @@ function versionLink(file, entry, version) {
   const path2 = version.id === entry.defaultId ? file.path : versionNotePath(file, version);
   const label = version.id === entry.defaultId ? "Default version" : versionLabel(version);
   return `[[${path2.replace(/\.md$/, "")}|${label}]]`;
+}
+function versionReference(file, entry, version) {
+  if (version.id === entry.defaultId || version.selected) {
+    return versionLink(file, entry, version);
+  }
+  return versionLabel(version);
 }
 function addUpLink(content, link) {
   var _a2;
@@ -13711,7 +13716,7 @@ var VersionStore = class {
     if (!defaultVersion)
       return 0;
     const selected = entry.versions.filter((v) => v.selected);
-    const otherLinks = selected.filter((v) => v.id !== defaultVersion.id).map((v) => versionLink(file, entry, v));
+    const otherLinks = entry.versions.filter((v) => v.id !== defaultVersion.id).sort((a, b) => versionNumber(a.id) - versionNumber(b.id)).map((v) => versionReference(file, entry, v));
     const defaultText = await this.versionText(entry, defaultVersion.id);
     if (!defaultText)
       return 0;
@@ -13727,7 +13732,7 @@ var VersionStore = class {
       const text = await this.versionText(entry, version.id);
       if (!text)
         continue;
-      const links = selected.filter((v) => v.id !== version.id).sort((a, b) => a.id === entry.defaultId ? -1 : b.id === entry.defaultId ? 1 : 0).map((v) => versionLink(file, entry, v));
+      const links = entry.versions.filter((v) => v.id !== version.id).sort((a, b) => a.id === entry.defaultId ? -1 : b.id === entry.defaultId ? 1 : versionNumber(a.id) - versionNumber(b.id)).map((v) => versionReference(file, entry, v));
       const withVersion = addVersionFrontmatter(text, version.id, links);
       if (await this.writeLive(path2, addUpLink(withVersion, defaultLink)))
         written += 1;
@@ -13844,7 +13849,7 @@ var ManageVersionsModal = class extends import_obsidian3.Modal {
       };
     }
     if (this.hasChanges() || !((_c = this.entry) == null ? void 0 : _c.versions.length)) {
-      const save = top.createEl("button", { text: "Save new version", cls: "mod-cta" });
+      const save = top.createEl("button", { text: "Save new version" });
       save.onclick = async () => {
         var _a3, _b3;
         await this.options.store.saveVersion(this.options.file, false, this.renderFingerprint, { activeVersionId: this.options.activeVersionId });
