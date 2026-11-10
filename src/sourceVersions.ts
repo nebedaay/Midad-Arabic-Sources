@@ -484,11 +484,12 @@ export class ManageVersionsModal extends Modal {
 			};
 		}
 
-		const list = contentEl.createDiv({ cls: "mas-versions-list" });
-		if (!this.entry?.versions.length) {
-			list.createDiv({ cls: "mas-versions-empty", text: "No saved versions yet." });
-		} else {
-			for (const version of [...this.entry.versions].sort((a, b) => versionNumber(a.id) - versionNumber(b.id))) {
+		if (!this.options.activeVersionId) {
+			const list = contentEl.createDiv({ cls: "mas-versions-list" });
+			if (!this.entry?.versions.length) {
+				list.createDiv({ cls: "mas-versions-empty", text: "No saved versions yet." });
+			} else {
+				for (const version of [...this.entry.versions].sort((a, b) => versionNumber(a.id) - versionNumber(b.id))) {
 				const row = list.createDiv({ cls: "mas-versions-row" });
 				if (version.selected) row.addClass("is-selected");
 				if (version.id === this.entry.defaultId) row.addClass("is-default");
@@ -524,6 +525,7 @@ export class ManageVersionsModal extends Modal {
 					this.selectionDirty = true;
 					await this.refresh();
 				};
+				}
 			}
 		}
 

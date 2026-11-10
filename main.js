@@ -13813,50 +13813,52 @@ var ManageVersionsModal = class extends import_obsidian3.Modal {
         (_b3 = (_a3 = this.options).onChanged) == null ? void 0 : _b3.call(_a3);
       };
     }
-    const list = contentEl.createDiv({ cls: "mas-versions-list" });
-    if (!((_d = this.entry) == null ? void 0 : _d.versions.length)) {
-      list.createDiv({ cls: "mas-versions-empty", text: "No saved versions yet." });
-    } else {
-      for (const version of [...this.entry.versions].sort((a, b) => versionNumber(a.id) - versionNumber(b.id))) {
-        const row = list.createDiv({ cls: "mas-versions-row" });
-        if (version.selected)
-          row.addClass("is-selected");
-        if (version.id === this.entry.defaultId)
-          row.addClass("is-default");
-        row.onclick = async (event) => {
-          var _a3;
-          if (event.target.closest("button"))
-            return;
-          if (version.id === ((_a3 = this.entry) == null ? void 0 : _a3.defaultId) && version.selected) {
-            new import_obsidian3.Notice("The default version must remain selected.");
-            return;
+    if (!this.options.activeVersionId) {
+      const list = contentEl.createDiv({ cls: "mas-versions-list" });
+      if (!((_d = this.entry) == null ? void 0 : _d.versions.length)) {
+        list.createDiv({ cls: "mas-versions-empty", text: "No saved versions yet." });
+      } else {
+        for (const version of [...this.entry.versions].sort((a, b) => versionNumber(a.id) - versionNumber(b.id))) {
+          const row = list.createDiv({ cls: "mas-versions-row" });
+          if (version.selected)
+            row.addClass("is-selected");
+          if (version.id === this.entry.defaultId)
+            row.addClass("is-default");
+          row.onclick = async (event) => {
+            var _a3;
+            if (event.target.closest("button"))
+              return;
+            if (version.id === ((_a3 = this.entry) == null ? void 0 : _a3.defaultId) && version.selected) {
+              new import_obsidian3.Notice("The default version must remain selected.");
+              return;
+            }
+            await this.options.store.setSelected(this.entry, version.id, !version.selected);
+            this.selectionDirty = true;
+            await this.refresh();
+          };
+          const main = row.createDiv({ cls: "mas-versions-main" });
+          main.createDiv({ cls: "mas-versions-label", text: versionLabel(version) });
+          main.createDiv({ cls: "mas-versions-date", text: new Date(version.savedAt).toLocaleString() });
+          const status = row.createDiv({ cls: "mas-versions-status" });
+          if (version.id === this.entry.defaultId) {
+            status.createSpan({ cls: "mas-versions-default", text: "Default" });
+          } else {
+            const setDefault = status.createEl("button", { cls: "mas-versions-default-button", text: "Set as default" });
+            setDefault.onclick = async () => {
+              await this.options.store.setDefault(this.entry, version.id);
+              this.selectionDirty = true;
+              await this.refresh();
+            };
           }
-          await this.options.store.setSelected(this.entry, version.id, !version.selected);
-          this.selectionDirty = true;
-          await this.refresh();
-        };
-        const main = row.createDiv({ cls: "mas-versions-main" });
-        main.createDiv({ cls: "mas-versions-label", text: versionLabel(version) });
-        main.createDiv({ cls: "mas-versions-date", text: new Date(version.savedAt).toLocaleString() });
-        const status = row.createDiv({ cls: "mas-versions-status" });
-        if (version.id === this.entry.defaultId) {
-          status.createSpan({ cls: "mas-versions-default", text: "Default" });
-        } else {
-          const setDefault = status.createEl("button", { cls: "mas-versions-default-button", text: "Set as default" });
-          setDefault.onclick = async () => {
-            await this.options.store.setDefault(this.entry, version.id);
+          const trash = status.createEl("button", { cls: "mas-versions-trash", attr: { "aria-label": "Delete version" } });
+          (0, import_obsidian3.setIcon)(trash, "trash-2");
+          trash.onclick = async (event) => {
+            event.stopPropagation();
+            await this.options.store.deleteVersion(this.entry, version.id, this.options.file);
             this.selectionDirty = true;
             await this.refresh();
           };
         }
-        const trash = status.createEl("button", { cls: "mas-versions-trash", attr: { "aria-label": "Delete version" } });
-        (0, import_obsidian3.setIcon)(trash, "trash-2");
-        trash.onclick = async (event) => {
-          event.stopPropagation();
-          await this.options.store.deleteVersion(this.entry, version.id, this.options.file);
-          this.selectionDirty = true;
-          await this.refresh();
-        };
       }
     }
     if (!this.options.activeVersionId) {
