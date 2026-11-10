@@ -13843,10 +13843,12 @@ var ManageVersionsModal = class extends import_obsidian3.Modal {
         };
       }
     }
-    contentEl.createEl("p", {
-      cls: "mas-versions-help",
-      text: "Selected versions are rendered as markdown; deselect a version to archive it. Click \u2018Set as default\u2019 to render a version on the main note without a version suffix. Click the trash icon to delete a version."
-    });
+    if (!this.activeVersionId) {
+      contentEl.createEl("p", {
+        cls: "mas-versions-help",
+        text: "Selected versions are rendered as markdown; deselect a version to archive it. Click \u2018Set as default\u2019 to render a version on the main note without a version suffix. Click the trash icon to delete a version."
+      });
+    }
     const top = contentEl.createDiv({ cls: "mas-versions-actions" });
     const changed = this.hasChanges();
     const hasVersions = !!((_b2 = this.entry) == null ? void 0 : _b2.versions.length);

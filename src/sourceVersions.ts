@@ -519,10 +519,12 @@ export class ManageVersionsModal extends Modal {
 				detach.onclick = () => { this.detach(); };
 			}
 		}
-		contentEl.createEl("p", {
-			cls: "mas-versions-help",
-			text: "Selected versions are rendered as markdown; deselect a version to archive it. Click ‘Set as default’ to render a version on the main note without a version suffix. Click the trash icon to delete a version.",
-		});
+		if (!this.activeVersionId) {
+			contentEl.createEl("p", {
+				cls: "mas-versions-help",
+				text: "Selected versions are rendered as markdown; deselect a version to archive it. Click ‘Set as default’ to render a version on the main note without a version suffix. Click the trash icon to delete a version.",
+			});
+		}
 
 		const top = contentEl.createDiv({ cls: "mas-versions-actions" });
 		const changed = this.hasChanges();
