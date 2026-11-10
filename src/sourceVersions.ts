@@ -60,6 +60,12 @@ function noteKey(file: TFile, frontmatter: Record<string, unknown> | undefined):
 	return id ? `id:${id}` : `path:${file.path}`;
 }
 
+function noteKeyFromText(file: TFile, text: string): string {
+	const match = /^midad-id:[ \t]*["']?([^"'\n]+)["']?[ \t]*$/m.exec(text);
+	const id = match?.[1]?.trim() ?? "";
+	return id ? `id:${id}` : `path:${file.path}`;
+}
+
 function versionFile(key: string, id: string): string {
 	const hash = hashString(key);
 	const folder = safeFileSegment(key.replace(/^[^:]+:/, ""), "note", 60);
@@ -142,6 +148,7 @@ function sanitizeFrontmatter(content: string): string {
 			continue;
 		}
 		const item = /^\s+-\s+(.*)$/.exec(line);
+		if (item && key === "midad-version") continue;
 		if (item && (key === "aliases" || key === "topics")) {
 			const value = item[1].trim();
 			// Version links belong in other-versions/midad-up, never aliases or
@@ -199,7 +206,7 @@ export class VersionStore {
 
 	async entryFor(file: TFile): Promise<NoteVersionEntry | null> {
 		const manifest = this.load();
-		const key = noteKey(file, this.app.metadataCache.getFileCache(file)?.frontmatter as Record<string, unknown> | undefined);
+		const key = noteKeyFromText(file, await this.app.vault.read(file));
 		return manifest.notes[key] ?? null;
 	}
 
@@ -207,10 +214,10 @@ export class VersionStore {
 		activeVersionId?: string;
 	} = {}): Promise<NoteVersionEntry> {
 		const manifest = this.load();
-		const frontmatter = this.app.metadataCache.getFileCache(file)?.frontmatter as Record<string, unknown> | undefined;
-		const key = noteKey(file, frontmatter);
 		const text = await this.app.vault.read(file);
-		const hash = normalizedHash(text);
+		const cleanText = sanitizeFrontmatter(text);
+		const key = noteKeyFromText(file, text);
+		const hash = normalizedHash(cleanText);
 		let entry = manifest.notes[key];
 		if (!entry) {
 			entry = {
@@ -279,7 +286,7 @@ export class VersionStore {
 			version.selected = true;
 			version.archived = false;
 		}
-		this.files[version.file] = strToU8(text);
+		this.files[version.file] = strToU8(cleanText);
 		this.save();
 		return entry;
 	}
@@ -446,11 +453,13 @@ export class ManageVersionsModal extends Modal {
 	private renderChanged = false;
 	private matchesSaved = false;
 	private outsideContent = "";
+	private activeVersionId: string | undefined;
 	private selectionDirty = false;
 
 	constructor(options: VersionModalOptions) {
 		super(options.app);
 		this.options = options;
+		this.activeVersionId = options.activeVersionId;
 	}
 
 	async onOpen(): Promise<void> {
@@ -461,6 +470,10 @@ export class ManageVersionsModal extends Modal {
 	private async refresh(): Promise<void> {
 		this.entry = await this.options.store.entryFor(this.options.file);
 		const liveText = await this.options.app.vault.read(this.options.file);
+		if (!this.activeVersionId) {
+			const versionMatch = /^midad-version:[ \t]*["']?([^"'\n]+)["']?[ \t]*$/m.exec(liveText);
+			if (versionMatch) this.activeVersionId = versionMatch[1].trim();
+		}
 		this.currentHash = normalizedHash(liveText);
 		const prior = splitNote(liveText);
 		const region = findManagedRegion(prior.body);
@@ -493,10 +506,10 @@ export class ManageVersionsModal extends Modal {
 			cls: "mas-versions-desc",
 			text: `Saved versions for ${this.entry?.title || this.options.file.basename}. The default version supplies the main note.`,
 		});
-		if (this.options.activeVersionId) {
+		if (this.activeVersionId) {
 			contentEl.createEl("p", {
 				cls: "mas-versions-help",
-				text: `This is not the default version (${this.options.activeVersionId.toUpperCase()}). Saving here will not update or replace the main note. To manage versions, run this command from the default version.`,
+				text: `This is not the default version (${this.activeVersionId.toUpperCase()}). Saving here will not update or replace the main note. To manage versions, run this command from the default version.`,
 			});
 			if (this.outsideContent) {
 				const detach = contentEl.createEl("button", {
@@ -512,26 +525,28 @@ export class ManageVersionsModal extends Modal {
 		});
 
 		const top = contentEl.createDiv({ cls: "mas-versions-actions" });
-		if (this.entry?.versions.length && this.hasChanges()) {
-			const overwrite = top.createEl("button", { text: this.options.activeVersionId ? "Overwrite this version" : "Save the current version" });
+		const changed = this.hasChanges();
+		const hasVersions = !!this.entry?.versions.length;
+		if (changed && hasVersions) {
+			const overwrite = top.createEl("button", { text: this.activeVersionId ? "Overwrite this version" : "Save the current version" });
 			overwrite.onclick = async () => {
-				await this.options.store.saveVersion(this.options.file, true, this.renderFingerprint, { activeVersionId: this.options.activeVersionId });
+				await this.options.store.saveVersion(this.options.file, true, this.renderFingerprint, { activeVersionId: this.activeVersionId });
 				this.selectionDirty = false;
 				await this.refresh();
 				this.options.onChanged?.();
 			};
 		}
-		if (this.hasChanges() || !this.entry?.versions.length) {
+		if (changed || !hasVersions) {
 			const save = top.createEl("button", { text: "Save new version" });
 			save.onclick = async () => {
-				await this.options.store.saveVersion(this.options.file, false, this.renderFingerprint, { activeVersionId: this.options.activeVersionId });
+				await this.options.store.saveVersion(this.options.file, false, this.renderFingerprint, { activeVersionId: this.activeVersionId });
 				this.selectionDirty = false;
 				await this.refresh();
 				this.options.onChanged?.();
 			};
 		}
 
-		if (!this.options.activeVersionId) {
+		if (!this.activeVersionId) {
 			const list = contentEl.createDiv({ cls: "mas-versions-list" });
 			if (!this.entry?.versions.length) {
 				list.createDiv({ cls: "mas-versions-empty", text: "No saved versions yet." });
@@ -583,7 +598,7 @@ export class ManageVersionsModal extends Modal {
 			}
 		}
 
-		if (!this.options.activeVersionId) {
+		if (!this.activeVersionId) {
 			const applyWrap = contentEl.createDiv({ cls: "mas-versions-apply" });
 			const apply = applyWrap.createEl("button", { text: "Apply default and re-render notes" });
 			apply.disabled = !this.entry?.versions.length;

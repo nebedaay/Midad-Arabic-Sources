@@ -13399,8 +13399,10 @@ function managedHash(text) {
     return hashString(prior.body.slice(region.start, region.end));
   return hashString(prior.body);
 }
-function noteKey(file, frontmatter) {
-  const id = typeof (frontmatter == null ? void 0 : frontmatter["midad-id"]) === "string" ? frontmatter["midad-id"].trim() : "";
+function noteKeyFromText(file, text) {
+  var _a2, _b2;
+  const match = /^midad-id:[ \t]*["']?([^"'\n]+)["']?[ \t]*$/m.exec(text);
+  const id = (_b2 = (_a2 = match == null ? void 0 : match[1]) == null ? void 0 : _a2.trim()) != null ? _b2 : "";
   return id ? `id:${id}` : `path:${file.path}`;
 }
 function versionFile(key, id) {
@@ -13498,6 +13500,8 @@ function sanitizeFrontmatter(content) {
       continue;
     }
     const item = /^\s+-\s+(.*)$/.exec(line);
+    if (item && key === "midad-version")
+      continue;
     if (item && (key === "aliases" || key === "topics")) {
       const value = item[1].trim();
       if (/\.Version\d+/i.test(value) || /\|V\d+\]\]/.test(value))
@@ -13546,18 +13550,18 @@ var VersionStore = class {
     fs2.writeFileSync(this.zipPath(), Buffer.from(zipSync(this.files, { level: 6 })));
   }
   async entryFor(file) {
-    var _a2, _b2;
+    var _a2;
     const manifest = this.load();
-    const key = noteKey(file, (_a2 = this.app.metadataCache.getFileCache(file)) == null ? void 0 : _a2.frontmatter);
-    return (_b2 = manifest.notes[key]) != null ? _b2 : null;
+    const key = noteKeyFromText(file, await this.app.vault.read(file));
+    return (_a2 = manifest.notes[key]) != null ? _a2 : null;
   }
   async saveVersion(file, overwrite, renderHash, options = {}) {
-    var _a2, _b2;
+    var _a2;
     const manifest = this.load();
-    const frontmatter = (_a2 = this.app.metadataCache.getFileCache(file)) == null ? void 0 : _a2.frontmatter;
-    const key = noteKey(file, frontmatter);
     const text = await this.app.vault.read(file);
-    const hash = normalizedHash(text);
+    const cleanText = sanitizeFrontmatter(text);
+    const key = noteKeyFromText(file, text);
+    const hash = normalizedHash(cleanText);
     let entry = manifest.notes[key];
     if (!entry) {
       entry = {
@@ -13585,7 +13589,7 @@ var VersionStore = class {
       version.hash = hash;
       version.kind = "user";
     } else if (overwrite && entry.versions.length) {
-      version = (_b2 = entry.versions.find((v) => v.id === entry.defaultId)) != null ? _b2 : [...entry.versions].sort((a, b) => versionNumber(a.id) - versionNumber(b.id)).at(-1);
+      version = (_a2 = entry.versions.find((v) => v.id === entry.defaultId)) != null ? _a2 : [...entry.versions].sort((a, b) => versionNumber(a.id) - versionNumber(b.id)).at(-1);
       version.savedAt = new Date().toISOString();
       version.hash = hash;
       version.kind = "user";
@@ -13621,7 +13625,7 @@ var VersionStore = class {
       version.selected = true;
       version.archived = false;
     }
-    this.files[version.file] = strToU8(text);
+    this.files[version.file] = strToU8(cleanText);
     this.save();
     return entry;
   }
@@ -13780,6 +13784,7 @@ var ManageVersionsModal = class extends import_obsidian3.Modal {
     this.outsideContent = "";
     this.selectionDirty = false;
     this.options = options;
+    this.activeVersionId = options.activeVersionId;
   }
   async onOpen() {
     this.modalEl.addClass("mas-versions-modal");
@@ -13789,6 +13794,11 @@ var ManageVersionsModal = class extends import_obsidian3.Modal {
     var _a2;
     this.entry = await this.options.store.entryFor(this.options.file);
     const liveText = await this.options.app.vault.read(this.options.file);
+    if (!this.activeVersionId) {
+      const versionMatch = /^midad-version:[ \t]*["']?([^"'\n]+)["']?[ \t]*$/m.exec(liveText);
+      if (versionMatch)
+        this.activeVersionId = versionMatch[1].trim();
+    }
     this.currentHash = normalizedHash(liveText);
     const prior = splitNote(liveText);
     const region = findManagedRegion(prior.body);
@@ -13810,7 +13820,7 @@ var ManageVersionsModal = class extends import_obsidian3.Modal {
     return !this.matchesSaved;
   }
   render() {
-    var _a2, _b2, _c, _d, _e;
+    var _a2, _b2, _c, _d;
     const { contentEl } = this;
     contentEl.empty();
     contentEl.createEl("h2", { text: "Manage versions" });
@@ -13818,10 +13828,10 @@ var ManageVersionsModal = class extends import_obsidian3.Modal {
       cls: "mas-versions-desc",
       text: `Saved versions for ${((_a2 = this.entry) == null ? void 0 : _a2.title) || this.options.file.basename}. The default version supplies the main note.`
     });
-    if (this.options.activeVersionId) {
+    if (this.activeVersionId) {
       contentEl.createEl("p", {
         cls: "mas-versions-help",
-        text: `This is not the default version (${this.options.activeVersionId.toUpperCase()}). Saving here will not update or replace the main note. To manage versions, run this command from the default version.`
+        text: `This is not the default version (${this.activeVersionId.toUpperCase()}). Saving here will not update or replace the main note. To manage versions, run this command from the default version.`
       });
       if (this.outsideContent) {
         const detach = contentEl.createEl("button", {
@@ -13838,29 +13848,31 @@ var ManageVersionsModal = class extends import_obsidian3.Modal {
       text: "Selected versions are rendered as markdown; deselect a version to archive it. Click \u2018Set as default\u2019 to render a version on the main note without a version suffix. Click the trash icon to delete a version."
     });
     const top = contentEl.createDiv({ cls: "mas-versions-actions" });
-    if (((_b2 = this.entry) == null ? void 0 : _b2.versions.length) && this.hasChanges()) {
-      const overwrite = top.createEl("button", { text: this.options.activeVersionId ? "Overwrite this version" : "Save the current version" });
+    const changed = this.hasChanges();
+    const hasVersions = !!((_b2 = this.entry) == null ? void 0 : _b2.versions.length);
+    if (changed && hasVersions) {
+      const overwrite = top.createEl("button", { text: this.activeVersionId ? "Overwrite this version" : "Save the current version" });
       overwrite.onclick = async () => {
         var _a3, _b3;
-        await this.options.store.saveVersion(this.options.file, true, this.renderFingerprint, { activeVersionId: this.options.activeVersionId });
+        await this.options.store.saveVersion(this.options.file, true, this.renderFingerprint, { activeVersionId: this.activeVersionId });
         this.selectionDirty = false;
         await this.refresh();
         (_b3 = (_a3 = this.options).onChanged) == null ? void 0 : _b3.call(_a3);
       };
     }
-    if (this.hasChanges() || !((_c = this.entry) == null ? void 0 : _c.versions.length)) {
+    if (changed || !hasVersions) {
       const save = top.createEl("button", { text: "Save new version" });
       save.onclick = async () => {
         var _a3, _b3;
-        await this.options.store.saveVersion(this.options.file, false, this.renderFingerprint, { activeVersionId: this.options.activeVersionId });
+        await this.options.store.saveVersion(this.options.file, false, this.renderFingerprint, { activeVersionId: this.activeVersionId });
         this.selectionDirty = false;
         await this.refresh();
         (_b3 = (_a3 = this.options).onChanged) == null ? void 0 : _b3.call(_a3);
       };
     }
-    if (!this.options.activeVersionId) {
+    if (!this.activeVersionId) {
       const list = contentEl.createDiv({ cls: "mas-versions-list" });
-      if (!((_d = this.entry) == null ? void 0 : _d.versions.length)) {
+      if (!((_c = this.entry) == null ? void 0 : _c.versions.length)) {
         list.createDiv({ cls: "mas-versions-empty", text: "No saved versions yet." });
       } else {
         for (const version of [...this.entry.versions].sort((a, b) => versionNumber(a.id) - versionNumber(b.id))) {
@@ -13914,10 +13926,10 @@ var ManageVersionsModal = class extends import_obsidian3.Modal {
         }
       }
     }
-    if (!this.options.activeVersionId) {
+    if (!this.activeVersionId) {
       const applyWrap = contentEl.createDiv({ cls: "mas-versions-apply" });
       const apply = applyWrap.createEl("button", { text: "Apply default and re-render notes" });
-      apply.disabled = !((_e = this.entry) == null ? void 0 : _e.versions.length);
+      apply.disabled = !((_d = this.entry) == null ? void 0 : _d.versions.length);
       apply.onclick = () => {
         void this.apply();
       };
