@@ -13442,33 +13442,32 @@ function addUpLink(content, link) {
   return `${content.slice(0, insert)}  - "${link}"
 ${content.slice(insert)}`;
 }
-function removeFrontmatterProperty(content, key) {
-  if (!content.startsWith("---"))
-    return content;
-  const end = content.indexOf("\n---", 3);
-  if (end < 0)
-    return content;
-  const front = content.slice(0, end);
-  const body = content.slice(end);
-  const re = new RegExp(`^${key}:[^\\n]*\\n(?:[ \\t]+-[^\\n]*\\n)*`, "m");
-  return front.replace(re, "") + body;
-}
 function setFrontmatterList(content, key, values) {
-  const clean3 = removeFrontmatterProperty(content, key);
-  if (!values.length)
-    return clean3;
-  const block = `${key}:
-${values.map((value) => `  - "${value.replace(/"/g, '\\"')}"`).join("\n")}
-`;
-  if (clean3.startsWith("---")) {
-    const end = clean3.indexOf("\n---", 3);
-    if (end >= 0)
-      return `${clean3.slice(0, end + 1)}${block}${clean3.slice(end + 1)}`;
+  var _a2;
+  const prior = splitNote(content);
+  const lines = ((_a2 = prior.frontmatter) != null ? _a2 : "").split("\n");
+  const out = [];
+  let skip = false;
+  for (const line of lines) {
+    const property = /^([A-Za-z][\w-]*):/.exec(line);
+    if (property) {
+      skip = property[1] === key;
+      if (!skip)
+        out.push(line);
+      continue;
+    }
+    if (skip && /^\s/.test(line))
+      continue;
+    out.push(line);
   }
-  return `---
-${block}---
-
-${clean3}`;
+  while (out.length && out[out.length - 1].trim() === "")
+    out.pop();
+  if (values.length) {
+    out.push(`${key}:`);
+    for (const value of values)
+      out.push(`  - "${value.replace(/"/g, '\\"')}"`);
+  }
+  return joinNote(out.join("\n"), prior.body);
 }
 function sanitizeFrontmatter(content) {
   if (!content.startsWith("---"))

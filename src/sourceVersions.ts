@@ -128,14 +128,26 @@ function setFrontmatterProperty(content: string, key: string, value: string): st
 }
 
 function setFrontmatterList(content: string, key: string, values: string[]): string {
-	const clean = removeFrontmatterProperty(content, key);
-	if (!values.length) return clean;
-	const block = `${key}:\n${values.map((value) => `  - "${value.replace(/"/g, '\\"')}"`).join("\n")}\n`;
-	if (clean.startsWith("---")) {
-		const end = clean.indexOf("\n---", 3);
-		if (end >= 0) return `${clean.slice(0, end + 1)}${block}${clean.slice(end + 1)}`;
+	const prior = splitNote(content);
+	const lines = (prior.frontmatter ?? "").split("\n");
+	const out: string[] = [];
+	let skip = false;
+	for (const line of lines) {
+		const property = /^([A-Za-z][\w-]*):/.exec(line);
+		if (property) {
+			skip = property[1] === key;
+			if (!skip) out.push(line);
+			continue;
+		}
+		if (skip && /^\s/.test(line)) continue;
+		out.push(line);
 	}
-	return `---\n${block}---\n\n${clean}`;
+	while (out.length && out[out.length - 1].trim() === "") out.pop();
+	if (values.length) {
+		out.push(`${key}:`);
+		for (const value of values) out.push(`  - "${value.replace(/"/g, '\\"')}"`);
+	}
+	return joinNote(out.join("\n"), prior.body);
 }
 
 function sanitizeFrontmatter(content: string): string {
