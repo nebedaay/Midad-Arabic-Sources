@@ -290,14 +290,21 @@ body [class*="quran-quote"]:dir(rtl) {
 body .callout[data-callout*="footnotes" i],
 body .callout[data-callout="toc" i] {
     background-color: transparent !important;
+    margin: 0px;
+    font-size: 90%;
     .callout-icon, .callout-title {
         display: none !important;
     }
     ul, li {
         list-style-type: none;
     }
+    li {
+        margin-block-start:0.3rem;
+        padding-inline-start: 1.5rem;
+        text-indent: -1.5rem;
+    }
     li > ul > li {
-        margin-left: 1rem;
+        margin-block-start: 1.5rem;
     }
     a:link, a:hover, a:visited {
         color: #876;
