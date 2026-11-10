@@ -13645,6 +13645,16 @@ var VersionStore = class {
     const content = this.files[version.file];
     return content ? strFromU8(content) : null;
   }
+  async matchesSavedVersion(entry, hash) {
+    for (const version of entry.versions) {
+      if (version.hash === hash)
+        return true;
+      const text = await this.versionText(entry, version.id);
+      if (text && normalizedHash(text) === hash)
+        return true;
+    }
+    return false;
+  }
   async entriesForPaths(paths) {
     const wanted = new Set(paths.map((path2) => (0, import_obsidian3.normalizePath)(path2)));
     return Object.values(this.load().notes).filter((entry) => wanted.has((0, import_obsidian3.normalizePath)(entry.path)));
@@ -13713,6 +13723,7 @@ var ManageVersionsModal = class extends import_obsidian3.Modal {
     this.currentHash = "";
     this.renderFingerprint = "";
     this.renderChanged = false;
+    this.matchesSaved = false;
     this.selectionDirty = false;
     this.options = options;
   }
@@ -13726,23 +13737,15 @@ var ManageVersionsModal = class extends import_obsidian3.Modal {
     this.currentHash = normalizedHash(await this.options.app.vault.read(this.options.file));
     this.renderFingerprint = this.options.getFingerprint ? await this.options.getFingerprint() : "";
     this.renderChanged = !!((_a2 = this.entry) == null ? void 0 : _a2.renderHash) && this.entry.renderHash !== this.renderFingerprint;
+    this.matchesSaved = this.entry ? await this.options.store.matchesSavedVersion(this.entry, this.currentHash) : false;
     this.render();
   }
   hasChanges() {
     var _a2;
-    if (!((_a2 = this.entry) == null ? void 0 : _a2.versions.length))
-      return true;
-    const latest = [...this.entry.versions].sort((a, b) => versionNumber(a.id) - versionNumber(b.id)).at(-1);
-    return !latest || latest.hash !== this.currentHash;
+    return !((_a2 = this.entry) == null ? void 0 : _a2.versions.length) || !this.matchesSaved;
   }
-  differsFromDefault() {
-    if (!this.entry)
-      return true;
-    const version = this.entry.versions.find((v) => {
-      var _a2;
-      return v.id === ((_a2 = this.entry) == null ? void 0 : _a2.defaultId);
-    });
-    return !version || version.hash !== this.currentHash;
+  hasUnsavedChanges() {
+    return !this.matchesSaved;
   }
   render() {
     var _a2, _b2, _c, _d;
@@ -13837,7 +13840,7 @@ var ManageVersionsModal = class extends import_obsidian3.Modal {
       new import_obsidian3.Notice("There are no saved versions to apply.");
       return;
     }
-    if (this.differsFromDefault()) {
+    if (this.hasUnsavedChanges()) {
       new UnsavedVersionModal(this.app, {
         onDiscard: async () => {
           await this.options.store.apply(this.options.file, this.entry);

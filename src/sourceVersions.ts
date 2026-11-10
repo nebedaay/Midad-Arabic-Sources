@@ -296,6 +296,16 @@ export class VersionStore {
 		return content ? strFromU8(content) : null;
 	}
 
+	/** Match content against saved snapshots; tolerates older raw-hash records. */
+	async matchesSavedVersion(entry: NoteVersionEntry, hash: string): Promise<boolean> {
+		for (const version of entry.versions) {
+			if (version.hash === hash) return true;
+			const text = await this.versionText(entry, version.id);
+			if (text && normalizedHash(text) === hash) return true;
+		}
+		return false;
+	}
+
 	async entriesForPaths(paths: string[]): Promise<NoteVersionEntry[]> {
 		const wanted = new Set(paths.map((path) => normalizePath(path)));
 		return Object.values(this.load().notes).filter((entry) => wanted.has(normalizePath(entry.path)));
@@ -372,6 +382,7 @@ export class ManageVersionsModal extends Modal {
 	private currentHash = "";
 	private renderFingerprint = "";
 	private renderChanged = false;
+	private matchesSaved = false;
 	private selectionDirty = false;
 
 	constructor(options: VersionModalOptions) {
@@ -389,19 +400,16 @@ export class ManageVersionsModal extends Modal {
 		this.currentHash = normalizedHash(await this.options.app.vault.read(this.options.file));
 		this.renderFingerprint = this.options.getFingerprint ? await this.options.getFingerprint() : "";
 		this.renderChanged = !!this.entry?.renderHash && this.entry.renderHash !== this.renderFingerprint;
+		this.matchesSaved = this.entry ? await this.options.store.matchesSavedVersion(this.entry, this.currentHash) : false;
 		this.render();
 	}
 
 	private hasChanges(): boolean {
-		if (!this.entry?.versions.length) return true;
-		const latest = [...this.entry.versions].sort((a, b) => versionNumber(a.id) - versionNumber(b.id)).at(-1);
-		return !latest || latest.hash !== this.currentHash;
+		return !this.entry?.versions.length || !this.matchesSaved;
 	}
 
-	private differsFromDefault(): boolean {
-		if (!this.entry) return true;
-		const version = this.entry.versions.find((v) => v.id === this.entry?.defaultId);
-		return !version || version.hash !== this.currentHash;
+	private hasUnsavedChanges(): boolean {
+		return !this.matchesSaved;
 	}
 
 	private render(): void {
@@ -491,7 +499,7 @@ export class ManageVersionsModal extends Modal {
 			new Notice("There are no saved versions to apply.");
 			return;
 		}
-		if (this.differsFromDefault()) {
+		if (this.hasUnsavedChanges()) {
 			new UnsavedVersionModal(this.app, {
 				onDiscard: async () => {
 					await this.options.store.apply(this.options.file, this.entry!);
