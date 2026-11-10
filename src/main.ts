@@ -5149,7 +5149,8 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		for (const entry of chosen) {
 			await this.runWithProgress(`Re-rendering @${info.citekey}`, ["reprocess", "--zip", entry.zip.path]);
 		}
-		await this.applySavedVersions([file.path]);
+		const canonicalPath = file.path.replace(/\.Version\d+\.md$/i, ".md");
+		await this.applySavedVersions([canonicalPath]);
 		new Notice(`Re-rendered ${chosen.length} archived batch(es) for @${info.citekey}.`);
 	}
 
