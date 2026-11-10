@@ -2186,8 +2186,43 @@ body .callout[data-callout^="mas-annotation-comment"] {
 
 /* Saved-version manager */
 .mas-versions-modal .mas-versions-desc {
-    margin: 0 0 1rem;
+    margin: 0 0 0.35rem;
     color: var(--text-muted);
+}
+
+.mas-versions-help {
+    margin: 0 0 0.85rem;
+    color: var(--text-muted);
+    font-size: var(--font-ui-smaller);
+}
+
+.mas-versions-status {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    margin-inline-start: auto;
+}
+
+.mas-versions-default-button,
+.mas-versions-trash {
+    border: none;
+    background: transparent;
+    box-shadow: none;
+    color: var(--text-muted);
+    padding: 0.2rem 0.35rem;
+    font-size: var(--font-ui-smaller);
+}
+
+.mas-versions-default-button:hover,
+.mas-versions-trash:hover {
+    color: var(--interactive-accent);
+    background: transparent;
+}
+
+.mas-versions-apply {
+    display: flex;
+    justify-content: flex-end;
+    margin-block-start: 0.8rem;
 }
 
 .mas-versions-actions {
@@ -2213,7 +2248,7 @@ body .callout[data-callout^="mas-annotation-comment"] {
     border: 1px solid var(--background-modifier-border);
     border-radius: var(--radius-s);
     background: var(--background-primary);
-    cursor: default;
+    cursor: pointer;
 }
 
 .mas-versions-row.is-selected {
@@ -2230,12 +2265,9 @@ body .callout[data-callout^="mas-annotation-comment"] {
     flex: 1;
 }
 
-.mas-versions-name {
-    font-weight: var(--font-semibold);
-}
-
 .mas-versions-label {
     color: var(--text-normal);
+    font-weight: var(--font-semibold);
 }
 
 .mas-versions-date {

@@ -5167,11 +5167,19 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		}
 		const frontmatter = this.app.metadataCache.getFileCache(file)?.frontmatter as Record<string, unknown> | undefined;
 		if (typeof frontmatter?.["midad-version"] === "string") {
-			new Notice("Open the canonical note to manage its versions.");
+			new Notice("Open the default note to manage its versions.");
 			return;
 		}
 		const store = new VersionStore(this.app, this.vaultPath());
-		new ManageVersionsModal({ app: this.app, file, store }).open();
+		new ManageVersionsModal({
+			app: this.app,
+			file,
+			store,
+			getFingerprint: async () => hashString(JSON.stringify({
+				version: this.manifest.version,
+				templates: await this.sourceTemplateHashes(),
+			})),
+		}).open();
 	}
 
 	/** Apply the safe Markdown-update layer to the active note. */
