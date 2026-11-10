@@ -234,7 +234,10 @@ export class VersionStore {
 			version.hash = hash;
 			version.kind = "user";
 		} else if (overwrite && entry.versions.length) {
-			version = [...entry.versions].sort((a, b) => versionNumber(a.id) - versionNumber(b.id)).at(-1) as SavedVersion;
+			// The default context overwrites the current default version, not the
+			// highest-numbered branch from another lineage.
+			version = entry.versions.find((v) => v.id === entry.defaultId)
+				?? [...entry.versions].sort((a, b) => versionNumber(a.id) - versionNumber(b.id)).at(-1) as SavedVersion;
 			version.savedAt = new Date().toISOString();
 			version.hash = hash;
 			version.kind = "user";
@@ -258,7 +261,7 @@ export class VersionStore {
 			// supersede the latest saved version.
 			version.selected = true;
 			version.archived = false;
-		} else {
+		} else if (!overwrite) {
 			for (const other of entry.versions) {
 				if (other.id !== version.id) {
 					other.selected = false;
@@ -268,6 +271,9 @@ export class VersionStore {
 			version.selected = true;
 			version.archived = false;
 			entry.defaultId = version.id;
+		} else {
+			version.selected = true;
+			version.archived = false;
 		}
 		this.files[version.file] = strToU8(text);
 		this.save();
@@ -431,6 +437,7 @@ export class ManageVersionsModal extends Modal {
 	private entry: NoteVersionEntry | null = null;
 	private currentHash = "";
 	private renderFingerprint = "";
+	private fingerprintLoaded = false;
 	private renderChanged = false;
 	private matchesSaved = false;
 	private outsideContent = "";
@@ -455,10 +462,14 @@ export class ManageVersionsModal extends Modal {
 		this.outsideContent = region
 			? `${prior.body.slice(0, region.start)}${prior.body.slice(region.end)}`.trim()
 			: "";
-		this.renderFingerprint = this.options.getFingerprint ? await this.options.getFingerprint() : "";
-		this.renderChanged = !!this.entry?.renderHash && this.entry.renderHash !== this.renderFingerprint;
 		this.matchesSaved = this.entry ? await this.options.store.matchesSavedVersion(this.entry, this.currentHash) : false;
 		this.render();
+		if (!this.fingerprintLoaded) {
+			this.renderFingerprint = this.options.getFingerprint ? await this.options.getFingerprint() : "";
+			this.fingerprintLoaded = true;
+			this.renderChanged = !!this.entry?.renderHash && this.entry.renderHash !== this.renderFingerprint;
+			this.render();
+		}
 	}
 
 	private hasChanges(): boolean {
@@ -506,7 +517,7 @@ export class ManageVersionsModal extends Modal {
 			};
 		}
 		if (this.entry?.versions.length && this.hasChanges()) {
-			const overwrite = top.createEl("button", { text: this.options.activeVersionId ? "Overwrite this version" : "Overwrite last version" });
+			const overwrite = top.createEl("button", { text: this.options.activeVersionId ? "Overwrite this version" : "Save the current version" });
 			overwrite.onclick = async () => {
 				await this.options.store.saveVersion(this.options.file, true, this.renderFingerprint, { activeVersionId: this.options.activeVersionId });
 				this.selectionDirty = false;

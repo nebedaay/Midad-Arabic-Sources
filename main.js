@@ -13547,7 +13547,7 @@ var VersionStore = class {
     return (_b2 = manifest.notes[key]) != null ? _b2 : null;
   }
   async saveVersion(file, overwrite, renderHash, options = {}) {
-    var _a2;
+    var _a2, _b2;
     const manifest = this.load();
     const frontmatter = (_a2 = this.app.metadataCache.getFileCache(file)) == null ? void 0 : _a2.frontmatter;
     const key = noteKey(file, frontmatter);
@@ -13580,7 +13580,7 @@ var VersionStore = class {
       version.hash = hash;
       version.kind = "user";
     } else if (overwrite && entry.versions.length) {
-      version = [...entry.versions].sort((a, b) => versionNumber(a.id) - versionNumber(b.id)).at(-1);
+      version = (_b2 = entry.versions.find((v) => v.id === entry.defaultId)) != null ? _b2 : [...entry.versions].sort((a, b) => versionNumber(a.id) - versionNumber(b.id)).at(-1);
       version.savedAt = new Date().toISOString();
       version.hash = hash;
       version.kind = "user";
@@ -13602,7 +13602,7 @@ var VersionStore = class {
     if (options.activeVersionId) {
       version.selected = true;
       version.archived = false;
-    } else {
+    } else if (!overwrite) {
       for (const other of entry.versions) {
         if (other.id !== version.id) {
           other.selected = false;
@@ -13612,6 +13612,9 @@ var VersionStore = class {
       version.selected = true;
       version.archived = false;
       entry.defaultId = version.id;
+    } else {
+      version.selected = true;
+      version.archived = false;
     }
     this.files[version.file] = strToU8(text);
     this.save();
@@ -13766,6 +13769,7 @@ var ManageVersionsModal = class extends import_obsidian3.Modal {
     this.entry = null;
     this.currentHash = "";
     this.renderFingerprint = "";
+    this.fingerprintLoaded = false;
     this.renderChanged = false;
     this.matchesSaved = false;
     this.outsideContent = "";
@@ -13784,10 +13788,14 @@ var ManageVersionsModal = class extends import_obsidian3.Modal {
     const prior = splitNote(liveText);
     const region = findManagedRegion(prior.body);
     this.outsideContent = region ? `${prior.body.slice(0, region.start)}${prior.body.slice(region.end)}`.trim() : "";
-    this.renderFingerprint = this.options.getFingerprint ? await this.options.getFingerprint() : "";
-    this.renderChanged = !!((_a2 = this.entry) == null ? void 0 : _a2.renderHash) && this.entry.renderHash !== this.renderFingerprint;
     this.matchesSaved = this.entry ? await this.options.store.matchesSavedVersion(this.entry, this.currentHash) : false;
     this.render();
+    if (!this.fingerprintLoaded) {
+      this.renderFingerprint = this.options.getFingerprint ? await this.options.getFingerprint() : "";
+      this.fingerprintLoaded = true;
+      this.renderChanged = !!((_a2 = this.entry) == null ? void 0 : _a2.renderHash) && this.entry.renderHash !== this.renderFingerprint;
+      this.render();
+    }
   }
   hasChanges() {
     var _a2;
@@ -13836,7 +13844,7 @@ var ManageVersionsModal = class extends import_obsidian3.Modal {
       };
     }
     if (((_c = this.entry) == null ? void 0 : _c.versions.length) && this.hasChanges()) {
-      const overwrite = top.createEl("button", { text: this.options.activeVersionId ? "Overwrite this version" : "Overwrite last version" });
+      const overwrite = top.createEl("button", { text: this.options.activeVersionId ? "Overwrite this version" : "Save the current version" });
       overwrite.onclick = async () => {
         var _a3, _b3;
         await this.options.store.saveVersion(this.options.file, true, this.renderFingerprint, { activeVersionId: this.options.activeVersionId });
