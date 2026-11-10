@@ -1274,6 +1274,10 @@ export class AnnotationService {
 		return { left: rect.left + 20, top: rect.top + 20, bottom: rect.top + 40 };
 	}
 
+	private isVersionNote(file: TFile | null): boolean {
+		return !!file && /\.Version\d+\.md$/i.test(file.path);
+	}
+
 	private async openAnnotate(
 		editor: Editor,
 		file: TFile | null,
@@ -1281,6 +1285,10 @@ export class AnnotationService {
 		range?: { from: number; to: number }
 	): Promise<void> {
 		if (!file) return;
+		if (this.isVersionNote(file)) {
+			new Notice("Annotations are available only in the default version. Open it from the Annotations sidebar.");
+			return;
+		}
 		const draft = this.draftFromEditor(editor, file, range);
 		if (!draft) {
 			if (!autoSignature && this.lastDraftIssue) {
@@ -1842,6 +1850,7 @@ export class AnnotationService {
 	}
 
 	private async targetForPath(path: string): Promise<AnnotationTarget | null> {
+		if (/\.Version\d+\.md$/i.test(path)) return null;
 		const stored = this.store.findTarget(path);
 		if (stored) {
 			const work = await this.store.getWork(stored.workKey);
@@ -2144,6 +2153,20 @@ export class AnnotationService {
 		const navigation = buildNavigationData(this.app, path, (notePath) => this.annotationCountForPath(notePath));
 		if (!navigation) return this.collectionSidebarData();
 		this.lastSidebarPath = path;
+		if (/\.Version\d+\.md$/i.test(path)) {
+			const defaultPath = path.replace(/\.Version\d+\.md$/i, ".md");
+			const defaultFile = this.app.vault.getAbstractFileByPath(normalizePath(defaultPath));
+			return {
+				notePath: path,
+				noteName: file.basename,
+				workTitle: file.basename,
+				target: null,
+				annotations: [],
+				navigation,
+				collection: false,
+				versionDefaultPath: defaultFile instanceof TFile ? defaultFile.path : defaultPath,
+			};
+		}
 		const target = await this.targetForPath(path);
 		const annotations = target ? await this.annotationsFor(target) : [];
 		annotations.sort((a, b) => {

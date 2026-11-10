@@ -18678,6 +18678,18 @@ var AnnotationSidebarView = class extends import_obsidian13.ItemView {
   }
   async renderAnnotations(panel, data, component, token) {
     panel.empty();
+    if (data.versionDefaultPath) {
+      const notice = panel.createDiv({ cls: "mas-ann-sidebar__empty" });
+      notice.createSpan({ text: "Annotations are not available in non-default versions. " });
+      const link = notice.createEl("a", { text: "Open the default version", href: "#" });
+      link.onclick = (event) => {
+        event.preventDefault();
+        const file = this.app.vault.getAbstractFileByPath((0, import_obsidian13.normalizePath)(data.versionDefaultPath));
+        if (file instanceof import_obsidian13.TFile)
+          void this.app.workspace.getLeaf(false).openFile(file);
+      };
+      return;
+    }
     const target = data.target;
     if (!target) {
       panel.createDiv({
@@ -20572,10 +20584,17 @@ ${MANAGED_CLOSE}
     const rect = cm.dom.getBoundingClientRect();
     return { left: rect.left + 20, top: rect.top + 20, bottom: rect.top + 40 };
   }
+  isVersionNote(file) {
+    return !!file && /\.Version\d+\.md$/i.test(file.path);
+  }
   async openAnnotate(editor, file, autoSignature, range) {
     var _a2;
     if (!file)
       return;
+    if (this.isVersionNote(file)) {
+      new import_obsidian17.Notice("Annotations are available only in the default version. Open it from the Annotations sidebar.");
+      return;
+    }
     const draft = this.draftFromEditor(editor, file, range);
     if (!draft) {
       if (!autoSignature && this.lastDraftIssue) {
@@ -21086,6 +21105,8 @@ ${MANAGED_CLOSE}
       await this.app.workspace.getLeaf().openFile(file);
   }
   async targetForPath(path2) {
+    if (/\.Version\d+\.md$/i.test(path2))
+      return null;
     const stored = this.store.findTarget(path2);
     if (stored) {
       const work2 = await this.store.getWork(stored.workKey);
@@ -21359,6 +21380,20 @@ ${MANAGED_CLOSE}
     if (!navigation)
       return this.collectionSidebarData();
     this.lastSidebarPath = path2;
+    if (/\.Version\d+\.md$/i.test(path2)) {
+      const defaultPath = path2.replace(/\.Version\d+\.md$/i, ".md");
+      const defaultFile = this.app.vault.getAbstractFileByPath((0, import_obsidian17.normalizePath)(defaultPath));
+      return {
+        notePath: path2,
+        noteName: file.basename,
+        workTitle: file.basename,
+        target: null,
+        annotations: [],
+        navigation,
+        collection: false,
+        versionDefaultPath: defaultFile instanceof import_obsidian17.TFile ? defaultFile.path : defaultPath
+      };
+    }
     const target = await this.targetForPath(path2);
     const annotations = target ? await this.annotationsFor(target) : [];
     annotations.sort((a, b) => {

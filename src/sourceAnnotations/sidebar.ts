@@ -3,6 +3,7 @@ import {
 	ItemView,
 	TFile,
 	WorkspaceLeaf,
+	normalizePath,
 	setIcon,
 } from "obsidian";
 import { renderAnnotationCard } from "./cards";
@@ -21,6 +22,8 @@ export interface AnnotationSidebarData {
 	navigation: NavigationData;
 	/** True when the note in context is not a Midad note (the collection index). */
 	collection?: boolean;
+	/** Set for a subsidiary version note, pointing to its default note. */
+	versionDefaultPath?: string;
 }
 
 type SidebarTab = "annotations" | "navigation";
@@ -196,6 +199,17 @@ export class AnnotationSidebarView extends ItemView {
 		token: number
 	): Promise<void> {
 		panel.empty();
+		if (data.versionDefaultPath) {
+			const notice = panel.createDiv({ cls: "mas-ann-sidebar__empty" });
+			notice.createSpan({ text: "Annotations are not available in non-default versions. " });
+			const link = notice.createEl("a", { text: "Open the default version", href: "#" });
+			link.onclick = (event) => {
+				event.preventDefault();
+				const file = this.app.vault.getAbstractFileByPath(normalizePath(data.versionDefaultPath!));
+				if (file instanceof TFile) void this.app.workspace.getLeaf(false).openFile(file);
+			};
+			return;
+		}
 		const target = data.target;
 		if (!target) {
 			panel.createDiv({
