@@ -57,6 +57,7 @@ import { BUNDLED_ASSETS } from "./assets.generated";
 import { localDate } from "./time";
 import { formatPoetrySelection } from "./poetry";
 import { ManageVersionsModal, VersionStore } from "./sourceVersions";
+import { MANAGED_CLOSE, MANAGED_OPEN, findManagedRegion, joinNote, splitNote } from "./sourceImport/merge";
 import { BUILTIN_TOPICS, TOPIC_PAGE_PREFIX, genreTopic, normalizeGenre, topicLabel, topicLink, topicNoteName, topicsFromValue, turathCategory, turathGenres, turathTopicsForWork } from "./topics";
 import { identityOfFrontmatter, sourceIdToYaml, sourceOfFrontmatter } from "./sourceIds";
 import {
@@ -826,6 +827,17 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			id: "manage-versions",
 			name: "Manage versions of this note…",
 			callback: () => { this.openVersionManager(); },
+		});
+		this.addCommand({
+			id: "add-managed-tags-this-note",
+			name: "Add managed region tags to this note",
+			callback: async () => { await this.addManagedTagsToNote(this.app.workspace.getActiveFile()); },
+		});
+
+		this.addCommand({
+			id: "add-managed-tags-all-notes",
+			name: "Add managed region tags to all Midad-managed notes",
+			callback: async () => { await this.addManagedTagsToAll(); },
 		});
 
 		this.addCommand({
@@ -5216,6 +5228,70 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		}
 		const written = await this.renderWithProgress(models, true, "Re-rendering post-processed sources");
 		new Notice(`Post-processed ${models.length} model(s); re-rendered ${written.length} note(s).`);
+	}
+
+	private managedTaggedBody(text: string): string | null {
+		const prior = splitNote(text);
+		if (findManagedRegion(prior.body)) return null;
+		const body = prior.body.trim();
+		if (!body) return null;
+		const wrapped = `${MANAGED_OPEN}\n${body}\n${MANAGED_CLOSE}\n`;
+		return prior.frontmatter == null ? wrapped : joinNote(prior.frontmatter, wrapped);
+	}
+
+	private async addManagedTagsToNote(file: TAbstractFile | null): Promise<void> {
+		if (!(file instanceof TFile) || file.extension !== "md") {
+			new Notice("Open a Markdown note first.");
+			return;
+		}
+		if (/\.Version\d+\.md$/i.test(file.path)) {
+			new Notice("Version notes are managed snapshots and are not tagged separately.");
+			return;
+		}
+		const text = await this.app.vault.read(file);
+		const next = this.managedTaggedBody(text);
+		if (!next) {
+			new Notice("This note already has a managed region, or has no body.");
+			return;
+		}
+		const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+		const backup = `${this.vaultPath()}/.midad-arabic-sources/backups/managed-region-${stamp}/${file.path}`;
+		try {
+			fs.mkdirSync(backup.slice(0, backup.lastIndexOf("/")), { recursive: true });
+			fs.writeFileSync(backup, text, "utf8");
+		} catch { /* best effort */ }
+		await this.app.vault.modify(file, next);
+		new Notice("Added managed region tags.");
+	}
+
+	private async addManagedTagsToAll(): Promise<void> {
+		new ConfirmModal(this.app, {
+			title: "Add managed region tags",
+			message: "Add managed-region tags around the body of every Midad-managed note that lacks them? Existing text outside the tags is not protected until you move it outside; generated content inside will be replaceable.",
+			confirmText: "Add tags",
+			onConfirm: async () => {
+				let changed = 0;
+				const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+				for (const file of this.app.vault.getMarkdownFiles()) {
+					if (/\.Version\d+\.md$/i.test(file.path)) continue;
+					const fm = this.app.metadataCache.getFileCache(file)?.frontmatter as Record<string, unknown> | undefined;
+					const type = typeof fm?.["document-type"] === "string" ? String(fm["document-type"]) : "";
+					const isMidad = !!fm?.["midad-id"] || type.includes("text-source") || file.path.startsWith(`${this.transcriptionsFolder()}/`) || file.path.startsWith(`${this.translationsFolder()}/`);
+					if (!isMidad) continue;
+					const text = await this.app.vault.read(file);
+					const next = this.managedTaggedBody(text);
+					if (!next) continue;
+					try {
+						const backup = `${this.vaultPath()}/.midad-arabic-sources/backups/managed-region-${stamp}/${file.path}`;
+						fs.mkdirSync(backup.slice(0, backup.lastIndexOf("/")), { recursive: true });
+						fs.writeFileSync(backup, text, "utf8");
+					} catch { /* best effort */ }
+					await this.app.vault.modify(file, next);
+					changed += 1;
+				}
+				new Notice(changed ? `Added tags to ${changed} note(s).` : "No untagged Midad-managed notes found.");
+			},
+		}).open();
 	}
 
 	/** Open the saved-version manager for the active note. */

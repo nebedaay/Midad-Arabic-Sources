@@ -37,6 +37,49 @@ TYPE_SUFFIX = re.compile(
     re.I,
 )
 
+# The same managed-region markers used by the ETA source renderer. Transcripts
+# keep these around their generated body so user comments outside survive a
+# re-render; the markers are movable by the user.
+MANAGED_OPEN = '<span class="mas-managed">mas-managed</span>'
+MANAGED_CLOSE = '<span class="mas-managed">/mas-managed</span>'
+LEGACY_MANAGED_OPEN = "%%mas-managed%%"
+LEGACY_MANAGED_CLOSE = "%%/mas-managed%%"
+
+
+def _managed_span(body: str):
+    """Return (start, end) of an existing managed region in a body, or None."""
+    for open_mark, close_mark in ((MANAGED_OPEN, MANAGED_CLOSE), (LEGACY_MANAGED_OPEN, LEGACY_MANAGED_CLOSE)):
+        start = body.find(open_mark)
+        if start < 0:
+            continue
+        end = body.find(close_mark, start + len(open_mark))
+        if end >= 0:
+            return start, end + len(close_mark)
+    return None
+
+
+def _managed_body(existing: Path | None, generated: str) -> str:
+    """Wrap generated content, preserving text outside an existing region."""
+    generated = generated.strip("\n")
+    wrapped = f"{MANAGED_OPEN}\n{generated}\n{MANAGED_CLOSE}"
+    if existing is None or not existing.exists():
+        return wrapped
+    try:
+        text = existing.read_text(encoding="utf-8")
+    except Exception:
+        return wrapped
+    end = _frontmatter_end(text)
+    if end < 0:
+        body = text
+    else:
+        body_start = text.find("\n", end + 4)
+        body = text[body_start + 1:] if body_start >= 0 else ""
+    span = _managed_span(body)
+    if not span:
+        return wrapped
+    start, stop = span
+    return f"{body[:start]}{wrapped}{body[stop:]}"
+
 
 def _literature_notes():
     """Candidate @notes: the configured folder, else a vault-wide search."""
@@ -795,7 +838,7 @@ def write_note(body: str, citekey: str, doc_type: str, related: list[str] = None
                       title_ar=title_ar, authors_ar=authors_ar,
                       shorttitle_ar=shorttitle_ar, editors_ar=editors_ar,
                       unit=unit, up=_existing_list(dest, "up"), arabic=is_arabic)
-    dest.write_text(yaml + "\n" + body.strip() + "\n", encoding="utf-8")
+    dest.write_text(yaml + "\n" + _managed_body(dest, body) + "\n", encoding="utf-8")
     if not standalone and not unit:
         parent = dest_path(citekey, doc_type, None, standalone)
         _ensure_yaml_properties(parent, title_ar, authors_ar)
