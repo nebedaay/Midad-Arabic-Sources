@@ -56,6 +56,7 @@ import {
 import { BUNDLED_ASSETS } from "./assets.generated";
 import { localDate } from "./time";
 import { formatPoetrySelection } from "./poetry";
+import { ManageVersionsModal, VersionStore } from "./sourceVersions";
 import { BUILTIN_TOPICS, TOPIC_PAGE_PREFIX, genreTopic, normalizeGenre, topicLabel, topicLink, topicNoteName, topicsFromValue, turathCategory, turathGenres, turathTopicsForWork } from "./topics";
 import { identityOfFrontmatter, sourceIdToYaml, sourceOfFrontmatter } from "./sourceIds";
 import {
@@ -816,6 +817,11 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			id: "update-markdown-note",
 			name: "Update Markdown formatting in this note",
 			callback: async () => { await this.updateMarkdownNote(); },
+		});
+		this.addCommand({
+			id: "manage-versions",
+			name: "Manage versions of this note…",
+			callback: () => { this.openVersionManager(); },
 		});
 
 		this.addCommand({
@@ -5138,6 +5144,17 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		}
 		const written = await this.renderWithProgress(models, true, "Re-rendering post-processed sources");
 		new Notice(`Post-processed ${models.length} model(s); re-rendered ${written.length} note(s).`);
+	}
+
+	/** Open the saved-version manager for the active note. */
+	openVersionManager(): void {
+		const file = this.app.workspace.getActiveFile();
+		if (!(file instanceof TFile) || file.extension !== "md") {
+			new Notice("Open a Markdown note first.");
+			return;
+		}
+		const store = new VersionStore(this.app, this.vaultPath());
+		new ManageVersionsModal({ app: this.app, file, store }).open();
 	}
 
 	/** Apply the safe Markdown-update layer to the active note. */

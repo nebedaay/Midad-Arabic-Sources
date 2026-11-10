@@ -2183,3 +2183,82 @@ body .callout[data-callout^="mas-annotation-comment"] {
     padding: 0.15em 0;
     overflow-wrap: anywhere;
 }
+
+/* Saved-version manager */
+.mas-versions-modal .mas-versions-desc {
+    margin: 0 0 1rem;
+    color: var(--text-muted);
+}
+
+.mas-versions-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-block-end: 1rem;
+}
+
+.mas-versions-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    max-height: 50vh;
+    overflow-y: auto;
+}
+
+.mas-versions-row {
+    display: flex;
+    align-items: center;
+    gap: 0.65rem;
+    padding: 0.55rem 0.7rem;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: var(--radius-s);
+    background: var(--background-primary);
+    cursor: default;
+}
+
+.mas-versions-row.is-selected {
+    background: var(--background-modifier-hover);
+    border-color: var(--interactive-accent);
+}
+
+.mas-versions-row.is-default {
+    box-shadow: inset 3px 0 0 var(--interactive-accent);
+}
+
+.mas-versions-main {
+    min-width: 0;
+    flex: 1;
+}
+
+.mas-versions-name {
+    font-weight: var(--font-semibold);
+}
+
+.mas-versions-label {
+    color: var(--text-normal);
+}
+
+.mas-versions-date {
+    color: var(--text-muted);
+    font-size: var(--font-ui-smaller);
+}
+
+.mas-versions-default {
+    color: var(--interactive-accent);
+    font-size: var(--font-ui-smaller);
+    font-weight: var(--font-semibold);
+}
+
+.mas-versions-empty {
+    color: var(--text-muted);
+    padding: 1rem;
+    border: 1px dashed var(--background-modifier-border);
+    border-radius: var(--radius-s);
+}
+
+.mas-versions-conflict-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-block-start: 1rem;
+}
