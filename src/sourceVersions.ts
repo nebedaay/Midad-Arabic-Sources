@@ -51,6 +51,13 @@ function normalizedHash(text: string): string {
 	return hashString(clean);
 }
 
+function managedHash(text: string): string {
+	const prior = splitNote(text);
+	const region = findManagedRegion(prior.body);
+	if (region) return hashString(prior.body.slice(region.start, region.end));
+	return hashString(prior.body);
+}
+
 function noteKey(file: TFile, frontmatter: Record<string, unknown> | undefined): string {
 	const id = typeof frontmatter?.["midad-id"] === "string" ? frontmatter["midad-id"].trim() : "";
 	return id ? `id:${id}` : `path:${file.path}`;
@@ -70,7 +77,7 @@ function versionNotePath(file: TFile, version: SavedVersion): string {
 
 function versionLink(file: TFile, entry: NoteVersionEntry, version: SavedVersion): string {
 	const path = version.id === entry.defaultId ? file.path : versionNotePath(file, version);
-	const label = version.id === entry.defaultId ? "default" : version.id.toUpperCase();
+	const label = version.id === entry.defaultId ? "Default version" : versionLabel(version);
 	return `[[${path.replace(/\.md$/, "")}|${label}]]`;
 }
 
@@ -277,6 +284,19 @@ export class VersionStore {
 		this.save();
 	}
 
+	async renameVersion(entry: NoteVersionEntry, id: string, label: string): Promise<boolean> {
+		const version = entry.versions.find((v) => v.id === id);
+		const value = label.trim();
+		if (!version || !value) return false;
+		if (entry.versions.some((v) => v.id !== id && versionLabel(v).toLowerCase() === value.toLowerCase())) {
+			new Notice("That version name is already in use.");
+			return false;
+		}
+		version.label = value;
+		this.save();
+		return true;
+	}
+
 	async setSelected(entry: NoteVersionEntry, id: string, selected: boolean): Promise<void> {
 		const version = entry.versions.find((v) => v.id === id);
 		if (!version) return;
@@ -322,6 +342,17 @@ export class VersionStore {
 			if (text && normalizedHash(text) === hash) return true;
 		}
 		return false;
+	}
+
+	async versionModified(file: TFile, entry: NoteVersionEntry, id: string): Promise<boolean> {
+		const version = entry.versions.find((v) => v.id === id);
+		if (!version) return false;
+		const path = versionNotePath(file, version);
+		const existing = this.app.vault.getAbstractFileByPath(normalizePath(path));
+		if (!(existing instanceof TFile)) return false;
+		const live = await this.app.vault.read(existing);
+		const saved = await this.versionText(entry, id);
+		return !saved || managedHash(live) !== managedHash(saved);
 	}
 
 	async entriesForPaths(paths: string[]): Promise<NoteVersionEntry[]> {
@@ -499,12 +530,20 @@ export class ManageVersionsModal extends Modal {
 						new Notice("The default version must remain selected.");
 						return;
 					}
-					await this.options.store.setSelected(this.entry!, version.id, !version.selected);
+					await this.setSelectedWithPrompt(version, !version.selected);
 					this.selectionDirty = true;
-					await this.refresh();
 				};
 				const main = row.createDiv({ cls: "mas-versions-main" });
-				main.createDiv({ cls: "mas-versions-label", text: versionLabel(version) });
+				const labelLine = main.createDiv({ cls: "mas-versions-label-line" });
+				labelLine.createSpan({ cls: "mas-versions-label", text: versionLabel(version) });
+				const rename = labelLine.createEl("button", { cls: "mas-versions-rename", attr: { "aria-label": "Rename version" } });
+				setIcon(rename, "pencil");
+				rename.onclick = (event) => {
+					event.stopPropagation();
+					new RenameVersionModal(this.app, versionLabel(version), async (name) => {
+						if (await this.options.store.renameVersion(this.entry!, version.id, name)) await this.refresh();
+					}).open();
+				};
 				main.createDiv({ cls: "mas-versions-date", text: new Date(version.savedAt).toLocaleString() });
 				const status = row.createDiv({ cls: "mas-versions-status" });
 				if (version.id === this.entry.defaultId) {
@@ -521,9 +560,8 @@ export class ManageVersionsModal extends Modal {
 				setIcon(trash, "trash-2");
 				trash.onclick = async (event) => {
 					event.stopPropagation();
-					await this.options.store.deleteVersion(this.entry!, version.id, this.options.file);
+					await this.deleteWithPrompt(version);
 					this.selectionDirty = true;
-					await this.refresh();
 				};
 				}
 			}
@@ -535,6 +573,68 @@ export class ManageVersionsModal extends Modal {
 			apply.disabled = !this.entry?.versions.length;
 			apply.onclick = () => { void this.apply(); };
 		}
+	}
+
+	private async setSelectedWithPrompt(version: SavedVersion, selected: boolean): Promise<void> {
+		if (selected) {
+			await this.options.store.setSelected(this.entry!, version.id, true);
+			await this.refresh();
+			return;
+		}
+		if (version.id === this.entry?.defaultId) return;
+		const modified = await this.options.store.versionModified(this.options.file, this.entry!, version.id);
+		if (!modified) {
+			await this.options.store.setSelected(this.entry!, version.id, false);
+			await this.refresh();
+			return;
+		}
+		new ManagedVersionChangesModal(this.app, {
+			onSaveNew: async () => {
+				await this.saveVersionNote(version, false);
+				await this.options.store.setSelected(this.entry!, version.id, false);
+				await this.refresh();
+			},
+			onOverwrite: async () => {
+				await this.saveVersionNote(version, true);
+				await this.options.store.setSelected(this.entry!, version.id, false);
+				await this.refresh();
+			},
+			onDiscard: async () => {
+				await this.options.store.setSelected(this.entry!, version.id, false);
+				await this.refresh();
+			},
+		}).open();
+	}
+
+	private async deleteWithPrompt(version: SavedVersion): Promise<void> {
+		if (version.id === this.entry?.defaultId) {
+			new Notice("Choose another default version before deleting this one.");
+			return;
+		}
+		const modified = await this.options.store.versionModified(this.options.file, this.entry!, version.id);
+		if (!modified) {
+			await this.options.store.deleteVersion(this.entry!, version.id, this.options.file);
+			await this.refresh();
+			return;
+		}
+		new ManagedVersionChangesModal(this.app, {
+			onSaveNew: async () => {
+				await this.saveVersionNote(version, false);
+				await this.options.store.deleteVersion(this.entry!, version.id, this.options.file);
+				await this.refresh();
+			},
+			onDiscard: async () => {
+				await this.options.store.deleteVersion(this.entry!, version.id, this.options.file);
+				await this.refresh();
+			},
+		}).open();
+	}
+
+	private async saveVersionNote(version: SavedVersion, overwrite: boolean): Promise<void> {
+		const path = versionNotePath(this.options.file, version);
+		const note = this.options.app.vault.getAbstractFileByPath(normalizePath(path));
+		if (!(note instanceof TFile)) return;
+		await this.options.store.saveVersion(note, overwrite, this.renderFingerprint, { activeVersionId: version.id });
 	}
 
 	private detach(): void {
@@ -602,6 +702,74 @@ export class ManageVersionsModal extends Modal {
 		this.selectionDirty = false;
 		if (!written) new Notice("No changes to apply.");
 		this.close();
+	}
+}
+
+class ManagedVersionChangesModal extends Modal {
+	private readonly options: {
+		onSaveNew: () => Promise<void>;
+		onOverwrite?: () => Promise<void>;
+		onDiscard: () => Promise<void>;
+	};
+
+	constructor(app: App, options: ManagedVersionChangesModal["options"]) {
+		super(app);
+		this.options = options;
+	}
+
+	onOpen(): void {
+		const { contentEl } = this;
+		contentEl.createEl("h2", { text: "This version has changed" });
+		contentEl.createEl("p", { text: "This version has been modified from its saved content. Would you like to save these changes?" });
+		const buttons = contentEl.createDiv({ cls: "mas-versions-conflict-actions" });
+		const add = (text: string, action: () => Promise<void>, primary = false): void => {
+			const button = buttons.createEl("button", { text, cls: primary ? "mod-cta" : undefined });
+			button.onclick = async () => { await action(); this.close(); };
+		};
+		add("Save as new version", this.options.onSaveNew, true);
+		if (this.options.onOverwrite) add("Overwrite this version", this.options.onOverwrite);
+		add("Discard changes", this.options.onDiscard);
+		add("Cancel", async () => undefined);
+	}
+
+	onClose(): void {
+		this.contentEl.empty();
+	}
+}
+
+class RenameVersionModal extends Modal {
+	private readonly current: string;
+	private readonly onSubmit: (name: string) => Promise<void>;
+
+	constructor(app: App, current: string, onSubmit: (name: string) => Promise<void>) {
+		super(app);
+		this.current = current;
+		this.onSubmit = onSubmit;
+	}
+
+	onOpen(): void {
+		const { contentEl } = this;
+		contentEl.createEl("h2", { text: "Rename version" });
+		let name = this.current;
+		new Setting(contentEl).setName("Version name").addText((text) => {
+			text.setValue(name).onChange((value) => { name = value; });
+		});
+		const buttons = contentEl.createDiv({ cls: "mas-versions-conflict-actions" });
+		const save = buttons.createEl("button", { text: "Rename", cls: "mod-cta" });
+		save.onclick = async () => {
+			if (!name.trim()) {
+				new Notice("Enter a version name.");
+				return;
+			}
+			await this.onSubmit(name);
+			this.close();
+		};
+		const cancel = buttons.createEl("button", { text: "Cancel" });
+		cancel.onclick = () => this.close();
+	}
+
+	onClose(): void {
+		this.contentEl.empty();
 	}
 }
 

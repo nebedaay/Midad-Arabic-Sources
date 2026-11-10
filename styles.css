@@ -2298,3 +2298,22 @@ body .callout[data-callout^="mas-annotation-comment"] {
 .mas-versions-detach {
     margin-block-end: 0.75rem;
 }
+
+.mas-versions-label-line {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+}
+
+.mas-versions-rename {
+    border: none !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    color: var(--text-muted);
+    padding: 0.05rem 0.2rem;
+}
+
+.mas-versions-rename:hover {
+    color: var(--interactive-accent);
+    background: transparent !important;
+}

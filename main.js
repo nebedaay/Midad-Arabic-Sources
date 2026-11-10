@@ -13393,6 +13393,13 @@ function normalizedHash(text) {
   const clean3 = text.replace(/^other-versions:[^\n]*\n(?:[ \t]+-[^\n]*\n)*/gm, "").replace(/^midad-version:[^\n]*\n/gm, "");
   return hashString(clean3);
 }
+function managedHash(text) {
+  const prior = splitNote(text);
+  const region = findManagedRegion(prior.body);
+  if (region)
+    return hashString(prior.body.slice(region.start, region.end));
+  return hashString(prior.body);
+}
 function noteKey(file, frontmatter) {
   const id = typeof (frontmatter == null ? void 0 : frontmatter["midad-id"]) === "string" ? frontmatter["midad-id"].trim() : "";
   return id ? `id:${id}` : `path:${file.path}`;
@@ -13409,7 +13416,7 @@ function versionNotePath(file, version) {
 }
 function versionLink(file, entry, version) {
   const path2 = version.id === entry.defaultId ? file.path : versionNotePath(file, version);
-  const label = version.id === entry.defaultId ? "default" : version.id.toUpperCase();
+  const label = version.id === entry.defaultId ? "Default version" : versionLabel(version);
   return `[[${path2.replace(/\.md$/, "")}|${label}]]`;
 }
 function addUpLink(content, link) {
@@ -13619,6 +13626,19 @@ var VersionStore = class {
     }
     this.save();
   }
+  async renameVersion(entry, id, label) {
+    const version = entry.versions.find((v) => v.id === id);
+    const value = label.trim();
+    if (!version || !value)
+      return false;
+    if (entry.versions.some((v) => v.id !== id && versionLabel(v).toLowerCase() === value.toLowerCase())) {
+      new import_obsidian3.Notice("That version name is already in use.");
+      return false;
+    }
+    version.label = value;
+    this.save();
+    return true;
+  }
   async setSelected(entry, id, selected) {
     const version = entry.versions.find((v) => v.id === id);
     if (!version)
@@ -13666,6 +13686,18 @@ var VersionStore = class {
         return true;
     }
     return false;
+  }
+  async versionModified(file, entry, id) {
+    const version = entry.versions.find((v) => v.id === id);
+    if (!version)
+      return false;
+    const path2 = versionNotePath(file, version);
+    const existing = this.app.vault.getAbstractFileByPath((0, import_obsidian3.normalizePath)(path2));
+    if (!(existing instanceof import_obsidian3.TFile))
+      return false;
+    const live = await this.app.vault.read(existing);
+    const saved = await this.versionText(entry, id);
+    return !saved || managedHash(live) !== managedHash(saved);
   }
   async entriesForPaths(paths) {
     const wanted = new Set(paths.map((path2) => (0, import_obsidian3.normalizePath)(path2)));
@@ -13832,12 +13864,21 @@ var ManageVersionsModal = class extends import_obsidian3.Modal {
               new import_obsidian3.Notice("The default version must remain selected.");
               return;
             }
-            await this.options.store.setSelected(this.entry, version.id, !version.selected);
+            await this.setSelectedWithPrompt(version, !version.selected);
             this.selectionDirty = true;
-            await this.refresh();
           };
           const main = row.createDiv({ cls: "mas-versions-main" });
-          main.createDiv({ cls: "mas-versions-label", text: versionLabel(version) });
+          const labelLine = main.createDiv({ cls: "mas-versions-label-line" });
+          labelLine.createSpan({ cls: "mas-versions-label", text: versionLabel(version) });
+          const rename = labelLine.createEl("button", { cls: "mas-versions-rename", attr: { "aria-label": "Rename version" } });
+          (0, import_obsidian3.setIcon)(rename, "pencil");
+          rename.onclick = (event) => {
+            event.stopPropagation();
+            new RenameVersionModal(this.app, versionLabel(version), async (name) => {
+              if (await this.options.store.renameVersion(this.entry, version.id, name))
+                await this.refresh();
+            }).open();
+          };
           main.createDiv({ cls: "mas-versions-date", text: new Date(version.savedAt).toLocaleString() });
           const status = row.createDiv({ cls: "mas-versions-status" });
           if (version.id === this.entry.defaultId) {
@@ -13854,9 +13895,8 @@ var ManageVersionsModal = class extends import_obsidian3.Modal {
           (0, import_obsidian3.setIcon)(trash, "trash-2");
           trash.onclick = async (event) => {
             event.stopPropagation();
-            await this.options.store.deleteVersion(this.entry, version.id, this.options.file);
+            await this.deleteWithPrompt(version);
             this.selectionDirty = true;
-            await this.refresh();
           };
         }
       }
@@ -13869,6 +13909,69 @@ var ManageVersionsModal = class extends import_obsidian3.Modal {
         void this.apply();
       };
     }
+  }
+  async setSelectedWithPrompt(version, selected) {
+    var _a2;
+    if (selected) {
+      await this.options.store.setSelected(this.entry, version.id, true);
+      await this.refresh();
+      return;
+    }
+    if (version.id === ((_a2 = this.entry) == null ? void 0 : _a2.defaultId))
+      return;
+    const modified = await this.options.store.versionModified(this.options.file, this.entry, version.id);
+    if (!modified) {
+      await this.options.store.setSelected(this.entry, version.id, false);
+      await this.refresh();
+      return;
+    }
+    new ManagedVersionChangesModal(this.app, {
+      onSaveNew: async () => {
+        await this.saveVersionNote(version, false);
+        await this.options.store.setSelected(this.entry, version.id, false);
+        await this.refresh();
+      },
+      onOverwrite: async () => {
+        await this.saveVersionNote(version, true);
+        await this.options.store.setSelected(this.entry, version.id, false);
+        await this.refresh();
+      },
+      onDiscard: async () => {
+        await this.options.store.setSelected(this.entry, version.id, false);
+        await this.refresh();
+      }
+    }).open();
+  }
+  async deleteWithPrompt(version) {
+    var _a2;
+    if (version.id === ((_a2 = this.entry) == null ? void 0 : _a2.defaultId)) {
+      new import_obsidian3.Notice("Choose another default version before deleting this one.");
+      return;
+    }
+    const modified = await this.options.store.versionModified(this.options.file, this.entry, version.id);
+    if (!modified) {
+      await this.options.store.deleteVersion(this.entry, version.id, this.options.file);
+      await this.refresh();
+      return;
+    }
+    new ManagedVersionChangesModal(this.app, {
+      onSaveNew: async () => {
+        await this.saveVersionNote(version, false);
+        await this.options.store.deleteVersion(this.entry, version.id, this.options.file);
+        await this.refresh();
+      },
+      onDiscard: async () => {
+        await this.options.store.deleteVersion(this.entry, version.id, this.options.file);
+        await this.refresh();
+      }
+    }).open();
+  }
+  async saveVersionNote(version, overwrite) {
+    const path2 = versionNotePath(this.options.file, version);
+    const note = this.options.app.vault.getAbstractFileByPath((0, import_obsidian3.normalizePath)(path2));
+    if (!(note instanceof import_obsidian3.TFile))
+      return;
+    await this.options.store.saveVersion(note, overwrite, this.renderFingerprint, { activeVersionId: version.id });
   }
   detach() {
     if (!this.outsideContent)
@@ -13933,6 +14036,65 @@ ${prior.body.slice(region.start, region.end).trim()}
     if (!written)
       new import_obsidian3.Notice("No changes to apply.");
     this.close();
+  }
+};
+var ManagedVersionChangesModal = class extends import_obsidian3.Modal {
+  constructor(app, options) {
+    super(app);
+    this.options = options;
+  }
+  onOpen() {
+    const { contentEl } = this;
+    contentEl.createEl("h2", { text: "This version has changed" });
+    contentEl.createEl("p", { text: "This version has been modified from its saved content. Would you like to save these changes?" });
+    const buttons = contentEl.createDiv({ cls: "mas-versions-conflict-actions" });
+    const add = (text, action2, primary = false) => {
+      const button = buttons.createEl("button", { text, cls: primary ? "mod-cta" : void 0 });
+      button.onclick = async () => {
+        await action2();
+        this.close();
+      };
+    };
+    add("Save as new version", this.options.onSaveNew, true);
+    if (this.options.onOverwrite)
+      add("Overwrite this version", this.options.onOverwrite);
+    add("Discard changes", this.options.onDiscard);
+    add("Cancel", async () => void 0);
+  }
+  onClose() {
+    this.contentEl.empty();
+  }
+};
+var RenameVersionModal = class extends import_obsidian3.Modal {
+  constructor(app, current, onSubmit) {
+    super(app);
+    this.current = current;
+    this.onSubmit = onSubmit;
+  }
+  onOpen() {
+    const { contentEl } = this;
+    contentEl.createEl("h2", { text: "Rename version" });
+    let name = this.current;
+    new import_obsidian3.Setting(contentEl).setName("Version name").addText((text) => {
+      text.setValue(name).onChange((value) => {
+        name = value;
+      });
+    });
+    const buttons = contentEl.createDiv({ cls: "mas-versions-conflict-actions" });
+    const save = buttons.createEl("button", { text: "Rename", cls: "mod-cta" });
+    save.onclick = async () => {
+      if (!name.trim()) {
+        new import_obsidian3.Notice("Enter a version name.");
+        return;
+      }
+      await this.onSubmit(name);
+      this.close();
+    };
+    const cancel = buttons.createEl("button", { text: "Cancel" });
+    cancel.onclick = () => this.close();
+  }
+  onClose() {
+    this.contentEl.empty();
   }
 };
 var DetachVersionModal = class extends import_obsidian3.Modal {
