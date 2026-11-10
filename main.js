@@ -21967,7 +21967,9 @@ var MidadArabicSourcesPlugin = class extends import_obsidian19.Plugin {
       new import_obsidian19.Notice("The annotation layer could not start. See the developer console for details.");
     }
     this.app.workspace.onLayoutReady(() => {
-      void this.repairTopicLinks();
+      window.setTimeout(() => {
+        void this.repairTopicLinks();
+      }, 2500);
       void this.refreshSourceRegistry();
       void this.refreshSourcesIndex();
     });
@@ -24343,12 +24345,20 @@ var MidadArabicSourcesPlugin = class extends import_obsidian19.Plugin {
     }
   }
   withTopicUpLinks(text, topics2) {
+    const active = new Set(topics2.map((topic) => topicNoteName(topic)));
+    const topicLines = [...text.matchAll(/\[\[(Midad topic - [^\]|]+)/g)];
+    if (!topics2.length && !topicLines.length)
+      return text;
+    if (topics2.length && topicLines.every((match) => active.has(match[1]))) {
+      const allPresent = topics2.every((topic) => text.includes(`[[${topicNoteName(topic)}|`));
+      if (allPresent)
+        return text;
+    }
     const fmEnd = text.startsWith("---") ? text.indexOf("\n---", 3) : -1;
     if (fmEnd < 0)
       return text;
     const front = text.slice(0, fmEnd).split("\n");
     const body = text.slice(fmEnd);
-    const active = new Set(topics2.map((topic) => topicNoteName(topic)));
     const index = front.findIndex((line) => /^midad-up:[ \t]*$/.test(line));
     let items;
     if (index < 0) {
@@ -24405,6 +24415,8 @@ var MidadArabicSourcesPlugin = class extends import_obsidian19.Plugin {
       } catch (e) {
         continue;
       }
+      if (!text.includes("midad-up:") && !text.includes("Midad topic") && !text.includes("Midad Arabic"))
+        continue;
       let next = text;
       for (const old of oldTopics) {
         const label = old === "Qur\u02BE\u0101n (text)" || old === "Qur\u02BE\u0101n Translations" ? "Qur\u02BE\u0101n text and translations" : old === "Dictionaries" ? "Dictionaries" : topicLabel(old);

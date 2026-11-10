@@ -713,7 +713,9 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		// a whole-vault registry pass and a MOC re-render. OnLayoutReady fires
 		// immediately if the layout is already up.
 		this.app.workspace.onLayoutReady(() => {
-			void this.repairTopicLinks();
+			// Let the workspace become interactive before the full-vault topic
+			// migration scan starts.
+			window.setTimeout(() => { void this.repairTopicLinks(); }, 2500);
 			void this.refreshSourceRegistry();
 			void this.refreshSourcesIndex();
 		});
@@ -3304,11 +3306,17 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 
 	/** Keep midad-up topic links in sync with the user's topics property. */
 	private withTopicUpLinks(text: string, topics: string[]): string {
+		const active = new Set(topics.map((topic) => topicNoteName(topic)));
+		const topicLines = [...text.matchAll(/\[\[(Midad topic - [^\]|]+)/g)];
+		if (!topics.length && !topicLines.length) return text;
+		if (topics.length && topicLines.every((match) => active.has(match[1]))) {
+			const allPresent = topics.every((topic) => text.includes(`[[${topicNoteName(topic)}|`));
+			if (allPresent) return text;
+		}
 		const fmEnd = text.startsWith("---") ? text.indexOf("\n---", 3) : -1;
 		if (fmEnd < 0) return text;
 		const front = text.slice(0, fmEnd).split("\n");
 		const body = text.slice(fmEnd);
-		const active = new Set(topics.map((topic) => topicNoteName(topic)));
 		const index = front.findIndex((line) => /^midad-up:[ \t]*$/.test(line));
 		let items: string[];
 		if (index < 0) {
@@ -3349,6 +3357,9 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			} catch {
 				continue;
 			}
+			// Most vault notes have no topic/midad-up content at all; avoid the
+			// regex/migration work for them.
+			if (!text.includes("midad-up:") && !text.includes("Midad topic") && !text.includes("Midad Arabic")) continue;
 			let next = text;
 			for (const old of oldTopics) {
 				const label = old === "Qurʾān (text)" || old === "Qurʾān Translations"
