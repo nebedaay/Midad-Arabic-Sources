@@ -24531,7 +24531,8 @@ var MidadArabicSourcesPlugin = class extends import_obsidian19.Plugin {
       return text;
     if (topics2.length && topicLines.every((match) => active.has(match[1]))) {
       const allPresent = topics2.every((topic) => text.includes(`[[${topicNoteName(topic)}|`));
-      if (allPresent)
+      const noDuplicates = new Set(topicLines.map((match) => match[0])).size === topicLines.length;
+      if (allPresent && noDuplicates)
         return text;
     }
     const fmEnd = text.startsWith("---") ? text.indexOf("\n---", 3) : -1;
@@ -24553,9 +24554,16 @@ var MidadArabicSourcesPlugin = class extends import_obsidian19.Plugin {
       items = front.slice(index + 1, endIndex).filter((line) => line.trim());
       front.splice(index, endIndex - index, "midad-up:");
     }
+    const seen = new Set();
     items = items.filter((line) => {
       const target = /\[\[(Midad topic - [^\]|]+)/.exec(line);
-      return !target || active.has(target[1]);
+      if (target && !active.has(target[1]))
+        return false;
+      const key = line.trim();
+      if (!key || seen.has(key))
+        return false;
+      seen.add(key);
+      return true;
     });
     const missing = topics2.filter((topic) => !items.some((line) => line.includes(`[[${topicNoteName(topic)}|`))).map((topic) => `  - "${topicLink(topic)}"`);
     const insert = index < 0 ? front.length : index + 1;
