@@ -2326,3 +2326,9 @@ body .callout[data-callout^="mas-annotation-comment"] {
     align-items: center;
     justify-content: center;
 }
+
+.mas-versions-nochanges {
+    margin: 0 0 0.6rem;
+    color: var(--text-muted);
+    font-size: var(--font-ui-smaller);
+}

@@ -146,10 +146,13 @@ function sanitizeFrontmatter(content: string): string {
 	const out: string[] = [];
 	let key = "";
 	let seen = new Set<string>();
+	const seenProperties = new Set<string>();
 	for (const line of front) {
 		const property = /^([A-Za-z][\w-]*):/.exec(line);
 		if (property) {
 			key = property[1];
+			if (key === "midad-version" && seenProperties.has(key)) continue;
+			seenProperties.add(key);
 			seen = new Set<string>();
 			out.push(line);
 			continue;
@@ -508,7 +511,6 @@ export class ManageVersionsModal extends Modal {
 	private render(): void {
 		const { contentEl } = this;
 		contentEl.empty();
-		contentEl.createEl("h2", { text: "Manage versions" });
 		contentEl.createEl("p", {
 			cls: "mas-versions-desc",
 			text: `Saved versions for ${this.entry?.title || this.options.file.basename}. The default version supplies the main note.`,
@@ -548,6 +550,10 @@ export class ManageVersionsModal extends Modal {
 		if (changed || !hasVersions) {
 			const save = top.createEl("button", { text: "Save new version" });
 			save.onclick = () => { this.promptNewVersion(); };
+		}
+
+		if (!changed && hasVersions) {
+			contentEl.createEl("p", { cls: "mas-versions-nochanges", text: "No changes to save." });
 		}
 
 		if (!this.activeVersionId) {
@@ -773,8 +779,8 @@ class ManagedVersionChangesModal extends Modal {
 	}
 
 	onOpen(): void {
+		this.titleEl.setText("This version has changed");
 		const { contentEl } = this;
-		contentEl.createEl("h2", { text: "This version has changed" });
 		contentEl.createEl("p", { text: "This version has been modified from its saved content. Would you like to save these changes?" });
 		const buttons = contentEl.createDiv({ cls: "mas-versions-conflict-actions" });
 		const add = (text: string, action: () => Promise<void>, primary = false): void => {
@@ -803,10 +809,12 @@ class VersionNameModal extends Modal {
 	}
 
 	onOpen(): void {
+		this.titleEl.setText("Name new version");
 		const { contentEl } = this;
-		contentEl.createEl("h2", { text: "Name new version" });
 		let name = this.suggestion;
+		let inputEl: HTMLInputElement | null = null;
 		new Setting(contentEl).setName("Version name").addText((text) => {
+			inputEl = text.inputEl;
 			text.setValue(name).onChange((value) => { name = value; });
 		});
 		const buttons = contentEl.createDiv({ cls: "mas-versions-conflict-actions" });
@@ -819,6 +827,12 @@ class VersionNameModal extends Modal {
 			await this.onSubmit(name);
 			this.close();
 		};
+		inputEl?.addEventListener("keydown", (event) => {
+			if (event.key === "Enter") {
+				event.preventDefault();
+				save.click();
+			}
+		});
 		const cancel = buttons.createEl("button", { text: "Cancel" });
 		cancel.onclick = () => this.close();
 	}
@@ -837,10 +851,12 @@ class RenameVersionModal extends Modal {
 	}
 
 	onOpen(): void {
+		this.titleEl.setText("Rename version");
 		const { contentEl } = this;
-		contentEl.createEl("h2", { text: "Rename version" });
 		let name = this.current;
+		let inputEl: HTMLInputElement | null = null;
 		new Setting(contentEl).setName("Version name").addText((text) => {
+			inputEl = text.inputEl;
 			text.setValue(name).onChange((value) => { name = value; });
 		});
 		const buttons = contentEl.createDiv({ cls: "mas-versions-conflict-actions" });
@@ -853,6 +869,12 @@ class RenameVersionModal extends Modal {
 			await this.onSubmit(name);
 			this.close();
 		};
+		inputEl?.addEventListener("keydown", (event) => {
+			if (event.key === "Enter") {
+				event.preventDefault();
+				save.click();
+			}
+		});
 		const cancel = buttons.createEl("button", { text: "Cancel" });
 		cancel.onclick = () => this.close();
 	}
@@ -871,11 +893,13 @@ class DetachVersionModal extends Modal {
 	}
 
 	onOpen(): void {
+		this.titleEl.setText("Detach user content");
 		const { contentEl } = this;
-		contentEl.createEl("h2", { text: "Detach user content" });
 		contentEl.createEl("p", { text: "Save the text outside the managed region as a separate note. It will be removed from this version note." });
 		let name = this.options.defaultName;
+		let inputEl: HTMLInputElement | null = null;
 		new Setting(contentEl).setName("Note name").addText((text) => {
+			inputEl = text.inputEl;
 			text.setValue(name).onChange((value) => { name = value; });
 		});
 		const buttons = contentEl.createDiv({ cls: "mas-versions-conflict-actions" });
@@ -888,6 +912,12 @@ class DetachVersionModal extends Modal {
 			await this.options.onSubmit(name);
 			this.close();
 		};
+		inputEl?.addEventListener("keydown", (event) => {
+			if (event.key === "Enter") {
+				event.preventDefault();
+				save.click();
+			}
+		});
 		const cancel = buttons.createEl("button", { text: "Cancel" });
 		cancel.onclick = () => this.close();
 	}
@@ -911,8 +941,8 @@ class UnsavedVersionModal extends Modal {
 	}
 
 	onOpen(): void {
+		this.titleEl.setText("Unsaved changes");
 		const { contentEl } = this;
-		contentEl.createEl("h2", { text: "Unsaved changes" });
 		contentEl.createEl("p", {
 			text: "The current note has unsaved changes. What do you want to do with your changes?",
 		});

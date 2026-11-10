@@ -13494,10 +13494,14 @@ function sanitizeFrontmatter(content) {
   const out = [];
   let key = "";
   let seen = new Set();
+  const seenProperties = new Set();
   for (const line of front) {
     const property = /^([A-Za-z][\w-]*):/.exec(line);
     if (property) {
       key = property[1];
+      if (key === "midad-version" && seenProperties.has(key))
+        continue;
+      seenProperties.add(key);
       seen = new Set();
       out.push(line);
       continue;
@@ -13831,7 +13835,6 @@ var ManageVersionsModal = class extends import_obsidian3.Modal {
     var _a2, _b2, _c, _d;
     const { contentEl } = this;
     contentEl.empty();
-    contentEl.createEl("h2", { text: "Manage versions" });
     contentEl.createEl("p", {
       cls: "mas-versions-desc",
       text: `Saved versions for ${((_a2 = this.entry) == null ? void 0 : _a2.title) || this.options.file.basename}. The default version supplies the main note.`
@@ -13875,6 +13878,9 @@ var ManageVersionsModal = class extends import_obsidian3.Modal {
       save.onclick = () => {
         this.promptNewVersion();
       };
+    }
+    if (!changed && hasVersions) {
+      contentEl.createEl("p", { cls: "mas-versions-nochanges", text: "No changes to save." });
     }
     if (!this.activeVersionId) {
       const list = contentEl.createDiv({ cls: "mas-versions-list" });
@@ -14096,8 +14102,8 @@ var ManagedVersionChangesModal = class extends import_obsidian3.Modal {
     this.options = options;
   }
   onOpen() {
+    this.titleEl.setText("This version has changed");
     const { contentEl } = this;
-    contentEl.createEl("h2", { text: "This version has changed" });
     contentEl.createEl("p", { text: "This version has been modified from its saved content. Would you like to save these changes?" });
     const buttons = contentEl.createDiv({ cls: "mas-versions-conflict-actions" });
     const add = (text, action2, primary = false) => {
@@ -14124,10 +14130,12 @@ var VersionNameModal = class extends import_obsidian3.Modal {
     this.onSubmit = onSubmit;
   }
   onOpen() {
+    this.titleEl.setText("Name new version");
     const { contentEl } = this;
-    contentEl.createEl("h2", { text: "Name new version" });
     let name = this.suggestion;
+    let inputEl = null;
     new import_obsidian3.Setting(contentEl).setName("Version name").addText((text) => {
+      inputEl = text.inputEl;
       text.setValue(name).onChange((value) => {
         name = value;
       });
@@ -14142,6 +14150,12 @@ var VersionNameModal = class extends import_obsidian3.Modal {
       await this.onSubmit(name);
       this.close();
     };
+    inputEl == null ? void 0 : inputEl.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        save.click();
+      }
+    });
     const cancel = buttons.createEl("button", { text: "Cancel" });
     cancel.onclick = () => this.close();
   }
@@ -14156,10 +14170,12 @@ var RenameVersionModal = class extends import_obsidian3.Modal {
     this.onSubmit = onSubmit;
   }
   onOpen() {
+    this.titleEl.setText("Rename version");
     const { contentEl } = this;
-    contentEl.createEl("h2", { text: "Rename version" });
     let name = this.current;
+    let inputEl = null;
     new import_obsidian3.Setting(contentEl).setName("Version name").addText((text) => {
+      inputEl = text.inputEl;
       text.setValue(name).onChange((value) => {
         name = value;
       });
@@ -14174,6 +14190,12 @@ var RenameVersionModal = class extends import_obsidian3.Modal {
       await this.onSubmit(name);
       this.close();
     };
+    inputEl == null ? void 0 : inputEl.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        save.click();
+      }
+    });
     const cancel = buttons.createEl("button", { text: "Cancel" });
     cancel.onclick = () => this.close();
   }
@@ -14187,11 +14209,13 @@ var DetachVersionModal = class extends import_obsidian3.Modal {
     this.options = options;
   }
   onOpen() {
+    this.titleEl.setText("Detach user content");
     const { contentEl } = this;
-    contentEl.createEl("h2", { text: "Detach user content" });
     contentEl.createEl("p", { text: "Save the text outside the managed region as a separate note. It will be removed from this version note." });
     let name = this.options.defaultName;
+    let inputEl = null;
     new import_obsidian3.Setting(contentEl).setName("Note name").addText((text) => {
+      inputEl = text.inputEl;
       text.setValue(name).onChange((value) => {
         name = value;
       });
@@ -14206,6 +14230,12 @@ var DetachVersionModal = class extends import_obsidian3.Modal {
       await this.options.onSubmit(name);
       this.close();
     };
+    inputEl == null ? void 0 : inputEl.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        save.click();
+      }
+    });
     const cancel = buttons.createEl("button", { text: "Cancel" });
     cancel.onclick = () => this.close();
   }
@@ -14219,8 +14249,8 @@ var UnsavedVersionModal = class extends import_obsidian3.Modal {
     this.options = options;
   }
   onOpen() {
+    this.titleEl.setText("Unsaved changes");
     const { contentEl } = this;
-    contentEl.createEl("h2", { text: "Unsaved changes" });
     contentEl.createEl("p", {
       text: "The current note has unsaved changes. What do you want to do with your changes?"
     });
