@@ -3304,30 +3304,33 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 
 	/** Keep midad-up topic links in sync with the user's topics property. */
 	private withTopicUpLinks(text: string, topics: string[]): string {
+		const fmEnd = text.startsWith("---") ? text.indexOf("\n---", 3) : -1;
+		if (fmEnd < 0) return text;
+		const front = text.slice(0, fmEnd).split("\n");
+		const body = text.slice(fmEnd);
 		const active = new Set(topics.map((topic) => topicNoteName(topic)));
-		const block = /^midad-up:[ \t]*\n((?:[ \t]+-[ \t]*.*\n?)*)/m.exec(text);
-		if (block && block.index !== undefined) {
-			const lines = block[1]
-				.split("\n")
-				.filter((line) => {
-					const target = /\[\[(Midad topic - [^\]|]+)/.exec(line);
-					return !target || active.has(target[1]);
-				});
-			const missing = topics
-				.filter((topic) => !lines.some((line) => line.includes(`[[${topicNoteName(topic)}|`)))
-				.map((topic) => `  - "${topicLink(topic)}"`);
-			const nextBlock = `midad-up:\n${[...lines, ...missing].join("\n")}${lines.length || missing.length ? "\n" : ""}`;
-			return text.slice(0, block.index) + nextBlock + text.slice(block.index + block[0].length);
+		const index = front.findIndex((line) => /^midad-up:[ \t]*$/.test(line));
+		let items: string[];
+		if (index < 0) {
+			if (!topics.length) return text;
+			items = [];
+			front.push("midad-up:");
+		} else {
+			let endIndex = index + 1;
+			while (endIndex < front.length && !/^[A-Za-z][\w-]*:/.test(front[endIndex])) endIndex++;
+			items = front.slice(index + 1, endIndex).filter((line) => line.trim());
+			front.splice(index, endIndex - index, "midad-up:");
 		}
-		const missing = topics.map((topic) => `  - "${topicLink(topic)}"`);
-		if (!missing.length) return text;
-		if (text.startsWith("---")) {
-			const end = text.indexOf("\n---", 3);
-			if (end >= 0) {
-				return text.slice(0, end) + "\nmidad-up:\n" + missing.join("\n") + text.slice(end);
-			}
-		}
-		return text;
+		items = items.filter((line) => {
+			const target = /\[\[(Midad topic - [^\]|]+)/.exec(line);
+			return !target || active.has(target[1]);
+		});
+		const missing = topics
+			.filter((topic) => !items.some((line) => line.includes(`[[${topicNoteName(topic)}|`)))
+			.map((topic) => `  - "${topicLink(topic)}"`);
+		const insert = index < 0 ? front.length : index + 1;
+		front.splice(insert, 0, ...items, ...missing);
+		return front.join("\n") + body;
 	}
 
 	/** Repair old topic links left in midad-up by an earlier plugin version. */

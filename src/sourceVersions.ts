@@ -507,19 +507,19 @@ export class ManageVersionsModal extends Modal {
 		});
 
 		const top = contentEl.createDiv({ cls: "mas-versions-actions" });
-		if (this.hasChanges() || !this.entry?.versions.length) {
-			const save = top.createEl("button", { text: "Save new version", cls: "mod-cta" });
-			save.onclick = async () => {
-				await this.options.store.saveVersion(this.options.file, false, this.renderFingerprint, { activeVersionId: this.options.activeVersionId });
+		if (this.entry?.versions.length && this.hasChanges()) {
+			const overwrite = top.createEl("button", { text: this.options.activeVersionId ? "Overwrite this version" : "Save the current version" });
+			overwrite.onclick = async () => {
+				await this.options.store.saveVersion(this.options.file, true, this.renderFingerprint, { activeVersionId: this.options.activeVersionId });
 				this.selectionDirty = false;
 				await this.refresh();
 				this.options.onChanged?.();
 			};
 		}
-		if (this.entry?.versions.length && this.hasChanges()) {
-			const overwrite = top.createEl("button", { text: this.options.activeVersionId ? "Overwrite this version" : "Save the current version" });
-			overwrite.onclick = async () => {
-				await this.options.store.saveVersion(this.options.file, true, this.renderFingerprint, { activeVersionId: this.options.activeVersionId });
+		if (this.hasChanges() || !this.entry?.versions.length) {
+			const save = top.createEl("button", { text: "Save new version", cls: "mod-cta" });
+			save.onclick = async () => {
+				await this.options.store.saveVersion(this.options.file, false, this.renderFingerprint, { activeVersionId: this.options.activeVersionId });
 				this.selectionDirty = false;
 				await this.refresh();
 				this.options.onChanged?.();

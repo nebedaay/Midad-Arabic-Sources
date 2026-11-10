@@ -13833,21 +13833,21 @@ var ManageVersionsModal = class extends import_obsidian3.Modal {
       text: "Selected versions are rendered as markdown; deselect a version to archive it. Click \u2018Set as default\u2019 to render a version on the main note without a version suffix. Click the trash icon to delete a version."
     });
     const top = contentEl.createDiv({ cls: "mas-versions-actions" });
-    if (this.hasChanges() || !((_b2 = this.entry) == null ? void 0 : _b2.versions.length)) {
-      const save = top.createEl("button", { text: "Save new version", cls: "mod-cta" });
-      save.onclick = async () => {
+    if (((_b2 = this.entry) == null ? void 0 : _b2.versions.length) && this.hasChanges()) {
+      const overwrite = top.createEl("button", { text: this.options.activeVersionId ? "Overwrite this version" : "Save the current version" });
+      overwrite.onclick = async () => {
         var _a3, _b3;
-        await this.options.store.saveVersion(this.options.file, false, this.renderFingerprint, { activeVersionId: this.options.activeVersionId });
+        await this.options.store.saveVersion(this.options.file, true, this.renderFingerprint, { activeVersionId: this.options.activeVersionId });
         this.selectionDirty = false;
         await this.refresh();
         (_b3 = (_a3 = this.options).onChanged) == null ? void 0 : _b3.call(_a3);
       };
     }
-    if (((_c = this.entry) == null ? void 0 : _c.versions.length) && this.hasChanges()) {
-      const overwrite = top.createEl("button", { text: this.options.activeVersionId ? "Overwrite this version" : "Save the current version" });
-      overwrite.onclick = async () => {
+    if (this.hasChanges() || !((_c = this.entry) == null ? void 0 : _c.versions.length)) {
+      const save = top.createEl("button", { text: "Save new version", cls: "mod-cta" });
+      save.onclick = async () => {
         var _a3, _b3;
-        await this.options.store.saveVersion(this.options.file, true, this.renderFingerprint, { activeVersionId: this.options.activeVersionId });
+        await this.options.store.saveVersion(this.options.file, false, this.renderFingerprint, { activeVersionId: this.options.activeVersionId });
         this.selectionDirty = false;
         await this.refresh();
         (_b3 = (_a3 = this.options).onChanged) == null ? void 0 : _b3.call(_a3);
@@ -24326,28 +24326,34 @@ var MidadArabicSourcesPlugin = class extends import_obsidian19.Plugin {
     }
   }
   withTopicUpLinks(text, topics2) {
-    const active = new Set(topics2.map((topic) => topicNoteName(topic)));
-    const block = /^midad-up:[ \t]*\n((?:[ \t]+-[ \t]*.*\n?)*)/m.exec(text);
-    if (block && block.index !== void 0) {
-      const lines = block[1].split("\n").filter((line) => {
-        const target = /\[\[(Midad topic - [^\]|]+)/.exec(line);
-        return !target || active.has(target[1]);
-      });
-      const missing2 = topics2.filter((topic) => !lines.some((line) => line.includes(`[[${topicNoteName(topic)}|`))).map((topic) => `  - "${topicLink(topic)}"`);
-      const nextBlock = `midad-up:
-${[...lines, ...missing2].join("\n")}${lines.length || missing2.length ? "\n" : ""}`;
-      return text.slice(0, block.index) + nextBlock + text.slice(block.index + block[0].length);
-    }
-    const missing = topics2.map((topic) => `  - "${topicLink(topic)}"`);
-    if (!missing.length)
+    const fmEnd = text.startsWith("---") ? text.indexOf("\n---", 3) : -1;
+    if (fmEnd < 0)
       return text;
-    if (text.startsWith("---")) {
-      const end = text.indexOf("\n---", 3);
-      if (end >= 0) {
-        return text.slice(0, end) + "\nmidad-up:\n" + missing.join("\n") + text.slice(end);
-      }
+    const front = text.slice(0, fmEnd).split("\n");
+    const body = text.slice(fmEnd);
+    const active = new Set(topics2.map((topic) => topicNoteName(topic)));
+    const index = front.findIndex((line) => /^midad-up:[ \t]*$/.test(line));
+    let items;
+    if (index < 0) {
+      if (!topics2.length)
+        return text;
+      items = [];
+      front.push("midad-up:");
+    } else {
+      let endIndex = index + 1;
+      while (endIndex < front.length && !/^[A-Za-z][\w-]*:/.test(front[endIndex]))
+        endIndex++;
+      items = front.slice(index + 1, endIndex).filter((line) => line.trim());
+      front.splice(index, endIndex - index, "midad-up:");
     }
-    return text;
+    items = items.filter((line) => {
+      const target = /\[\[(Midad topic - [^\]|]+)/.exec(line);
+      return !target || active.has(target[1]);
+    });
+    const missing = topics2.filter((topic) => !items.some((line) => line.includes(`[[${topicNoteName(topic)}|`))).map((topic) => `  - "${topicLink(topic)}"`);
+    const insert = index < 0 ? front.length : index + 1;
+    front.splice(insert, 0, ...items, ...missing);
+    return front.join("\n") + body;
   }
   async repairTopicLinks() {
     var _a2;
