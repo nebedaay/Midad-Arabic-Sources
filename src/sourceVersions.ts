@@ -112,8 +112,39 @@ function setFrontmatterList(content: string, key: string, values: string[]): str
 	return `---\n${block}---\n\n${clean}`;
 }
 
+function sanitizeFrontmatter(content: string): string {
+	if (!content.startsWith("---")) return content;
+	const end = content.indexOf("\n---", 3);
+	if (end < 0) return content;
+	const front = content.slice(0, end).split("\n");
+	const body = content.slice(end);
+	const out: string[] = [];
+	let key = "";
+	let seen = new Set<string>();
+	for (const line of front) {
+		const property = /^([A-Za-z][\w-]*):/.exec(line);
+		if (property) {
+			key = property[1];
+			seen = new Set<string>();
+			out.push(line);
+			continue;
+		}
+		const item = /^\s+-\s+(.*)$/.exec(line);
+		if (item && (key === "aliases" || key === "topics")) {
+			const value = item[1].trim();
+			// Version links belong in other-versions/midad-up, never aliases or
+			// topics. Duplicate aliases are also invalid in Obsidian.
+			if (/\.Version\d+/i.test(value) || /\|V\d+\]\]/.test(value)) continue;
+			if (key === "aliases" && seen.has(value)) continue;
+			seen.add(value);
+		}
+		out.push(line);
+	}
+	return out.join("\n") + body;
+}
+
 function addVersionFrontmatter(content: string, id: string, otherLinks: string[]): string {
-	const withVersion = setFrontmatterProperty(content, "midad-version", `"${id}"`);
+	const withVersion = setFrontmatterProperty(sanitizeFrontmatter(content), "midad-version", `"${id}"`);
 	return setFrontmatterList(withVersion, "other-versions", otherLinks);
 }
 
@@ -279,7 +310,7 @@ export class VersionStore {
 			.map((v) => versionLink(file, entry, v));
 		const defaultText = await this.versionText(entry, defaultVersion.id);
 		if (!defaultText) return 0;
-		const defaultBody = setFrontmatterList(defaultText, "other-versions", otherLinks);
+		const defaultBody = setFrontmatterList(sanitizeFrontmatter(defaultText), "other-versions", otherLinks);
 		let written = (await this.writeLive(file.path, defaultBody)) ? 1 : 0;
 		const defaultLink = versionLink(file, entry, defaultVersion);
 		for (const version of entry.versions) {

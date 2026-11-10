@@ -13466,8 +13466,40 @@ ${block}---
 
 ${clean3}`;
 }
+function sanitizeFrontmatter(content) {
+  if (!content.startsWith("---"))
+    return content;
+  const end = content.indexOf("\n---", 3);
+  if (end < 0)
+    return content;
+  const front = content.slice(0, end).split("\n");
+  const body = content.slice(end);
+  const out = [];
+  let key = "";
+  let seen = new Set();
+  for (const line of front) {
+    const property = /^([A-Za-z][\w-]*):/.exec(line);
+    if (property) {
+      key = property[1];
+      seen = new Set();
+      out.push(line);
+      continue;
+    }
+    const item = /^\s+-\s+(.*)$/.exec(line);
+    if (item && (key === "aliases" || key === "topics")) {
+      const value = item[1].trim();
+      if (/\.Version\d+/i.test(value) || /\|V\d+\]\]/.test(value))
+        continue;
+      if (key === "aliases" && seen.has(value))
+        continue;
+      seen.add(value);
+    }
+    out.push(line);
+  }
+  return out.join("\n") + body;
+}
 function addVersionFrontmatter(content, id, otherLinks) {
-  const withVersion = setFrontmatterProperty(content, "midad-version", `"${id}"`);
+  const withVersion = setFrontmatterProperty(sanitizeFrontmatter(content), "midad-version", `"${id}"`);
   return setFrontmatterList(withVersion, "other-versions", otherLinks);
 }
 var VersionStore = class {
@@ -13626,7 +13658,7 @@ var VersionStore = class {
     const defaultText = await this.versionText(entry, defaultVersion.id);
     if (!defaultText)
       return 0;
-    const defaultBody = setFrontmatterList(defaultText, "other-versions", otherLinks);
+    const defaultBody = setFrontmatterList(sanitizeFrontmatter(defaultText), "other-versions", otherLinks);
     let written = await this.writeLive(file.path, defaultBody) ? 1 : 0;
     const defaultLink = versionLink(file, entry, defaultVersion);
     for (const version of entry.versions) {
