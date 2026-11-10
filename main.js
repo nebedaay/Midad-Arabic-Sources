@@ -13539,7 +13539,7 @@ var VersionStore = class {
     const key = noteKey(file, (_a2 = this.app.metadataCache.getFileCache(file)) == null ? void 0 : _a2.frontmatter);
     return (_b2 = manifest.notes[key]) != null ? _b2 : null;
   }
-  async saveVersion(file, overwrite, renderHash) {
+  async saveVersion(file, overwrite, renderHash, options = {}) {
     var _a2;
     const manifest = this.load();
     const frontmatter = (_a2 = this.app.metadataCache.getFileCache(file)) == null ? void 0 : _a2.frontmatter;
@@ -13551,23 +13551,32 @@ var VersionStore = class {
       entry = {
         key,
         path: file.path,
-        title: file.basename,
+        title: file.basename.replace(/\.Version\d+$/i, ""),
         defaultId: "v0",
         versions: []
       };
       manifest.notes[key] = entry;
     }
-    entry.path = file.path;
-    entry.title = file.basename;
+    if (!options.activeVersionId) {
+      entry.path = file.path;
+      entry.title = file.basename;
+    }
     if (renderHash)
       entry.renderHash = renderHash;
+    const active = options.activeVersionId ? entry.versions.find((v) => v.id === options.activeVersionId) : null;
+    if (overwrite && !active && !entry.versions.length)
+      return entry;
     let version;
-    if (overwrite && entry.versions.length) {
+    if (overwrite && active) {
+      version = active;
+      version.savedAt = new Date().toISOString();
+      version.hash = hash;
+      version.kind = "user";
+    } else if (overwrite && entry.versions.length) {
       version = [...entry.versions].sort((a, b) => versionNumber(a.id) - versionNumber(b.id)).at(-1);
       version.savedAt = new Date().toISOString();
       version.hash = hash;
       version.kind = "user";
-      version.label = version.label || "User version";
     } else {
       const highest = entry.versions.reduce((n, v) => Math.max(n, versionNumber(v.id)), -1);
       const id = `v${highest + 1}`;
@@ -13582,18 +13591,21 @@ var VersionStore = class {
         archived: false
       };
       entry.versions.push(version);
-      if (!entry.defaultId)
-        entry.defaultId = id;
     }
-    for (const other of entry.versions) {
-      if (other.id !== version.id) {
-        other.selected = false;
-        other.archived = true;
+    if (options.activeVersionId) {
+      version.selected = true;
+      version.archived = false;
+    } else {
+      for (const other of entry.versions) {
+        if (other.id !== version.id) {
+          other.selected = false;
+          other.archived = true;
+        }
       }
+      version.selected = true;
+      version.archived = false;
+      entry.defaultId = version.id;
     }
-    version.selected = true;
-    version.archived = false;
-    entry.defaultId = version.id;
     this.files[version.file] = strToU8(text);
     this.save();
     return entry;
@@ -13748,41 +13760,47 @@ var ManageVersionsModal = class extends import_obsidian3.Modal {
     return !this.matchesSaved;
   }
   render() {
-    var _a2, _b2, _c, _d;
+    var _a2, _b2, _c, _d, _e;
     const { contentEl } = this;
     contentEl.empty();
     contentEl.createEl("h2", { text: "Manage versions" });
     contentEl.createEl("p", {
       cls: "mas-versions-desc",
-      text: `Saved versions for ${this.options.file.basename}. The default version supplies the main note.`
+      text: `Saved versions for ${((_a2 = this.entry) == null ? void 0 : _a2.title) || this.options.file.basename}. The default version supplies the main note.`
     });
+    if (this.options.activeVersionId) {
+      contentEl.createEl("p", {
+        cls: "mas-versions-help",
+        text: `This is not the default version (${this.options.activeVersionId.toUpperCase()}). Saving here will not update or replace the main note.`
+      });
+    }
     contentEl.createEl("p", {
       cls: "mas-versions-help",
       text: "Selected versions are rendered as markdown; deselect a version to archive it. Click \u2018Set as default\u2019 to render a version on the main note without a version suffix. Click the trash icon to delete a version."
     });
     const top = contentEl.createDiv({ cls: "mas-versions-actions" });
-    if (this.hasChanges() || !((_a2 = this.entry) == null ? void 0 : _a2.versions.length)) {
+    if (this.hasChanges() || !((_b2 = this.entry) == null ? void 0 : _b2.versions.length)) {
       const save = top.createEl("button", { text: "Save new version", cls: "mod-cta" });
       save.onclick = async () => {
         var _a3, _b3;
-        await this.options.store.saveVersion(this.options.file, false, this.renderFingerprint);
+        await this.options.store.saveVersion(this.options.file, false, this.renderFingerprint, { activeVersionId: this.options.activeVersionId });
         this.selectionDirty = false;
         await this.refresh();
         (_b3 = (_a3 = this.options).onChanged) == null ? void 0 : _b3.call(_a3);
       };
     }
-    if (((_b2 = this.entry) == null ? void 0 : _b2.versions.length) && this.hasChanges()) {
-      const overwrite = top.createEl("button", { text: "Overwrite last version" });
+    if (((_c = this.entry) == null ? void 0 : _c.versions.length) && this.hasChanges()) {
+      const overwrite = top.createEl("button", { text: this.options.activeVersionId ? "Overwrite this version" : "Overwrite last version" });
       overwrite.onclick = async () => {
         var _a3, _b3;
-        await this.options.store.saveVersion(this.options.file, true, this.renderFingerprint);
+        await this.options.store.saveVersion(this.options.file, true, this.renderFingerprint, { activeVersionId: this.options.activeVersionId });
         this.selectionDirty = false;
         await this.refresh();
         (_b3 = (_a3 = this.options).onChanged) == null ? void 0 : _b3.call(_a3);
       };
     }
     const list = contentEl.createDiv({ cls: "mas-versions-list" });
-    if (!((_c = this.entry) == null ? void 0 : _c.versions.length)) {
+    if (!((_d = this.entry) == null ? void 0 : _d.versions.length)) {
       list.createDiv({ cls: "mas-versions-empty", text: "No saved versions yet." });
     } else {
       for (const version of [...this.entry.versions].sort((a, b) => versionNumber(a.id) - versionNumber(b.id))) {
@@ -13827,12 +13845,14 @@ var ManageVersionsModal = class extends import_obsidian3.Modal {
         };
       }
     }
-    const applyWrap = contentEl.createDiv({ cls: "mas-versions-apply" });
-    const apply = applyWrap.createEl("button", { text: "Apply default and re-render notes" });
-    apply.disabled = !((_d = this.entry) == null ? void 0 : _d.versions.length);
-    apply.onclick = () => {
-      void this.apply();
-    };
+    if (!this.options.activeVersionId) {
+      const applyWrap = contentEl.createDiv({ cls: "mas-versions-apply" });
+      const apply = applyWrap.createEl("button", { text: "Apply default and re-render notes" });
+      apply.disabled = !((_e = this.entry) == null ? void 0 : _e.versions.length);
+      apply.onclick = () => {
+        void this.apply();
+      };
+    }
   }
   async apply() {
     var _a2;
@@ -25647,15 +25667,13 @@ ${lines.join("\n")}`;
       return;
     }
     const frontmatter = (_a2 = this.app.metadataCache.getFileCache(file)) == null ? void 0 : _a2.frontmatter;
-    if (typeof (frontmatter == null ? void 0 : frontmatter["midad-version"]) === "string") {
-      new import_obsidian19.Notice("Open the default note to manage its versions.");
-      return;
-    }
+    const activeVersionId = typeof (frontmatter == null ? void 0 : frontmatter["midad-version"]) === "string" ? frontmatter["midad-version"].trim() : void 0;
     const store = new VersionStore(this.app, this.vaultPath());
     new ManageVersionsModal({
       app: this.app,
       file,
       store,
+      activeVersionId,
       getFingerprint: async () => hashString(JSON.stringify({
         version: this.manifest.version,
         templates: await this.sourceTemplateHashes()

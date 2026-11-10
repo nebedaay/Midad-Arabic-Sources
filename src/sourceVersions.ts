@@ -191,7 +191,9 @@ export class VersionStore {
 		return manifest.notes[key] ?? null;
 	}
 
-	async saveVersion(file: TFile, overwrite: boolean, renderHash?: string): Promise<NoteVersionEntry> {
+	async saveVersion(file: TFile, overwrite: boolean, renderHash?: string, options: {
+		activeVersionId?: string;
+	} = {}): Promise<NoteVersionEntry> {
 		const manifest = this.load();
 		const frontmatter = this.app.metadataCache.getFileCache(file)?.frontmatter as Record<string, unknown> | undefined;
 		const key = noteKey(file, frontmatter);
@@ -202,22 +204,32 @@ export class VersionStore {
 			entry = {
 				key,
 				path: file.path,
-				title: file.basename,
+				title: file.basename.replace(/\.Version\d+$/i, ""),
 				defaultId: "v0",
 				versions: [],
 			};
 			manifest.notes[key] = entry;
 		}
-		entry.path = file.path;
-		entry.title = file.basename;
+		if (!options.activeVersionId) {
+			entry.path = file.path;
+			entry.title = file.basename;
+		}
 		if (renderHash) entry.renderHash = renderHash;
+		const active = options.activeVersionId
+			? entry.versions.find((v) => v.id === options.activeVersionId)
+			: null;
+		if (overwrite && !active && !entry.versions.length) return entry;
 		let version: SavedVersion;
-		if (overwrite && entry.versions.length) {
+		if (overwrite && active) {
+			version = active;
+			version.savedAt = new Date().toISOString();
+			version.hash = hash;
+			version.kind = "user";
+		} else if (overwrite && entry.versions.length) {
 			version = [...entry.versions].sort((a, b) => versionNumber(a.id) - versionNumber(b.id)).at(-1) as SavedVersion;
 			version.savedAt = new Date().toISOString();
 			version.hash = hash;
 			version.kind = "user";
-			version.label = version.label || "User version";
 		} else {
 			const highest = entry.versions.reduce((n, v) => Math.max(n, versionNumber(v.id)), -1);
 			const id = `v${highest + 1}`;
@@ -232,18 +244,23 @@ export class VersionStore {
 				archived: false,
 			};
 			entry.versions.push(version);
-			if (!entry.defaultId) entry.defaultId = id;
 		}
-		// The newly saved version is the record of the current note.
-		for (const other of entry.versions) {
-			if (other.id !== version.id) {
-				other.selected = false;
-				other.archived = true;
+		if (options.activeVersionId) {
+			// Editing a subsidiary version does not move the default or silently
+			// supersede the latest saved version.
+			version.selected = true;
+			version.archived = false;
+		} else {
+			for (const other of entry.versions) {
+				if (other.id !== version.id) {
+					other.selected = false;
+					other.archived = true;
+				}
 			}
+			version.selected = true;
+			version.archived = false;
+			entry.defaultId = version.id;
 		}
-		version.selected = true;
-		version.archived = false;
-		entry.defaultId = version.id;
 		this.files[version.file] = strToU8(text);
 		this.save();
 		return entry;
@@ -374,6 +391,7 @@ interface VersionModalOptions {
 	store: VersionStore;
 	onChanged?: () => void;
 	getFingerprint?: () => Promise<string>;
+	activeVersionId?: string;
 }
 
 export class ManageVersionsModal extends Modal {
@@ -418,8 +436,14 @@ export class ManageVersionsModal extends Modal {
 		contentEl.createEl("h2", { text: "Manage versions" });
 		contentEl.createEl("p", {
 			cls: "mas-versions-desc",
-			text: `Saved versions for ${this.options.file.basename}. The default version supplies the main note.`,
+			text: `Saved versions for ${this.entry?.title || this.options.file.basename}. The default version supplies the main note.`,
 		});
+		if (this.options.activeVersionId) {
+			contentEl.createEl("p", {
+				cls: "mas-versions-help",
+				text: `This is not the default version (${this.options.activeVersionId.toUpperCase()}). Saving here will not update or replace the main note.`,
+			});
+		}
 		contentEl.createEl("p", {
 			cls: "mas-versions-help",
 			text: "Selected versions are rendered as markdown; deselect a version to archive it. Click ‘Set as default’ to render a version on the main note without a version suffix. Click the trash icon to delete a version.",
@@ -429,16 +453,16 @@ export class ManageVersionsModal extends Modal {
 		if (this.hasChanges() || !this.entry?.versions.length) {
 			const save = top.createEl("button", { text: "Save new version", cls: "mod-cta" });
 			save.onclick = async () => {
-				await this.options.store.saveVersion(this.options.file, false, this.renderFingerprint);
+				await this.options.store.saveVersion(this.options.file, false, this.renderFingerprint, { activeVersionId: this.options.activeVersionId });
 				this.selectionDirty = false;
 				await this.refresh();
 				this.options.onChanged?.();
 			};
 		}
 		if (this.entry?.versions.length && this.hasChanges()) {
-			const overwrite = top.createEl("button", { text: "Overwrite last version" });
+			const overwrite = top.createEl("button", { text: this.options.activeVersionId ? "Overwrite this version" : "Overwrite last version" });
 			overwrite.onclick = async () => {
-				await this.options.store.saveVersion(this.options.file, true, this.renderFingerprint);
+				await this.options.store.saveVersion(this.options.file, true, this.renderFingerprint, { activeVersionId: this.options.activeVersionId });
 				this.selectionDirty = false;
 				await this.refresh();
 				this.options.onChanged?.();
@@ -488,10 +512,12 @@ export class ManageVersionsModal extends Modal {
 			}
 		}
 
-		const applyWrap = contentEl.createDiv({ cls: "mas-versions-apply" });
-		const apply = applyWrap.createEl("button", { text: "Apply default and re-render notes" });
-		apply.disabled = !this.entry?.versions.length;
-		apply.onclick = () => { void this.apply(); };
+		if (!this.options.activeVersionId) {
+			const applyWrap = contentEl.createDiv({ cls: "mas-versions-apply" });
+			const apply = applyWrap.createEl("button", { text: "Apply default and re-render notes" });
+			apply.disabled = !this.entry?.versions.length;
+			apply.onclick = () => { void this.apply(); };
+		}
 	}
 
 	private async apply(): Promise<void> {

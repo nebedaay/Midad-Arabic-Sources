@@ -5166,15 +5166,15 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			return;
 		}
 		const frontmatter = this.app.metadataCache.getFileCache(file)?.frontmatter as Record<string, unknown> | undefined;
-		if (typeof frontmatter?.["midad-version"] === "string") {
-			new Notice("Open the default note to manage its versions.");
-			return;
-		}
+		const activeVersionId = typeof frontmatter?.["midad-version"] === "string"
+			? frontmatter["midad-version"].trim()
+			: undefined;
 		const store = new VersionStore(this.app, this.vaultPath());
 		new ManageVersionsModal({
 			app: this.app,
 			file,
 			store,
+			activeVersionId,
 			getFingerprint: async () => hashString(JSON.stringify({
 				version: this.manifest.version,
 				templates: await this.sourceTemplateHashes(),
