@@ -884,6 +884,12 @@ export class ManageVersionsModal extends Modal {
 				text: "Selected versions are rendered as markdown; deselect a version to archive it. Click ‘Set as default’ to render a version on the main note without a version suffix. Click the trash icon to delete a version.",
 			});
 		}
+		if (this.renderChanged) {
+			contentEl.createEl("p", {
+				cls: "mas-versions-help",
+				text: "These saved versions were created with an older template/render fingerprint. Their snapshots are preserved; Version 0 re-renders with the current templates.",
+			});
+		}
 
 		const top = contentEl.createDiv({ cls: "mas-versions-actions" });
 		const changed = this.hasChanges();
