@@ -287,6 +287,32 @@ export class VersionStore {
 		};
 	}
 
+	/** Mark a source-backed entry as having a virtual Version 0, migrating a legacy saved v0 to the first user slot. */
+	async ensureVirtualOriginal(file: TFile, entry: NoteVersionEntry): Promise<NoteVersionEntry> {
+		if (entry.virtualOriginal) return entry;
+		entry.virtualOriginal = true;
+		const legacy = entry.versions.find((v) => v.id === "v0");
+		if (legacy) {
+			let next = 1;
+			while (entry.versions.some((v) => v.id === `v${next}`)) next++;
+			const oldPath = versionNotePath(entry, { ...legacy, id: "v0" });
+			const oldId = legacy.id;
+			legacy.id = `v${next}`;
+			if (/^v?0$/i.test(legacy.label.trim())) legacy.label = `Version ${next}`;
+			if (entry.defaultId === oldId) entry.defaultId = legacy.id;
+			const newPath = versionNotePath(entry, legacy);
+			const oldFile = this.app.vault.getAbstractFileByPath(normalizePath(oldPath));
+			if (oldFile instanceof TFile && !this.app.vault.getAbstractFileByPath(normalizePath(newPath))) {
+				await this.app.fileManager.renameFile(oldFile, normalizePath(newPath));
+				await this.app.fileManager.processFrontMatter(oldFile, (fm: Record<string, unknown>) => {
+					fm["midad-version"] = legacy.id;
+				});
+			}
+		}
+		this.save();
+		return entry;
+	}
+
 	async saveVersion(file: TFile, overwrite: boolean, renderHash?: string, options: {
 		activeVersionId?: string;
 		label?: string;
@@ -633,8 +659,11 @@ export class ManageVersionsModal extends Modal {
 
 	private async refresh(): Promise<void> {
 		this.entry = await this.options.store.entryFor(this.options.file);
-		if (!this.entry && this.options.isSourceBacked && await this.options.isSourceBacked()) {
+		const sourceBacked = this.options.isSourceBacked ? await this.options.isSourceBacked() : false;
+		if (!this.entry && sourceBacked) {
 			this.entry = await this.options.store.virtualEntry(this.options.file);
+		} else if (this.entry && sourceBacked) {
+			this.entry = await this.options.store.ensureVirtualOriginal(this.options.file, this.entry);
 		}
 		const liveText = await this.options.app.vault.read(this.options.file);
 		if (!this.activeVersionId && /\.Version\d+\.md$/i.test(this.options.file.path)) {
