@@ -19612,6 +19612,24 @@ function isChildEntry(entry) {
 }
 
 // src/sourceAnnotations/navigation.ts
+async function readHeadings(app, file) {
+  const text = await app.vault.cachedRead(file);
+  const out = [];
+  let inFence = false;
+  for (const line of text.split("\n")) {
+    const trimmed = line.trim();
+    if (trimmed.startsWith("```") || trimmed.startsWith("~~~")) {
+      inFence = !inFence;
+      continue;
+    }
+    if (inFence)
+      continue;
+    const match = /^(#{1,6})\s+(.+?)\s*$/.exec(line);
+    if (match)
+      out.push({ level: match[1].length, heading: match[2] });
+  }
+  return out;
+}
 function frontmatterOf(app, file) {
   var _a2, _b2;
   return (_b2 = (_a2 = app.metadataCache.getFileCache(file)) == null ? void 0 : _a2.frontmatter) != null ? _b2 : {};
@@ -19683,11 +19701,12 @@ function documentType(app, file) {
   const rawType = frontmatterOf(app, file)["document-type"];
   return typeof rawType === "string" ? rawType : "";
 }
-function childLinks(app, file, countForPath) {
-  var _a2, _b2;
+function childLinks(app, file, countForPath, fallbackHeadings) {
+  var _a2;
   const outgoing = outgoingFiles(app, file);
   const title = fileTitle(app, file);
-  const headings = (_b2 = (_a2 = app.metadataCache.getFileCache(file)) == null ? void 0 : _a2.headings) != null ? _b2 : [];
+  const cached = (_a2 = app.metadataCache.getFileCache(file)) == null ? void 0 : _a2.headings;
+  const headings = (cached == null ? void 0 : cached.length) ? cached : fallbackHeadings != null ? fallbackHeadings : [];
   const sections = () => headings.filter((heading, index) => !(index === 0 && heading.level === 1 && heading.heading.trim() === title)).map((heading) => linkFor(app, file, countForPath, heading.heading));
   const type = documentType(app, file);
   if (type.includes("source-annotation"))
@@ -19710,7 +19729,7 @@ function currentItem(app, file, countForPath, children) {
     children
   };
 }
-function buildNavigationData(app, path2, countForPath) {
+function buildNavigationData(app, path2, countForPath, fallbackHeadings) {
   var _a2;
   const normalized2 = (0, import_obsidian15.normalizePath)(path2);
   const file = app.vault.getAbstractFileByPath(normalized2);
@@ -19718,7 +19737,7 @@ function buildNavigationData(app, path2, countForPath) {
     return null;
   const parents = parentFiles(app, file).map((parent) => linkFor(app, parent, countForPath));
   const primary = (_a2 = parentFiles(app, file)[0]) != null ? _a2 : null;
-  const current = currentItem(app, file, countForPath, childLinks(app, file, countForPath));
+  const current = currentItem(app, file, countForPath, childLinks(app, file, countForPath, fallbackHeadings));
   if (!primary)
     return { parents, items: [current] };
   const siblings = outgoingFiles(app, primary);
@@ -22075,7 +22094,7 @@ var AnnotationService = class {
     }
   }
   async sidebarData(fileOverride) {
-    var _a2, _b2, _c, _d;
+    var _a2, _b2, _c, _d, _e;
     const sidebarView = this.app.workspace.getActiveViewOfType(AnnotationSidebarView);
     const markdownView = this.app.workspace.getActiveViewOfType(import_obsidian18.MarkdownView);
     const sidebarHasFocus = !!sidebarView;
@@ -22098,7 +22117,9 @@ var AnnotationService = class {
       return this.collectionSidebarData();
     }
     const path2 = (0, import_obsidian18.normalizePath)(file.path);
-    const navigation = buildNavigationData(this.app, path2, (notePath) => this.annotationCountForPath(notePath));
+    const cachedHeadings = (_d = this.app.metadataCache.getFileCache(file)) == null ? void 0 : _d.headings;
+    const fallbackHeadings = (cachedHeadings == null ? void 0 : cachedHeadings.length) ? void 0 : await readHeadings(this.app, file);
+    const navigation = buildNavigationData(this.app, path2, (notePath) => this.annotationCountForPath(notePath), fallbackHeadings);
     if (!navigation)
       return this.collectionSidebarData();
     this.lastSidebarPath = path2;
@@ -22129,7 +22150,7 @@ var AnnotationService = class {
       return ((_b3 = (_a3 = a.position) == null ? void 0 : _a3.start) != null ? _b3 : Number.MAX_SAFE_INTEGER) - ((_d2 = (_c2 = b.position) == null ? void 0 : _c2.start) != null ? _d2 : Number.MAX_SAFE_INTEGER);
     });
     const work = target ? await this.store.getWork(target.workKey) : null;
-    const frontmatter = (_d = this.app.metadataCache.getFileCache(file)) == null ? void 0 : _d.frontmatter;
+    const frontmatter = (_e = this.app.metadataCache.getFileCache(file)) == null ? void 0 : _e.frontmatter;
     const rawTitle = frontmatter == null ? void 0 : frontmatter["title"];
     const noteName = typeof rawTitle === "string" && rawTitle.trim() ? rawTitle.trim() : file.basename;
     return {

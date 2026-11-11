@@ -34,7 +34,7 @@ import { refreshReadingViews, registerReadingAnnotations } from "./reading";
 import { reanchorAnnotation } from "./reanchor";
 import { annotationLabel, findNormalized, resolveAnnotations, visibleSegments } from "./resolve";
 import { AnnotationSidebarView, ANNOTATION_SIDEBAR_VIEW, type AnnotationSidebarData } from "./sidebar";
-import { buildCollectionNavigation, buildNavigationData, buildResourceNavigation, type NavigationData } from "./navigation";
+import { buildCollectionNavigation, buildNavigationData, buildResourceNavigation, readHeadings, type NavigationData } from "./navigation";
 import { loadResourceModel } from "../resourceModel";
 import { AnnotationStore, annotationNow, newAnnotationId, type AnnotationTrashBatch } from "./store";
 import { AnnotationTargetResolver } from "./target";
@@ -2166,7 +2166,9 @@ export class AnnotationService {
 		}
 
 		const path = normalizePath(file.path);
-		const navigation = buildNavigationData(this.app, path, (notePath) => this.annotationCountForPath(notePath));
+		const cachedHeadings = this.app.metadataCache.getFileCache(file)?.headings;
+		const fallbackHeadings = cachedHeadings?.length ? undefined : await readHeadings(this.app, file);
+		const navigation = buildNavigationData(this.app, path, (notePath) => this.annotationCountForPath(notePath), fallbackHeadings);
 		if (!navigation) return this.collectionSidebarData();
 		this.lastSidebarPath = path;
 		if (/\.Version\d+\.md$/i.test(path)) {

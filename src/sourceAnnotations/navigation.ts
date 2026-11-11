@@ -2,6 +2,26 @@ import { App, TFile, normalizePath } from "obsidian";
 import { isChildEntry, parseSourceIndex } from "./sourceIndex";
 import type { ResourceModelFile } from "../resourceModel";
 
+export interface HeadingEntry {
+	level: number;
+	heading: string;
+}
+
+/** Read headings from note text when the metadata cache has not caught up. */
+export async function readHeadings(app: App, file: TFile): Promise<HeadingEntry[]> {
+	const text = await app.vault.cachedRead(file);
+	const out: HeadingEntry[] = [];
+	let inFence = false;
+	for (const line of text.split("\n")) {
+		const trimmed = line.trim();
+		if (trimmed.startsWith("```") || trimmed.startsWith("~~~")) { inFence = !inFence; continue; }
+		if (inFence) continue;
+		const match = /^(#{1,6})\s+(.+?)\s*$/.exec(line);
+		if (match) out.push({ level: match[1].length, heading: match[2] });
+	}
+	return out;
+}
+
 export interface NavigationLink {
 	title: string;
 	path: string;
@@ -107,10 +127,11 @@ function documentType(app: App, file: TFile): string {
 	return typeof rawType === "string" ? rawType : "";
 }
 
-function childLinks(app: App, file: TFile, countForPath: CountForPath): NavigationLink[] {
+function childLinks(app: App, file: TFile, countForPath: CountForPath, fallbackHeadings?: HeadingEntry[]): NavigationLink[] {
 	const outgoing = outgoingFiles(app, file);
 	const title = fileTitle(app, file);
-	const headings = app.metadataCache.getFileCache(file)?.headings ?? [];
+	const cached = app.metadataCache.getFileCache(file)?.headings;
+	const headings = cached?.length ? cached : fallbackHeadings ?? [];
 	const sections = (): NavigationLink[] => headings
 		.filter((heading, index) => !(index === 0 && heading.level === 1 && heading.heading.trim() === title))
 		.map((heading) => linkFor(app, file, countForPath, heading.heading));
@@ -143,7 +164,8 @@ function currentItem(
 export function buildNavigationData(
 	app: App,
 	path: string,
-	countForPath: CountForPath
+	countForPath: CountForPath,
+	fallbackHeadings?: HeadingEntry[]
 ): NavigationData | null {
 	const normalized = normalizePath(path);
 	const file = app.vault.getAbstractFileByPath(normalized);
@@ -151,7 +173,7 @@ export function buildNavigationData(
 
 	const parents = parentFiles(app, file).map((parent) => linkFor(app, parent, countForPath));
 	const primary = parentFiles(app, file)[0] ?? null;
-	const current = currentItem(app, file, countForPath, childLinks(app, file, countForPath));
+	const current = currentItem(app, file, countForPath, childLinks(app, file, countForPath, fallbackHeadings));
 	if (!primary) return { parents, items: [current] };
 
 	const siblings = outgoingFiles(app, primary);
