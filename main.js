@@ -7066,9 +7066,6 @@ def main():
             tpr = load("transcription-process-raw.py")
             raw_path = workdir / f"{stem}-raw.md"
             tpr.concatenate(jsonl, raw_path)
-            yaml = tpr._build_yaml(stem)
-            raw_text = raw_path.read_text(encoding="utf-8")
-            raw_path.write_text(yaml.rstrip("\\n") + "\\n\\n" + raw_text.lstrip("\\n"), encoding="utf-8")
 
             processed = workdir / "processed.md"
             # Cover metadata is extracted for every transcription: it supplies
