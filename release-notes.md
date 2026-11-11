@@ -1,18 +1,22 @@
-# 0.2.2
+# 0.2.3
 
-Documentation release for managed regions and cross-source identity.
+Documentation cleanup and clarification.
 
-### New guide
+### Automatic transcription/translation recognition
 
-- Added **Managed regions, identity, and adoption** (`docs/managed-regions.md`), covering:
-  - the `mas-managed` marker boundary and spacing;
-  - adding managed tags to one note or all managed notes;
-  - `midad-id` and retired identity properties;
-  - adoption and Unadopt;
-  - preservation during re-render and source removal;
-  - identity cleanup and hash pruning.
+- Documented the exact filename forms Midad recognizes automatically:
+  - `@citekey - transcription` / `translation`
+  - `mas-citekey - transcription` / `translation`
+  - optional `- vol. N` and final variant suffix
+- Explained that `@citekey` means a Zotero/ScholarWeft literature note and `mas-` means a standalone PDF.
+- Clarified that recognition is filename-based, not dependent on a special YAML property, and that the title comes from `title:` frontmatter when present.
 
-### Links
+### Documentation cleanup
 
-- Linked the guide from the README, Commands, Document import, Templates, and Versions guides.
-- The command reference now covers every registered command, including **Stop source import or render** and **Check imported source note sizes**.
+- Removed obsolete legacy-marker, retired-property, and migration notes from the guides.
+- Consolidated Unadopt under **Managed regions, identity, and adoption** instead of repeating it in the versions guide.
+- Updated links so version lifecycle and identity/cleanup have distinct homes.
+
+### Documentation workflow
+
+- `Midad Docs/` in the vault is the source of truth. `npm run sync-docs` copies it into the development repo, and local builds run the sync automatically.

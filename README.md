@@ -31,7 +31,7 @@ The full guides are in [`docs/`](./docs/); this README is a summary. Every page 
 - [Transcription](./docs/transcription.md) — the Gemini OCR pipeline, post-processing, status, and reprocessing.
 - [Translation](./docs/translation.md) — translating a finished transcription.
 - [Document import](./docs/document-import.md) — collections, the Manage text sources dialogue, naming, and updates.
-- [Versions, removal, and cleanup](./docs/versions.md) — Version 0, saved versions, re-rendering, removal, model deletion, corrections, Unadopt, and orphan cleanup.
+- [Versions, removal, and cleanup](./docs/versions.md) — Version 0, saved versions, re-rendering, removal, and model deletion.
 - [Managed regions, identity, and adoption](./docs/managed-regions.md) — managed tags, re-render boundaries, adoption, Unadopt, and identity cleanup.
 - [Templates](./docs/templates.md) — the ETA templates and the render-model variable reference.
 - [Zotero](./docs/zotero.md) — Local / Web / CSL-JSON export, update-in-place, and auto-sync.

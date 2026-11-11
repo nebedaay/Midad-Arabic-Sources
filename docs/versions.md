@@ -77,31 +77,6 @@ The installed-source context menu also offers:
 - **Re-download source/model…** — fetch the model and notes again while preserving user content.
 - **Delete cached model only…** — remove the model but keep rendered notes and saved versions.
 
-## Corrections
-
-Legacy transcription/translation corrections are stored in `.corrections.json` sidecars beside archive ZIPs.
-
-On startup, or with **Consolidate archived corrections into saved versions…**, each sidecar becomes a saved version named **Committed corrections**. The sidecar and its `.rendered.json` baseline are backed up under `.midad-arabic-sources/backups/corrections-consolidated/` and then retired.
-
-## Unadopt and cleanup
-
-**Unadopt this note…** removes:
-
-- Midad identity properties (`midad-id`, `midad-up`, and retired identity fields).
-- Version properties.
-- The `mas-managed` opening and closing tag lines, while keeping the content inside them.
-- Saved versions and hash records.
-- Adopted-note registration.
-
-The note itself and its content remain. See [Managed regions, identity, and adoption](./managed-regions.md#unadopting) for the region and identity model.
-
-**Clean up orphaned Midad data…** prunes:
-
-- Hash records for notes that no longer exist.
-- Adopted-note registry entries whose files are missing and that have no annotations.
-
-It preserves saved-version archives and annotation content.
-
 ## State summary
 
 | Path | Holds |
@@ -111,4 +86,3 @@ It preserves saved-version archives and annotation content.
 | `source-archives/<collection>/<id>.zip` | Archived source models and rendered notes |
 | `annotations/` | Annotation store and adopted-note registry |
 | `source-imports.json` | Installed, deleting, and archived source status |
-| `backups/corrections-consolidated/` | Retired correction sidecars and render baselines |

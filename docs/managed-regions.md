@@ -1,6 +1,6 @@
 # Managed regions, identity, and adoption
 
-Managed regions are the boundary between generated content and your own writing. They apply to repository sources, transcriptions, translations, adopted notes, and generated MOCs.
+Managed regions are the boundary between content generated and updated by the plugin and your own writing, which is left alone. They apply to repository sources, transcriptions, translations, adopted notes, and generated MOCs.
 
 ## The managed region
 
@@ -15,8 +15,6 @@ generated content
 ```
 
 The markers are always on their own blank-line-separated block, including a blank line after the closing marker at the end of a note. Re-rendering replaces the managed region and preserves everything outside it.
-
-Notes rendered before the HTML markers used `%%mas-managed%%` and `%%/mas-managed%%`; these are recognized and normalized on the next write.
 
 ## Adding managed tags
 
@@ -36,13 +34,29 @@ pdf/<pdf-key>/<transcription|translation>[/<unit>]
 adopted/<uuid>
 ```
 
-The retired `midad-kind`, `midad-work`, `midad-unit`, and `midad-source` properties are read as fallbacks for older notes but are no longer written.
+## Automatic transcription/translation recognition
 
-## Adoption
+Midad recognizes a transcription or translation automatically when its **filename** matches one of these forms, case-insensitively:
 
-Known Midad transcriptions and translations are registered automatically. For another Markdown note, **Adopt note for annotations** adds an `adopted/<uuid>` identity and wraps its body in a managed region.
+```text
+@citekey - transcription
+@citekey - translation
+@citekey - transcription - vol. N
+@citekey - translation - vol. N
+mas-citekey - transcription
+mas-citekey - translation
+```
 
-When a legacy transcription or translation is recognized, the adoption dialog offers to apply Midad metadata defaults and move it into the standard folder. Annotations and saved versions are tied to the note’s identity, so adoption should happen before making extensive annotations when possible.
+- `@citekey` is a Zotero/ScholarWeft literature-note citekey.
+- `mas-` is a standalone PDF transcription or translation with no Zotero item.
+- `vol. N` (or `volume N`, `v. N`) is optional and becomes the unit key.
+- A final ` - variant` after the type or volume is allowed and becomes part of the unit label.
+- The displayed title comes from the note’s `title:` frontmatter when present; otherwise Midad uses the citekey.
+- Recognition is based on the filename, not on a special YAML property. The note must be Markdown in the vault. Known files are registered at startup and when created.
+
+This is the format Midad’s own transcription/translation pipeline writes. A file named differently is not auto-recognized; use **Adopt note for annotations** instead.
+
+For any other Markdown note, **Adopt note for annotations** adds an `adopted/<uuid>` identity and wraps its body in a managed region. Annotations and saved versions are tied to the note’s identity, so adopt before making extensive annotations when possible.
 
 ## Unadopting
 

@@ -35,7 +35,7 @@ Every category MOC points up to one **parent note** (the setting **“Sources pa
 
 Top-level source notes (work hubs, MOCs, and transcription/translation parents) carry `[[Midad Arabic Sources]]` in `midad-up`, so the corpus is traceable without giving every individual sūra, chapter, root, or volume note a backlink to the parent.
 
-All plugin-managed frontmatter properties use the `midad-` prefix and are written together at the start of the generated property block (`midad-up`, `midad-id`, `midad-note`). The plain `up` property is never generated, so it remains available for the user. `midad-kind`, `midad-work`, `midad-unit`, `midad-source`, and `midad-key` were retired: the kind, work, unit, and source are parsed from the comprehensive `midad-id` (see [Source identity](./setup.md#where-state-lives)). Templates declare the retired keys with `merge: 'remove'` so a re-render deletes them.
+All plugin-managed frontmatter properties use the `midad-` prefix and are written together at the start of the generated property block (`midad-up`, `midad-id`, `midad-note`). The plain `up` property is never generated, so it remains available for the user. Kind, work, unit, and source are parsed from the comprehensive `midad-id` (see [Source identity](./setup.md#where-state-lives)).
 
 Language sections in every category and repository MOC use one shared order: **Arabic Texts** first, then any other languages alphabetically, then **English Texts**. This keeps bilingual works and the consolidated Qurʾān MOC consistent.
 
@@ -262,7 +262,7 @@ Re-rendering is non-destructive:
 - **`related:`** is declared with `merge: 'keep'`: the template inserts it once (empty), then your value always wins. Use it for topics you want linked.
 - **`updated:`** is the volatile render timestamp; it is ignored when deciding whether a re-render actually changed anything.
 
-Per-property merge strategies: `replace` (default — the template wins), `append` (union with your list), `keep` (write once, then never touch), `subtract` (migration only), and `remove` (retirement only — declare a retired property with an empty value and it is deleted on the next re-render).
+Per-property merge strategies: `replace` (default — the template wins), `append` (union with your list), and `keep` (write once, then never touch).
 
 ## Auto-update when a template changes
 
@@ -276,7 +276,7 @@ Each work records the repository’s own `repository-updated` date. **“Check f
 
 ## Annotations
 
-Annotations are an overlay, not native `==` marks: select text inside the managed region and the plugin stores the quote, colour, and comment in `.midad-arabic-sources/annotations/`, then paints it in Live Preview and Reading view. The generated source note is never modified. The margin icon opens a comment tooltip. In Live Preview the active annotation exposes oval drag handles, links are atomic selections, and a partial legacy link is widened on startup. The Midad sidebar has a Navigation tab for every note and, where annotations are supported, an Annotations tab with click-to-scroll cards. Each work gets a generated annotation note and a shared Source Annotations MOC. The outer callout uses a light blue paper colour; comments appear first in a colour-gradient inset callout, quotes follow on a white inset page with highlighted text, and each callout ends with an alphanumeric `^ann…` block ID on its own line. Re-renders re-anchor quotes by exact text first and then by surrounding context; unmatched annotations remain in the note's **Unanchored** section and can be re-anchored from a new selection. **Copy source with annotations** copies the source plus an Annotations section for use outside the vault. Source archive keeps the annotations when the notes are removed.
+Annotations are an overlay, not native `==` marks: select text inside the managed region and the plugin stores the quote, colour, and comment in `.midad-arabic-sources/annotations/`, then paints it in Live Preview and Reading view. The generated source note is never modified. The margin icon opens a comment tooltip. In Live Preview the active annotation exposes oval drag handles, links are atomic selections,  The Midad sidebar has a Navigation tab for every note and, where annotations are supported, an Annotations tab with click-to-scroll cards. Each work gets a generated annotation note and a shared Source Annotations MOC. The outer callout uses a light blue paper colour; comments appear first in a colour-gradient inset callout, quotes follow on a white inset page with highlighted text, and each callout ends with an alphanumeric `^ann…` block ID on its own line. Re-renders re-anchor quotes by exact text first and then by surrounding context; unmatched annotations remain in the note's **Unanchored** section and can be re-anchored from a new selection. **Copy source with annotations** copies the source plus an Annotations section for use outside the vault. Source archive keeps the annotations when the notes are removed.
 
 ## Layouts
 

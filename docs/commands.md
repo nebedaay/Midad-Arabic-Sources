@@ -31,14 +31,13 @@ See [Transcription](./transcription.md) and [Translation](./translation.md).
 - **Add managed region tags to all Midad-managed notes** — apply that boundary to every managed content note that lacks it, with backups and a confirmation.
 - **Manage versions of this note…** — save, overwrite, select, archive, delete, and choose a default version. Version 0 is virtual for installed/model-backed sources: it re-renders the source and stores no snapshot. User versions are stored in per-work archives; selected non-default versions are rendered as `.VersionN.md` notes. See [Versions, removal, and cleanup](./versions.md).
 - **Cache managed-region hashes for all managed notes** — seed missing baseline hashes used to detect edits against Version 0.
-- **Consolidate archived corrections into saved versions…** — convert legacy `.corrections.json` sidecars into saved versions and retire them with backups. See [Versions, removal, and cleanup](./versions.md#corrections).
-- **Unadopt this note (remove Midad identity and managed tags)…** — remove Midad identity, managed tags, saved versions, and adopted-note registration while keeping the note content. See [Versions, removal, and cleanup](./versions.md#unadopt-and-cleanup).
-- **Clean up orphaned Midad data…** — prune hash and adopted-registry records whose notes no longer exist. See [Versions, removal, and cleanup](./versions.md#unadopt-and-cleanup).
+- **Unadopt this note (remove Midad identity and managed tags)…** — remove Midad identity, managed tags, saved versions, and adopted-note registration while keeping the note content. See [Managed regions, identity, and adoption](./managed-regions.md#unadopting).
+- **Clean up orphaned Midad data…** — prune hash and adopted-registry records whose notes no longer exist. See [Managed regions, identity, and adoption](./managed-regions.md#cleanup).
 - **Update Markdown formatting in this note** — apply the safe Markdown-update layer to an already-rendered note: escape literal brackets, normalize block spacing, and detect/link unmarked Qur’ān quotes without rerunning raw-source page numbering or OCR conversion.
 - **Put selected text in a poetry callout** — format the selection as Arabic-poetry callouts: blank-line-separated verse groups become nested hemistich items, single short lines become direct items, and lines over 80 characters stay as ordinary paragraphs.
 - **Commit edits to archived transcription/translation** — save the current note’s page bodies beside its archive, so a later re-render from that archive keeps your corrections (poetry, page numbers, and body text).
 - **Assign topic and post-process this transcription…** — write a topic onto the parent transcription note and re-process it. A topic containing “tafsīr” switches quote discovery to commentary mode, where short fragments are checked against the verse under discussion.
-- **Re-render transcriptions of this item’s attachments** — run the same re-render for every transcription/translation attached to the open literature note, using archives where present and in-place post-processing for legacy notes.
+- **Re-render transcriptions of this item’s attachments** — run the same re-render for every transcription/translation attached to the open literature note, using archives where present and in-place post-processing when no archive exists.
 - **Check transcription pipeline** — list archived batches.
 - **Show pipeline status** — reveal the status panel, resume an interrupted job, or open the last log.
 - **Open last pipeline log** — open the newest job log.
@@ -52,7 +51,7 @@ See [Document import](./document-import.md) and [Templates](./templates.md).
 - **Copy import templates to vault** — copy the editable ETA templates into your vault.
 - **Re-render imported sources** — regenerate every note from its cached model.
 - **Post-process cached source models** — apply the safe shared content migration (currently literal-bracket escaping) to cached models without re-downloading, then re-render the affected works.
-- **Re-render this source** — regenerate an imported work, or re-run a transcription/translation from its archived JSON (also on the note’s right-click menu). On a volume transcription, choose only that volume or all volumes. A legacy transcription with no archive is post-processed in place with the current local scripts.
+- **Re-render this source** — regenerate an imported work, or re-run a transcription/translation from its archived JSON (also on the note’s right-click menu). On a volume transcription, choose only that volume or all volumes. A transcription with no archive is post-processed in place with the current local scripts.
 - **Apply template changes to imported sources** — apply a detected template change on demand.
 - **Re-download imported sources (rebuild models)** — re-fetch the source JSON and rebuild every model.
 - **Migrate imported sources to the current naming scheme** — rename installed works to `Author - Title (repository)`, updating notes, models, MOCs, and annotation paths.
@@ -76,7 +75,7 @@ See [Document import](./document-import.md#annotations).
 - **Delete annotations for this source…** — move a work's annotation store and note to the plugin trash.
 - **Open Midad sidebar** — open the Midad sidebar. Navigation is available for every note; annotatable notes also show the Annotations tab, MOC links, and Manage sources.
 - **Copy source with annotations** — copy the managed source text plus a colour-callout annotation section.
-- **Adopt note for annotations** — make an arbitrary Markdown note annotatable by adding a stable `midad-id` and a managed body region. For a legacy transcription/translation, a dialog offers metadata normalization, moving to the default folder, and remembering the choice for existing and future adoptions. Known Midad transcriptions/translations are recognised without wrapping; a legacy one has its native metadata and literature-note list upgraded instead, and a same-named adopted parent is consolidated into the native one with a backup.
+- **Adopt note for annotations** — make an arbitrary Markdown note annotatable by adding a stable `midad-id` and a managed body region. Known transcriptions and translations are recognized automatically from their filenames; see [Managed regions, identity, and adoption](./managed-regions.md#automatic-transcriptiontranslation-recognition).
 - **Open source annotations** — open the generated per-work annotation note.
 - **Open annotation trash** — restore or permanently delete annotation batches.
 - **Reload annotations** — reload the store and repaint open source notes.
