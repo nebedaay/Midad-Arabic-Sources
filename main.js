@@ -13562,7 +13562,7 @@ function removeFrontmatterProperty(content, key) {
     return content;
   const front = content.slice(0, end);
   const body = content.slice(end);
-  const re = new RegExp(`^${key}:[^\\n]*\\n(?:[ \\t]+-[^\\n]*\\n)*`, "m");
+  const re = new RegExp(`^${key}:[^\\n]*\\n(?:[ \\t]+-[^\\n]*\\n)*`, "gm");
   return front.replace(re, "") + body;
 }
 function stripVersionProperties(content) {
@@ -13626,7 +13626,7 @@ function sanitizeFrontmatter(content) {
     const property = /^([A-Za-z][\w-]*):/.exec(line);
     if (property) {
       key = property[1];
-      if (key === "midad-version" && seenProperties.has(key))
+      if ((key === "midad-version" || key === "midad-version-name") && seenProperties.has(key))
         continue;
       seenProperties.add(key);
       seen = new Set();
@@ -13845,6 +13845,10 @@ var VersionStore = class {
       await this.app.fileManager.processFrontMatter(file, (fm) => {
         fm["midad-version-name"] = version.label;
       });
+      const live = await this.app.vault.read(file);
+      const clean3 = sanitizeFrontmatter(live);
+      if (clean3 !== live)
+        await this.writeLive(file.path, clean3);
     }
     if (options.activeVersionId) {
       const live = await this.app.vault.read(file);
@@ -13854,6 +13858,9 @@ var VersionStore = class {
     return entry;
   }
   async setDefault(entry, id) {
+    const manifest = this.load();
+    if (!manifest.notes[entry.key])
+      manifest.notes[entry.key] = entry;
     entry.defaultId = id;
     const version = entry.versions.find((v) => v.id === id);
     if (version) {
@@ -14186,8 +14193,18 @@ var _ManageVersionsModal = class extends import_obsidian3.Modal {
       const list = contentEl.createDiv({ cls: "mas-versions-list" });
       if (((_c = this.entry) == null ? void 0 : _c.virtualOriginal) && !this.entry.versions.some((v) => v.id === "v0")) {
         const row = list.createDiv({ cls: "mas-versions-row" });
-        if (this.entry.defaultId === "v0")
+        if (this.entry.defaultId === "v0") {
           row.addClass("is-default");
+          row.addClass("is-selected");
+        }
+        row.onclick = async () => {
+          var _a3;
+          if (((_a3 = this.entry) == null ? void 0 : _a3.defaultId) === "v0")
+            return;
+          await this.options.store.setDefault(this.entry, "v0");
+          this.selectionDirty = true;
+          await this.refresh();
+        };
         const main = row.createDiv({ cls: "mas-versions-main" });
         main.createDiv({ cls: "mas-versions-label-line" }).createSpan({ cls: "mas-versions-label", text: "Version 0 \u2014 Original source" });
         main.createDiv({ cls: "mas-versions-date", text: "Rendered from the source; no stored snapshot." });

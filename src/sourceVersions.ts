@@ -118,7 +118,7 @@ function removeFrontmatterProperty(content: string, key: string): string {
 	if (end < 0) return content;
 	const front = content.slice(0, end);
 	const body = content.slice(end);
-	const re = new RegExp(`^${key}:[^\\n]*\\n(?:[ \\t]+-[^\\n]*\\n)*`, "m");
+	const re = new RegExp(`^${key}:[^\\n]*\\n(?:[ \\t]+-[^\\n]*\\n)*`, "gm");
 	return front.replace(re, "") + body;
 }
 
@@ -173,7 +173,7 @@ function sanitizeFrontmatter(content: string): string {
 		const property = /^([A-Za-z][\w-]*):/.exec(line);
 		if (property) {
 			key = property[1];
-			if (key === "midad-version" && seenProperties.has(key)) continue;
+			if ((key === "midad-version" || key === "midad-version-name") && seenProperties.has(key)) continue;
 			seenProperties.add(key);
 			seen = new Set<string>();
 			out.push(line);
@@ -404,6 +404,11 @@ export class VersionStore {
 			await this.app.fileManager.processFrontMatter(file, (fm: Record<string, unknown>) => {
 				fm["midad-version-name"] = version.label;
 			});
+			// processFrontMatter can leave a pre-existing duplicate scalar behind;
+			// sanitize the live note so the same property is never written twice.
+			const live = await this.app.vault.read(file);
+			const clean = sanitizeFrontmatter(live);
+			if (clean !== live) await this.writeLive(file.path, clean);
 		}
 		if (options.activeVersionId) {
 			const live = await this.app.vault.read(file);
@@ -414,6 +419,8 @@ export class VersionStore {
 	}
 
 	async setDefault(entry: NoteVersionEntry, id: string): Promise<void> {
+		const manifest = this.load();
+		if (!manifest.notes[entry.key]) manifest.notes[entry.key] = entry;
 		entry.defaultId = id;
 		const version = entry.versions.find((v) => v.id === id);
 		if (version) {
@@ -748,7 +755,16 @@ export class ManageVersionsModal extends Modal {
 			const list = contentEl.createDiv({ cls: "mas-versions-list" });
 			if (this.entry?.virtualOriginal && !this.entry.versions.some((v) => v.id === "v0")) {
 				const row = list.createDiv({ cls: "mas-versions-row" });
-				if (this.entry.defaultId === "v0") row.addClass("is-default");
+				if (this.entry.defaultId === "v0") {
+					row.addClass("is-default");
+					row.addClass("is-selected");
+				}
+				row.onclick = async () => {
+					if (this.entry?.defaultId === "v0") return;
+					await this.options.store.setDefault(this.entry!, "v0");
+					this.selectionDirty = true;
+					await this.refresh();
+				};
 				const main = row.createDiv({ cls: "mas-versions-main" });
 				main.createDiv({ cls: "mas-versions-label-line" }).createSpan({ cls: "mas-versions-label", text: "Version 0 — Original source" });
 				main.createDiv({ cls: "mas-versions-date", text: "Rendered from the source; no stored snapshot." });
