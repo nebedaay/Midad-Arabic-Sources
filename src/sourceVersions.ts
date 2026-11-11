@@ -798,7 +798,7 @@ export class ManageVersionsModal extends Modal {
 				this.options.onChanged?.();
 			};
 		}
-		if (changed || !hasVersions) {
+		if (changed) {
 			const save = top.createEl("button", { text: "Save new version" });
 			save.onclick = () => { this.promptNewVersion(); };
 		}

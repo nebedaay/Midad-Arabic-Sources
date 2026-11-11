@@ -14251,7 +14251,7 @@ var _ManageVersionsModal = class extends import_obsidian3.Modal {
         (_b3 = (_a3 = this.options).onChanged) == null ? void 0 : _b3.call(_a3);
       };
     }
-    if (changed || !hasVersions) {
+    if (changed) {
       const save = top.createEl("button", { text: "Save new version" });
       save.onclick = () => {
         this.promptNewVersion();
