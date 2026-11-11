@@ -23,6 +23,7 @@ export interface NoteVersionEntry {
 	defaultId: string;
 	virtualOriginal?: boolean;
 	virtualSelected?: boolean;
+	workKey?: string;
 	renderHash?: string;
 	versions: SavedVersion[];
 }
@@ -33,7 +34,8 @@ interface VersionManifest {
 }
 
 const EMPTY: VersionManifest = { schema: 1, notes: {} };
-const STORE_REL = ".midad-arabic-sources/source-versions.zip";
+const LEGACY_STORE_REL = ".midad-arabic-sources/source-versions.zip";
+const ARCHIVE_DIR = ".midad-arabic-sources/version-archives";
 
 function versionNumber(id: string): number {
 	const match = /^v(\d+)$/i.exec(id);
@@ -61,6 +63,22 @@ function noteKeyFromText(file: TFile, text: string): string {
 	const match = /^midad-id:[ \t]*["']?([^"'\n]+)["']?[ \t]*$/m.exec(text);
 	const id = match?.[1]?.trim() ?? "";
 	return id ? `id:${id}` : `path:${file.path}`;
+}
+
+function workKeyFromKey(key: string): string {
+	const raw = key.replace(/^(?:id|path):/, "");
+	const match = /^(.*?\/(?:transcription|translation))(?=\/|$)/.exec(raw);
+	return match ? match[1] : raw;
+}
+
+function workKeyFromText(file: TFile, text: string): string {
+	const match = /^midad-id:[ \t]*["']?([^"'\n]+)["']?[ \t]*$/m.exec(text);
+	return match ? workKeyFromKey(`id:${match[1].trim()}`) : `path:${file.path}`;
+}
+
+function workArchivePath(vaultPath: string, workKey: string): string {
+	const name = `${safeFileSegment(workKey, "work", 80)}-${hashString(workKey)}.zip`;
+	return `${vaultPath}/${ARCHIVE_DIR}/${name}`;
 }
 
 function versionFile(key: string, id: string): string {
@@ -249,33 +267,94 @@ export class VersionStore {
 		this.hashes = NoteHashStore.forVault(vaultPath);
 	}
 
-	private zipPath(): string {
-		return `${this.vaultPath}/${STORE_REL}`;
+	private archiveDir(): string {
+		return `${this.vaultPath}/${ARCHIVE_DIR}`;
 	}
 
 	private load(): VersionManifest {
 		if (this.manifest) return this.manifest;
+		const dir = this.archiveDir();
+		let found = false;
 		try {
-			const raw = fs.readFileSync(this.zipPath());
-			this.files = unzipSync(new Uint8Array(raw));
-			const text = this.files["manifest.json"];
-			this.manifest = text ? JSON.parse(strFromU8(text)) as VersionManifest : { ...EMPTY, notes: {} };
-			for (const entry of Object.values(this.manifest.notes)) {
-				for (const version of entry.versions) delete (version as unknown as { hash?: string }).hash;
+			for (const name of fs.readdirSync(dir)) {
+				if (!name.endsWith(".zip")) continue;
+				try {
+					const files = unzipSync(new Uint8Array(fs.readFileSync(`${dir}/${name}`)));
+					const text = files["manifest.json"];
+					if (!text) continue;
+					const archive = JSON.parse(strFromU8(text)) as VersionManifest;
+					for (const [key, entry] of Object.entries(archive.notes ?? {})) {
+						entry.workKey ??= workKeyFromKey(key);
+						for (const version of entry.versions) delete (version as unknown as { hash?: string }).hash;
+						this.manifest ??= { schema: 1, notes: {} };
+						this.manifest.notes[key] = entry;
+					}
+					for (const [name2, bytes] of Object.entries(files)) {
+						if (name2 !== "manifest.json") this.files[name2] = bytes;
+					}
+					found = true;
+				} catch { /* ignore an unreadable archive */ }
 			}
-		} catch {
-			this.manifest = { schema: 1, notes: {} };
-			this.files = {};
+		} catch { /* no archive directory yet */ }
+		if (!found) {
+			try {
+				const raw = fs.readFileSync(`${this.vaultPath}/${LEGACY_STORE_REL}`);
+				this.files = unzipSync(new Uint8Array(raw));
+				const text = this.files["manifest.json"];
+				this.manifest = text ? JSON.parse(strFromU8(text)) as VersionManifest : { ...EMPTY, notes: {} };
+				delete this.files["manifest.json"];
+				for (const [key, entry] of Object.entries(this.manifest.notes)) {
+					entry.workKey ??= workKeyFromKey(key);
+					for (const version of entry.versions) delete (version as unknown as { hash?: string }).hash;
+				}
+				this.save();
+				const backup = `${this.vaultPath}/.midad-arabic-sources/backups/source-versions-migrated.zip`;
+				fs.mkdirSync(backup.slice(0, backup.lastIndexOf("/")), { recursive: true });
+				try { fs.renameSync(`${this.vaultPath}/${LEGACY_STORE_REL}`, backup); } catch { /* already moved */ }
+			} catch {
+				this.manifest = { schema: 1, notes: {} };
+				this.files = {};
+			}
 		}
+		this.manifest ??= { schema: 1, notes: {} };
 		return this.manifest;
 	}
 
 	private save(): void {
 		const manifest = this.load();
-		this.files["manifest.json"] = strToU8(JSON.stringify(manifest, null, 1) + "\n");
-		const dir = this.zipPath().slice(0, this.zipPath().lastIndexOf("/"));
+		const dir = this.archiveDir();
 		fs.mkdirSync(dir, { recursive: true });
-		fs.writeFileSync(this.zipPath(), Buffer.from(zipSync(this.files, { level: 6 })));
+		const groups = new Map<string, VersionManifest>();
+		for (const [key, entry] of Object.entries(manifest.notes)) {
+			const workKey = entry.workKey ?? workKeyFromKey(key);
+			entry.workKey = workKey;
+			let group = groups.get(workKey);
+			if (!group) {
+				group = { schema: 1, notes: {} };
+				groups.set(workKey, group);
+			}
+			group.notes[key] = entry;
+		}
+		const expected = new Set<string>();
+		for (const [workKey, group] of groups) {
+			const archive = workArchivePath(this.vaultPath, workKey);
+			expected.add(archive.slice(archive.lastIndexOf("/") + 1));
+			const entries: Record<string, Uint8Array> = {
+				"manifest.json": strToU8(JSON.stringify(group, null, 1) + "\n"),
+			};
+			for (const entry of Object.values(group.notes)) {
+				for (const version of entry.versions) {
+					const bytes = this.files[version.file];
+					if (bytes) entries[version.file] = bytes;
+				}
+			}
+			fs.writeFileSync(archive, Buffer.from(zipSync(entries, { level: 6 })));
+		}
+		try {
+			for (const name of fs.readdirSync(dir)) {
+				if (name.endsWith(".zip") && !expected.has(name)) fs.unlinkSync(`${dir}/${name}`);
+			}
+		} catch { /* ignore cleanup errors */ }
 	}
 
 	async entryFor(file: TFile): Promise<NoteVersionEntry | null> {
@@ -292,6 +371,7 @@ export class VersionStore {
 			title: file.basename,
 			defaultId: "v0",
 			virtualOriginal: true,
+			workKey: workKeyFromText(file, text),
 			versions: [],
 		};
 	}
@@ -365,6 +445,7 @@ export class VersionStore {
 				title: file.basename.replace(/\.Version\d+$/i, ""),
 				defaultId: "v0",
 				virtualOriginal: !!options.virtualOriginal,
+				workKey: workKeyFromText(file, text),
 				versions: [],
 			};
 			manifest.notes[key] = entry;

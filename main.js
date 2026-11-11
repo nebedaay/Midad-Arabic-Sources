@@ -13679,7 +13679,8 @@ NoteHashStore.instances = new Map();
 
 // src/sourceVersions.ts
 var EMPTY = { schema: 1, notes: {} };
-var STORE_REL = ".midad-arabic-sources/source-versions.zip";
+var LEGACY_STORE_REL = ".midad-arabic-sources/source-versions.zip";
+var ARCHIVE_DIR = ".midad-arabic-sources/version-archives";
 function versionNumber(id) {
   const match = /^v(\d+)$/i.exec(id);
   return match ? Number(match[1]) : -1;
@@ -13695,6 +13696,19 @@ function noteKeyFromText(file, text) {
   const match = /^midad-id:[ \t]*["']?([^"'\n]+)["']?[ \t]*$/m.exec(text);
   const id = (_b2 = (_a2 = match == null ? void 0 : match[1]) == null ? void 0 : _a2.trim()) != null ? _b2 : "";
   return id ? `id:${id}` : `path:${file.path}`;
+}
+function workKeyFromKey(key) {
+  const raw = key.replace(/^(?:id|path):/, "");
+  const match = /^(.*?\/(?:transcription|translation))(?=\/|$)/.exec(raw);
+  return match ? match[1] : raw;
+}
+function workKeyFromText(file, text) {
+  const match = /^midad-id:[ \t]*["']?([^"'\n]+)["']?[ \t]*$/m.exec(text);
+  return match ? workKeyFromKey(`id:${match[1].trim()}`) : `path:${file.path}`;
+}
+function workArchivePath(vaultPath, workKey2) {
+  const name = `${safeFileSegment(workKey2, "work", 80)}-${hashString(workKey2)}.zip`;
+  return `${vaultPath}/${ARCHIVE_DIR}/${name}`;
 }
 function versionFile(key, id) {
   const hash = hashString(key);
@@ -13884,33 +13898,108 @@ var VersionStore = class {
     this.vaultPath = vaultPath;
     this.hashes = NoteHashStore.forVault(vaultPath);
   }
-  zipPath() {
-    return `${this.vaultPath}/${STORE_REL}`;
+  archiveDir() {
+    return `${this.vaultPath}/${ARCHIVE_DIR}`;
   }
   load() {
+    var _a2, _b2, _c, _d, _e;
     if (this.manifest)
       return this.manifest;
+    const dir = this.archiveDir();
+    let found = false;
     try {
-      const raw = fs3.readFileSync(this.zipPath());
-      this.files = unzipSync(new Uint8Array(raw));
-      const text = this.files["manifest.json"];
-      this.manifest = text ? JSON.parse(strFromU8(text)) : { ...EMPTY, notes: {} };
-      for (const entry of Object.values(this.manifest.notes)) {
-        for (const version of entry.versions)
-          delete version.hash;
+      for (const name of fs3.readdirSync(dir)) {
+        if (!name.endsWith(".zip"))
+          continue;
+        try {
+          const files = unzipSync(new Uint8Array(fs3.readFileSync(`${dir}/${name}`)));
+          const text = files["manifest.json"];
+          if (!text)
+            continue;
+          const archive = JSON.parse(strFromU8(text));
+          for (const [key, entry] of Object.entries((_a2 = archive.notes) != null ? _a2 : {})) {
+            (_b2 = entry.workKey) != null ? _b2 : entry.workKey = workKeyFromKey(key);
+            for (const version of entry.versions)
+              delete version.hash;
+            (_c = this.manifest) != null ? _c : this.manifest = { schema: 1, notes: {} };
+            this.manifest.notes[key] = entry;
+          }
+          for (const [name2, bytes] of Object.entries(files)) {
+            if (name2 !== "manifest.json")
+              this.files[name2] = bytes;
+          }
+          found = true;
+        } catch (e) {
+        }
       }
     } catch (e) {
-      this.manifest = { schema: 1, notes: {} };
-      this.files = {};
     }
+    if (!found) {
+      try {
+        const raw = fs3.readFileSync(`${this.vaultPath}/${LEGACY_STORE_REL}`);
+        this.files = unzipSync(new Uint8Array(raw));
+        const text = this.files["manifest.json"];
+        this.manifest = text ? JSON.parse(strFromU8(text)) : { ...EMPTY, notes: {} };
+        delete this.files["manifest.json"];
+        for (const [key, entry] of Object.entries(this.manifest.notes)) {
+          (_d = entry.workKey) != null ? _d : entry.workKey = workKeyFromKey(key);
+          for (const version of entry.versions)
+            delete version.hash;
+        }
+        this.save();
+        const backup = `${this.vaultPath}/.midad-arabic-sources/backups/source-versions-migrated.zip`;
+        fs3.mkdirSync(backup.slice(0, backup.lastIndexOf("/")), { recursive: true });
+        try {
+          fs3.renameSync(`${this.vaultPath}/${LEGACY_STORE_REL}`, backup);
+        } catch (e) {
+        }
+      } catch (e) {
+        this.manifest = { schema: 1, notes: {} };
+        this.files = {};
+      }
+    }
+    (_e = this.manifest) != null ? _e : this.manifest = { schema: 1, notes: {} };
     return this.manifest;
   }
   save() {
+    var _a2;
     const manifest = this.load();
-    this.files["manifest.json"] = strToU8(JSON.stringify(manifest, null, 1) + "\n");
-    const dir = this.zipPath().slice(0, this.zipPath().lastIndexOf("/"));
+    const dir = this.archiveDir();
     fs3.mkdirSync(dir, { recursive: true });
-    fs3.writeFileSync(this.zipPath(), Buffer.from(zipSync(this.files, { level: 6 })));
+    const groups = new Map();
+    for (const [key, entry] of Object.entries(manifest.notes)) {
+      const workKey2 = (_a2 = entry.workKey) != null ? _a2 : workKeyFromKey(key);
+      entry.workKey = workKey2;
+      let group = groups.get(workKey2);
+      if (!group) {
+        group = { schema: 1, notes: {} };
+        groups.set(workKey2, group);
+      }
+      group.notes[key] = entry;
+    }
+    const expected = new Set();
+    for (const [workKey2, group] of groups) {
+      const archive = workArchivePath(this.vaultPath, workKey2);
+      expected.add(archive.slice(archive.lastIndexOf("/") + 1));
+      const entries = {
+        "manifest.json": strToU8(JSON.stringify(group, null, 1) + "\n")
+      };
+      for (const entry of Object.values(group.notes)) {
+        for (const version of entry.versions) {
+          const bytes = this.files[version.file];
+          if (bytes)
+            entries[version.file] = bytes;
+        }
+      }
+      fs3.writeFileSync(archive, Buffer.from(zipSync(entries, { level: 6 })));
+    }
+    try {
+      for (const name of fs3.readdirSync(dir)) {
+        if (name.endsWith(".zip") && !expected.has(name))
+          fs3.unlinkSync(`${dir}/${name}`);
+      }
+    } catch (e) {
+    }
   }
   async entryFor(file) {
     var _a2;
@@ -13926,6 +14015,7 @@ var VersionStore = class {
       title: file.basename,
       defaultId: "v0",
       virtualOriginal: true,
+      workKey: workKeyFromText(file, text),
       versions: []
     };
   }
@@ -13993,6 +14083,7 @@ var VersionStore = class {
         title: file.basename.replace(/\.Version\d+$/i, ""),
         defaultId: "v0",
         virtualOriginal: !!options.virtualOriginal,
+        workKey: workKeyFromText(file, text),
         versions: []
       };
       manifest.notes[key] = entry;
