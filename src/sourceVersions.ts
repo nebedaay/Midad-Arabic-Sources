@@ -668,6 +668,7 @@ interface VersionModalOptions {
 	isSourceBacked?: () => Promise<boolean>;
 	renderOriginal?: () => Promise<void>;
 	renderVersionZero?: () => Promise<void>;
+	matchesOriginal?: () => Promise<boolean | null>;
 	updateBaseline?: () => Promise<void>;
 }
 
@@ -680,6 +681,7 @@ export class ManageVersionsModal extends Modal {
 	private fingerprintLoaded = false;
 	private renderChanged = false;
 	private matchesSaved = false;
+	private originalMatches: boolean | null = null;
 	private outsideContent = "";
 	private activeVersionId: string | undefined;
 	private selectionDirty = false;
@@ -728,6 +730,7 @@ export class ManageVersionsModal extends Modal {
 			? `${prior.body.slice(0, region.start)}${prior.body.slice(region.end)}`.trim()
 			: "";
 		this.matchesSaved = this.entry ? await this.options.store.matchesSavedVersion(this.entry, this.currentHash) : false;
+		this.originalMatches = this.options.matchesOriginal ? await this.options.matchesOriginal() : null;
 		this.render();
 		if (!this.fingerprintLoaded) {
 			this.renderFingerprint = this.options.getFingerprint ? await this.options.getFingerprint() : "";
@@ -742,8 +745,12 @@ export class ManageVersionsModal extends Modal {
 	}
 
 	private hasUnsavedChanges(): boolean {
-		// A virtual Version 0 with no saved versions has no snapshot to compare
-		// against; applying it simply re-renders the installed model.
+		if (this.entry?.virtualOriginal && this.entry.defaultId === "v0") {
+			if (this.originalMatches === true) return false;
+			if (this.originalMatches === false) return true;
+			// No baseline is available: don't claim Version 0 is unchanged.
+			return this.entry.versions.length ? !this.matchesSaved : true;
+		}
 		return !!this.entry?.versions.length && !this.matchesSaved;
 	}
 

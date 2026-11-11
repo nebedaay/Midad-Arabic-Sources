@@ -4106,6 +4106,14 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		return changed;
 	}
 
+	/** Compare a note's managed region with the last rendered baseline. */
+	private async noteMatchesBaseline(file: TFile): Promise<boolean | null> {
+		const baselines = await this.loadNoteBaselines();
+		const previous = baselines[normalizePath(file.path)];
+		if (!previous) return null;
+		return this.noteContentHash(await this.app.vault.read(file)) === previous;
+	}
+
 	private async updateNoteBaselines(paths: string[]): Promise<void> {
 		const notes = await this.loadNoteBaselines();
 		for (const path of [...new Set(paths.map((value) => normalizePath(value)))]) {
@@ -5446,6 +5454,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 				const entry = await store.entryFor(file);
 				if (entry && await this.renderVersionZeroFor(file, entry)) new Notice("Rendered Version 0 as a separate note.");
 			},
+			matchesOriginal: async () => this.noteMatchesBaseline(file),
 			updateBaseline: async () => { await this.updateNoteBaselines([file.path]); },
 			getFingerprint: async () => hashString(JSON.stringify({
 				version: this.manifest.version,

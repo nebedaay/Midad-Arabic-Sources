@@ -14133,6 +14133,7 @@ var _ManageVersionsModal = class extends import_obsidian3.Modal {
     this.fingerprintLoaded = false;
     this.renderChanged = false;
     this.matchesSaved = false;
+    this.originalMatches = null;
     this.outsideContent = "";
     this.selectionDirty = false;
     this.options = options;
@@ -14177,6 +14178,7 @@ var _ManageVersionsModal = class extends import_obsidian3.Modal {
     const region = findManagedRegion(prior.body);
     this.outsideContent = region ? `${prior.body.slice(0, region.start)}${prior.body.slice(region.end)}`.trim() : "";
     this.matchesSaved = this.entry ? await this.options.store.matchesSavedVersion(this.entry, this.currentHash) : false;
+    this.originalMatches = this.options.matchesOriginal ? await this.options.matchesOriginal() : null;
     this.render();
     if (!this.fingerprintLoaded) {
       this.renderFingerprint = this.options.getFingerprint ? await this.options.getFingerprint() : "";
@@ -14190,8 +14192,15 @@ var _ManageVersionsModal = class extends import_obsidian3.Modal {
     return !((_a2 = this.entry) == null ? void 0 : _a2.versions.length) || !this.matchesSaved;
   }
   hasUnsavedChanges() {
-    var _a2;
-    return !!((_a2 = this.entry) == null ? void 0 : _a2.versions.length) && !this.matchesSaved;
+    var _a2, _b2;
+    if (((_a2 = this.entry) == null ? void 0 : _a2.virtualOriginal) && this.entry.defaultId === "v0") {
+      if (this.originalMatches === true)
+        return false;
+      if (this.originalMatches === false)
+        return true;
+      return this.entry.versions.length ? !this.matchesSaved : true;
+    }
+    return !!((_b2 = this.entry) == null ? void 0 : _b2.versions.length) && !this.matchesSaved;
   }
   render() {
     var _a2, _b2, _c, _d, _e, _f, _g;
@@ -25648,6 +25657,13 @@ var MidadArabicSourcesPlugin = class extends import_obsidian19.Plugin {
     }
     return changed;
   }
+  async noteMatchesBaseline(file) {
+    const baselines = await this.loadNoteBaselines();
+    const previous = baselines[(0, import_obsidian19.normalizePath)(file.path)];
+    if (!previous)
+      return null;
+    return this.noteContentHash(await this.app.vault.read(file)) === previous;
+  }
   async updateNoteBaselines(paths) {
     const notes = await this.loadNoteBaselines();
     for (const path2 of [...new Set(paths.map((value) => (0, import_obsidian19.normalizePath)(value)))]) {
@@ -26791,6 +26807,7 @@ ${lines.join("\n")}`;
         if (entry && await this.renderVersionZeroFor(file, entry))
           new import_obsidian19.Notice("Rendered Version 0 as a separate note.");
       },
+      matchesOriginal: async () => this.noteMatchesBaseline(file),
       updateBaseline: async () => {
         await this.updateNoteBaselines([file.path]);
       },
