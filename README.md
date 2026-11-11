@@ -153,8 +153,11 @@ The importer is **acquisition only**: it downloads a work’s source, normalises
 
 ## Building from source
 
+Documentation is edited in the vault's `Midad Docs/` folder, which is the source of truth. Run `npm run sync-docs` to copy it into the development repo's `docs/` and `README.md`; `npm run build` and `npm run dev` do this automatically. In CI, where the vault folder is absent, the committed copies are used.
+
 ```bash
 npm install
+npm run sync-docs     # Midad Docs/ → docs/ + README.md
 npm run check-types   # tsc --noemit
 npm run lint          # eslint (Obsidian community-plugin rules)
 npm run build         # esbuild → main.js

@@ -5,10 +5,11 @@
   "main": "main.js",
   "scripts": {
     "gen-assets": "node gen-assets.mjs",
-    "predev": "npm run gen-assets",
+    "predev": "node sync-docs.mjs && npm run gen-assets",
     "dev": "node esbuild.config.mjs",
-    "prebuild": "npm run gen-assets",
+    "prebuild": "node sync-docs.mjs && npm run gen-assets",
     "build": "node esbuild.config.mjs production",
+    "sync-docs": "node sync-docs.mjs",
     "deploy": "npm run build && mkdir -p ../../.obsidian/plugins/midad-arabic-sources && cp main.js manifest.json styles.css ../../.obsidian/plugins/midad-arabic-sources/ && cp -R scripts midad-arabic-sources-import-templates ../../.obsidian/plugins/midad-arabic-sources/",
     "precheck-types": "npm run gen-assets",
     "check-types": "tsc --noemit",
