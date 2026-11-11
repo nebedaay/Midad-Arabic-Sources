@@ -14004,7 +14004,7 @@ var VersionStore = class {
     return true;
   }
 };
-var ManageVersionsModal = class extends import_obsidian3.Modal {
+var _ManageVersionsModal = class extends import_obsidian3.Modal {
   constructor(options) {
     super(options.app);
     this.entry = null;
@@ -14019,8 +14019,23 @@ var ManageVersionsModal = class extends import_obsidian3.Modal {
     this.activeVersionId = options.activeVersionId;
   }
   async onOpen() {
+    if (_ManageVersionsModal.current && _ManageVersionsModal.current !== this) {
+      _ManageVersionsModal.current.close();
+    }
+    document.querySelectorAll(".modal.mas-versions-modal").forEach((el) => {
+      var _a2;
+      if (el !== this.modalEl)
+        (_a2 = el.querySelector(".modal-close-button")) == null ? void 0 : _a2.click();
+    });
+    _ManageVersionsModal.current = this;
     this.modalEl.addClass("mas-versions-modal");
+    this.titleEl.setText("Manage versions");
     await this.refresh();
+  }
+  onClose() {
+    if (_ManageVersionsModal.current === this)
+      _ManageVersionsModal.current = null;
+    this.contentEl.empty();
   }
   async refresh() {
     var _a2;
@@ -14316,6 +14331,7 @@ ${prior.body.slice(region.start, region.end).trim()}
     this.close();
   }
 };
+var ManageVersionsModal = _ManageVersionsModal;
 ManageVersionsModal.current = null;
 var ManagedVersionChangesModal = class extends import_obsidian3.Modal {
   constructor(app, options) {

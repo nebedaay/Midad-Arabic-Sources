@@ -580,8 +580,21 @@ export class ManageVersionsModal extends Modal {
 	}
 
 	async onOpen(): Promise<void> {
+		if (ManageVersionsModal.current && ManageVersionsModal.current !== this) {
+			ManageVersionsModal.current.close();
+		}
+		document.querySelectorAll<HTMLElement>(".modal.mas-versions-modal").forEach((el) => {
+			if (el !== this.modalEl) el.querySelector<HTMLButtonElement>(".modal-close-button")?.click();
+		});
+		ManageVersionsModal.current = this;
 		this.modalEl.addClass("mas-versions-modal");
+		this.titleEl.setText("Manage versions");
 		await this.refresh();
+	}
+
+	onClose(): void {
+		if (ManageVersionsModal.current === this) ManageVersionsModal.current = null;
+		this.contentEl.empty();
 	}
 
 	private async refresh(): Promise<void> {
