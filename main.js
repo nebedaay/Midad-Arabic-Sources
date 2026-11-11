@@ -25307,6 +25307,57 @@ var MidadArabicSourcesPlugin = class extends import_obsidian19.Plugin {
         this.endSourceOperation(op);
     }
   }
+  noteBaselinePath() {
+    return (0, import_obsidian19.normalizePath)(".midad-arabic-sources/note-baselines.json");
+  }
+  async loadNoteBaselines() {
+    var _a2;
+    try {
+      const raw = await this.app.vault.adapter.read(this.noteBaselinePath());
+      const parsed = JSON.parse(raw);
+      return (_a2 = parsed.notes) != null ? _a2 : {};
+    } catch (e) {
+      return {};
+    }
+  }
+  async saveNoteBaselines(notes) {
+    try {
+      await this.app.vault.adapter.write(this.noteBaselinePath(), JSON.stringify({ schema: 1, notes }, null, 1) + "\n");
+    } catch (error) {
+      console.error("[midad-arabic-sources] save note baselines", error);
+    }
+  }
+  noteContentHash(text) {
+    const prior = splitNote(text);
+    const region = findManagedRegion(prior.body);
+    return hashString(region ? prior.body.slice(region.start, region.end) : prior.body);
+  }
+  async findChangedSourceNotes(paths) {
+    const baselines = await this.loadNoteBaselines();
+    const changed = [];
+    for (const path2 of [...new Set(paths.map((value) => (0, import_obsidian19.normalizePath)(value)))]) {
+      const file = this.app.vault.getAbstractFileByPath(path2);
+      if (!(file instanceof import_obsidian19.TFile))
+        continue;
+      const previous = baselines[path2];
+      if (!previous)
+        continue;
+      const hash = this.noteContentHash(await this.app.vault.read(file));
+      if (hash !== previous)
+        changed.push({ path: path2, file, hash });
+    }
+    return changed;
+  }
+  async updateNoteBaselines(paths) {
+    const notes = await this.loadNoteBaselines();
+    for (const path2 of [...new Set(paths.map((value) => (0, import_obsidian19.normalizePath)(value)))]) {
+      const file = this.app.vault.getAbstractFileByPath(path2);
+      if (!(file instanceof import_obsidian19.TFile))
+        continue;
+      notes[path2] = this.noteContentHash(await this.app.vault.read(file));
+    }
+    await this.saveNoteBaselines(notes);
+  }
   async renderModels(modelPaths, force = false, onProgress, shouldCancel) {
     var _a2, _b2, _c, _d, _e, _f, _g, _h;
     const vault = this.vaultPath();
@@ -25350,7 +25401,22 @@ var MidadArabicSourcesPlugin = class extends import_obsidian19.Plugin {
       }
       m.work.unit_prefix = isCanonical ? "" : m.work.dir;
     }
+    const expected = batch.flatMap((model) => expectedNotePaths(model, outRoot, canonicalRoot, canonicalId));
+    const changed = await this.findChangedSourceNotes(expected);
+    if (changed.length) {
+      const choice = await new Promise((resolve) => {
+        new SourceChangeReviewModal(this.app, changed.map((entry) => entry.path), resolve).open();
+      });
+      if (choice === "cancel")
+        return [];
+      if (choice === "save") {
+        const store = new VersionStore(this.app, this.vaultPath());
+        for (const entry of changed)
+          await store.saveVersion(entry.file, false);
+      }
+    }
     const written = [];
+    const contentPaths = [];
     const pubs = await this.loadPublicationMap();
     const stats = await this.loadSourceStats();
     for (let i = 0; i < batch.length; i++) {
@@ -25374,6 +25440,7 @@ var MidadArabicSourcesPlugin = class extends import_obsidian19.Plugin {
         const seen = new Map(Object.entries((_c = (_b2 = stats[this.workKey(model.work)]) == null ? void 0 : _b2.units) != null ? _c : {}));
         const w = await renderModelToVault(this.app, templates, model, outRoot, force, emit, void 0, seen, shouldCancel);
         written.push(...w);
+        contentPaths.push(...w);
         await this.applySavedVersions(w);
         const key = this.workKey(model.work);
         const now = Date.now();
@@ -25397,6 +25464,7 @@ var MidadArabicSourcesPlugin = class extends import_obsidian19.Plugin {
       await this.pruneRenamedFolder(model.work);
     }
     await this.saveSourceStats(stats);
+    await this.updateNoteBaselines(contentPaths);
     void this.reportLargeSourceNotes(false);
     if (shouldCancel == null ? void 0 : shouldCancel())
       return written;
@@ -26261,6 +26329,7 @@ ${lines.join("\n")}`;
     }
     const canonicalPath = file.path.replace(/\.Version\d+\.md$/i, ".md");
     await this.applySavedVersions([canonicalPath]);
+    await this.updateNoteBaselines([canonicalPath]);
     new import_obsidian19.Notice(`Re-rendered ${chosen.length} archived batch(es) for @${info.citekey}.`);
   }
   async applySavedVersions(paths) {
@@ -29230,6 +29299,39 @@ var TurathUrlModal = class extends import_obsidian19.Modal {
   }
   onClose() {
     this.contentEl.empty();
+  }
+};
+var SourceChangeReviewModal = class extends import_obsidian19.Modal {
+  constructor(app, paths, resolve) {
+    super(app);
+    this.chosen = false;
+    this.paths = paths;
+    this.resolve = resolve;
+  }
+  onOpen() {
+    this.titleEl.setText("Unsaved source changes");
+    const { contentEl } = this;
+    contentEl.createEl("p", { text: "These notes have changes that are not saved as versions. Automatic rendering would replace them." });
+    const list = contentEl.createEl("ul");
+    for (const path2 of this.paths)
+      list.createEl("li", { text: path2 });
+    const buttons = contentEl.createDiv({ cls: "mas-versions-conflict-actions" });
+    const add = (text, choice, primary = false) => {
+      const button = buttons.createEl("button", { text, cls: primary ? "mod-cta" : void 0 });
+      button.onclick = () => {
+        this.chosen = true;
+        this.resolve(choice);
+        this.close();
+      };
+    };
+    add("Save as versions", "save", true);
+    add("Overwrite changes", "overwrite");
+    add("Cancel", "cancel");
+  }
+  onClose() {
+    this.contentEl.empty();
+    if (!this.chosen)
+      this.resolve("cancel");
   }
 };
 var ManageSourcesModal = class extends import_obsidian19.Modal {

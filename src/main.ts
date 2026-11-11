@@ -4057,6 +4057,56 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		}
 	}
 
+	private noteBaselinePath(): string {
+		return normalizePath(".midad-arabic-sources/note-baselines.json");
+	}
+
+	private async loadNoteBaselines(): Promise<Record<string, string>> {
+		try {
+			const raw = await this.app.vault.adapter.read(this.noteBaselinePath());
+			const parsed = JSON.parse(raw) as { notes?: Record<string, string> };
+			return parsed.notes ?? {};
+		} catch { return {}; }
+	}
+
+	private async saveNoteBaselines(notes: Record<string, string>): Promise<void> {
+		try {
+			await this.app.vault.adapter.write(this.noteBaselinePath(), JSON.stringify({ schema: 1, notes }, null, 1) + "\n");
+		} catch (error) {
+			console.error("[midad-arabic-sources] save note baselines", error);
+		}
+	}
+
+	private noteContentHash(text: string): string {
+		const prior = splitNote(text);
+		const region = findManagedRegion(prior.body);
+		return hashString(region ? prior.body.slice(region.start, region.end) : prior.body);
+	}
+
+	private async findChangedSourceNotes(paths: string[]): Promise<Array<{ path: string; file: TFile; hash: string }>> {
+		const baselines = await this.loadNoteBaselines();
+		const changed: Array<{ path: string; file: TFile; hash: string }> = [];
+		for (const path of [...new Set(paths.map((value) => normalizePath(value)))]) {
+			const file = this.app.vault.getAbstractFileByPath(path);
+			if (!(file instanceof TFile)) continue;
+			const previous = baselines[path];
+			if (!previous) continue;
+			const hash = this.noteContentHash(await this.app.vault.read(file));
+			if (hash !== previous) changed.push({ path, file, hash });
+		}
+		return changed;
+	}
+
+	private async updateNoteBaselines(paths: string[]): Promise<void> {
+		const notes = await this.loadNoteBaselines();
+		for (const path of [...new Set(paths.map((value) => normalizePath(value)))]) {
+			const file = this.app.vault.getAbstractFileByPath(path);
+			if (!(file instanceof TFile)) continue;
+			notes[path] = this.noteContentHash(await this.app.vault.read(file));
+		}
+		await this.saveNoteBaselines(notes);
+	}
+
 	async renderModels(modelPaths: string[], force = false, onProgress?: (p: RenderProgress) => void,
 		shouldCancel?: () => boolean): Promise<string[]> {
 		const vault = this.vaultPath();
@@ -4105,7 +4155,20 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			// to the canonical Qur'ān notes instead of its own.
 			m.work.unit_prefix = isCanonical ? "" : (m.work.dir as string);
 		}
+		const expected = batch.flatMap((model) => expectedNotePaths(model, outRoot, canonicalRoot, canonicalId));
+		const changed = await this.findChangedSourceNotes(expected);
+		if (changed.length) {
+			const choice = await new Promise<"cancel" | "save" | "overwrite">((resolve) => {
+				new SourceChangeReviewModal(this.app, changed.map((entry) => entry.path), resolve).open();
+			});
+			if (choice === "cancel") return [];
+			if (choice === "save") {
+				const store = new VersionStore(this.app, this.vaultPath());
+				for (const entry of changed) await store.saveVersion(entry.file, false);
+			}
+		}
 		const written: string[] = [];
+		const contentPaths: string[] = [];
 		const pubs = await this.loadPublicationMap();
 		const stats = await this.loadSourceStats();
 		for (let i = 0; i < batch.length; i++) {
@@ -4132,6 +4195,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 				const w = await renderModelToVault(this.app, templates, model, outRoot, force, emit,
 					undefined, seen, shouldCancel);
 				written.push(...w);
+				contentPaths.push(...w);
 				await this.applySavedVersions(w);
 				// A full render brings every template the work uses up to date.
 				const key = this.workKey(model.work);
@@ -4157,6 +4221,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			await this.pruneRenamedFolder(model.work);
 		}
 		await this.saveSourceStats(stats);
+		await this.updateNoteBaselines(contentPaths);
 		// Surface any generated note that crossed the size threshold. This is a
 		// health check, not a failure: a huge note usually means a parser/chunker
 		// defect (see the FODT image payload and the pre-letter Lisān volumes).
@@ -5201,6 +5266,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		}
 		const canonicalPath = file.path.replace(/\.Version\d+\.md$/i, ".md");
 		await this.applySavedVersions([canonicalPath]);
+		await this.updateNoteBaselines([canonicalPath]);
 		new Notice(`Re-rendered ${chosen.length} archived batch(es) for @${info.citekey}.`);
 	}
 
@@ -8629,6 +8695,39 @@ class TurathUrlModal extends Modal {
 
 	onClose(): void {
 		this.contentEl.empty();
+	}
+}
+
+class SourceChangeReviewModal extends Modal {
+	private readonly paths: string[];
+	private readonly resolve: (choice: "cancel" | "save" | "overwrite") => void;
+	private chosen = false;
+
+	constructor(app: App, paths: string[], resolve: (choice: "cancel" | "save" | "overwrite") => void) {
+		super(app);
+		this.paths = paths;
+		this.resolve = resolve;
+	}
+
+	onOpen(): void {
+		this.titleEl.setText("Unsaved source changes");
+		const { contentEl } = this;
+		contentEl.createEl("p", { text: "These notes have changes that are not saved as versions. Automatic rendering would replace them." });
+		const list = contentEl.createEl("ul");
+		for (const path of this.paths) list.createEl("li", { text: path });
+		const buttons = contentEl.createDiv({ cls: "mas-versions-conflict-actions" });
+		const add = (text: string, choice: "cancel" | "save" | "overwrite", primary = false): void => {
+			const button = buttons.createEl("button", { text, cls: primary ? "mod-cta" : undefined });
+			button.onclick = () => { this.chosen = true; this.resolve(choice); this.close(); };
+		};
+		add("Save as versions", "save", true);
+		add("Overwrite changes", "overwrite");
+		add("Cancel", "cancel");
+	}
+
+	onClose(): void {
+		this.contentEl.empty();
+		if (!this.chosen) this.resolve("cancel");
 	}
 }
 
