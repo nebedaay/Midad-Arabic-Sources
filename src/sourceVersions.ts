@@ -21,6 +21,7 @@ export interface NoteVersionEntry {
 	path: string;
 	title: string;
 	defaultId: string;
+	virtualOriginal?: boolean;
 	renderHash?: string;
 	versions: SavedVersion[];
 }
@@ -93,10 +94,12 @@ function versionReference(entry: NoteVersionEntry, version: SavedVersion): strin
 }
 
 function otherVersionReferences(entry: NoteVersionEntry, excludeId?: string): string[] {
-	return entry.versions
+	const refs = entry.versions
 		.filter((v) => v.id !== excludeId)
 		.sort((a, b) => a.id === entry.defaultId ? -1 : b.id === entry.defaultId ? 1 : versionNumber(a.id) - versionNumber(b.id))
 		.map((v) => versionReference(entry, v));
+	if (entry.virtualOriginal && excludeId !== "v0") refs.unshift("Original source");
+	return refs;
 }
 
 function addUpLink(content: string, link: string): string {
@@ -272,9 +275,24 @@ export class VersionStore {
 		return manifest.notes[key] ?? null;
 	}
 
+	async virtualEntry(file: TFile): Promise<NoteVersionEntry> {
+		const text = await this.app.vault.read(file);
+		return {
+			key: noteKeyFromText(file, text),
+			path: file.path,
+			title: file.basename,
+			defaultId: "v0",
+			virtualOriginal: true,
+			versions: [],
+		};
+	}
+
 	async saveVersion(file: TFile, overwrite: boolean, renderHash?: string, options: {
 		activeVersionId?: string;
 		label?: string;
+		startAt?: number;
+		virtualOriginal?: boolean;
+		makeDefault?: boolean;
 	} = {}): Promise<NoteVersionEntry> {
 		const manifest = this.load();
 		const text = await this.app.vault.read(file);
@@ -288,6 +306,7 @@ export class VersionStore {
 				path: file.path,
 				title: file.basename.replace(/\.Version\d+$/i, ""),
 				defaultId: "v0",
+				virtualOriginal: !!options.virtualOriginal,
 				versions: [],
 			};
 			manifest.notes[key] = entry;
@@ -316,7 +335,7 @@ export class VersionStore {
 			version.hash = hash;
 			version.kind = "user";
 		} else {
-			const highest = entry.versions.reduce((n, v) => Math.max(n, versionNumber(v.id)), -1);
+			const highest = entry.versions.reduce((n, v) => Math.max(n, versionNumber(v.id)), (options.startAt ?? 0) - 1);
 			const id = `v${highest + 1}`;
 			version = {
 				id,
@@ -336,15 +355,17 @@ export class VersionStore {
 			version.selected = true;
 			version.archived = false;
 		} else if (!overwrite) {
-			for (const other of entry.versions) {
-				if (other.id !== version.id) {
-					other.selected = false;
-					other.archived = true;
+			if (options.makeDefault !== false) {
+				for (const other of entry.versions) {
+					if (other.id !== version.id) {
+						other.selected = false;
+						other.archived = true;
+					}
 				}
+				entry.defaultId = version.id;
 			}
 			version.selected = true;
 			version.archived = false;
-			entry.defaultId = version.id;
 		} else {
 			version.selected = true;
 			version.archived = false;
@@ -494,23 +515,30 @@ export class VersionStore {
 
 	async apply(file: TFile, entry: NoteVersionEntry): Promise<number> {
 		const defaultVersion = entry.versions.find((v) => v.id === entry.defaultId);
-		if (!defaultVersion) return 0;
+		const virtualDefault = !defaultVersion && entry.virtualOriginal && entry.defaultId === "v0";
+		if (!defaultVersion && !virtualDefault) return 0;
 		const current = await this.app.vault.read(file);
 		const currentPrior = splitNote(current);
 		const outside = outsideBody(current);
-		const frontmatter = currentPrior.frontmatter ?? splitNote(await this.versionText(entry, defaultVersion.id) ?? "").frontmatter ?? "";
-		const defaultText = await this.versionText(entry, defaultVersion.id);
+		const frontmatter = currentPrior.frontmatter ?? (defaultVersion ? splitNote(await this.versionText(entry, defaultVersion.id) ?? "").frontmatter ?? "" : "");
+		const defaultText = defaultVersion ? await this.versionText(entry, defaultVersion.id) : current;
 		if (!defaultText) return 0;
-		const otherLinks = otherVersionReferences(entry, defaultVersion.id);
+		const otherLinks = otherVersionReferences(entry, defaultVersion?.id ?? "v0");
 		let written = 0;
-		const changeDefault = () => {
-			const body = normalizeManagedMarkerSpacing(`${outside}${managedRegionText(defaultText)}`);
-			const clean = stripVersionProperties(joinNote(frontmatter, body));
-			const withName = setFrontmatterProperty(clean, "midad-version-name", `"${versionLabel(defaultVersion).replace(/"/g, '\\"')}"`);
-			return setFrontmatterList(withName, "other-versions", otherLinks);
-		};
-		if (await this.writeLive(file.path, changeDefault())) written += 1;
-		const defaultLink = versionLink(entry, defaultVersion);
+		if (defaultVersion) {
+			const changeDefault = () => {
+				const body = normalizeManagedMarkerSpacing(`${outside}${managedRegionText(defaultText)}`);
+				const clean = stripVersionProperties(joinNote(frontmatter, body));
+				const withName = setFrontmatterProperty(clean, "midad-version-name", `"${versionLabel(defaultVersion).replace(/"/g, '\\"')}"`);
+				return setFrontmatterList(withName, "other-versions", otherLinks);
+			};
+			if (await this.writeLive(file.path, changeDefault())) written += 1;
+		} else {
+			const clean = stripVersionProperties(current);
+			const withName = setFrontmatterProperty(clean, "midad-version-name", `"Original source"`);
+			if (await this.writeLive(file.path, setFrontmatterList(withName, "other-versions", otherLinks))) written += 1;
+		}
+		const defaultLink = defaultVersion ? versionLink(entry, defaultVersion) : `[[${entry.path.replace(/\.md$/, "")}|Default version]]`;
 		for (const version of entry.versions) {
 			const path = versionNotePath(entry, version);
 			if (!version.selected || version.id === entry.defaultId) {
@@ -562,6 +590,8 @@ interface VersionModalOptions {
 	onChanged?: () => void;
 	getFingerprint?: () => Promise<string>;
 	activeVersionId?: string;
+	isSourceBacked?: () => Promise<boolean>;
+	renderOriginal?: () => Promise<void>;
 }
 
 export class ManageVersionsModal extends Modal {
@@ -603,6 +633,9 @@ export class ManageVersionsModal extends Modal {
 
 	private async refresh(): Promise<void> {
 		this.entry = await this.options.store.entryFor(this.options.file);
+		if (!this.entry && this.options.isSourceBacked && await this.options.isSourceBacked()) {
+			this.entry = await this.options.store.virtualEntry(this.options.file);
+		}
 		const liveText = await this.options.app.vault.read(this.options.file);
 		if (!this.activeVersionId && /\.Version\d+\.md$/i.test(this.options.file.path)) {
 			const versionMatch = /^midad-version:[ \t]*["']?([^"'\n]+)["']?[ \t]*$/m.exec(liveText);
@@ -682,8 +715,26 @@ export class ManageVersionsModal extends Modal {
 
 		if (!this.activeVersionId) {
 			const list = contentEl.createDiv({ cls: "mas-versions-list" });
+			if (this.entry?.virtualOriginal) {
+				const row = list.createDiv({ cls: "mas-versions-row" });
+				if (this.entry.defaultId === "v0") row.addClass("is-default");
+				const main = row.createDiv({ cls: "mas-versions-main" });
+				main.createDiv({ cls: "mas-versions-label-line" }).createSpan({ cls: "mas-versions-label", text: "Version 0 — Original source" });
+				main.createDiv({ cls: "mas-versions-date", text: "Rendered from the source; no stored snapshot." });
+				const status = row.createDiv({ cls: "mas-versions-status" });
+				if (this.entry.defaultId === "v0") {
+					status.createSpan({ cls: "mas-versions-default", text: "Default" });
+				} else {
+					const setDefault = status.createEl("button", { cls: "mas-versions-default-button", text: "Set as default" });
+					setDefault.onclick = async () => {
+						await this.options.store.setDefault(this.entry!, "v0");
+						this.selectionDirty = true;
+						await this.refresh();
+					};
+				}
+			}
 			if (!this.entry?.versions.length) {
-				list.createDiv({ cls: "mas-versions-empty", text: "No saved versions yet." });
+				if (!this.entry?.virtualOriginal) list.createDiv({ cls: "mas-versions-empty", text: "No saved versions yet." });
 			} else {
 				for (const version of [...this.entry.versions].sort((a, b) => versionNumber(a.id) - versionNumber(b.id))) {
 				const row = list.createDiv({ cls: "mas-versions-row" });
@@ -735,7 +786,7 @@ export class ManageVersionsModal extends Modal {
 		if (!this.activeVersionId) {
 			const applyWrap = contentEl.createDiv({ cls: "mas-versions-apply" });
 			const apply = applyWrap.createEl("button", { text: "Apply default and re-render notes" });
-			apply.disabled = !this.entry?.versions.length;
+			apply.disabled = !this.entry?.versions.length && !this.entry?.virtualOriginal;
 			apply.onclick = () => { void this.apply(); };
 		}
 	}
@@ -838,7 +889,7 @@ export class ManageVersionsModal extends Modal {
 
 	private promptNewVersion(): void {
 		const versions = this.entry?.versions ?? [];
-		const highest = versions.reduce((n, v) => Math.max(n, versionNumber(v.id)), -1);
+		const highest = versions.reduce((n, v) => Math.max(n, versionNumber(v.id)), this.entry?.virtualOriginal ? 0 : -1);
 		const active = this.activeVersionId ? versions.find((v) => v.id === this.activeVersionId) : null;
 		let suggestion = active ? `${versionLabel(active)}.1` : `Version ${highest + 1}`;
 		let suffix = 2;
@@ -849,6 +900,8 @@ export class ManageVersionsModal extends Modal {
 			await this.options.store.saveVersion(this.options.file, false, this.renderFingerprint, {
 				activeVersionId: this.activeVersionId,
 				label: name,
+				startAt: this.entry?.virtualOriginal ? 1 : 0,
+				virtualOriginal: !!this.entry?.virtualOriginal,
 			});
 			this.selectionDirty = false;
 			await this.refresh();
@@ -857,6 +910,34 @@ export class ManageVersionsModal extends Modal {
 	}
 
 	private async apply(): Promise<void> {
+		if (this.entry?.virtualOriginal && this.entry.defaultId === "v0" && this.options.renderOriginal) {
+			const renderOriginal = async () => {
+				await this.options.renderOriginal!();
+				this.close();
+			};
+			if (this.hasUnsavedChanges()) {
+				new UnsavedVersionModal(this.app, {
+					onDiscard: renderOriginal,
+					onSaveNew: async () => {
+						const versions = this.entry?.versions ?? [];
+						const highest = versions.reduce((n, v) => Math.max(n, versionNumber(v.id)), 0);
+						const next = highest + 1;
+						await this.options.store.saveVersion(this.options.file, false, this.renderFingerprint, {
+							startAt: next,
+							virtualOriginal: true,
+							makeDefault: false,
+							label: `Version ${next}`,
+						});
+						await renderOriginal();
+					},
+					onOverwrite: renderOriginal,
+					onCancel: () => undefined,
+				}).open();
+				return;
+			}
+			await renderOriginal();
+			return;
+		}
 		if (!this.entry?.versions.length) {
 			new Notice("There are no saved versions to apply.");
 			return;

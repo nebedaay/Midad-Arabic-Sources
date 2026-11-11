@@ -4166,15 +4166,35 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		}
 		const expected = batch.flatMap((model) => expectedNotePaths(model, outRoot, canonicalRoot, canonicalId));
 		const changed = await this.findChangedSourceNotes(expected);
+		const originalPaths = new Set<string>();
 		if (changed.length) {
-			const choice = await new Promise<"cancel" | "save" | "overwrite">((resolve) => {
+			const choice = await new Promise<"cancel" | "skip" | "save" | "overwrite" | "original">((resolve) => {
 				new SourceChangeReviewModal(this.app, changed.map((entry) => entry.path), resolve).open();
 			});
-			if (choice === "cancel") return [];
+			if (choice === "cancel" || choice === "skip") return [];
+			const store = new VersionStore(this.app, this.vaultPath());
 			if (choice === "save") {
-				const store = new VersionStore(this.app, this.vaultPath());
-				for (const entry of changed) await store.saveVersion(entry.file, false);
+				for (const entry of changed) {
+					const existing = await store.entryFor(entry.file);
+					await store.saveVersion(entry.file, false, undefined, {
+						startAt: existing ? undefined : 1,
+						virtualOriginal: !existing,
+						makeDefault: false,
+					});
+				}
+			} else if (choice === "original") {
+				// Keep the user's changed note as the default version, then capture
+				// the freshly rendered source below as a non-default version.
+				for (const entry of changed) {
+					const existing = await store.entryFor(entry.file);
+					await store.saveVersion(entry.file, false, undefined, {
+						startAt: existing ? undefined : 1,
+						virtualOriginal: !existing,
+						makeDefault: true,
+					});
+				}
 			}
+			if (choice === "original") for (const entry of changed) originalPaths.add(normalizePath(entry.path));
 		}
 		const written: string[] = [];
 		const contentPaths: string[] = [];
@@ -4205,6 +4225,16 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 					undefined, seen, shouldCancel);
 				written.push(...w);
 				contentPaths.push(...w);
+				if (originalPaths.size) {
+					const store = new VersionStore(this.app, this.vaultPath());
+					for (const path of w) {
+						if (!originalPaths.has(normalizePath(path))) continue;
+						const file = this.app.vault.getAbstractFileByPath(normalizePath(path));
+						if (file instanceof TFile) {
+							await store.saveVersion(file, false, undefined, { makeDefault: false, label: "Original source (saved)" });
+						}
+					}
+				}
 				await this.applySavedVersions(w);
 				// A full render brings every template the work uses up to date.
 				const key = this.workKey(model.work);
@@ -5366,7 +5396,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 	}
 
 	/** Open the saved-version manager for the active note. */
-	openVersionManager(): void {
+	async openVersionManager(): Promise<void> {
 		const file = this.app.workspace.getActiveFile();
 		if (!(file instanceof TFile) || file.extension !== "md") {
 			new Notice("Open a Markdown note first.");
@@ -5382,6 +5412,13 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			file,
 			store,
 			activeVersionId,
+			isSourceBacked: async () => !!(archivedNoteInfo(file.path)?.type || await this.workForPath(file.path)),
+			renderOriginal: async () => {
+				// The user already made an explicit choice in the version manager;
+				// don't ask the same unsaved-changes question again.
+				await this.updateNoteBaselines([file.path]);
+				await this.rerenderCurrentSource(file);
+			},
 			getFingerprint: async () => hashString(JSON.stringify({
 				version: this.manifest.version,
 				templates: await this.sourceTemplateHashes(),
@@ -8705,10 +8742,10 @@ class TurathUrlModal extends Modal {
 
 class SourceChangeReviewModal extends Modal {
 	private readonly paths: string[];
-	private readonly resolve: (choice: "cancel" | "save" | "overwrite") => void;
+	private readonly resolve: (choice: "cancel" | "skip" | "save" | "overwrite" | "original") => void;
 	private chosen = false;
 
-	constructor(app: App, paths: string[], resolve: (choice: "cancel" | "save" | "overwrite") => void) {
+	constructor(app: App, paths: string[], resolve: (choice: "cancel" | "skip" | "save" | "overwrite" | "original") => void) {
 		super(app);
 		this.paths = paths;
 		this.resolve = resolve;
@@ -8721,12 +8758,14 @@ class SourceChangeReviewModal extends Modal {
 		const list = contentEl.createEl("ul");
 		for (const path of this.paths) list.createEl("li", { text: path });
 		const buttons = contentEl.createDiv({ cls: "mas-versions-conflict-actions" });
-		const add = (text: string, choice: "cancel" | "save" | "overwrite", primary = false): void => {
+		const add = (text: string, choice: "cancel" | "skip" | "save" | "overwrite" | "original", primary = false): void => {
 			const button = buttons.createEl("button", { text, cls: primary ? "mod-cta" : undefined });
 			button.onclick = () => { this.chosen = true; this.resolve(choice); this.close(); };
 		};
-		add("Save as versions", "save", true);
-		add("Overwrite changes", "overwrite");
+		add("Save changes as versions", "save", true);
+		add("Save original as a non-default version", "original");
+		add("Overwrite with the original", "overwrite");
+		add("Skip re-rendering", "skip");
 		add("Cancel", "cancel");
 	}
 

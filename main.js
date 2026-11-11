@@ -13532,7 +13532,10 @@ function versionReference(entry, version) {
   return versionLabel(version);
 }
 function otherVersionReferences(entry, excludeId) {
-  return entry.versions.filter((v) => v.id !== excludeId).sort((a, b) => a.id === entry.defaultId ? -1 : b.id === entry.defaultId ? 1 : versionNumber(a.id) - versionNumber(b.id)).map((v) => versionReference(entry, v));
+  const refs = entry.versions.filter((v) => v.id !== excludeId).sort((a, b) => a.id === entry.defaultId ? -1 : b.id === entry.defaultId ? 1 : versionNumber(a.id) - versionNumber(b.id)).map((v) => versionReference(entry, v));
+  if (entry.virtualOriginal && excludeId !== "v0")
+    refs.unshift("Original source");
+  return refs;
 }
 function addUpLink(content, link) {
   var _a2;
@@ -13718,8 +13721,19 @@ var VersionStore = class {
     const key = noteKeyFromText(file, await this.app.vault.read(file));
     return (_a2 = manifest.notes[key]) != null ? _a2 : null;
   }
+  async virtualEntry(file) {
+    const text = await this.app.vault.read(file);
+    return {
+      key: noteKeyFromText(file, text),
+      path: file.path,
+      title: file.basename,
+      defaultId: "v0",
+      virtualOriginal: true,
+      versions: []
+    };
+  }
   async saveVersion(file, overwrite, renderHash, options = {}) {
-    var _a2, _b2;
+    var _a2, _b2, _c;
     const manifest = this.load();
     const text = await this.app.vault.read(file);
     const cleanText = sanitizeFrontmatter(text);
@@ -13732,6 +13746,7 @@ var VersionStore = class {
         path: file.path,
         title: file.basename.replace(/\.Version\d+$/i, ""),
         defaultId: "v0",
+        virtualOriginal: !!options.virtualOriginal,
         versions: []
       };
       manifest.notes[key] = entry;
@@ -13757,11 +13772,11 @@ var VersionStore = class {
       version.hash = hash;
       version.kind = "user";
     } else {
-      const highest = entry.versions.reduce((n, v) => Math.max(n, versionNumber(v.id)), -1);
+      const highest = entry.versions.reduce((n, v) => Math.max(n, versionNumber(v.id)), ((_b2 = options.startAt) != null ? _b2 : 0) - 1);
       const id = `v${highest + 1}`;
       version = {
         id,
-        label: ((_b2 = options.label) == null ? void 0 : _b2.trim()) || `Version ${highest + 1}`,
+        label: ((_c = options.label) == null ? void 0 : _c.trim()) || `Version ${highest + 1}`,
         kind: "user",
         savedAt: new Date().toISOString(),
         hash,
@@ -13775,15 +13790,17 @@ var VersionStore = class {
       version.selected = true;
       version.archived = false;
     } else if (!overwrite) {
-      for (const other of entry.versions) {
-        if (other.id !== version.id) {
-          other.selected = false;
-          other.archived = true;
+      if (options.makeDefault !== false) {
+        for (const other of entry.versions) {
+          if (other.id !== version.id) {
+            other.selected = false;
+            other.archived = true;
+          }
         }
+        entry.defaultId = version.id;
       }
       version.selected = true;
       version.archived = false;
-      entry.defaultId = version.id;
     } else {
       version.selected = true;
       version.archived = false;
@@ -13935,28 +13952,36 @@ var VersionStore = class {
     return Object.values(this.load().notes).filter((entry) => wanted.has((0, import_obsidian3.normalizePath)(entry.path)));
   }
   async apply(file, entry) {
-    var _a2, _b2, _c;
+    var _a2, _b2, _c, _d;
     const defaultVersion = entry.versions.find((v) => v.id === entry.defaultId);
-    if (!defaultVersion)
+    const virtualDefault = !defaultVersion && entry.virtualOriginal && entry.defaultId === "v0";
+    if (!defaultVersion && !virtualDefault)
       return 0;
     const current = await this.app.vault.read(file);
     const currentPrior = splitNote(current);
     const outside = outsideBody(current);
-    const frontmatter = (_c = (_b2 = currentPrior.frontmatter) != null ? _b2 : splitNote((_a2 = await this.versionText(entry, defaultVersion.id)) != null ? _a2 : "").frontmatter) != null ? _c : "";
-    const defaultText = await this.versionText(entry, defaultVersion.id);
+    const frontmatter = (_c = currentPrior.frontmatter) != null ? _c : defaultVersion ? (_b2 = splitNote((_a2 = await this.versionText(entry, defaultVersion.id)) != null ? _a2 : "").frontmatter) != null ? _b2 : "" : "";
+    const defaultText = defaultVersion ? await this.versionText(entry, defaultVersion.id) : current;
     if (!defaultText)
       return 0;
-    const otherLinks = otherVersionReferences(entry, defaultVersion.id);
+    const otherLinks = otherVersionReferences(entry, (_d = defaultVersion == null ? void 0 : defaultVersion.id) != null ? _d : "v0");
     let written = 0;
-    const changeDefault = () => {
-      const body = normalizeManagedMarkerSpacing(`${outside}${managedRegionText(defaultText)}`);
-      const clean3 = stripVersionProperties(joinNote(frontmatter, body));
-      const withName = setFrontmatterProperty(clean3, "midad-version-name", `"${versionLabel(defaultVersion).replace(/"/g, '\\"')}"`);
-      return setFrontmatterList(withName, "other-versions", otherLinks);
-    };
-    if (await this.writeLive(file.path, changeDefault()))
-      written += 1;
-    const defaultLink = versionLink(entry, defaultVersion);
+    if (defaultVersion) {
+      const changeDefault = () => {
+        const body = normalizeManagedMarkerSpacing(`${outside}${managedRegionText(defaultText)}`);
+        const clean3 = stripVersionProperties(joinNote(frontmatter, body));
+        const withName = setFrontmatterProperty(clean3, "midad-version-name", `"${versionLabel(defaultVersion).replace(/"/g, '\\"')}"`);
+        return setFrontmatterList(withName, "other-versions", otherLinks);
+      };
+      if (await this.writeLive(file.path, changeDefault()))
+        written += 1;
+    } else {
+      const clean3 = stripVersionProperties(current);
+      const withName = setFrontmatterProperty(clean3, "midad-version-name", `"Original source"`);
+      if (await this.writeLive(file.path, setFrontmatterList(withName, "other-versions", otherLinks)))
+        written += 1;
+    }
+    const defaultLink = defaultVersion ? versionLink(entry, defaultVersion) : `[[${entry.path.replace(/\.md$/, "")}|Default version]]`;
     for (const version of entry.versions) {
       const path2 = versionNotePath(entry, version);
       if (!version.selected || version.id === entry.defaultId) {
@@ -14040,6 +14065,9 @@ var _ManageVersionsModal = class extends import_obsidian3.Modal {
   async refresh() {
     var _a2;
     this.entry = await this.options.store.entryFor(this.options.file);
+    if (!this.entry && this.options.isSourceBacked && await this.options.isSourceBacked()) {
+      this.entry = await this.options.store.virtualEntry(this.options.file);
+    }
     const liveText = await this.options.app.vault.read(this.options.file);
     if (!this.activeVersionId && /\.Version\d+\.md$/i.test(this.options.file.path)) {
       const versionMatch = /^midad-version:[ \t]*["']?([^"'\n]+)["']?[ \t]*$/m.exec(liveText);
@@ -14067,7 +14095,7 @@ var _ManageVersionsModal = class extends import_obsidian3.Modal {
     return !this.matchesSaved;
   }
   render() {
-    var _a2, _b2, _c, _d;
+    var _a2, _b2, _c, _d, _e, _f, _g;
     const { contentEl } = this;
     contentEl.empty();
     contentEl.createEl("p", {
@@ -14119,8 +14147,28 @@ var _ManageVersionsModal = class extends import_obsidian3.Modal {
     }
     if (!this.activeVersionId) {
       const list = contentEl.createDiv({ cls: "mas-versions-list" });
-      if (!((_c = this.entry) == null ? void 0 : _c.versions.length)) {
-        list.createDiv({ cls: "mas-versions-empty", text: "No saved versions yet." });
+      if ((_c = this.entry) == null ? void 0 : _c.virtualOriginal) {
+        const row = list.createDiv({ cls: "mas-versions-row" });
+        if (this.entry.defaultId === "v0")
+          row.addClass("is-default");
+        const main = row.createDiv({ cls: "mas-versions-main" });
+        main.createDiv({ cls: "mas-versions-label-line" }).createSpan({ cls: "mas-versions-label", text: "Version 0 \u2014 Original source" });
+        main.createDiv({ cls: "mas-versions-date", text: "Rendered from the source; no stored snapshot." });
+        const status = row.createDiv({ cls: "mas-versions-status" });
+        if (this.entry.defaultId === "v0") {
+          status.createSpan({ cls: "mas-versions-default", text: "Default" });
+        } else {
+          const setDefault = status.createEl("button", { cls: "mas-versions-default-button", text: "Set as default" });
+          setDefault.onclick = async () => {
+            await this.options.store.setDefault(this.entry, "v0");
+            this.selectionDirty = true;
+            await this.refresh();
+          };
+        }
+      }
+      if (!((_d = this.entry) == null ? void 0 : _d.versions.length)) {
+        if (!((_e = this.entry) == null ? void 0 : _e.virtualOriginal))
+          list.createDiv({ cls: "mas-versions-empty", text: "No saved versions yet." });
       } else {
         for (const version of [...this.entry.versions].sort((a, b) => versionNumber(a.id) - versionNumber(b.id))) {
           const row = list.createDiv({ cls: "mas-versions-row" });
@@ -14176,7 +14224,7 @@ var _ManageVersionsModal = class extends import_obsidian3.Modal {
     if (!this.activeVersionId) {
       const applyWrap = contentEl.createDiv({ cls: "mas-versions-apply" });
       const apply = applyWrap.createEl("button", { text: "Apply default and re-render notes" });
-      apply.disabled = !((_d = this.entry) == null ? void 0 : _d.versions.length);
+      apply.disabled = !((_f = this.entry) == null ? void 0 : _f.versions.length) && !((_g = this.entry) == null ? void 0 : _g.virtualOriginal);
       apply.onclick = () => {
         void this.apply();
       };
@@ -14276,9 +14324,9 @@ ${prior.body.slice(region.start, region.end).trim()}
     }).open();
   }
   promptNewVersion() {
-    var _a2, _b2;
+    var _a2, _b2, _c;
     const versions = (_b2 = (_a2 = this.entry) == null ? void 0 : _a2.versions) != null ? _b2 : [];
-    const highest = versions.reduce((n, v) => Math.max(n, versionNumber(v.id)), -1);
+    const highest = versions.reduce((n, v) => Math.max(n, versionNumber(v.id)), ((_c = this.entry) == null ? void 0 : _c.virtualOriginal) ? 0 : -1);
     const active = this.activeVersionId ? versions.find((v) => v.id === this.activeVersionId) : null;
     let suggestion = active ? `${versionLabel(active)}.1` : `Version ${highest + 1}`;
     let suffix = 2;
@@ -14286,19 +14334,50 @@ ${prior.body.slice(region.start, region.end).trim()}
       suggestion = active ? `${versionLabel(active)}.${suffix++}` : `Version ${highest + suffix++}`;
     }
     new VersionNameModal(this.app, suggestion, async (name) => {
-      var _a3, _b3;
+      var _a3, _b3, _c2, _d;
       await this.options.store.saveVersion(this.options.file, false, this.renderFingerprint, {
         activeVersionId: this.activeVersionId,
-        label: name
+        label: name,
+        startAt: ((_a3 = this.entry) == null ? void 0 : _a3.virtualOriginal) ? 1 : 0,
+        virtualOriginal: !!((_b3 = this.entry) == null ? void 0 : _b3.virtualOriginal)
       });
       this.selectionDirty = false;
       await this.refresh();
-      (_b3 = (_a3 = this.options).onChanged) == null ? void 0 : _b3.call(_a3);
+      (_d = (_c2 = this.options).onChanged) == null ? void 0 : _d.call(_c2);
     }).open();
   }
   async apply() {
-    var _a2;
-    if (!((_a2 = this.entry) == null ? void 0 : _a2.versions.length)) {
+    var _a2, _b2;
+    if (((_a2 = this.entry) == null ? void 0 : _a2.virtualOriginal) && this.entry.defaultId === "v0" && this.options.renderOriginal) {
+      const renderOriginal = async () => {
+        await this.options.renderOriginal();
+        this.close();
+      };
+      if (this.hasUnsavedChanges()) {
+        new UnsavedVersionModal(this.app, {
+          onDiscard: renderOriginal,
+          onSaveNew: async () => {
+            var _a3, _b3;
+            const versions = (_b3 = (_a3 = this.entry) == null ? void 0 : _a3.versions) != null ? _b3 : [];
+            const highest = versions.reduce((n, v) => Math.max(n, versionNumber(v.id)), 0);
+            const next = highest + 1;
+            await this.options.store.saveVersion(this.options.file, false, this.renderFingerprint, {
+              startAt: next,
+              virtualOriginal: true,
+              makeDefault: false,
+              label: `Version ${next}`
+            });
+            await renderOriginal();
+          },
+          onOverwrite: renderOriginal,
+          onCancel: () => void 0
+        }).open();
+        return;
+      }
+      await renderOriginal();
+      return;
+    }
+    if (!((_b2 = this.entry) == null ? void 0 : _b2.versions.length)) {
       new import_obsidian3.Notice("There are no saved versions to apply.");
       return;
     }
@@ -25499,17 +25578,36 @@ var MidadArabicSourcesPlugin = class extends import_obsidian19.Plugin {
     }
     const expected = batch.flatMap((model) => expectedNotePaths(model, outRoot, canonicalRoot, canonicalId));
     const changed = await this.findChangedSourceNotes(expected);
+    const originalPaths = new Set();
     if (changed.length) {
       const choice = await new Promise((resolve) => {
         new SourceChangeReviewModal(this.app, changed.map((entry) => entry.path), resolve).open();
       });
-      if (choice === "cancel")
+      if (choice === "cancel" || choice === "skip")
         return [];
+      const store = new VersionStore(this.app, this.vaultPath());
       if (choice === "save") {
-        const store = new VersionStore(this.app, this.vaultPath());
-        for (const entry of changed)
-          await store.saveVersion(entry.file, false);
+        for (const entry of changed) {
+          const existing = await store.entryFor(entry.file);
+          await store.saveVersion(entry.file, false, void 0, {
+            startAt: existing ? void 0 : 1,
+            virtualOriginal: !existing,
+            makeDefault: false
+          });
+        }
+      } else if (choice === "original") {
+        for (const entry of changed) {
+          const existing = await store.entryFor(entry.file);
+          await store.saveVersion(entry.file, false, void 0, {
+            startAt: existing ? void 0 : 1,
+            virtualOriginal: !existing,
+            makeDefault: true
+          });
+        }
       }
+      if (choice === "original")
+        for (const entry of changed)
+          originalPaths.add((0, import_obsidian19.normalizePath)(entry.path));
     }
     const written = [];
     const contentPaths = [];
@@ -25537,6 +25635,17 @@ var MidadArabicSourcesPlugin = class extends import_obsidian19.Plugin {
         const w = await renderModelToVault(this.app, templates, model, outRoot, force, emit, void 0, seen, shouldCancel);
         written.push(...w);
         contentPaths.push(...w);
+        if (originalPaths.size) {
+          const store = new VersionStore(this.app, this.vaultPath());
+          for (const path2 of w) {
+            if (!originalPaths.has((0, import_obsidian19.normalizePath)(path2)))
+              continue;
+            const file = this.app.vault.getAbstractFileByPath((0, import_obsidian19.normalizePath)(path2));
+            if (file instanceof import_obsidian19.TFile) {
+              await store.saveVersion(file, false, void 0, { makeDefault: false, label: "Original source (saved)" });
+            }
+          }
+        }
         await this.applySavedVersions(w);
         const key = this.workKey(model.work);
         const now = Date.now();
@@ -26511,7 +26620,7 @@ ${lines.join("\n")}`;
       }
     }).open();
   }
-  openVersionManager() {
+  async openVersionManager() {
     var _a2;
     const file = this.app.workspace.getActiveFile();
     if (!(file instanceof import_obsidian19.TFile) || file.extension !== "md") {
@@ -26526,6 +26635,14 @@ ${lines.join("\n")}`;
       file,
       store,
       activeVersionId,
+      isSourceBacked: async () => {
+        var _a3;
+        return !!(((_a3 = archivedNoteInfo(file.path)) == null ? void 0 : _a3.type) || await this.workForPath(file.path));
+      },
+      renderOriginal: async () => {
+        await this.updateNoteBaselines([file.path]);
+        await this.rerenderCurrentSource(file);
+      },
       getFingerprint: async () => hashString(JSON.stringify({
         version: this.manifest.version,
         templates: await this.sourceTemplateHashes()
@@ -29409,8 +29526,10 @@ var SourceChangeReviewModal = class extends import_obsidian19.Modal {
         this.close();
       };
     };
-    add("Save as versions", "save", true);
-    add("Overwrite changes", "overwrite");
+    add("Save changes as versions", "save", true);
+    add("Save original as a non-default version", "original");
+    add("Overwrite with the original", "overwrite");
+    add("Skip re-rendering", "skip");
     add("Cancel", "cancel");
   }
   onClose() {
