@@ -835,18 +835,6 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			callback: async () => { await this.cacheAllNoteBaselines(); },
 		});
 		this.addCommand({
-			id: "restore-removed-versions",
-			name: "Restore saved versions from removed sources…",
-			callback: async () => {
-				const store = new VersionStore(this.app, this.vaultPath());
-				const entries = (await store.allEntries()).filter((entry) =>
-					entry.versions.length > 0 && !this.app.vault.getAbstractFileByPath(normalizePath(entry.path))
-				);
-				if (!entries.length) { new Notice("No saved versions from removed notes were found."); return; }
-				new RemovedVersionsModal(this.app, store, entries).open();
-			},
-		});
-		this.addCommand({
 			id: "add-managed-tags-this-note",
 			name: "Add managed region tags to this note",
 			callback: async () => { await this.addManagedTagsToNote(this.app.workspace.getActiveFile()); },
@@ -3151,9 +3139,9 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		const modelRel = normalizePath(`.midad-arabic-sources/source-models/${work.collection}/${work.id}.json`);
 		const modelAbs = `${this.vaultPath()}/${modelRel}`;
 		let restoredNotes = false;
+		let manifest: SourceArchiveManifest | null = null;
 		try {
 			let text: string;
-			let manifest: SourceArchiveManifest | null = null;
 			if (hasZip) {
 				const files = unzipSync(new Uint8Array(fs.readFileSync(archive)));
 				const modelBytes = files["model.json"];
@@ -3212,6 +3200,11 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		if (!this.app.vault.getAbstractFileByPath(hub)) {
 			new Notice("The archive was extracted, but its notes could not be rendered. It remains archived.");
 			return false;
+		}
+		if (restoredNotes) {
+			const restoredPaths = manifest?.notes.map((note) => note.path) ?? [];
+			await this.applySavedVersions([...restoredPaths, hub]);
+			await this.updateNoteBaselines([...restoredPaths, hub]);
 		}
 		await this.setWorkStatus(key, "installed");
 		await this.refreshSourcesIndex();
@@ -8899,39 +8892,6 @@ class TurathUrlModal extends Modal {
 	onClose(): void {
 		this.contentEl.empty();
 	}
-}
-
-class RemovedVersionsModal extends Modal {
-	private readonly store: VersionStore;
-	private readonly entries: NoteVersionEntry[];
-
-	constructor(app: App, store: VersionStore, entries: NoteVersionEntry[]) {
-		super(app);
-		this.store = store;
-		this.entries = entries;
-	}
-
-	onOpen(): void {
-		this.titleEl.setText("Restore removed versions");
-		const { contentEl } = this;
-		contentEl.createEl("p", { text: "These notes are gone, but their saved version snapshots still exist. Restoring recreates the default note and its selected versions." });
-		const list = contentEl.createEl("ul");
-		for (const entry of this.entries) {
-			const row = list.createEl("li");
-			row.createEl("strong", { text: entry.title || entry.path });
-			row.createEl("div", { cls: "mas-manage__mut", text: entry.path });
-			row.createEl("div", { cls: "mas-manage__mut", text: `${entry.versions.length} saved version(s)` });
-			const button = row.createEl("button", { text: "Restore" });
-			button.onclick = async () => {
-				button.disabled = true;
-				const ok = await this.store.restoreRemovedEntry(entry);
-				new Notice(ok ? `Restored “${entry.title || entry.path}”.` : "Could not restore that note.");
-				this.close();
-			};
-		}
-	}
-
-	onClose(): void { this.contentEl.empty(); }
 }
 
 class SourceRemovalModal extends Modal {

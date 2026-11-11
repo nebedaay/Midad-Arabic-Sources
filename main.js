@@ -14197,29 +14197,6 @@ var VersionStore = class {
     const saved = await this.versionText(entry, id);
     return !saved || managedHash(live) !== managedHash(saved);
   }
-  async restoreRemovedEntry(entry) {
-    var _a2, _b2;
-    if (this.app.vault.getAbstractFileByPath((0, import_obsidian4.normalizePath)(entry.path)))
-      return false;
-    const version = (_b2 = (_a2 = entry.versions.find((v) => v.id === entry.defaultId)) != null ? _a2 : entry.versions.find((v) => v.selected)) != null ? _b2 : entry.versions[0];
-    if (!version)
-      return false;
-    const text = await this.versionText(entry, version.id);
-    if (!text)
-      return false;
-    const clean3 = stripVersionProperties(text);
-    const path2 = (0, import_obsidian4.normalizePath)(entry.path);
-    const folder = path2.slice(0, path2.lastIndexOf("/"));
-    if (folder)
-      await ensureFolder(this.app, folder);
-    const file = await this.app.vault.create(path2, clean3);
-    if (entry.defaultId !== version.id) {
-      entry.defaultId = version.id;
-      this.save();
-    }
-    await this.apply(file, entry);
-    return true;
-  }
   async syncVersionName(file) {
     const text = await this.app.vault.read(file);
     const versionMatch = /^midad-version:[ \t]*["']?([^"'\n]+)["']?[ \t]*$/m.exec(text);
@@ -22878,19 +22855,6 @@ var MidadArabicSourcesPlugin = class extends import_obsidian20.Plugin {
       }
     });
     this.addCommand({
-      id: "restore-removed-versions",
-      name: "Restore saved versions from removed sources\u2026",
-      callback: async () => {
-        const store = new VersionStore(this.app, this.vaultPath());
-        const entries = (await store.allEntries()).filter((entry) => entry.versions.length > 0 && !this.app.vault.getAbstractFileByPath((0, import_obsidian20.normalizePath)(entry.path)));
-        if (!entries.length) {
-          new import_obsidian20.Notice("No saved versions from removed notes were found.");
-          return;
-        }
-        new RemovedVersionsModal(this.app, store, entries).open();
-      }
-    });
-    this.addCommand({
       id: "add-managed-tags-this-note",
       name: "Add managed region tags to this note",
       callback: async () => {
@@ -24965,7 +24929,7 @@ var MidadArabicSourcesPlugin = class extends import_obsidian20.Plugin {
     return true;
   }
   async restoreArchivedSource(work) {
-    var _a2, _b2;
+    var _a2, _b2, _c;
     if (this.sourceOperationActive) {
       new import_obsidian20.Notice("Wait for the current source operation to finish before restoring.");
       return false;
@@ -24982,9 +24946,9 @@ var MidadArabicSourcesPlugin = class extends import_obsidian20.Plugin {
     const modelRel = (0, import_obsidian20.normalizePath)(`.midad-arabic-sources/source-models/${work.collection}/${work.id}.json`);
     const modelAbs = `${this.vaultPath()}/${modelRel}`;
     let restoredNotes = false;
+    let manifest = null;
     try {
       let text;
-      let manifest = null;
       if (hasZip) {
         const files = unzipSync(new Uint8Array(fs4.readFileSync(archive)));
         const modelBytes = files["model.json"];
@@ -25045,10 +25009,15 @@ var MidadArabicSourcesPlugin = class extends import_obsidian20.Plugin {
       new import_obsidian20.Notice("The archive was extracted, but its notes could not be rendered. It remains archived.");
       return false;
     }
+    if (restoredNotes) {
+      const restoredPaths = (_b2 = manifest == null ? void 0 : manifest.notes.map((note) => note.path)) != null ? _b2 : [];
+      await this.applySavedVersions([...restoredPaths, hub]);
+      await this.updateNoteBaselines([...restoredPaths, hub]);
+    }
     await this.setWorkStatus(key, "installed");
     await this.refreshSourcesIndex();
     try {
-      await ((_b2 = this.annotations) == null ? void 0 : _b2.onSourceRestored(key));
+      await ((_c = this.annotations) == null ? void 0 : _c.onSourceRestored(key));
     } catch (e) {
       console.error("[midad-arabic-sources] annotation status after restore", e);
     }
@@ -29990,35 +29959,6 @@ var TurathUrlModal = class extends import_obsidian20.Modal {
   onOpen() {
     this.titleEl.setText("Add Turath works by URL");
     buildUrlAdder(this.plugin, this.contentEl);
-  }
-  onClose() {
-    this.contentEl.empty();
-  }
-};
-var RemovedVersionsModal = class extends import_obsidian20.Modal {
-  constructor(app, store, entries) {
-    super(app);
-    this.store = store;
-    this.entries = entries;
-  }
-  onOpen() {
-    this.titleEl.setText("Restore removed versions");
-    const { contentEl } = this;
-    contentEl.createEl("p", { text: "These notes are gone, but their saved version snapshots still exist. Restoring recreates the default note and its selected versions." });
-    const list = contentEl.createEl("ul");
-    for (const entry of this.entries) {
-      const row = list.createEl("li");
-      row.createEl("strong", { text: entry.title || entry.path });
-      row.createEl("div", { cls: "mas-manage__mut", text: entry.path });
-      row.createEl("div", { cls: "mas-manage__mut", text: `${entry.versions.length} saved version(s)` });
-      const button = row.createEl("button", { text: "Restore" });
-      button.onclick = async () => {
-        button.disabled = true;
-        const ok = await this.store.restoreRemovedEntry(entry);
-        new import_obsidian20.Notice(ok ? `Restored \u201C${entry.title || entry.path}\u201D.` : "Could not restore that note.");
-        this.close();
-      };
-    }
   }
   onClose() {
     this.contentEl.empty();
