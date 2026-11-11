@@ -117,6 +117,10 @@ function removeFrontmatterProperty(content: string, key: string): string {
 	return front.replace(re, "") + body;
 }
 
+function stripVersionProperties(content: string): string {
+	return removeFrontmatterProperty(removeFrontmatterProperty(content, "midad-version"), "midad-version-name");
+}
+
 function setFrontmatterProperty(content: string, key: string, value: string): string {
 	const clean = removeFrontmatterProperty(content, key);
 	const line = `${key}: ${value}`;
@@ -492,7 +496,7 @@ export class VersionStore {
 		let written = 0;
 		const changeDefault = () => {
 			const body = normalizeManagedMarkerSpacing(`${outside}${managedRegionText(defaultText)}`);
-			return setFrontmatterList(joinNote(frontmatter, body), "other-versions", otherLinks);
+			return setFrontmatterList(stripVersionProperties(joinNote(frontmatter, body)), "other-versions", otherLinks);
 		};
 		if (await this.writeLive(file.path, changeDefault())) written += 1;
 		const defaultLink = versionLink(entry, defaultVersion);
@@ -550,6 +554,7 @@ interface VersionModalOptions {
 }
 
 export class ManageVersionsModal extends Modal {
+	private static current: ManageVersionsModal | null = null;
 	private readonly options: VersionModalOptions;
 	private entry: NoteVersionEntry | null = null;
 	private currentHash = "";
@@ -575,7 +580,7 @@ export class ManageVersionsModal extends Modal {
 	private async refresh(): Promise<void> {
 		this.entry = await this.options.store.entryFor(this.options.file);
 		const liveText = await this.options.app.vault.read(this.options.file);
-		if (!this.activeVersionId) {
+		if (!this.activeVersionId && /\.Version\d+\.md$/i.test(this.options.file.path)) {
 			const versionMatch = /^midad-version:[ \t]*["']?([^"'\n]+)["']?[ \t]*$/m.exec(liveText);
 			if (versionMatch) this.activeVersionId = versionMatch[1].trim();
 		}

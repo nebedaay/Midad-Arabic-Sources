@@ -13548,6 +13548,20 @@ function addUpLink(content, link) {
   return `${content.slice(0, insert)}  - "${link}"
 ${content.slice(insert)}`;
 }
+function removeFrontmatterProperty(content, key) {
+  if (!content.startsWith("---"))
+    return content;
+  const end = content.indexOf("\n---", 3);
+  if (end < 0)
+    return content;
+  const front = content.slice(0, end);
+  const body = content.slice(end);
+  const re = new RegExp(`^${key}:[^\\n]*\\n(?:[ \\t]+-[^\\n]*\\n)*`, "m");
+  return front.replace(re, "") + body;
+}
+function stripVersionProperties(content) {
+  return removeFrontmatterProperty(removeFrontmatterProperty(content, "midad-version"), "midad-version-name");
+}
 function setFrontmatterList(content, key, values) {
   var _a2;
   const prior = splitNote(content);
@@ -13916,7 +13930,7 @@ var VersionStore = class {
     let written = 0;
     const changeDefault = () => {
       const body = normalizeManagedMarkerSpacing(`${outside}${managedRegionText(defaultText)}`);
-      return setFrontmatterList(joinNote(frontmatter, body), "other-versions", otherLinks);
+      return setFrontmatterList(stripVersionProperties(joinNote(frontmatter, body)), "other-versions", otherLinks);
     };
     if (await this.writeLive(file.path, changeDefault()))
       written += 1;
@@ -13990,7 +14004,7 @@ var ManageVersionsModal = class extends import_obsidian3.Modal {
     var _a2;
     this.entry = await this.options.store.entryFor(this.options.file);
     const liveText = await this.options.app.vault.read(this.options.file);
-    if (!this.activeVersionId) {
+    if (!this.activeVersionId && /\.Version\d+\.md$/i.test(this.options.file.path)) {
       const versionMatch = /^midad-version:[ \t]*["']?([^"'\n]+)["']?[ \t]*$/m.exec(liveText);
       if (versionMatch)
         this.activeVersionId = versionMatch[1].trim();
@@ -14280,6 +14294,7 @@ ${prior.body.slice(region.start, region.end).trim()}
     this.close();
   }
 };
+ManageVersionsModal.current = null;
 var ManagedVersionChangesModal = class extends import_obsidian3.Modal {
   constructor(app, options) {
     super(app);
@@ -26455,7 +26470,7 @@ ${lines.join("\n")}`;
       return;
     }
     const frontmatter = (_a2 = this.app.metadataCache.getFileCache(file)) == null ? void 0 : _a2.frontmatter;
-    const activeVersionId = typeof (frontmatter == null ? void 0 : frontmatter["midad-version"]) === "string" ? frontmatter["midad-version"].trim() : void 0;
+    const activeVersionId = /\.Version\d+\.md$/i.test(file.path) && typeof (frontmatter == null ? void 0 : frontmatter["midad-version"]) === "string" ? frontmatter["midad-version"].trim() : void 0;
     const store = new VersionStore(this.app, this.vaultPath());
     new ManageVersionsModal({
       app: this.app,
