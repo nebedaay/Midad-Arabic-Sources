@@ -22870,6 +22870,15 @@ var MidadArabicSourcesPlugin = class extends import_obsidian20.Plugin {
       }, 2500);
       void this.refreshSourceRegistry();
       void this.refreshSourcesIndex();
+      try {
+        const archiveDir = `${this.vaultPath()}/.midad-arabic-sources/archive`;
+        if (fs4.readdirSync(archiveDir).some((name) => name.endsWith(".corrections.json"))) {
+          window.setTimeout(() => {
+            void this.consolidateArchivedCorrections();
+          }, 1500);
+        }
+      } catch (e) {
+      }
     });
     this.addCommand({
       id: "transliterate-selection-to-clipboard",

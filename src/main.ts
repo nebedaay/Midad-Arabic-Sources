@@ -722,6 +722,12 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			window.setTimeout(() => { void this.repairTopicLinks(); }, 2500);
 			void this.refreshSourceRegistry();
 			void this.refreshSourcesIndex();
+			try {
+				const archiveDir = `${this.vaultPath()}/.midad-arabic-sources/archive`;
+				if (fs.readdirSync(archiveDir).some((name) => name.endsWith(".corrections.json"))) {
+					window.setTimeout(() => { void this.consolidateArchivedCorrections(); }, 1500);
+				}
+			} catch { /* no archive directory */ }
 		});
 
 		this.addCommand({
