@@ -57,6 +57,7 @@ import { BUNDLED_ASSETS } from "./assets.generated";
 import { localDate } from "./time";
 import { formatPoetrySelection } from "./poetry";
 import { ManageVersionsModal, NoteVersionEntry, VersionStore } from "./sourceVersions";
+import { NoteHashStore, managedHash } from "./noteHashes";
 import { ensureManagedRegion, findManagedRegion, joinNote, splitNote } from "./sourceImport/merge";
 import { BUILTIN_TOPICS, TOPIC_PAGE_PREFIX, genreTopic, normalizeGenre, topicLabel, topicLink, topicNoteName, topicsFromValue, turathCategory, turathGenres, turathTopicsForWork } from "./topics";
 import { identityOfFrontmatter, sourceIdToYaml, sourceOfFrontmatter } from "./sourceIds";
@@ -4071,30 +4072,24 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		}
 	}
 
-	private noteBaselinePath(): string {
-		return normalizePath(".midad-arabic-sources/note-baselines.json");
+	private hashStore(): NoteHashStore {
+		return NoteHashStore.forVault(this.vaultPath());
 	}
 
 	private async loadNoteBaselines(): Promise<Record<string, string>> {
-		try {
-			const raw = await this.app.vault.adapter.read(this.noteBaselinePath());
-			const parsed = JSON.parse(raw) as { notes?: Record<string, string> };
-			return parsed.notes ?? {};
-		} catch { return {}; }
+		return this.hashStore().allBaselines();
 	}
 
 	private async saveNoteBaselines(notes: Record<string, string>): Promise<void> {
 		try {
-			await this.app.vault.adapter.write(this.noteBaselinePath(), JSON.stringify({ schema: 1, notes }, null, 1) + "\n");
+			this.hashStore().setBaselines(notes);
 		} catch (error) {
 			console.error("[midad-arabic-sources] save note baselines", error);
 		}
 	}
 
 	private noteContentHash(text: string): string {
-		const prior = splitNote(text);
-		const region = findManagedRegion(prior.body);
-		return hashString(region ? prior.body.slice(region.start, region.end) : prior.body);
+		return managedHash(text);
 	}
 
 	private async findChangedSourceNotes(paths: string[]): Promise<Array<{ path: string; file: TFile; hash: string }>> {
@@ -4113,8 +4108,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 
 	/** Compare a note's managed region with the last rendered baseline. */
 	private async noteMatchesBaseline(file: TFile): Promise<boolean | null> {
-		const baselines = await this.loadNoteBaselines();
-		const previous = baselines[normalizePath(file.path)];
+		const previous = this.hashStore().baseline(file.path);
 		if (!previous) return null;
 		return this.noteContentHash(await this.app.vault.read(file)) === previous;
 	}

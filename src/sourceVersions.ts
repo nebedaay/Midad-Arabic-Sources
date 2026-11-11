@@ -3,6 +3,7 @@ import { strFromU8, strToU8, unzipSync, zipSync } from "fflate";
 import * as fs from "fs";
 import { hashString } from "./sourceImport/history";
 import { ensureFolder, safeFileSegment } from "./sourcePaths";
+import { NoteHashStore, managedHash } from "./noteHashes";
 import { ensureManagedRegion, findManagedRegion, joinNote, normalizeManagedMarkerSpacing, splitNote } from "./sourceImport/merge";
 
 export interface SavedVersion {
@@ -10,7 +11,6 @@ export interface SavedVersion {
 	label: string;
 	kind: "source" | "user";
 	savedAt: string;
-	hash: string;
 	file: string;
 	selected: boolean;
 	archived: boolean;
@@ -50,12 +50,7 @@ function normalizedHash(text: string): string {
 	return managedHash(text);
 }
 
-function managedHash(text: string): string {
-	const prior = splitNote(text);
-	const region = findManagedRegion(prior.body);
-	if (region) return hashString(prior.body.slice(region.start, region.end));
-	return hashString(prior.body);
-}
+
 
 function noteKey(file: TFile, frontmatter: Record<string, unknown> | undefined): string {
 	const id = typeof frontmatter?.["midad-id"] === "string" ? frontmatter["midad-id"].trim() : "";
@@ -82,7 +77,7 @@ function versionNotePath(entry: NoteVersionEntry, version: SavedVersion): string
 }
 
 function versionZeroNotePath(entry: NoteVersionEntry): string {
-	return versionNotePath(entry, { id: "v0", label: "Original source", kind: "source", savedAt: "", hash: "", file: "", selected: true, archived: false });
+	return versionNotePath(entry, { id: "v0", label: "Original source", kind: "source", savedAt: "", file: "", selected: true, archived: false });
 }
 
 function versionLink(entry: NoteVersionEntry, version: SavedVersion): string {
@@ -244,12 +239,14 @@ function addVersionFrontmatter(content: string, id: string, otherLinks: string[]
 export class VersionStore {
 	private readonly app: App;
 	private readonly vaultPath: string;
+	private readonly hashes: NoteHashStore;
 	private manifest: VersionManifest | null = null;
 	private files: Record<string, Uint8Array> = {};
 
 	constructor(app: App, vaultPath: string) {
 		this.app = app;
 		this.vaultPath = vaultPath;
+		this.hashes = NoteHashStore.forVault(vaultPath);
 	}
 
 	private zipPath(): string {
@@ -263,6 +260,9 @@ export class VersionStore {
 			this.files = unzipSync(new Uint8Array(raw));
 			const text = this.files["manifest.json"];
 			this.manifest = text ? JSON.parse(strFromU8(text)) as VersionManifest : { ...EMPTY, notes: {} };
+			for (const entry of Object.values(this.manifest.notes)) {
+				for (const version of entry.versions) delete (version as unknown as { hash?: string }).hash;
+			}
 		} catch {
 			this.manifest = { schema: 1, notes: {} };
 			this.files = {};
@@ -307,6 +307,11 @@ export class VersionStore {
 			const oldPath = versionNotePath(entry, { ...legacy, id: "v0" });
 			const oldId = legacy.id;
 			legacy.id = `v${next}`;
+			const oldHash = this.hashes.versionHash(entry.path, oldId);
+			if (oldHash) {
+				this.hashes.setVersionHash(entry.path, legacy.id, oldHash);
+				this.hashes.deleteVersionHash(entry.path, oldId);
+			}
 			if (/^v?0$/i.test(legacy.label.trim())) legacy.label = `Version ${next}`;
 			if (entry.defaultId === oldId) entry.defaultId = legacy.id;
 			const newPath = versionNotePath(entry, legacy);
@@ -377,7 +382,6 @@ export class VersionStore {
 		if (overwrite && active) {
 			version = active;
 			version.savedAt = new Date().toISOString();
-			version.hash = hash;
 			version.kind = "user";
 		} else if (overwrite && entry.versions.length) {
 			// The default context overwrites the current default version, not the
@@ -385,7 +389,6 @@ export class VersionStore {
 			version = entry.versions.find((v) => v.id === entry.defaultId)
 				?? [...entry.versions].sort((a, b) => versionNumber(a.id) - versionNumber(b.id)).at(-1) as SavedVersion;
 			version.savedAt = new Date().toISOString();
-			version.hash = hash;
 			version.kind = "user";
 		} else {
 			const highest = entry.versions.reduce((n, v) => Math.max(n, versionNumber(v.id)), (options.startAt ?? 0) - 1);
@@ -395,7 +398,6 @@ export class VersionStore {
 				label: options.label?.trim() || `Version ${highest + 1}`,
 				kind: "user",
 				savedAt: new Date().toISOString(),
-				hash,
 				file: versionFile(key, id),
 				selected: true,
 				archived: false,
@@ -424,6 +426,7 @@ export class VersionStore {
 			version.archived = false;
 		}
 		this.files[version.file] = strToU8(cleanText);
+		this.hashes.setVersionHash(entry.path, version.id, hash);
 		this.save();
 		if (!options.activeVersionId && entry.defaultId === version.id) {
 			await this.app.fileManager.processFrontMatter(file, (fm: Record<string, unknown>) => {
@@ -531,6 +534,7 @@ export class VersionStore {
 		const version = entry.versions.find((v) => v.id === id);
 		if (!version) return;
 		delete this.files[version.file];
+		this.hashes.deleteVersionHash(entry.path, id);
 		if (file && id !== entry.defaultId) await this.deleteVersionNote(versionNotePath(entry, version), id);
 		entry.versions = entry.versions.filter((v) => v.id !== id);
 		this.save();
@@ -546,7 +550,7 @@ export class VersionStore {
 	/** Match content against saved snapshots; tolerates older raw-hash records. */
 	async matchesSavedVersion(entry: NoteVersionEntry, hash: string): Promise<boolean> {
 		for (const version of entry.versions) {
-			if (version.hash === hash) return true;
+			if (this.hashes.versionHash(entry.path, version.id) === hash) return true;
 			const text = await this.versionText(entry, version.id);
 			if (text && normalizedHash(text) === hash) return true;
 		}
@@ -560,6 +564,8 @@ export class VersionStore {
 		const existing = this.app.vault.getAbstractFileByPath(normalizePath(path));
 		if (!(existing instanceof TFile)) return false;
 		const live = await this.app.vault.read(existing);
+		const recorded = this.hashes.versionHash(entry.path, id);
+		if (recorded) return managedHash(live) !== recorded;
 		const saved = await this.versionText(entry, id);
 		return !saved || managedHash(live) !== managedHash(saved);
 	}
