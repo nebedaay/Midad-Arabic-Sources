@@ -803,7 +803,7 @@ export class ManageVersionsModal extends Modal {
 			save.onclick = () => { this.promptNewVersion(); };
 		}
 
-		if (!changed && hasVersions) {
+		if (!changed) {
 			contentEl.createEl("p", { cls: "mas-versions-nochanges", text: "No changes to save." });
 		}
 

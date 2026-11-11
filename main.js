@@ -14257,7 +14257,7 @@ var _ManageVersionsModal = class extends import_obsidian3.Modal {
         this.promptNewVersion();
       };
     }
-    if (!changed && hasVersions) {
+    if (!changed) {
       contentEl.createEl("p", { cls: "mas-versions-nochanges", text: "No changes to save." });
     }
     if (!this.activeVersionId) {
