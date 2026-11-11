@@ -22,6 +22,7 @@ export interface NoteVersionEntry {
 	title: string;
 	defaultId: string;
 	virtualOriginal?: boolean;
+	virtualSelected?: boolean;
 	renderHash?: string;
 	versions: SavedVersion[];
 }
@@ -80,6 +81,10 @@ function versionNotePath(entry: NoteVersionEntry, version: SavedVersion): string
 	return normalizePath(`${folder}/${stem}.Version${versionNumber(version.id)}.md`);
 }
 
+function versionZeroNotePath(entry: NoteVersionEntry): string {
+	return versionNotePath(entry, { id: "v0", label: "Original source", kind: "source", savedAt: "", hash: "", file: "", selected: true, archived: false });
+}
+
 function versionLink(entry: NoteVersionEntry, version: SavedVersion): string {
 	const path = version.id === entry.defaultId ? entry.path : versionNotePath(entry, version);
 	const label = version.id === entry.defaultId ? "Default version" : versionLabel(version);
@@ -99,7 +104,9 @@ function otherVersionReferences(entry: NoteVersionEntry, excludeId?: string): st
 		.sort((a, b) => a.id === entry.defaultId ? -1 : b.id === entry.defaultId ? 1 : versionNumber(a.id) - versionNumber(b.id))
 		.map((v) => versionReference(entry, v));
 	if (entry.virtualOriginal && excludeId !== "v0" && !entry.versions.some((v) => v.id === "v0")) {
-		refs.unshift("Original source");
+		refs.unshift(entry.virtualSelected
+			? `[[${versionZeroNotePath(entry).replace(/\.md$/, "")}|Original source]]`
+			: "Original source");
 	}
 	return refs;
 }
@@ -315,6 +322,18 @@ export class VersionStore {
 		return entry;
 	}
 
+	/** Write the separately rendered Version 0 note without archiving a snapshot. */
+	async writeVersionZeroNote(file: TFile, entry: NoteVersionEntry, rendered: string): Promise<void> {
+		const prior = splitNote(rendered);
+		const region = managedRegionText(rendered);
+		const links = otherVersionReferences(entry, "v0");
+		const withVersion = addVersionFrontmatter(joinNote(prior.frontmatter ?? "", region), "v0", links, "Original source");
+		const defaultLink = `[[${entry.path.replace(/\.md$/, "")}|Default version]]`;
+		await this.writeLive(versionZeroNotePath(entry), addUpLink(withVersion, defaultLink));
+		entry.virtualSelected = true;
+		this.save();
+	}
+
 	async saveVersion(file: TFile, overwrite: boolean, renderHash?: string, options: {
 		activeVersionId?: string;
 		label?: string;
@@ -428,6 +447,14 @@ export class VersionStore {
 			version.archived = false;
 		}
 		this.save();
+	}
+
+	async setVirtualSelected(entry: NoteVersionEntry, selected: boolean, file?: TFile): Promise<void> {
+		const manifest = this.load();
+		if (!manifest.notes[entry.key]) manifest.notes[entry.key] = entry;
+		entry.virtualSelected = selected;
+		this.save();
+		if (!selected && file) await this.deleteVersionNote(versionZeroNotePath(entry), "v0");
 	}
 
 	async renameVersion(entry: NoteVersionEntry, id: string, label: string): Promise<boolean> {
@@ -627,6 +654,7 @@ interface VersionModalOptions {
 	activeVersionId?: string;
 	isSourceBacked?: () => Promise<boolean>;
 	renderOriginal?: () => Promise<void>;
+	updateBaseline?: () => Promise<void>;
 }
 
 export class ManageVersionsModal extends Modal {
@@ -755,13 +783,15 @@ export class ManageVersionsModal extends Modal {
 			const list = contentEl.createDiv({ cls: "mas-versions-list" });
 			if (this.entry?.virtualOriginal && !this.entry.versions.some((v) => v.id === "v0")) {
 				const row = list.createDiv({ cls: "mas-versions-row" });
-				if (this.entry.defaultId === "v0") {
-					row.addClass("is-default");
-					row.addClass("is-selected");
-				}
+				const virtualSelected = this.entry.defaultId === "v0" || this.entry.virtualSelected === true;
+				if (this.entry.defaultId === "v0") row.addClass("is-default");
+				if (virtualSelected) row.addClass("is-selected");
 				row.onclick = async () => {
-					if (this.entry?.defaultId === "v0") return;
-					await this.options.store.setDefault(this.entry!, "v0");
+					if (this.entry?.defaultId === "v0") {
+						new Notice("The default version must remain selected.");
+						return;
+					}
+					await this.options.store.setVirtualSelected(this.entry!, !this.entry!.virtualSelected, this.options.file);
 					this.selectionDirty = true;
 					await this.refresh();
 				};
@@ -773,7 +803,8 @@ export class ManageVersionsModal extends Modal {
 					status.createSpan({ cls: "mas-versions-default", text: "Default" });
 				} else {
 					const setDefault = status.createEl("button", { cls: "mas-versions-default-button", text: "Set as default" });
-					setDefault.onclick = async () => {
+					setDefault.onclick = async (event) => {
+						event.stopPropagation();
 						await this.options.store.setDefault(this.entry!, "v0");
 						this.selectionDirty = true;
 						await this.refresh();
@@ -934,6 +965,27 @@ export class ManageVersionsModal extends Modal {
 		}).open();
 	}
 
+	private async renderVirtualZeroAsVersion(): Promise<void> {
+		if (!this.entry || !this.options.renderOriginal) return;
+		const entry = this.entry;
+		const file = this.options.file;
+		const previousText = await this.options.app.vault.read(file);
+		const previousDefault = entry.defaultId;
+		entry.defaultId = "v0";
+		await this.options.store.setDefault(entry, "v0");
+		await this.options.renderOriginal();
+		const rendered = await this.options.app.vault.read(file);
+		await this.options.store.writeVersionZeroNote(file, entry, rendered);
+		await this.options.app.vault.modify(file, previousText);
+		entry.defaultId = previousDefault;
+		entry.virtualSelected = true;
+		await this.options.store.setDefault(entry, previousDefault);
+		await this.options.store.apply(file, entry);
+		await this.options.updateBaseline?.();
+		await this.refresh();
+		this.options.onChanged?.();
+	}
+
 	private promptNewVersion(): void {
 		const versions = this.entry?.versions ?? [];
 		const highest = versions.reduce((n, v) => Math.max(n, versionNumber(v.id)), this.entry?.virtualOriginal ? 0 : -1);
@@ -957,6 +1009,10 @@ export class ManageVersionsModal extends Modal {
 	}
 
 	private async apply(): Promise<void> {
+		if (this.entry?.virtualOriginal && this.entry.virtualSelected && this.entry.defaultId !== "v0" && this.options.renderOriginal) {
+			await this.renderVirtualZeroAsVersion();
+			return;
+		}
 		if (this.entry?.virtualOriginal && this.entry.defaultId === "v0" && this.options.renderOriginal) {
 			const renderOriginal = async () => {
 				await this.options.renderOriginal!();

@@ -5423,6 +5423,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 				await this.updateNoteBaselines([file.path]);
 				await this.rerenderCurrentSource(file);
 			},
+			updateBaseline: async () => { await this.updateNoteBaselines([file.path]); },
 			getFingerprint: async () => hashString(JSON.stringify({
 				version: this.manifest.version,
 				templates: await this.sourceTemplateHashes(),

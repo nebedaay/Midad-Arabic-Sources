@@ -13525,6 +13525,9 @@ function versionNotePath(entry, version) {
   const stem = (_b2 = (_a2 = path2.split("/").pop()) == null ? void 0 : _a2.replace(/\.md$/i, "")) != null ? _b2 : entry.title;
   return (0, import_obsidian3.normalizePath)(`${folder}/${stem}.Version${versionNumber(version.id)}.md`);
 }
+function versionZeroNotePath(entry) {
+  return versionNotePath(entry, { id: "v0", label: "Original source", kind: "source", savedAt: "", hash: "", file: "", selected: true, archived: false });
+}
 function versionLink(entry, version) {
   const path2 = version.id === entry.defaultId ? entry.path : versionNotePath(entry, version);
   const label = version.id === entry.defaultId ? "Default version" : versionLabel(version);
@@ -13539,7 +13542,7 @@ function versionReference(entry, version) {
 function otherVersionReferences(entry, excludeId) {
   const refs = entry.versions.filter((v) => v.id !== excludeId).sort((a, b) => a.id === entry.defaultId ? -1 : b.id === entry.defaultId ? 1 : versionNumber(a.id) - versionNumber(b.id)).map((v) => versionReference(entry, v));
   if (entry.virtualOriginal && excludeId !== "v0" && !entry.versions.some((v) => v.id === "v0")) {
-    refs.unshift("Original source");
+    refs.unshift(entry.virtualSelected ? `[[${versionZeroNotePath(entry).replace(/\.md$/, "")}|Original source]]` : "Original source");
   }
   return refs;
 }
@@ -13766,6 +13769,17 @@ var VersionStore = class {
     this.save();
     return entry;
   }
+  async writeVersionZeroNote(file, entry, rendered) {
+    var _a2;
+    const prior = splitNote(rendered);
+    const region = managedRegionText(rendered);
+    const links = otherVersionReferences(entry, "v0");
+    const withVersion = addVersionFrontmatter(joinNote((_a2 = prior.frontmatter) != null ? _a2 : "", region), "v0", links, "Original source");
+    const defaultLink = `[[${entry.path.replace(/\.md$/, "")}|Default version]]`;
+    await this.writeLive(versionZeroNotePath(entry), addUpLink(withVersion, defaultLink));
+    entry.virtualSelected = true;
+    this.save();
+  }
   async saveVersion(file, overwrite, renderHash, options = {}) {
     var _a2, _b2, _c;
     const manifest = this.load();
@@ -13868,6 +13882,15 @@ var VersionStore = class {
       version.archived = false;
     }
     this.save();
+  }
+  async setVirtualSelected(entry, selected, file) {
+    const manifest = this.load();
+    if (!manifest.notes[entry.key])
+      manifest.notes[entry.key] = entry;
+    entry.virtualSelected = selected;
+    this.save();
+    if (!selected && file)
+      await this.deleteVersionNote(versionZeroNotePath(entry), "v0");
   }
   async renameVersion(entry, id, label) {
     const version = entry.versions.find((v) => v.id === id);
@@ -14193,15 +14216,18 @@ var _ManageVersionsModal = class extends import_obsidian3.Modal {
       const list = contentEl.createDiv({ cls: "mas-versions-list" });
       if (((_c = this.entry) == null ? void 0 : _c.virtualOriginal) && !this.entry.versions.some((v) => v.id === "v0")) {
         const row = list.createDiv({ cls: "mas-versions-row" });
-        if (this.entry.defaultId === "v0") {
+        const virtualSelected = this.entry.defaultId === "v0" || this.entry.virtualSelected === true;
+        if (this.entry.defaultId === "v0")
           row.addClass("is-default");
+        if (virtualSelected)
           row.addClass("is-selected");
-        }
         row.onclick = async () => {
           var _a3;
-          if (((_a3 = this.entry) == null ? void 0 : _a3.defaultId) === "v0")
+          if (((_a3 = this.entry) == null ? void 0 : _a3.defaultId) === "v0") {
+            new import_obsidian3.Notice("The default version must remain selected.");
             return;
-          await this.options.store.setDefault(this.entry, "v0");
+          }
+          await this.options.store.setVirtualSelected(this.entry, !this.entry.virtualSelected, this.options.file);
           this.selectionDirty = true;
           await this.refresh();
         };
@@ -14213,7 +14239,8 @@ var _ManageVersionsModal = class extends import_obsidian3.Modal {
           status.createSpan({ cls: "mas-versions-default", text: "Default" });
         } else {
           const setDefault = status.createEl("button", { cls: "mas-versions-default-button", text: "Set as default" });
-          setDefault.onclick = async () => {
+          setDefault.onclick = async (event) => {
+            event.stopPropagation();
             await this.options.store.setDefault(this.entry, "v0");
             this.selectionDirty = true;
             await this.refresh();
@@ -14377,6 +14404,28 @@ ${prior.body.slice(region.start, region.end).trim()}
       }
     }).open();
   }
+  async renderVirtualZeroAsVersion() {
+    var _a2, _b2, _c, _d;
+    if (!this.entry || !this.options.renderOriginal)
+      return;
+    const entry = this.entry;
+    const file = this.options.file;
+    const previousText = await this.options.app.vault.read(file);
+    const previousDefault = entry.defaultId;
+    entry.defaultId = "v0";
+    await this.options.store.setDefault(entry, "v0");
+    await this.options.renderOriginal();
+    const rendered = await this.options.app.vault.read(file);
+    await this.options.store.writeVersionZeroNote(file, entry, rendered);
+    await this.options.app.vault.modify(file, previousText);
+    entry.defaultId = previousDefault;
+    entry.virtualSelected = true;
+    await this.options.store.setDefault(entry, previousDefault);
+    await this.options.store.apply(file, entry);
+    await ((_b2 = (_a2 = this.options).updateBaseline) == null ? void 0 : _b2.call(_a2));
+    await this.refresh();
+    (_d = (_c = this.options).onChanged) == null ? void 0 : _d.call(_c);
+  }
   promptNewVersion() {
     var _a2, _b2, _c;
     const versions = (_b2 = (_a2 = this.entry) == null ? void 0 : _a2.versions) != null ? _b2 : [];
@@ -14401,8 +14450,12 @@ ${prior.body.slice(region.start, region.end).trim()}
     }).open();
   }
   async apply() {
-    var _a2, _b2;
-    if (((_a2 = this.entry) == null ? void 0 : _a2.virtualOriginal) && this.entry.defaultId === "v0" && this.options.renderOriginal) {
+    var _a2, _b2, _c;
+    if (((_a2 = this.entry) == null ? void 0 : _a2.virtualOriginal) && this.entry.virtualSelected && this.entry.defaultId !== "v0" && this.options.renderOriginal) {
+      await this.renderVirtualZeroAsVersion();
+      return;
+    }
+    if (((_b2 = this.entry) == null ? void 0 : _b2.virtualOriginal) && this.entry.defaultId === "v0" && this.options.renderOriginal) {
       const renderOriginal = async () => {
         await this.options.renderOriginal();
         this.close();
@@ -14431,7 +14484,7 @@ ${prior.body.slice(region.start, region.end).trim()}
       await renderOriginal();
       return;
     }
-    if (!((_b2 = this.entry) == null ? void 0 : _b2.versions.length)) {
+    if (!((_c = this.entry) == null ? void 0 : _c.versions.length)) {
       new import_obsidian3.Notice("There are no saved versions to apply.");
       return;
     }
@@ -26698,6 +26751,9 @@ ${lines.join("\n")}`;
       renderOriginal: async () => {
         await this.updateNoteBaselines([file.path]);
         await this.rerenderCurrentSource(file);
+      },
+      updateBaseline: async () => {
+        await this.updateNoteBaselines([file.path]);
       },
       getFingerprint: async () => hashString(JSON.stringify({
         version: this.manifest.version,
