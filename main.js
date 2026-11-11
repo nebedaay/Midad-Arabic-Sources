@@ -14190,7 +14190,8 @@ var _ManageVersionsModal = class extends import_obsidian3.Modal {
     return !((_a2 = this.entry) == null ? void 0 : _a2.versions.length) || !this.matchesSaved;
   }
   hasUnsavedChanges() {
-    return !this.matchesSaved;
+    var _a2;
+    return !!((_a2 = this.entry) == null ? void 0 : _a2.versions.length) && !this.matchesSaved;
   }
   render() {
     var _a2, _b2, _c, _d, _e, _f, _g;
@@ -26627,7 +26628,7 @@ ${lines.join("\n")}`;
         new import_obsidian19.Notice(`No archived ${(_c = info.type) != null ? _c : "transcription"} batch found for @${info.citekey}, vol. ${info.volume}.`);
         return null;
       }
-      if (batches.some((entry) => entry.info.volume !== info.volume)) {
+      if (!options.onlyCurrentVolume && !options.outPath && batches.some((entry) => entry.info.volume !== info.volume)) {
         const scope = await new Promise((resolve) => {
           new ReRenderBatchScopeModal(this.app, info.citekey, info.volume, batches.length, resolve).open();
         });
@@ -26843,7 +26844,7 @@ ${lines.join("\n")}`;
         return false;
       }
     } else {
-      rendered = await this.rerenderArchivedNote(file, { outPath, skipApply: true, skipChangeReview: true });
+      rendered = await this.rerenderArchivedNote(file, { outPath, skipApply: true, skipChangeReview: true, onlyCurrentVolume: true });
     }
     if (!rendered) {
       new import_obsidian19.Notice("Could not render Version 0 for this note.");

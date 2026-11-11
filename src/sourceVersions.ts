@@ -742,7 +742,9 @@ export class ManageVersionsModal extends Modal {
 	}
 
 	private hasUnsavedChanges(): boolean {
-		return !this.matchesSaved;
+		// A virtual Version 0 with no saved versions has no snapshot to compare
+		// against; applying it simply re-renders the installed model.
+		return !!this.entry?.versions.length && !this.matchesSaved;
 	}
 
 	private render(): void {

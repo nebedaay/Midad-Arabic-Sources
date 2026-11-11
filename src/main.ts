@@ -5237,7 +5237,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 	 * volume notes. The archive contains the OCR/translation JSON, so this
 	 * never calls Gemini.
 	 */
-	async rerenderArchivedNote(file: TAbstractFile, options: { outPath?: string; skipApply?: boolean; skipChangeReview?: boolean } = {}): Promise<string | null> {
+	async rerenderArchivedNote(file: TAbstractFile, options: { outPath?: string; skipApply?: boolean; skipChangeReview?: boolean; onlyCurrentVolume?: boolean } = {}): Promise<string | null> {
 		const info = archivedNoteInfo(file.path);
 		if (!info) {
 			new Notice("That note does not belong to an imported source and has no archived transcription.");
@@ -5271,7 +5271,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 				new Notice(`No archived ${info.type ?? "transcription"} batch found for @${info.citekey}, vol. ${info.volume}.`);
 				return null;
 			}
-			if (batches.some((entry) => entry.info.volume !== info.volume)) {
+			if (!options.onlyCurrentVolume && !options.outPath && batches.some((entry) => entry.info.volume !== info.volume)) {
 				const scope = await new Promise<"one" | "all" | null>((resolve) => {
 					new ReRenderBatchScopeModal(
 						this.app,
@@ -5497,7 +5497,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 				return false;
 			}
 		} else {
-			rendered = await this.rerenderArchivedNote(file, { outPath, skipApply: true, skipChangeReview: true });
+			rendered = await this.rerenderArchivedNote(file, { outPath, skipApply: true, skipChangeReview: true, onlyCurrentVolume: true });
 		}
 		if (!rendered) {
 			new Notice("Could not render Version 0 for this note.");
