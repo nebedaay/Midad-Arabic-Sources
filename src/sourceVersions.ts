@@ -483,6 +483,10 @@ export class VersionStore {
 		return true;
 	}
 
+	async allEntries(): Promise<NoteVersionEntry[]> {
+		return Object.values(this.load().notes);
+	}
+
 	async entriesForPaths(paths: string[]): Promise<NoteVersionEntry[]> {
 		const wanted = new Set(paths.map((path) => normalizePath(path)));
 		return Object.values(this.load().notes).filter((entry) => wanted.has(normalizePath(entry.path)));

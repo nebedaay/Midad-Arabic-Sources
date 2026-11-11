@@ -2715,7 +2715,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 
 	async openManageSources(
 		force = false,
-		showFilter?: "all" | "installed" | "not-installed" | "archived" | "annotated",
+		showFilter?: "all" | "installed" | "not-installed" | "archived" | "annotated" | "corrected",
 		initialMode: "manage" | "zotero" | "url" = "manage"
 	) {
 		const loading = new Notice("Loading available sources…", 0);
@@ -2738,6 +2738,15 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			const statusKeys = (status: "installed" | "deleting") =>
 				new Set(manifest.filter((w) => this.workStatus(w) === status).map((w) => this.workKey(w)));
 			const archivedKeys = new Set(manifest.filter((w) => w.status === "archived").map((w) => this.workKey(w)));
+			const versionPaths = (await new VersionStore(this.app, this.vaultPath()).allEntries()).map((entry) => normalizePath(entry.path));
+			const correctedKeys = new Set<string>();
+			for (const w of works) {
+				const dir = String(w.dir ?? "");
+				if (!dir) continue;
+				const hub = normalizePath(`${this.installedSourcesRoot()}/${dir}.md`);
+				const folder = normalizePath(`${this.installedSourcesRoot()}/${dir}/`);
+				if (versionPaths.some((path) => path === hub || path.startsWith(folder))) correctedKeys.add(w.key);
+			}
 			const installedKeys = new Set(
 				manifest.filter((w) => w.status !== "archived" && this.workStatus(w) === "installed").map((w) => this.workKey(w))
 			);
@@ -2774,7 +2783,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 				for (const e of await this.zoteroEntries()) zoteroStatus.set(String(e.work.key), e.status);
 			}
 			new ManageSourcesModal(
-				this.app, this, works, installedKeys, statusKeys("deleting"), archivedKeys, sizes, zoteroStatus,
+				this.app, this, works, installedKeys, statusKeys("deleting"), archivedKeys, sizes, zoteroStatus, correctedKeys,
 				() => { void this.openManageSources(true); }, new Set(this.archivingSources), showFilter, initialMode
 			).open();
 		} finally {
@@ -8735,15 +8744,16 @@ class ManageSourcesModal extends Modal {
 	archived: Set<string>;
 	archiving: Set<string>;
 	annotationCounts: Map<string, number>;
+	corrected: Set<string>;
 	sizes: Map<string, number>;
 	onReload?: () => void;
 	initial: Map<string, boolean>;
 	zoteroStatus: Map<string, string>;
-	rows: Array<{ work: SourceWork; el: HTMLElement; stateEl: HTMLElement; isInstalled: boolean; isArchived: boolean; isArchiving: boolean; annotationCount: number; topics: string[]; repo: string; collection: string }> = [];
+	rows: Array<{ work: SourceWork; el: HTMLElement; stateEl: HTMLElement; isInstalled: boolean; isArchived: boolean; isArchiving: boolean; annotationCount: number; corrected: boolean; topics: string[]; repo: string; collection: string }> = [];
 	headings: Map<string, HTMLElement> = new Map();
 	/** The works the user has highlighted; Apply acts on the difference. */
 	selected = new Set<string>();
-	show: "all" | "installed" | "not-installed" | "archived" | "annotated";
+	show: "all" | "installed" | "not-installed" | "archived" | "annotated" | "corrected";
 	mode: "manage" | "zotero" | "url" = "manage";
 	activeGenres = new Set<string>();
 	offRepos = new Set<string>();
@@ -8754,7 +8764,7 @@ class ManageSourcesModal extends Modal {
 	markArchiving: (work: SourceWork) => void = () => {};
 	finishArchiving: (work: SourceWork, ok: boolean) => void = () => {};
 
-	constructor(app: App, plugin: MidadArabicSourcesPlugin, works: SourceWork[], installed: Set<string>, deleting: Set<string> = new Set(), archived: Set<string> = new Set(), sizes: Map<string, number> = new Map(), zoteroStatus: Map<string, string> = new Map(), onReload?: () => void, archiving: Set<string> = new Set(), showFilter?: "all" | "installed" | "not-installed" | "archived" | "annotated", initialMode: "manage" | "zotero" | "url" = "manage") {
+	constructor(app: App, plugin: MidadArabicSourcesPlugin, works: SourceWork[], installed: Set<string>, deleting: Set<string> = new Set(), archived: Set<string> = new Set(), sizes: Map<string, number> = new Map(), zoteroStatus: Map<string, string> = new Map(), corrected: Set<string> = new Set(), onReload?: () => void, archiving: Set<string> = new Set(), showFilter?: "all" | "installed" | "not-installed" | "archived" | "annotated" | "corrected", initialMode: "manage" | "zotero" | "url" = "manage") {
 		super(app);
 		this.plugin = plugin;
 		this.works = works;
@@ -8767,10 +8777,11 @@ class ManageSourcesModal extends Modal {
 		);
 		this.sizes = sizes;
 		this.zoteroStatus = zoteroStatus;
+		this.corrected = corrected;
 		this.onReload = onReload;
 		this.initial = new Map(works.map((w) => [w.key, installed.has(w.key) && !archiving.has(w.key)]));
 		const saved = plugin.settings.manageShowFilter;
-		this.show = showFilter ?? (saved === "installed" || saved === "not-installed" || saved === "archived" || saved === "annotated"
+		this.show = showFilter ?? (saved === "installed" || saved === "not-installed" || saved === "archived" || saved === "annotated" || saved === "corrected"
 			? saved
 			: "all");
 		this.mode = initialMode;
@@ -8805,6 +8816,7 @@ class ManageSourcesModal extends Modal {
 			["not-installed", "Not installed"],
 			["archived", "Archived"],
 			["annotated", "Annotated"],
+			["corrected", "Corrected"],
 		] as const) {
 			showSel.createEl("option", { text: label }).value = val;
 		}
@@ -9005,6 +9017,7 @@ class ManageSourcesModal extends Modal {
 			};
 			this.rows.push({
 				work: w, el: row, stateEl, isInstalled, isArchived, isArchiving, annotationCount,
+				corrected: this.corrected.has(w.key),
 				topics: this.plugin.topicsForWork(w),
 				repo: w.repository || "Other",
 				collection: w.collection,
@@ -9096,7 +9109,9 @@ class ManageSourcesModal extends Modal {
 							? !r.isInstalled && !r.isArchived && !r.isArchiving
 							: this.show === "archived"
 								? r.isArchived || r.isArchiving
-								: r.annotationCount > 0;
+								: this.show === "corrected"
+									? r.corrected
+									: r.annotationCount > 0;
 				const repoOk = !this.offRepos.has(r.repo);
 				const otherOk = showOk && repoOk && (!q || hay.includes(q)) && (!lg || w.language === lg);
 				if (otherOk) for (const topic of r.topics) availableTopics.add(topic);

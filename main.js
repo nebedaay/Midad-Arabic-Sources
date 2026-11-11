@@ -13930,6 +13930,9 @@ var VersionStore = class {
     this.save();
     return true;
   }
+  async allEntries() {
+    return Object.values(this.load().notes);
+  }
   async entriesForPaths(paths) {
     const wanted = new Set(paths.map((path2) => (0, import_obsidian3.normalizePath)(path2)));
     return Object.values(this.load().notes).filter((entry) => wanted.has((0, import_obsidian3.normalizePath)(entry.path)));
@@ -24188,7 +24191,7 @@ var MidadArabicSourcesPlugin = class extends import_obsidian19.Plugin {
     }
   }
   async openManageSources(force = false, showFilter, initialMode = "manage") {
-    var _a2;
+    var _a2, _b2;
     const loading = new import_obsidian19.Notice("Loading available sources\u2026", 0);
     try {
       const works = [...await this.listSourcesCached(force)];
@@ -24207,6 +24210,17 @@ var MidadArabicSourcesPlugin = class extends import_obsidian19.Plugin {
       }
       const statusKeys = (status) => new Set(manifest.filter((w) => this.workStatus(w) === status).map((w) => this.workKey(w)));
       const archivedKeys = new Set(manifest.filter((w) => w.status === "archived").map((w) => this.workKey(w)));
+      const versionPaths = (await new VersionStore(this.app, this.vaultPath()).allEntries()).map((entry) => (0, import_obsidian19.normalizePath)(entry.path));
+      const correctedKeys = new Set();
+      for (const w of works) {
+        const dir = String((_a2 = w.dir) != null ? _a2 : "");
+        if (!dir)
+          continue;
+        const hub = (0, import_obsidian19.normalizePath)(`${this.installedSourcesRoot()}/${dir}.md`);
+        const folder = (0, import_obsidian19.normalizePath)(`${this.installedSourcesRoot()}/${dir}/`);
+        if (versionPaths.some((path2) => path2 === hub || path2.startsWith(folder)))
+          correctedKeys.add(w.key);
+      }
       const installedKeys = new Set(manifest.filter((w) => w.status !== "archived" && this.workStatus(w) === "installed").map((w) => this.workKey(w)));
       for (const key of this.archivingSources)
         installedKeys.delete(key);
@@ -24216,7 +24230,7 @@ var MidadArabicSourcesPlugin = class extends import_obsidian19.Plugin {
       for (const w of works) {
         const st = stats[w.key];
         if (installedKeys.has(w.key)) {
-          if (st && typeof st.bytes === "number" && ((_a2 = st.at) != null ? _a2 : 0) > this.workRenderedMs(w, st)) {
+          if (st && typeof st.bytes === "number" && ((_b2 = st.at) != null ? _b2 : 0) > this.workRenderedMs(w, st)) {
             sizes.set(w.key, st.bytes);
           } else {
             const bytes = await this.onDiskBytes(w);
@@ -24237,7 +24251,7 @@ var MidadArabicSourcesPlugin = class extends import_obsidian19.Plugin {
         for (const e of await this.zoteroEntries())
           zoteroStatus.set(String(e.work.key), e.status);
       }
-      new ManageSourcesModal(this.app, this, works, installedKeys, statusKeys("deleting"), archivedKeys, sizes, zoteroStatus, () => {
+      new ManageSourcesModal(this.app, this, works, installedKeys, statusKeys("deleting"), archivedKeys, sizes, zoteroStatus, correctedKeys, () => {
         void this.openManageSources(true);
       }, new Set(this.archivingSources), showFilter, initialMode).open();
     } finally {
@@ -29409,7 +29423,7 @@ var SourceChangeReviewModal = class extends import_obsidian19.Modal {
   }
 };
 var ManageSourcesModal = class extends import_obsidian19.Modal {
-  constructor(app, plugin, works, installed, deleting = new Set(), archived = new Set(), sizes = new Map(), zoteroStatus = new Map(), onReload, archiving = new Set(), showFilter, initialMode = "manage") {
+  constructor(app, plugin, works, installed, deleting = new Set(), archived = new Set(), sizes = new Map(), zoteroStatus = new Map(), corrected = new Set(), onReload, archiving = new Set(), showFilter, initialMode = "manage") {
     super(app);
     this.rows = [];
     this.headings = new Map();
@@ -29437,10 +29451,11 @@ var ManageSourcesModal = class extends import_obsidian19.Modal {
     this.annotationCounts = new Map(Object.entries((_b2 = (_a2 = plugin.annotations) == null ? void 0 : _a2.annotationSummary()) != null ? _b2 : {}).map(([key, value]) => [key, value.count]));
     this.sizes = sizes;
     this.zoteroStatus = zoteroStatus;
+    this.corrected = corrected;
     this.onReload = onReload;
     this.initial = new Map(works.map((w) => [w.key, installed.has(w.key) && !archiving.has(w.key)]));
     const saved = plugin.settings.manageShowFilter;
-    this.show = showFilter != null ? showFilter : saved === "installed" || saved === "not-installed" || saved === "archived" || saved === "annotated" ? saved : "all";
+    this.show = showFilter != null ? showFilter : saved === "installed" || saved === "not-installed" || saved === "archived" || saved === "annotated" || saved === "corrected" ? saved : "all";
     this.mode = initialMode;
     this.activeGenres = new Set((plugin.settings.manageGenreFilter || []).map((value) => {
       const topic = genreTopic(value);
@@ -29466,7 +29481,8 @@ var ManageSourcesModal = class extends import_obsidian19.Modal {
       ["installed", "Installed"],
       ["not-installed", "Not installed"],
       ["archived", "Archived"],
-      ["annotated", "Annotated"]
+      ["annotated", "Annotated"],
+      ["corrected", "Corrected"]
     ]) {
       showSel.createEl("option", { text: label }).value = val;
     }
@@ -29669,6 +29685,7 @@ var ManageSourcesModal = class extends import_obsidian19.Modal {
         isArchived,
         isArchiving,
         annotationCount,
+        corrected: this.corrected.has(w.key),
         topics: this.plugin.topicsForWork(w),
         repo: w.repository || "Other",
         collection: w.collection
@@ -29754,7 +29771,7 @@ var ManageSourcesModal = class extends import_obsidian19.Modal {
       for (const r of this.rows) {
         const w = r.work;
         const hay = `${w.title} ${w.name} ${(_a3 = w.title_ar) != null ? _a3 : ""} ${(_b2 = w.short_ar) != null ? _b2 : ""} ${((_c = w.aliases) != null ? _c : []).join(" ")} ${w.author} ${(_d = w.subtitle) != null ? _d : ""} ${w.id} ${w.repository || ""}`.toLowerCase();
-        const showOk = this.show === "all" ? true : this.show === "installed" ? r.isInstalled : this.show === "not-installed" ? !r.isInstalled && !r.isArchived && !r.isArchiving : this.show === "archived" ? r.isArchived || r.isArchiving : r.annotationCount > 0;
+        const showOk = this.show === "all" ? true : this.show === "installed" ? r.isInstalled : this.show === "not-installed" ? !r.isInstalled && !r.isArchived && !r.isArchiving : this.show === "archived" ? r.isArchived || r.isArchiving : this.show === "corrected" ? r.corrected : r.annotationCount > 0;
         const repoOk = !this.offRepos.has(r.repo);
         const otherOk = showOk && repoOk && (!q || hay.includes(q)) && (!lg || w.language === lg);
         if (otherOk)
