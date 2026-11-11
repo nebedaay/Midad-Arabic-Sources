@@ -164,6 +164,16 @@ export interface ManagedRegion {
 }
 
 /** Keep managed-region markers on their own blank-line-separated block. */
+export function ensureManagedRegion(content: string): string {
+	const prior = splitNote(content);
+	if (findManagedRegion(prior.body)) return normalizeManagedMarkerSpacing(content);
+	const body = prior.body.trim();
+	if (!body) return content;
+	const wrapped = `${MANAGED_OPEN}\n\n${body}\n\n${MANAGED_CLOSE}\n`;
+	const ensured = prior.frontmatter == null ? wrapped : joinNote(prior.frontmatter, wrapped);
+	return normalizeManagedMarkerSpacing(ensured);
+}
+
 export function normalizeManagedMarkerSpacing(text: string): string {
 	const lines = text.split("\n");
 	const out: string[] = [];

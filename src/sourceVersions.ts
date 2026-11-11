@@ -3,7 +3,7 @@ import { strFromU8, strToU8, unzipSync, zipSync } from "fflate";
 import * as fs from "fs";
 import { hashString } from "./sourceImport/history";
 import { ensureFolder, safeFileSegment } from "./sourcePaths";
-import { MANAGED_CLOSE, MANAGED_OPEN, findManagedRegion, joinNote, normalizeManagedMarkerSpacing, splitNote } from "./sourceImport/merge";
+import { ensureManagedRegion, findManagedRegion, joinNote, normalizeManagedMarkerSpacing, splitNote } from "./sourceImport/merge";
 
 export interface SavedVersion {
 	id: string;
@@ -197,15 +197,6 @@ function outsideBody(content: string): string {
 	const region = findManagedRegion(prior.body);
 	if (!region) return "";
 	return `${prior.body.slice(0, region.start)}${prior.body.slice(region.end)}`;
-}
-
-function ensureManagedRegion(content: string): string {
-	const prior = splitNote(content);
-	if (findManagedRegion(prior.body)) return content;
-	const body = prior.body.trim();
-	if (!body) return content;
-	const wrapped = `${MANAGED_OPEN}\n\n${body}\n\n${MANAGED_CLOSE}\n`;
-	return prior.frontmatter == null ? wrapped : joinNote(prior.frontmatter, wrapped);
 }
 
 function addVersionFrontmatter(content: string, id: string, otherLinks: string[], label: string): string {

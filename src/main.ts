@@ -57,7 +57,7 @@ import { BUNDLED_ASSETS } from "./assets.generated";
 import { localDate } from "./time";
 import { formatPoetrySelection } from "./poetry";
 import { ManageVersionsModal, VersionStore } from "./sourceVersions";
-import { MANAGED_CLOSE, MANAGED_OPEN, findManagedRegion, joinNote, splitNote } from "./sourceImport/merge";
+import { ensureManagedRegion, findManagedRegion, joinNote, splitNote } from "./sourceImport/merge";
 import { BUILTIN_TOPICS, TOPIC_PAGE_PREFIX, genreTopic, normalizeGenre, topicLabel, topicLink, topicNoteName, topicsFromValue, turathCategory, turathGenres, turathTopicsForWork } from "./topics";
 import { identityOfFrontmatter, sourceIdToYaml, sourceOfFrontmatter } from "./sourceIds";
 import {
@@ -5297,12 +5297,8 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 	}
 
 	private managedTaggedBody(text: string): string | null {
-		const prior = splitNote(text);
-		if (findManagedRegion(prior.body)) return null;
-		const body = prior.body.trim();
-		if (!body) return null;
-		const wrapped = `${MANAGED_OPEN}\n\n${body}\n\n${MANAGED_CLOSE}\n`;
-		return prior.frontmatter == null ? wrapped : joinNote(prior.frontmatter, wrapped);
+		const next = ensureManagedRegion(text);
+		return next === text ? null : next;
 	}
 
 	private async addManagedTagsToNote(file: TAbstractFile | null): Promise<void> {

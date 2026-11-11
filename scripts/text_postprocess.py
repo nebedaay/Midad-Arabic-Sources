@@ -145,3 +145,14 @@ def normalize_managed_marker_spacing(text: str) -> str:
         out.append(lines[i])
         i += 1
     return "\n".join(out)
+
+
+MANAGED_OPEN = '<span class="mas-managed">mas-managed</span>'
+MANAGED_CLOSE = '<span class="mas-managed">/mas-managed</span>'
+LEGACY_MANAGED_OPEN = "%%mas-managed%%"
+LEGACY_MANAGED_CLOSE = "%%/mas-managed%%"
+
+
+def wrap_managed_body(body: str) -> str:
+    """The one canonical wrapper for generated managed content."""
+    return f"{MANAGED_OPEN}\n\n{body.strip()}\n\n{MANAGED_CLOSE}"

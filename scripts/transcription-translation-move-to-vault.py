@@ -20,12 +20,6 @@ import sys
 from pathlib import Path
 from datetime import datetime
 
-try:
-    from text_postprocess import normalize_managed_marker_spacing
-except Exception:
-    def normalize_managed_marker_spacing(text):
-        return text
-
 VAULT = Path(os.environ.get("OBSIDIAN_VAULT", os.path.expanduser("~/Documents/Obsidian Vault")))
 _LITERATURE_DIR = os.environ.get("MIDAD_LITERATURE_DIR", "").strip()
 BIB = VAULT / _LITERATURE_DIR if _LITERATURE_DIR else None
@@ -43,13 +37,24 @@ TYPE_SUFFIX = re.compile(
     re.I,
 )
 
-# The same managed-region markers used by the ETA source renderer. Transcripts
-# keep these around their generated body so user comments outside survive a
-# re-render; the markers are movable by the user.
-MANAGED_OPEN = '<span class="mas-managed">mas-managed</span>'
-MANAGED_CLOSE = '<span class="mas-managed">/mas-managed</span>'
-LEGACY_MANAGED_OPEN = "%%mas-managed%%"
-LEGACY_MANAGED_CLOSE = "%%/mas-managed%%"
+try:
+    from text_postprocess import (
+        LEGACY_MANAGED_CLOSE,
+        LEGACY_MANAGED_OPEN,
+        MANAGED_CLOSE,
+        MANAGED_OPEN,
+        normalize_managed_marker_spacing,
+        wrap_managed_body,
+    )
+except Exception:  # direct use without the shared module
+    MANAGED_OPEN = '<span class="mas-managed">mas-managed</span>'
+    MANAGED_CLOSE = '<span class="mas-managed">/mas-managed</span>'
+    LEGACY_MANAGED_OPEN = "%%mas-managed%%"
+    LEGACY_MANAGED_CLOSE = "%%/mas-managed%%"
+    def normalize_managed_marker_spacing(text):
+        return text
+    def wrap_managed_body(body):
+        return f"{MANAGED_OPEN}\n\n{body.strip()}\n\n{MANAGED_CLOSE}"
 
 
 def _managed_span(body: str):
@@ -67,7 +72,7 @@ def _managed_span(body: str):
 def _managed_body(existing: Path | None, generated: str) -> str:
     """Wrap generated content, preserving text outside an existing region."""
     generated = generated.strip("\n")
-    wrapped = f"{MANAGED_OPEN}\n\n{generated}\n\n{MANAGED_CLOSE}"
+    wrapped = wrap_managed_body(generated)
     if existing is None or not existing.exists():
         return wrapped
     try:

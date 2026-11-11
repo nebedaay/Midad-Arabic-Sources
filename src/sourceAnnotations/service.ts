@@ -53,7 +53,7 @@ import {
 	selectionExclusion,
 	type SelectionExclusion,
 } from "./text";
-import { MANAGED_CLOSE, MANAGED_OPEN, joinNote, splitNote } from "../sourceImport/merge";
+import { ensureManagedRegion, joinNote, splitNote } from "../sourceImport/merge";
 import { identityOfFrontmatter, sourceIdToYaml } from "../sourceIds";
 import type {
 	AdoptionOptions,
@@ -433,17 +433,12 @@ export class AnnotationService {
 		});
 		const text = await this.app.vault.adapter.read(normalizePath(file.path));
 		if (!managedBounds(text)) {
-			const prior = splitNote(text);
-			const body = prior.body.replace(/^\n+|\n+$/g, "");
-			if (!body.trim()) {
+			const ensured = ensureManagedRegion(text);
+			if (ensured === text) {
 				new Notice("This note has no body to adopt.");
 				return;
 			}
-			const wrapped = `${MANAGED_OPEN}\n\n${body}\n\n${MANAGED_CLOSE}\n`;
-			await this.app.vault.adapter.write(
-				normalizePath(file.path),
-				joinNote(prior.frontmatter ?? "", wrapped)
-			);
+			await this.app.vault.adapter.write(normalizePath(file.path), ensured);
 		}
 		this.resolver.invalidate();
 		void this.host.refreshRegistry?.();
