@@ -3,7 +3,7 @@ import { strFromU8, strToU8, unzipSync, zipSync } from "fflate";
 import * as fs from "fs";
 import { hashString } from "./sourceImport/history";
 import { ensureFolder, safeFileSegment } from "./sourcePaths";
-import { MANAGED_CLOSE, MANAGED_OPEN, findManagedRegion, joinNote, splitNote } from "./sourceImport/merge";
+import { MANAGED_CLOSE, MANAGED_OPEN, findManagedRegion, joinNote, normalizeManagedMarkerSpacing, splitNote } from "./sourceImport/merge";
 
 export interface SavedVersion {
 	id: string;
@@ -147,7 +147,7 @@ function setFrontmatterList(content: string, key: string, values: string[]): str
 		out.push(`${key}:`);
 		for (const value of values) out.push(`  - "${value.replace(/"/g, '\\"')}"`);
 	}
-	return ensureManagedRegion(joinNote(out.join("\n"), prior.body));
+	return normalizeManagedMarkerSpacing(ensureManagedRegion(joinNote(out.join("\n"), prior.body)));
 }
 
 function sanitizeFrontmatter(content: string): string {
@@ -481,7 +481,7 @@ export class VersionStore {
 		const otherLinks = otherVersionReferences(file, entry, defaultVersion.id);
 		const defaultText = await this.versionText(entry, defaultVersion.id);
 		if (!defaultText) return 0;
-		const defaultBody = setFrontmatterList(ensureManagedRegion(sanitizeFrontmatter(defaultText)), "other-versions", otherLinks);
+		const defaultBody = normalizeManagedMarkerSpacing(setFrontmatterList(ensureManagedRegion(sanitizeFrontmatter(defaultText)), "other-versions", otherLinks));
 		let written = (await this.writeLive(file.path, defaultBody)) ? 1 : 0;
 		const defaultLink = versionLink(entry, defaultVersion);
 		for (const version of entry.versions) {

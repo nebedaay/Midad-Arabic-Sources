@@ -20,6 +20,12 @@ import sys
 from pathlib import Path
 from datetime import datetime
 
+try:
+    from text_postprocess import normalize_managed_marker_spacing
+except Exception:
+    def normalize_managed_marker_spacing(text):
+        return text
+
 VAULT = Path(os.environ.get("OBSIDIAN_VAULT", os.path.expanduser("~/Documents/Obsidian Vault")))
 _LITERATURE_DIR = os.environ.get("MIDAD_LITERATURE_DIR", "").strip()
 BIB = VAULT / _LITERATURE_DIR if _LITERATURE_DIR else None
@@ -78,7 +84,7 @@ def _managed_body(existing: Path | None, generated: str) -> str:
     if not span:
         return wrapped
     start, stop = span
-    return f"{body[:start]}{wrapped}{body[stop:]}"
+    return normalize_managed_marker_spacing(f"{body[:start]}{wrapped}{body[stop:]}")
 
 
 def _literature_notes():

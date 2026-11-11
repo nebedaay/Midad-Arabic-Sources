@@ -10992,6 +10992,12 @@ import sys
 from pathlib import Path
 from datetime import datetime
 
+try:
+    from text_postprocess import normalize_managed_marker_spacing
+except Exception:
+    def normalize_managed_marker_spacing(text):
+        return text
+
 VAULT = Path(os.environ.get("OBSIDIAN_VAULT", os.path.expanduser("~/Documents/Obsidian Vault")))
 _LITERATURE_DIR = os.environ.get("MIDAD_LITERATURE_DIR", "").strip()
 BIB = VAULT / _LITERATURE_DIR if _LITERATURE_DIR else None
@@ -11050,7 +11056,7 @@ def _managed_body(existing: Path | None, generated: str) -> str:
     if not span:
         return wrapped
     start, stop = span
-    return f"{body[:start]}{wrapped}{body[stop:]}"
+    return normalize_managed_marker_spacing(f"{body[:start]}{wrapped}{body[stop:]}")
 
 
 def _literature_notes():
@@ -13546,7 +13552,7 @@ function setFrontmatterList(content, key, values) {
     for (const value of values)
       out.push(`  - "${value.replace(/"/g, '\\"')}"`);
   }
-  return ensureManagedRegion(joinNote(out.join("\n"), prior.body));
+  return normalizeManagedMarkerSpacing(ensureManagedRegion(joinNote(out.join("\n"), prior.body)));
 }
 function sanitizeFrontmatter(content) {
   if (!content.startsWith("---"))
@@ -13884,7 +13890,7 @@ var VersionStore = class {
     const defaultText = await this.versionText(entry, defaultVersion.id);
     if (!defaultText)
       return 0;
-    const defaultBody = setFrontmatterList(ensureManagedRegion(sanitizeFrontmatter(defaultText)), "other-versions", otherLinks);
+    const defaultBody = normalizeManagedMarkerSpacing(setFrontmatterList(ensureManagedRegion(sanitizeFrontmatter(defaultText)), "other-versions", otherLinks));
     let written = await this.writeLive(file.path, defaultBody) ? 1 : 0;
     const defaultLink = versionLink(entry, defaultVersion);
     for (const version of entry.versions) {
@@ -18691,7 +18697,7 @@ var AnnotationSidebarView = class extends import_obsidian13.ItemView {
     this.component = null;
   }
   async refresh(file) {
-    var _a2, _b2, _c;
+    var _a2, _b2, _c, _d;
     const token = ++this.renderToken;
     const data = await this.service.sidebarData(file);
     if (token !== this.renderToken)
@@ -18718,10 +18724,10 @@ var AnnotationSidebarView = class extends import_obsidian13.ItemView {
       text: "Navigation",
       attr: { type: "button", role: "tab" }
     });
-    const hasAnnotationTab = data.target !== null;
+    const hasAnnotationTab = data.target !== null || !!data.versionDefaultPath;
     const annotationTab = hasAnnotationTab ? tabs.createEl("button", {
       cls: "mas-ann-sidebar__tab",
-      text: `Annotations (${data.annotations.length})`,
+      text: `Annotations (${data.versionDefaultPath ? (_d = data.versionAnnotationCount) != null ? _d : 0 : data.annotations.length})`,
       attr: { type: "button", role: "tab" }
     }) : null;
     const panels = root.createDiv({ cls: "mas-ann-sidebar__panels" });
@@ -21479,6 +21485,8 @@ ${MANAGED_CLOSE}
     if (/\.Version\d+\.md$/i.test(path2)) {
       const defaultPath = path2.replace(/\.Version\d+\.md$/i, ".md");
       const defaultFile = this.app.vault.getAbstractFileByPath((0, import_obsidian17.normalizePath)(defaultPath));
+      const defaultTarget = defaultFile instanceof import_obsidian17.TFile ? await this.targetForPath(defaultFile.path) : null;
+      const defaultAnnotations = defaultTarget ? await this.annotationsFor(defaultTarget) : [];
       return {
         notePath: path2,
         noteName: file.basename,
@@ -21487,7 +21495,8 @@ ${MANAGED_CLOSE}
         annotations: [],
         navigation,
         collection: false,
-        versionDefaultPath: defaultFile instanceof import_obsidian17.TFile ? defaultFile.path : defaultPath
+        versionDefaultPath: defaultFile instanceof import_obsidian17.TFile ? defaultFile.path : defaultPath,
+        versionAnnotationCount: defaultAnnotations.length
       };
     }
     const target = await this.targetForPath(path2);

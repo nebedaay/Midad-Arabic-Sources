@@ -24,6 +24,8 @@ export interface AnnotationSidebarData {
 	collection?: boolean;
 	/** Set for a subsidiary version note, pointing to its default note. */
 	versionDefaultPath?: string;
+	/** Annotation count from the default version, shown on subsidiary versions. */
+	versionAnnotationCount?: number;
 }
 
 type SidebarTab = "annotations" | "navigation";
@@ -138,11 +140,11 @@ export class AnnotationSidebarView extends ItemView {
 			text: "Navigation",
 			attr: { type: "button", role: "tab" },
 		});
-		const hasAnnotationTab = data.target !== null;
+		const hasAnnotationTab = data.target !== null || !!data.versionDefaultPath;
 		const annotationTab = hasAnnotationTab
 			? tabs.createEl("button", {
 				cls: "mas-ann-sidebar__tab",
-				text: `Annotations (${data.annotations.length})`,
+				text: `Annotations (${data.versionDefaultPath ? data.versionAnnotationCount ?? 0 : data.annotations.length})`,
 				attr: { type: "button", role: "tab" },
 			})
 			: null;

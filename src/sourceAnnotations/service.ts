@@ -2156,6 +2156,8 @@ export class AnnotationService {
 		if (/\.Version\d+\.md$/i.test(path)) {
 			const defaultPath = path.replace(/\.Version\d+\.md$/i, ".md");
 			const defaultFile = this.app.vault.getAbstractFileByPath(normalizePath(defaultPath));
+			const defaultTarget = defaultFile instanceof TFile ? await this.targetForPath(defaultFile.path) : null;
+			const defaultAnnotations = defaultTarget ? await this.annotationsFor(defaultTarget) : [];
 			return {
 				notePath: path,
 				noteName: file.basename,
@@ -2165,6 +2167,7 @@ export class AnnotationService {
 				navigation,
 				collection: false,
 				versionDefaultPath: defaultFile instanceof TFile ? defaultFile.path : defaultPath,
+				versionAnnotationCount: defaultAnnotations.length,
 			};
 		}
 		const target = await this.targetForPath(path);
