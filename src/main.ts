@@ -56,7 +56,7 @@ import {
 import { BUNDLED_ASSETS } from "./assets.generated";
 import { localDate } from "./time";
 import { formatPoetrySelection } from "./poetry";
-import { ManageVersionsModal, VersionStore } from "./sourceVersions";
+import { ManageVersionsModal, NoteVersionEntry, VersionStore } from "./sourceVersions";
 import { ensureManagedRegion, findManagedRegion, joinNote, splitNote } from "./sourceImport/merge";
 import { BUILTIN_TOPICS, TOPIC_PAGE_PREFIX, genreTopic, normalizeGenre, topicLabel, topicLink, topicNoteName, topicsFromValue, turathCategory, turathGenres, turathTopicsForWork } from "./topics";
 import { identityOfFrontmatter, sourceIdToYaml, sourceOfFrontmatter } from "./sourceIds";
@@ -5237,11 +5237,11 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 	 * volume notes. The archive contains the OCR/translation JSON, so this
 	 * never calls Gemini.
 	 */
-	async rerenderArchivedNote(file: TAbstractFile): Promise<void> {
+	async rerenderArchivedNote(file: TAbstractFile, options: { outPath?: string; skipApply?: boolean; skipChangeReview?: boolean } = {}): Promise<string | null> {
 		const info = archivedNoteInfo(file.path);
 		if (!info) {
 			new Notice("That note does not belong to an imported source and has no archived transcription.");
-			return;
+			return null;
 		}
 
 		const all = (await this.pipelineResult(["list-archive"]))?.zips ?? [];
@@ -5258,10 +5258,10 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 				// Legacy notes predate the archive format; the current local
 				// post-processor can still improve them in place.
 				await this.postprocessTranscriptionNote(file, info);
-				return;
+				return null;
 			}
 			new Notice(`No archived batch found for @${info.citekey}.`);
-			return;
+			return null;
 		}
 
 		let chosen = batches;
@@ -5269,7 +5269,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			const exact = batches.filter((entry) => entry.info.volume === info.volume);
 			if (!exact.length) {
 				new Notice(`No archived ${info.type ?? "transcription"} batch found for @${info.citekey}, vol. ${info.volume}.`);
-				return;
+				return null;
 			}
 			if (batches.some((entry) => entry.info.volume !== info.volume)) {
 				const scope = await new Promise<"one" | "all" | null>((resolve) => {
@@ -5281,7 +5281,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 						resolve
 					).open();
 				});
-				if (!scope) return;
+				if (!scope) return null;
 				chosen = scope === "one" ? exact : batches;
 			} else {
 				chosen = exact;
@@ -5289,12 +5289,12 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		}
 
 		const canonicalPath = file.path.replace(/\.Version\d+\.md$/i, ".md");
-		const changed = await this.findChangedSourceNotes([canonicalPath]);
+		const changed = options.skipChangeReview ? [] : await this.findChangedSourceNotes([canonicalPath]);
 		if (changed.length) {
 			const choice = await new Promise<"cancel" | "skip" | "save" | "overwrite" | "original">((resolve) => {
 				new SourceChangeReviewModal(this.app, changed.map((entry) => entry.path), resolve).open();
 			});
-			if (choice === "cancel" || choice === "skip") return;
+			if (choice === "cancel" || choice === "skip") return null;
 			const store = new VersionStore(this.app, this.vaultPath());
 			for (const entry of changed) {
 				const existing = await store.entryFor(entry.file);
@@ -5305,12 +5305,31 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 				});
 			}
 		}
+		if (options.outPath && chosen.length > 1) chosen = chosen.slice(0, 1);
 		for (const entry of chosen) {
-			await this.runWithProgress(`Re-rendering @${info.citekey}`, ["reprocess", "--zip", entry.zip.path]);
+			if (options.outPath) {
+				await this.runWithProgress(
+					`Rendering Version 0 for @${info.citekey}`,
+					[entry.zip.path, "--out", options.outPath],
+					"scripts/reprocess-batch-files.py"
+				);
+			} else {
+				await this.runWithProgress(`Re-rendering @${info.citekey}`, ["reprocess", "--zip", entry.zip.path]);
+			}
 		}
-		await this.applySavedVersions([canonicalPath]);
-		await this.updateNoteBaselines([canonicalPath]);
-		new Notice(`Re-rendered ${chosen.length} archived batch(es) for @${info.citekey}.`);
+		if (options.outPath) {
+			try {
+				return await this.app.vault.adapter.read(options.outPath);
+			} catch {
+				return null;
+			}
+		}
+		if (!options.skipApply) {
+			await this.applySavedVersions([canonicalPath]);
+			await this.updateNoteBaselines([canonicalPath]);
+			new Notice(`Re-rendered ${chosen.length} archived batch(es) for @${info.citekey}.`);
+		}
+		return null;
 	}
 
 	/** Restore saved user versions over freshly rendered model notes. */
@@ -5423,12 +5442,70 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 				await this.updateNoteBaselines([file.path]);
 				await this.rerenderCurrentSource(file);
 			},
+			renderVersionZero: async () => {
+				const entry = await store.entryFor(file);
+				if (entry && await this.renderVersionZeroFor(file, entry)) new Notice("Rendered Version 0 as a separate note.");
+			},
 			updateBaseline: async () => { await this.updateNoteBaselines([file.path]); },
 			getFingerprint: async () => hashString(JSON.stringify({
 				version: this.manifest.version,
 				templates: await this.sourceTemplateHashes(),
 			})),
 		}).open();
+	}
+
+	/** Render Version 0 directly to its suffixed note, leaving the default note alone. */
+	private async renderVersionZeroFor(file: TFile, entry: NoteVersionEntry): Promise<boolean> {
+		const store = new VersionStore(this.app, this.vaultPath());
+		const outPath = store.versionZeroPath(entry);
+		const work = await this.workForPath(file.path);
+		let rendered: string | null = null;
+		if (work) {
+			const modelRel = normalizePath(`.midad-arabic-sources/source-models/${work.collection}/${work.id}.json`);
+			try {
+				const model = JSON.parse(await this.app.vault.adapter.read(modelRel)) as SourceModel;
+				const userFolder = this.settings.sourceTemplateFolder.trim() || null;
+				const templates = await loadTemplates(this.app, this.bundledTemplateDir(), userFolder);
+				const outRoot = this.installedSourcesRoot();
+				const canonicalId = this.resolveCanonicalQuran();
+				const canonicalRoot = this.settings.canonicalQuranFolder.trim() || `${outRoot}/Quran`;
+				const isQuranText = model.work.collection === "quran-text";
+				const isCanonical = isQuranText && String(model.work.id) === canonicalId;
+				if (isQuranText) {
+					model.work.canonical = isCanonical;
+					model.work.canonical_root = canonicalRoot;
+				}
+				model.work.unit_prefix = isCanonical ? "" : (model.work.dir as string);
+				const pubs = await this.loadPublicationMap();
+				const pub = pubs[this.workKey(model.work)] ?? {};
+				model.work.publication = { ...pub, mas_note: this.masNote(pub) };
+				const up = this.normalizeUpLinks(model.work.up);
+				for (const topic of workGenres(model.work).map(genreTopic)) {
+					const link = topicLink(topic);
+					if (!up.includes(link)) up.push(link);
+				}
+				model.work.up = up;
+				model.work.user_topics = this.userTopicsForWork(model.work);
+				await renderModelToVault(this.app, templates, model, outRoot, true, undefined, undefined, undefined, undefined, false, {
+					canonicalPath: file.path,
+					destinationPath: outPath,
+				});
+				rendered = await this.app.vault.adapter.read(outPath);
+			} catch (error) {
+				console.error("[midad-arabic-sources] render Version 0", error);
+				new Notice(`Could not render Version 0: ${error instanceof Error ? error.message : error}`);
+				return false;
+			}
+		} else {
+			rendered = await this.rerenderArchivedNote(file, { outPath, skipApply: true, skipChangeReview: true });
+		}
+		if (!rendered) {
+			new Notice("Could not render Version 0 for this note.");
+			return false;
+		}
+		await store.writeVersionZeroNote(file, entry, rendered);
+		await store.syncDefaultVersionLinks(file, entry);
+		return true;
 	}
 
 	/** Apply the safe Markdown-update layer to the active note. */

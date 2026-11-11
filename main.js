@@ -2166,7 +2166,7 @@ function contentHash(content) {
   }
   return (h >>> 0).toString(16);
 }
-async function renderModelToVault(app, templates, model, outRoot, force = false, onStep, onlyKinds, seen, shouldCancel, yamlOnly = false) {
+async function renderModelToVault(app, templates, model, outRoot, force = false, onStep, onlyKinds, seen, shouldCancel, yamlOnly = false, singleNote) {
   var _a2, _b2;
   const engine = makeEngine();
   if (Array.isArray(model.work.up)) {
@@ -2193,6 +2193,27 @@ async function renderModelToVault(app, templates, model, outRoot, force = false,
     for (const ch of (_a2 = unit.chapters) != null ? _a2 : []) {
       ch.note_stem = `${dir} - ${safeFileSegment(String(ch.base), "section", 100)}`;
     }
+  }
+  if (singleNote) {
+    const wanted = (0, import_obsidian2.normalizePath)(singleNote.canonicalPath);
+    const destination = (0, import_obsidian2.normalizePath)(singleNote.destinationPath);
+    const hubPath2 = (0, import_obsidian2.normalizePath)(`${outRoot}/${dir}.md`);
+    if (wanted === hubPath2) {
+      const out = renderHub(engine, templates, model, isQuranText ? void 0 : singleUnit);
+      await writeMerged(app, destination, out, true, false);
+      return [destination];
+    }
+    for (const unit of model.units) {
+      const base = safeFileSegment(String(unit.base), "section", 100);
+      const dictRoot = model.work.collection === "dictionary" && unit.kind === "dict";
+      const path2 = isCanonical && canonicalRoot ? `${canonicalRoot}/${base}.md` : isCanonical || dictRoot ? `${outRoot}/${dir}/${base}.md` : `${outRoot}/${dir}/${dir} - ${base}.md`;
+      if ((0, import_obsidian2.normalizePath)(path2) !== wanted)
+        continue;
+      const out = renderUnit(engine, templates, model, unit);
+      await writeMerged(app, destination, out, true, false);
+      return [destination];
+    }
+    return [];
   }
   if (singleUnit && !isQuranText) {
     await deleteNote(app, `${folder}/${dir} - ${safeFileSegment(String(singleUnit.base), "section", 100)}.md`);
@@ -13769,12 +13790,17 @@ var VersionStore = class {
     this.save();
     return entry;
   }
+  versionZeroPath(entry) {
+    return versionZeroNotePath(entry);
+  }
   async writeVersionZeroNote(file, entry, rendered) {
-    var _a2;
+    var _a2, _b2;
     const prior = splitNote(rendered);
+    const current = await this.app.vault.read(file);
+    const frontmatter = (_b2 = (_a2 = prior.frontmatter) != null ? _a2 : splitNote(current).frontmatter) != null ? _b2 : "";
     const region = managedRegionText(rendered);
     const links = otherVersionReferences(entry, "v0");
-    const withVersion = addVersionFrontmatter(joinNote((_a2 = prior.frontmatter) != null ? _a2 : "", region), "v0", links, "Original source");
+    const withVersion = addVersionFrontmatter(joinNote(frontmatter, region), "v0", links, "Original source");
     const defaultLink = `[[${entry.path.replace(/\.md$/, "")}|Default version]]`;
     await this.writeLive(versionZeroNotePath(entry), addUpLink(withVersion, defaultLink));
     entry.virtualSelected = true;
@@ -13891,6 +13917,11 @@ var VersionStore = class {
     this.save();
     if (!selected && file)
       await this.deleteVersionNote(versionZeroNotePath(entry), "v0");
+  }
+  async syncDefaultVersionLinks(file, entry) {
+    const current = await this.app.vault.read(file);
+    const next = setFrontmatterList(current, "other-versions", otherVersionReferences(entry, entry.defaultId));
+    await this.writeLive(file.path, next);
   }
   async renameVersion(entry, id, label) {
     const version = entry.versions.find((v) => v.id === id);
@@ -14405,26 +14436,12 @@ ${prior.body.slice(region.start, region.end).trim()}
     }).open();
   }
   async renderVirtualZeroAsVersion() {
-    var _a2, _b2, _c, _d;
-    if (!this.entry || !this.options.renderOriginal)
+    var _a2, _b2;
+    if (!this.options.renderVersionZero)
       return;
-    const entry = this.entry;
-    const file = this.options.file;
-    const previousText = await this.options.app.vault.read(file);
-    const previousDefault = entry.defaultId;
-    entry.defaultId = "v0";
-    await this.options.store.setDefault(entry, "v0");
-    await this.options.renderOriginal();
-    const rendered = await this.options.app.vault.read(file);
-    await this.options.store.writeVersionZeroNote(file, entry, rendered);
-    await this.options.app.vault.modify(file, previousText);
-    entry.defaultId = previousDefault;
-    entry.virtualSelected = true;
-    await this.options.store.setDefault(entry, previousDefault);
-    await this.options.store.apply(file, entry);
-    await ((_b2 = (_a2 = this.options).updateBaseline) == null ? void 0 : _b2.call(_a2));
+    await this.options.renderVersionZero();
     await this.refresh();
-    (_d = (_c = this.options).onChanged) == null ? void 0 : _d.call(_c);
+    (_b2 = (_a2 = this.options).onChanged) == null ? void 0 : _b2.call(_a2);
   }
   promptNewVersion() {
     var _a2, _b2, _c;
@@ -26579,12 +26596,12 @@ ${lines.join("\n")}`;
     }
     new import_obsidian19.Notice(done ? `Re-rendered ${done} transcription/translation note${done === 1 ? "" : "s"} for @${citekey}.` : `No re-renderable notes found for @${citekey}.`);
   }
-  async rerenderArchivedNote(file) {
+  async rerenderArchivedNote(file, options = {}) {
     var _a2, _b2, _c;
     const info = archivedNoteInfo(file.path);
     if (!info) {
       new import_obsidian19.Notice("That note does not belong to an imported source and has no archived transcription.");
-      return;
+      return null;
     }
     const all = (_b2 = (_a2 = await this.pipelineResult(["list-archive"])) == null ? void 0 : _a2.zips) != null ? _b2 : [];
     const batches = all.map((zip) => ({ zip, info: archivedBatchInfo(zip.name) })).filter((entry) => {
@@ -26598,37 +26615,37 @@ ${lines.join("\n")}`;
     if (!batches.length) {
       if (info.type) {
         await this.postprocessTranscriptionNote(file, info);
-        return;
+        return null;
       }
       new import_obsidian19.Notice(`No archived batch found for @${info.citekey}.`);
-      return;
+      return null;
     }
     let chosen = batches;
     if (info.volume != null) {
       const exact = batches.filter((entry) => entry.info.volume === info.volume);
       if (!exact.length) {
         new import_obsidian19.Notice(`No archived ${(_c = info.type) != null ? _c : "transcription"} batch found for @${info.citekey}, vol. ${info.volume}.`);
-        return;
+        return null;
       }
       if (batches.some((entry) => entry.info.volume !== info.volume)) {
         const scope = await new Promise((resolve) => {
           new ReRenderBatchScopeModal(this.app, info.citekey, info.volume, batches.length, resolve).open();
         });
         if (!scope)
-          return;
+          return null;
         chosen = scope === "one" ? exact : batches;
       } else {
         chosen = exact;
       }
     }
     const canonicalPath = file.path.replace(/\.Version\d+\.md$/i, ".md");
-    const changed = await this.findChangedSourceNotes([canonicalPath]);
+    const changed = options.skipChangeReview ? [] : await this.findChangedSourceNotes([canonicalPath]);
     if (changed.length) {
       const choice = await new Promise((resolve) => {
         new SourceChangeReviewModal(this.app, changed.map((entry) => entry.path), resolve).open();
       });
       if (choice === "cancel" || choice === "skip")
-        return;
+        return null;
       const store = new VersionStore(this.app, this.vaultPath());
       for (const entry of changed) {
         const existing = await store.entryFor(entry.file);
@@ -26639,12 +26656,28 @@ ${lines.join("\n")}`;
         });
       }
     }
+    if (options.outPath && chosen.length > 1)
+      chosen = chosen.slice(0, 1);
     for (const entry of chosen) {
-      await this.runWithProgress(`Re-rendering @${info.citekey}`, ["reprocess", "--zip", entry.zip.path]);
+      if (options.outPath) {
+        await this.runWithProgress(`Rendering Version 0 for @${info.citekey}`, [entry.zip.path, "--out", options.outPath], "scripts/reprocess-batch-files.py");
+      } else {
+        await this.runWithProgress(`Re-rendering @${info.citekey}`, ["reprocess", "--zip", entry.zip.path]);
+      }
     }
-    await this.applySavedVersions([canonicalPath]);
-    await this.updateNoteBaselines([canonicalPath]);
-    new import_obsidian19.Notice(`Re-rendered ${chosen.length} archived batch(es) for @${info.citekey}.`);
+    if (options.outPath) {
+      try {
+        return await this.app.vault.adapter.read(options.outPath);
+      } catch (e) {
+        return null;
+      }
+    }
+    if (!options.skipApply) {
+      await this.applySavedVersions([canonicalPath]);
+      await this.updateNoteBaselines([canonicalPath]);
+      new import_obsidian19.Notice(`Re-rendered ${chosen.length} archived batch(es) for @${info.citekey}.`);
+    }
+    return null;
   }
   async applySavedVersions(paths) {
     const store = new VersionStore(this.app, this.vaultPath());
@@ -26752,6 +26785,11 @@ ${lines.join("\n")}`;
         await this.updateNoteBaselines([file.path]);
         await this.rerenderCurrentSource(file);
       },
+      renderVersionZero: async () => {
+        const entry = await store.entryFor(file);
+        if (entry && await this.renderVersionZeroFor(file, entry))
+          new import_obsidian19.Notice("Rendered Version 0 as a separate note.");
+      },
       updateBaseline: async () => {
         await this.updateNoteBaselines([file.path]);
       },
@@ -26760,6 +26798,60 @@ ${lines.join("\n")}`;
         templates: await this.sourceTemplateHashes()
       }))
     }).open();
+  }
+  async renderVersionZeroFor(file, entry) {
+    var _a2;
+    const store = new VersionStore(this.app, this.vaultPath());
+    const outPath = store.versionZeroPath(entry);
+    const work = await this.workForPath(file.path);
+    let rendered = null;
+    if (work) {
+      const modelRel = (0, import_obsidian19.normalizePath)(`.midad-arabic-sources/source-models/${work.collection}/${work.id}.json`);
+      try {
+        const model = JSON.parse(await this.app.vault.adapter.read(modelRel));
+        const userFolder = this.settings.sourceTemplateFolder.trim() || null;
+        const templates = await loadTemplates(this.app, this.bundledTemplateDir(), userFolder);
+        const outRoot = this.installedSourcesRoot();
+        const canonicalId = this.resolveCanonicalQuran();
+        const canonicalRoot = this.settings.canonicalQuranFolder.trim() || `${outRoot}/Quran`;
+        const isQuranText = model.work.collection === "quran-text";
+        const isCanonical = isQuranText && String(model.work.id) === canonicalId;
+        if (isQuranText) {
+          model.work.canonical = isCanonical;
+          model.work.canonical_root = canonicalRoot;
+        }
+        model.work.unit_prefix = isCanonical ? "" : model.work.dir;
+        const pubs = await this.loadPublicationMap();
+        const pub = (_a2 = pubs[this.workKey(model.work)]) != null ? _a2 : {};
+        model.work.publication = { ...pub, mas_note: this.masNote(pub) };
+        const up = this.normalizeUpLinks(model.work.up);
+        for (const topic of workGenres(model.work).map(genreTopic)) {
+          const link = topicLink(topic);
+          if (!up.includes(link))
+            up.push(link);
+        }
+        model.work.up = up;
+        model.work.user_topics = this.userTopicsForWork(model.work);
+        await renderModelToVault(this.app, templates, model, outRoot, true, void 0, void 0, void 0, void 0, false, {
+          canonicalPath: file.path,
+          destinationPath: outPath
+        });
+        rendered = await this.app.vault.adapter.read(outPath);
+      } catch (error) {
+        console.error("[midad-arabic-sources] render Version 0", error);
+        new import_obsidian19.Notice(`Could not render Version 0: ${error instanceof Error ? error.message : error}`);
+        return false;
+      }
+    } else {
+      rendered = await this.rerenderArchivedNote(file, { outPath, skipApply: true, skipChangeReview: true });
+    }
+    if (!rendered) {
+      new import_obsidian19.Notice("Could not render Version 0 for this note.");
+      return false;
+    }
+    await store.writeVersionZeroNote(file, entry, rendered);
+    await store.syncDefaultVersionLinks(file, entry);
+    return true;
   }
   async updateMarkdownNote() {
     const file = this.app.workspace.getActiveFile();

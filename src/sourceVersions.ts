@@ -322,12 +322,18 @@ export class VersionStore {
 		return entry;
 	}
 
+	versionZeroPath(entry: NoteVersionEntry): string {
+		return versionZeroNotePath(entry);
+	}
+
 	/** Write the separately rendered Version 0 note without archiving a snapshot. */
 	async writeVersionZeroNote(file: TFile, entry: NoteVersionEntry, rendered: string): Promise<void> {
 		const prior = splitNote(rendered);
+		const current = await this.app.vault.read(file);
+		const frontmatter = prior.frontmatter ?? splitNote(current).frontmatter ?? "";
 		const region = managedRegionText(rendered);
 		const links = otherVersionReferences(entry, "v0");
-		const withVersion = addVersionFrontmatter(joinNote(prior.frontmatter ?? "", region), "v0", links, "Original source");
+		const withVersion = addVersionFrontmatter(joinNote(frontmatter, region), "v0", links, "Original source");
 		const defaultLink = `[[${entry.path.replace(/\.md$/, "")}|Default version]]`;
 		await this.writeLive(versionZeroNotePath(entry), addUpLink(withVersion, defaultLink));
 		entry.virtualSelected = true;
@@ -455,6 +461,13 @@ export class VersionStore {
 		entry.virtualSelected = selected;
 		this.save();
 		if (!selected && file) await this.deleteVersionNote(versionZeroNotePath(entry), "v0");
+	}
+
+	/** Add the Version 0 link to the default note without touching its managed body. */
+	async syncDefaultVersionLinks(file: TFile, entry: NoteVersionEntry): Promise<void> {
+		const current = await this.app.vault.read(file);
+		const next = setFrontmatterList(current, "other-versions", otherVersionReferences(entry, entry.defaultId));
+		await this.writeLive(file.path, next);
 	}
 
 	async renameVersion(entry: NoteVersionEntry, id: string, label: string): Promise<boolean> {
@@ -654,6 +667,7 @@ interface VersionModalOptions {
 	activeVersionId?: string;
 	isSourceBacked?: () => Promise<boolean>;
 	renderOriginal?: () => Promise<void>;
+	renderVersionZero?: () => Promise<void>;
 	updateBaseline?: () => Promise<void>;
 }
 
@@ -966,22 +980,8 @@ export class ManageVersionsModal extends Modal {
 	}
 
 	private async renderVirtualZeroAsVersion(): Promise<void> {
-		if (!this.entry || !this.options.renderOriginal) return;
-		const entry = this.entry;
-		const file = this.options.file;
-		const previousText = await this.options.app.vault.read(file);
-		const previousDefault = entry.defaultId;
-		entry.defaultId = "v0";
-		await this.options.store.setDefault(entry, "v0");
-		await this.options.renderOriginal();
-		const rendered = await this.options.app.vault.read(file);
-		await this.options.store.writeVersionZeroNote(file, entry, rendered);
-		await this.options.app.vault.modify(file, previousText);
-		entry.defaultId = previousDefault;
-		entry.virtualSelected = true;
-		await this.options.store.setDefault(entry, previousDefault);
-		await this.options.store.apply(file, entry);
-		await this.options.updateBaseline?.();
+		if (!this.options.renderVersionZero) return;
+		await this.options.renderVersionZero();
 		await this.refresh();
 		this.options.onChanged?.();
 	}

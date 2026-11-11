@@ -354,7 +354,9 @@ export async function renderModelToVault(
 	/** Checked before every note, so a long dictionary render can be stopped. */
 	shouldCancel?: () => boolean,
 	/** Update only YAML frontmatter; bodies are preserved. */
-	yamlOnly = false
+	yamlOnly = false,
+	/** Render exactly one canonical note to a different destination path. */
+	singleNote?: { canonicalPath: string; destinationPath: string }
 ): Promise<string[]> {
 	const engine = makeEngine();
 	if (Array.isArray(model.work.up)) {
@@ -388,6 +390,31 @@ export async function renderModelToVault(
 		for (const ch of (unit.chapters as Array<JsonObject> | undefined) ?? []) {
 			ch.note_stem = `${dir} - ${safeFileSegment(String(ch.base), "section", 100)}`;
 		}
+	}
+
+	if (singleNote) {
+		const wanted = normalizePath(singleNote.canonicalPath);
+		const destination = normalizePath(singleNote.destinationPath);
+		const hubPath = normalizePath(`${outRoot}/${dir}.md`);
+		if (wanted === hubPath) {
+			const out = renderHub(engine, templates, model, isQuranText ? undefined : singleUnit);
+			await writeMerged(app, destination, out, true, false);
+			return [destination];
+		}
+		for (const unit of model.units) {
+			const base = safeFileSegment(String(unit.base), "section", 100);
+			const dictRoot = model.work.collection === "dictionary" && unit.kind === "dict";
+			const path = isCanonical && canonicalRoot
+				? `${canonicalRoot}/${base}.md`
+				: (isCanonical || dictRoot)
+					? `${outRoot}/${dir}/${base}.md`
+					: `${outRoot}/${dir}/${dir} - ${base}.md`;
+			if (normalizePath(path) !== wanted) continue;
+			const out = renderUnit(engine, templates, model, unit);
+			await writeMerged(app, destination, out, true, false);
+			return [destination];
+		}
+		return [];
 	}
 
 	if (singleUnit && !isQuranText) {
