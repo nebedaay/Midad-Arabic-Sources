@@ -25566,7 +25566,7 @@ var MidadArabicSourcesPlugin = class extends import_obsidian19.Plugin {
         this.endSourceOperation(op);
     }
   }
-  async renderWithProgress(modelPaths, force, title, operationId, kind = "explicit") {
+  async renderWithProgress(modelPaths, force, title, operationId, kind = "explicit", skipChangeReview = false) {
     const op = operationId != null ? operationId : this.beginSourceOperation(kind);
     if (op === null)
       return [];
@@ -25600,7 +25600,7 @@ var MidadArabicSourcesPlugin = class extends import_obsidian19.Plugin {
         if (left > 0)
           parts.push(`${left} work${left === 1 ? "" : "s"} left`);
         progress.setMessage(`${title}: ${parts.join(" \u2014 ")}`);
-      }, () => this.isSourceCancelled(op));
+      }, () => this.isSourceCancelled(op), skipChangeReview);
     } finally {
       progress.hide();
       if (owns)
@@ -25658,7 +25658,7 @@ var MidadArabicSourcesPlugin = class extends import_obsidian19.Plugin {
     }
     await this.saveNoteBaselines(notes);
   }
-  async renderModels(modelPaths, force = false, onProgress, shouldCancel) {
+  async renderModels(modelPaths, force = false, onProgress, shouldCancel, skipChangeReview = false) {
     var _a2, _b2, _c, _d, _e, _f, _g, _h;
     const vault = this.vaultPath();
     const userFolder = this.settings.sourceTemplateFolder.trim() || null;
@@ -25702,7 +25702,7 @@ var MidadArabicSourcesPlugin = class extends import_obsidian19.Plugin {
       m.work.unit_prefix = isCanonical ? "" : m.work.dir;
     }
     const expected = batch.flatMap((model) => expectedNotePaths(model, outRoot, canonicalRoot, canonicalId));
-    const changed = await this.findChangedSourceNotes(expected);
+    const changed = skipChangeReview ? [] : await this.findChangedSourceNotes(expected);
     if (changed.length) {
       const choice = await new Promise((resolve) => {
         new SourceChangeReviewModal(this.app, changed.map((entry) => entry.path), resolve).open();
@@ -26316,7 +26316,7 @@ ${lines.join("\n")}`;
         await adapter.rename(from, to);
     }
   }
-  async rerenderCurrentSource(file) {
+  async rerenderCurrentSource(file, skipChangeReview = false) {
     var _a2, _b2;
     const target = file != null ? file : this.app.workspace.getActiveFile();
     if (!target) {
@@ -26325,7 +26325,7 @@ ${lines.join("\n")}`;
     }
     const work = await this.workForPath(target.path);
     if (!work) {
-      await this.rerenderArchivedNote(target);
+      await this.rerenderArchivedNote(target, { skipChangeReview });
       return;
     }
     const rel = (0, import_obsidian19.normalizePath)(`.midad-arabic-sources/source-models/${work.collection}/${work.id}.json`);
@@ -26334,7 +26334,7 @@ ${lines.join("\n")}`;
       return;
     }
     const label = String((_b2 = (_a2 = work.title) != null ? _a2 : work.dir) != null ? _b2 : work.id);
-    await this.renderWithProgress([`${this.vaultPath()}/${rel}`], true, `Re-rendering ${label}`);
+    await this.renderWithProgress([`${this.vaultPath()}/${rel}`], true, `Re-rendering ${label}`, void 0, "explicit", skipChangeReview);
     new import_obsidian19.Notice(`Re-rendered ${label}.`);
   }
   noteHasVolumes(citekey, type) {
@@ -26784,7 +26784,7 @@ ${lines.join("\n")}`;
       },
       renderOriginal: async () => {
         await this.updateNoteBaselines([file.path]);
-        await this.rerenderCurrentSource(file);
+        await this.rerenderCurrentSource(file, true);
       },
       renderVersionZero: async () => {
         const entry = await store.entryFor(file);

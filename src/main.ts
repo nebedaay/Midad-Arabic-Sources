@@ -4025,7 +4025,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 	 * render goes through here, so nothing large ever runs without a report.
 	 */
 	async renderWithProgress(modelPaths: string[], force: boolean, title: string,
-		operationId?: number, kind: "explicit" | "auto" = "explicit"): Promise<string[]> {
+		operationId?: number, kind: "explicit" | "auto" = "explicit", skipChangeReview = false): Promise<string[]> {
 		const op = operationId ?? this.beginSourceOperation(kind);
 		if (op === null) return [];
 		const owns = operationId === undefined;
@@ -4059,7 +4059,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 				];
 				if (left > 0) parts.push(`${left} work${left === 1 ? "" : "s"} left`);
 				progress.setMessage(`${title}: ${parts.join(" — ")}`);
-			}, () => this.isSourceCancelled(op));
+			}, () => this.isSourceCancelled(op), skipChangeReview);
 		} finally {
 			progress.hide();
 			if (owns) this.endSourceOperation(op);
@@ -4117,7 +4117,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 	}
 
 	async renderModels(modelPaths: string[], force = false, onProgress?: (p: RenderProgress) => void,
-		shouldCancel?: () => boolean): Promise<string[]> {
+		shouldCancel?: () => boolean, skipChangeReview = false): Promise<string[]> {
 		const vault = this.vaultPath();
 		const userFolder = this.settings.sourceTemplateFolder.trim() || null;
 		let templates: TemplateSet;
@@ -4165,7 +4165,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			m.work.unit_prefix = isCanonical ? "" : (m.work.dir as string);
 		}
 		const expected = batch.flatMap((model) => expectedNotePaths(model, outRoot, canonicalRoot, canonicalId));
-		const changed = await this.findChangedSourceNotes(expected);
+		const changed = skipChangeReview ? [] : await this.findChangedSourceNotes(expected);
 		if (changed.length) {
 			const choice = await new Promise<"cancel" | "skip" | "save" | "overwrite" | "original">((resolve) => {
 				new SourceChangeReviewModal(this.app, changed.map((entry) => entry.path), resolve).open();
@@ -4906,7 +4906,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 	 * work's hub or any note under it. Handy after a model is rebuilt for one work:
 	 * the rest of the corpus is left alone.
 	 */
-	async rerenderCurrentSource(file?: TAbstractFile | null): Promise<void> {
+	async rerenderCurrentSource(file?: TAbstractFile | null, skipChangeReview = false): Promise<void> {
 		const target = file ?? this.app.workspace.getActiveFile();
 		if (!target) {
 			new Notice("Open a note that belongs to an imported source first.");
@@ -4914,7 +4914,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		}
 		const work = await this.workForPath(target.path);
 		if (!work) {
-			await this.rerenderArchivedNote(target);
+			await this.rerenderArchivedNote(target, { skipChangeReview });
 			return;
 		}
 		const rel = normalizePath(`.midad-arabic-sources/source-models/${work.collection}/${work.id}.json`);
@@ -4923,7 +4923,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			return;
 		}
 		const label = String(work.title ?? work.dir ?? work.id);
-		await this.renderWithProgress([`${this.vaultPath()}/${rel}`], true, `Re-rendering ${label}`);
+		await this.renderWithProgress([`${this.vaultPath()}/${rel}`], true, `Re-rendering ${label}`, undefined, "explicit", skipChangeReview);
 		new Notice(`Re-rendered ${label}.`);
 	}
 
@@ -5440,7 +5440,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 				// The user already made an explicit choice in the version manager;
 				// don't ask the same unsaved-changes question again.
 				await this.updateNoteBaselines([file.path]);
-				await this.rerenderCurrentSource(file);
+				await this.rerenderCurrentSource(file, true);
 			},
 			renderVersionZero: async () => {
 				const entry = await store.entryFor(file);
