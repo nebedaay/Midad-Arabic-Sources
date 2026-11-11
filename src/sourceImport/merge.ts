@@ -163,6 +163,36 @@ export interface ManagedRegion {
 	end: number;
 }
 
+/** Keep managed-region markers on their own blank-line-separated block. */
+export function normalizeManagedMarkerSpacing(text: string): string {
+	const lines = text.split("\n");
+	const out: string[] = [];
+	let inFence = false;
+	let fence = "";
+	for (let i = 0; i < lines.length; i++) {
+		const stripped = lines[i].trim();
+		if (stripped.startsWith("```") || stripped.startsWith("~~~")) {
+			const marker = stripped.slice(0, 3);
+			if (!inFence) { inFence = true; fence = marker; }
+			else if (marker === fence) inFence = false;
+		}
+		const isOpen = stripped === MANAGED_OPEN || stripped === LEGACY_MANAGED_OPEN;
+		const isClose = stripped === MANAGED_CLOSE || stripped === LEGACY_MANAGED_CLOSE;
+		if (!inFence && (isOpen || isClose)) {
+			while (out.length && out[out.length - 1].trim() === "") out.pop();
+			if (out.length) out.push("");
+			out.push(lines[i].trim());
+			i += 1;
+			while (i < lines.length && lines[i].trim() === "") i += 1;
+			if (i < lines.length) out.push("");
+			i -= 1;
+			continue;
+		}
+		out.push(lines[i]);
+	}
+	return out.join("\n");
+}
+
 export function findManagedRegion(body: string): ManagedRegion | null {
 	for (const [open, close] of REGION_MARKERS) {
 		const start = body.indexOf(open);

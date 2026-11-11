@@ -22,7 +22,7 @@ SCRIPTS = Path(__file__).resolve().parent
 if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
-from text_postprocess import escape_literal_brackets
+from text_postprocess import escape_literal_brackets, normalize_managed_marker_spacing
 
 
 def _load(name: str):
@@ -114,6 +114,7 @@ def update_markdown(text: str, *, quran: bool = True, tafsir: bool = False) -> s
     # raw-only page-number, OCR-heading, poetry, footnote, and TOC conversions
     # deliberately do not run here.
     body = normalize_markdown_spacing(body)
+    body = normalize_managed_marker_spacing(body)
     body = _restore_fences(body, fences)
     return body
 

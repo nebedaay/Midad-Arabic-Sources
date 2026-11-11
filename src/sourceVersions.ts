@@ -190,7 +190,7 @@ function ensureManagedRegion(content: string): string {
 	if (findManagedRegion(prior.body)) return content;
 	const body = prior.body.trim();
 	if (!body) return content;
-	const wrapped = `${MANAGED_OPEN}\n${body}\n${MANAGED_CLOSE}\n`;
+	const wrapped = `${MANAGED_OPEN}\n\n${body}\n\n${MANAGED_CLOSE}\n`;
 	return prior.frontmatter == null ? wrapped : joinNote(prior.frontmatter, wrapped);
 }
 

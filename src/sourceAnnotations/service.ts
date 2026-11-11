@@ -439,7 +439,7 @@ export class AnnotationService {
 				new Notice("This note has no body to adopt.");
 				return;
 			}
-			const wrapped = `${MANAGED_OPEN}\n${body}\n${MANAGED_CLOSE}\n`;
+			const wrapped = `${MANAGED_OPEN}\n\n${body}\n\n${MANAGED_CLOSE}\n`;
 			await this.app.vault.adapter.write(
 				normalizePath(file.path),
 				joinNote(prior.frontmatter ?? "", wrapped)

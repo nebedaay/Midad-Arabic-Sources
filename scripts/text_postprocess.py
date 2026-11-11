@@ -106,3 +106,42 @@ def main(argv=None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
+
+def normalize_managed_marker_spacing(text: str) -> str:
+    """Keep mas-managed marker lines on their own blank-line-separated block."""
+    markers = {
+        '<span class="mas-managed">mas-managed</span>',
+        '<span class="mas-managed">/mas-managed</span>',
+        "%%mas-managed%%",
+        "%%/mas-managed%%",
+    }
+    lines = text.split("\n")
+    out: list[str] = []
+    in_fence = False
+    fence = ""
+    i = 0
+    while i < len(lines):
+        stripped = lines[i].strip()
+        if stripped.startswith(("```", "~~~")):
+            marker = stripped[:3]
+            if not in_fence:
+                in_fence = True
+                fence = marker
+            elif marker == fence:
+                in_fence = False
+        if not in_fence and stripped in markers:
+            while out and out[-1].strip() == "":
+                out.pop()
+            if out:
+                out.append("")
+            out.append(stripped)
+            i += 1
+            while i < len(lines) and lines[i].strip() == "":
+                i += 1
+            if i < len(lines):
+                out.append("")
+            continue
+        out.append(lines[i])
+        i += 1
+    return "\n".join(out)

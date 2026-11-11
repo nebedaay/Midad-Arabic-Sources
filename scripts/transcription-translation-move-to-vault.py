@@ -61,7 +61,7 @@ def _managed_span(body: str):
 def _managed_body(existing: Path | None, generated: str) -> str:
     """Wrap generated content, preserving text outside an existing region."""
     generated = generated.strip("\n")
-    wrapped = f"{MANAGED_OPEN}\n{generated}\n{MANAGED_CLOSE}"
+    wrapped = f"{MANAGED_OPEN}\n\n{generated}\n\n{MANAGED_CLOSE}"
     if existing is None or not existing.exists():
         return wrapped
     try:

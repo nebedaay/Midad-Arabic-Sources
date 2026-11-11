@@ -5235,7 +5235,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		if (findManagedRegion(prior.body)) return null;
 		const body = prior.body.trim();
 		if (!body) return null;
-		const wrapped = `${MANAGED_OPEN}\n${body}\n${MANAGED_CLOSE}\n`;
+		const wrapped = `${MANAGED_OPEN}\n\n${body}\n\n${MANAGED_CLOSE}\n`;
 		return prior.frontmatter == null ? wrapped : joinNote(prior.frontmatter, wrapped);
 	}
 

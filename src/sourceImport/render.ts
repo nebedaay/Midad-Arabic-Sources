@@ -1,7 +1,7 @@
 import { App, TFile, normalizePath } from "obsidian";
 import { makeEngine, SourceTemplateEngine } from "./engine";
 import { YamlFieldSpec } from "./yaml";
-import { joinNote, mergeFrontmatter, mergeNote, splitNote, substantiveContentDiffers } from "./merge";
+import { joinNote, mergeFrontmatter, mergeNote, normalizeManagedMarkerSpacing, splitNote, substantiveContentDiffers } from "./merge";
 import { ensureFolder, safeFileSegment } from "../sourcePaths";
 
 /** Loosely-typed JSON data: importer work/unit models (fields are template-driven). */
@@ -295,11 +295,12 @@ export async function writeMerged(app: App, path: string, out: RenderOutput, for
 	const existing = await readVaultFile(app, path);
 	if (existing == null || existing.trim() === "") {
 		// New (or previously blanked) note: write the full render.
-		await writeNote(app, path, out.content);
+		await writeNote(app, path, normalizeManagedMarkerSpacing(out.content));
 		return;
 	}
 	const merged = mergeNote(existing, out.content, out.specs, { managesRegion: true, replaceUnmanaged });
-	if (force || substantiveContentDiffers(existing, merged)) await writeNote(app, path, merged);
+	const normalized = normalizeManagedMarkerSpacing(merged);
+	if (force || substantiveContentDiffers(existing, normalized)) await writeNote(app, path, normalized);
 }
 
 /**
