@@ -10,6 +10,8 @@ Some of its many features:
 - **transliterates** Arabic passages for integration into English writing
 - **provides an annotation interface** similar to Zotero’s PDF annotation features, preserving your annotations even if the source document is updated or removed from Obsidian
 - **auto-updates and re-renders** generated source notes when templates and upstream sources change
+- **manages saved versions** per note, with virtual Version 0 for the installed model, per-work version archives, and safe restoration after a source is removed
+- **preserves user-written content** when sources are removed, while allowing explicit full deletion or model-only cleanup
 - **exports sources** as auto-updated Zotero items
 
 The plugin was built for research on Islam and the Arabic language — Qurʾān commentaries, ḥadīth, the Qurʾān in its riwāyāt, and the classical dictionaries — but the importer is catalog-driven, so more repositories on any topic can be wired in over time, and users can add works by URL or PDF import that are not listed in the plugin.
@@ -71,6 +73,8 @@ A catalog-driven importer pulls classical texts from public repositories into yo
 - **Check imported sources** — find works whose notes or cached model are missing.
 - **Check for source updates** — ask the repositories whether a text changed upstream.
 - **Archive this source…** — zip the work's model and rendered notes, remove the live notes, and preserve its annotations; restore it from Manage text sources.
+- **Manage versions…** — save, select, compare, and restore note versions. Version 0 is the installed model/archive; saved user versions live in per-work archives and are reapplied automatically when a source is restored.
+- **Remove a source safely** — user-written text outside the managed region is kept by default; the removal dialog also offers full deletion and model-only deletion.
 
 Collections currently wired in: Qurʾān commentaries (tafsīr) from `spa5k/tafsir_api` and the Qurʾānic Universal Library; Qurʾān translations from `fawazahmed0/quran-api`; ḥadīth collections from `AhmedBaset/hadith-json`; the Qurʾān in its riwāyāt from `risan/quran-json`; two dictionaries, Hans Wehr’s *Dictionary of Modern Written Arabic* (read from its FODT edition) and Lane’s *An Arabic-English Lexicon* (read from its SQLite edition), one note per root; and classical books from [Turath.io](https://app.turath.io) (one note per TOC chapter, a volume index per volume, two category MOCs — `Turath` and the work type). Folders and hub files use `Author - Title (repository)` (for example `Aḥmad b. Ḥanbal - Musnad Aḥmad (hadith-json)`); the dictionaries and Qur'ān editions keep their established titles. Imports are cached, and re-rendering never overwrites your edits: generated content sits in a managed region and only template-declared frontmatter properties are reconciled. See [Document import](./docs/document-import.md) and [Templates](./docs/templates.md).
 

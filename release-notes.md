@@ -1,27 +1,33 @@
-# 0.1.5
+# 0.2.0
 
-A small cleanup release: it clears the last avoidable community-directory warning and carries the final documentation and Zotero-companion naming updates from `main`.
+This release completes the source/version lifecycle work: safer removal, per-work version archives, a unified hash index, automatic correction consolidation, and cleanup tools.
 
-### Review cleanup
+### Versions and managed notes
 
-- Replaced the two `column-gap` declarations in the Manage sources grid with the equivalent `gap: 8px` shorthand. This clears the directory scanner’s **“multicolumn”** warning (2 occurrences) without changing layout or behaviour.
-- The only warnings left are the deliberate `JsonObject` `any` and the desktop plugin’s filesystem/shell disclosures.
+- **Version 0 is virtual for installed and generated sources.** It represents the installed model or archived transcription/translation and creates no snapshot. Saved user versions are Version 1 and later.
+- Version 0 can be selected, rendered as a separate `.Version0.md` note, or made the default independently of the other versions.
+- Saved versions are stored in **per-work archives** under `.midad-arabic-sources/version-archives/`; the old global `source-versions.zip` is migrated automatically.
+- Reinstalling or restoring a source automatically reapplies its saved versions.
+- Managed-region baselines and saved-version hashes now live in one index, `.midad-arabic-sources/note-hashes.json`.
+- Managed-region markers are normalized consistently on every write, including a blank line after the closing marker at the end of a note.
+- The version manager reports template/render-fingerprint changes without rewriting historical snapshots.
 
-### Zotero companion
+### Safer source removal
 
-- Renamed **Arabic Fields Romanizer** to **Midad Arabic Transliteration**:
-  - Zotero ID `midad-arabic-transliteration@nebedaay.github.io`
-  - `.xpi` at `midad-arabic-transliteration/midad-arabic-transliteration.xpi`
-  - preferences `extensions.midadArabicTransliteration.*`
-  - menu action **Midad: Create romanized copy**
-  - update manifest under `midad-arabic-transliteration/updates.json`
-- The companion remains separate from the Obsidian plugin bundle and release assets; there is a new in-app **Midad Arabic Transliteration** guide covering installation, the transliteration server, preferences, and updates.
-- Anyone with the old `arabic-fields-romanizer@example.com` build must reinstall it once because the ID changed.
+- Removing a source now keeps notes containing user-written text outside the managed region, stripping only the generated region.
+- The removal dialog offers **Remove, keep my notes** or **Remove everything**.
+- **Delete cached model only** keeps notes and versions while removing the model.
+- **Re-download source/model** re-fetches a source while preserving user content.
+- Source removal and model deletion require explicit confirmation.
+
+### Corrections and cleanup
+
+- Legacy `*.corrections.json` sidecars are consolidated automatically into saved versions named **Committed corrections**, with backups, and then retired.
+- **Unadopt this note…** removes Midad identity, managed tags, saved versions, and adopted-note registration while keeping the note content.
+- **Clean up orphaned Midad data…** prunes hash and adopted-registry records whose notes no longer exist.
+- Saved-version and annotation content is preserved when notes are removed.
 
 ### Documentation
 
-- Installation uses **Community plugins** as the default and **BRAT** as the beta alternative.
-- The transcription and translation guides point to the **Literature notes folder** setting; blank uses ScholarWeft’s `literatureNoteFolder`, then a vault-wide `@citekey` search.
-- The Commands guide includes the **From the command line** section for transliteration, transcription, translation, inspection, and text-source import.
-
-Install or update from the community directory when listed, via BRAT (`nebedaay/Midad-Arabic-Sources`), or manually from this release.
+- Updated the README and guides for version management, per-work archives, safe removal, re-download/model deletion, correction consolidation, Unadopt, and cleanup.
+- Documented the new `.midad-arabic-sources/note-hashes.json` and `version-archives/` state.

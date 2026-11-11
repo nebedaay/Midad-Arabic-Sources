@@ -129,10 +129,12 @@ The plugin keeps its cache and bookkeeping in `.midad-arabic-sources/` at the va
 | `source-catalog.json` | The cached catalogue of available works (7-day TTL). |
 | `source-stats.json` | Measured sizes and the per-template render watermarks. |
 | `template-history.json` | The content-hash timeline that decides whether a template change affects notes. |
+| `note-hashes.json` | Managed-region baseline hashes and saved-version hashes. |
+| `version-archives/<work>-<hash>.zip` | Per-work saved-version metadata and snapshot notes. |
 | `archive/` | Archived transcription batches. |
 | `jobs/` | The persisted state of running pipeline jobs. |
 
-Deleting a work from the plugin removes its cached model and its notes (a hard delete, not a trash move); its source JSON stays cached, so re-installing is quick. Archiving instead writes a zip containing the model and the rendered markdown, removes the live notes, and keeps the annotations; restore unzips the notes directly when the template hashes still match, and otherwise re-renders from the model without downloading.
+Deleting a work from the plugin removes its cached model and generated notes; notes with user-written text outside the managed region are kept by default, and a full-deletion option is offered. Its source JSON stays cached, so re-installing is quick. The model can also be deleted separately while keeping notes and saved versions. Archiving instead writes a zip containing the model and the rendered markdown, removes the live notes, and keeps the annotations; restore unzips the notes directly when the template hashes still match, and otherwise re-renders from the model without downloading.
 
 ## Updating and state
 

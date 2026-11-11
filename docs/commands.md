@@ -27,7 +27,13 @@ See [Transcription](./transcription.md) and [Translation](./translation.md).
 - **Post-process this transcription/translation** — run the current local post-processing scripts over the open note, without an archive or Gemini. Also rebuilds the native YAML, volume parent, and literature-note list.
 - **Post-process all transcriptions and translations** — run that same post-processor over every recognised note, with a confirmation and per-note backup.
 - **Escape literal brackets in transcriptions and translations** — apply the shared bracket pass alone, without re-running every other formatting step; useful for a large batch.
-- **Add managed region tags to this note** — wrap the note body in `mas-managed` markers if it lacks a region.\n- **Add managed region tags to all Midad-managed notes** — apply that boundary to every managed content note that lacks it, with backups and a confirmation.\n- **Manage versions of this note…** — save, overwrite, select, archive, delete, and choose a default version for a note. The default occupies the main note path; other selected versions are rendered as `.VersionN.md` notes. Versions are stored in a zipped manifest.
+- **Add managed region tags to this note** — wrap the note body in `mas-managed` markers if it lacks a region.
+- **Add managed region tags to all Midad-managed notes** — apply that boundary to every managed content note that lacks it, with backups and a confirmation.
+- **Manage versions of this note…** — save, overwrite, select, archive, delete, and choose a default version. Version 0 is virtual for installed/model-backed sources: it re-renders the source and stores no snapshot. User versions are stored in per-work archives; selected non-default versions are rendered as `.VersionN.md` notes.
+- **Cache managed-region hashes for all managed notes** — seed missing baseline hashes used to detect edits against Version 0.
+- **Consolidate archived corrections into saved versions…** — convert legacy `.corrections.json` sidecars into saved versions and retire them with backups.
+- **Unadopt this note…** — remove Midad identity, managed tags, saved versions, and adopted-note registration while keeping the note content.
+- **Clean up orphaned Midad data…** — prune hash and adopted-registry records whose notes no longer exist.
 - **Update Markdown formatting in this note** — apply the safe Markdown-update layer to an already-rendered note: escape literal brackets, normalize block spacing, and detect/link unmarked Qur’ān quotes without rerunning raw-source page numbering or OCR conversion.
 - **Put selected text in a poetry callout** — format the selection as Arabic-poetry callouts: blank-line-separated verse groups become nested hemistich items, single short lines become direct items, and lines over 80 characters stay as ordinary paragraphs.
 - **Commit edits to archived transcription/translation** — save the current note’s page bodies beside its archive, so a later re-render from that archive keeps your corrections (poetry, page numbers, and body text).
@@ -53,6 +59,8 @@ See [Document import](./document-import.md) and [Templates](./templates.md).
 - **Check imported sources** — find works whose notes or cached model are missing.
 - **Check for source updates** — ask each repository whether a text changed upstream.
 - **Archive this source…** — zip the work's model and rendered notes, remove the live notes, and keep its annotations.
+- **Re-download source/model…** and **Delete cached model only…** — available from an installed source’s context menu in Manage text sources.
+- Removing a source preserves notes with user-written text by default; the removal dialog offers a full-deletion alternative.
 
 ## Annotations
 
