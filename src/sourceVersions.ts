@@ -92,7 +92,7 @@ function versionReference(entry: NoteVersionEntry, version: SavedVersion): strin
 	return versionLabel(version);
 }
 
-function otherVersionReferences(file: TFile, entry: NoteVersionEntry, excludeId?: string): string[] {
+function otherVersionReferences(entry: NoteVersionEntry, excludeId?: string): string[] {
 	return entry.versions
 		.filter((v) => v.id !== excludeId)
 		.sort((a, b) => a.id === entry.defaultId ? -1 : b.id === entry.defaultId ? 1 : versionNumber(a.id) - versionNumber(b.id))
@@ -183,6 +183,20 @@ function sanitizeFrontmatter(content: string): string {
 		out.push(line);
 	}
 	return out.join("\n") + body;
+}
+
+function managedRegionText(content: string): string {
+	const prior = splitNote(content);
+	const region = findManagedRegion(prior.body);
+	const raw = region ? prior.body.slice(region.start, region.end) : prior.body.trim();
+	return normalizeManagedMarkerSpacing(ensureManagedRegion(raw));
+}
+
+function outsideBody(content: string): string {
+	const prior = splitNote(content);
+	const region = findManagedRegion(prior.body);
+	if (!region) return "";
+	return `${prior.body.slice(0, region.start)}${prior.body.slice(region.end)}`;
 }
 
 function ensureManagedRegion(content: string): string {
@@ -344,7 +358,7 @@ export class VersionStore {
 		this.save();
 		if (options.activeVersionId) {
 			const live = await this.app.vault.read(file);
-			const links = otherVersionReferences(file, entry, version.id);
+			const links = otherVersionReferences(entry, version.id);
 			await this.writeLive(file.path, addVersionFrontmatter(live, version.id, links, versionLabel(version)));
 		}
 		return entry;
@@ -477,12 +491,19 @@ export class VersionStore {
 	async apply(file: TFile, entry: NoteVersionEntry): Promise<number> {
 		const defaultVersion = entry.versions.find((v) => v.id === entry.defaultId);
 		if (!defaultVersion) return 0;
-		const selected = entry.versions.filter((v) => v.selected);
-		const otherLinks = otherVersionReferences(file, entry, defaultVersion.id);
+		const current = await this.app.vault.read(file);
+		const currentPrior = splitNote(current);
+		const outside = outsideBody(current);
+		const frontmatter = currentPrior.frontmatter ?? splitNote(await this.versionText(entry, defaultVersion.id) ?? "").frontmatter ?? "";
 		const defaultText = await this.versionText(entry, defaultVersion.id);
 		if (!defaultText) return 0;
-		const defaultBody = normalizeManagedMarkerSpacing(setFrontmatterList(ensureManagedRegion(sanitizeFrontmatter(defaultText)), "other-versions", otherLinks));
-		let written = (await this.writeLive(file.path, defaultBody)) ? 1 : 0;
+		const otherLinks = otherVersionReferences(entry, defaultVersion.id);
+		let written = 0;
+		const changeDefault = () => {
+			const body = normalizeManagedMarkerSpacing(`${outside}${managedRegionText(defaultText)}`);
+			return setFrontmatterList(joinNote(frontmatter, body), "other-versions", otherLinks);
+		};
+		if (await this.writeLive(file.path, changeDefault())) written += 1;
 		const defaultLink = versionLink(entry, defaultVersion);
 		for (const version of entry.versions) {
 			const path = versionNotePath(entry, version);
@@ -492,8 +513,10 @@ export class VersionStore {
 			}
 			const text = await this.versionText(entry, version.id);
 			if (!text) continue;
-			const links = otherVersionReferences(file, entry, version.id);
-			const withVersion = addVersionFrontmatter(text, version.id, links, versionLabel(version));
+			const links = otherVersionReferences(entry, version.id);
+			const region = managedRegionText(text);
+			const versionBody = normalizeManagedMarkerSpacing(region);
+			const withVersion = addVersionFrontmatter(joinNote(frontmatter, versionBody), version.id, links, versionLabel(version));
 			if (await this.writeLive(path, addUpLink(withVersion, defaultLink))) written += 1;
 		}
 		return written;

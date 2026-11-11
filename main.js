@@ -13513,7 +13513,7 @@ function versionReference(entry, version) {
   }
   return versionLabel(version);
 }
-function otherVersionReferences(file, entry, excludeId) {
+function otherVersionReferences(entry, excludeId) {
   return entry.versions.filter((v) => v.id !== excludeId).sort((a, b) => a.id === entry.defaultId ? -1 : b.id === entry.defaultId ? 1 : versionNumber(a.id) - versionNumber(b.id)).map((v) => versionReference(entry, v));
 }
 function addUpLink(content, link) {
@@ -13591,6 +13591,19 @@ function sanitizeFrontmatter(content) {
     out.push(line);
   }
   return out.join("\n") + body;
+}
+function managedRegionText(content) {
+  const prior = splitNote(content);
+  const region = findManagedRegion(prior.body);
+  const raw = region ? prior.body.slice(region.start, region.end) : prior.body.trim();
+  return normalizeManagedMarkerSpacing(ensureManagedRegion(raw));
+}
+function outsideBody(content) {
+  const prior = splitNote(content);
+  const region = findManagedRegion(prior.body);
+  if (!region)
+    return "";
+  return `${prior.body.slice(0, region.start)}${prior.body.slice(region.end)}`;
 }
 function ensureManagedRegion(content) {
   const prior = splitNote(content);
@@ -13747,7 +13760,7 @@ var VersionStore = class {
     this.save();
     if (options.activeVersionId) {
       const live = await this.app.vault.read(file);
-      const links = otherVersionReferences(file, entry, version.id);
+      const links = otherVersionReferences(entry, version.id);
       await this.writeLive(file.path, addVersionFrontmatter(live, version.id, links, versionLabel(version)));
     }
     return entry;
@@ -13882,16 +13895,25 @@ var VersionStore = class {
     return Object.values(this.load().notes).filter((entry) => wanted.has((0, import_obsidian3.normalizePath)(entry.path)));
   }
   async apply(file, entry) {
+    var _a2, _b2, _c;
     const defaultVersion = entry.versions.find((v) => v.id === entry.defaultId);
     if (!defaultVersion)
       return 0;
-    const selected = entry.versions.filter((v) => v.selected);
-    const otherLinks = otherVersionReferences(file, entry, defaultVersion.id);
+    const current = await this.app.vault.read(file);
+    const currentPrior = splitNote(current);
+    const outside = outsideBody(current);
+    const frontmatter = (_c = (_b2 = currentPrior.frontmatter) != null ? _b2 : splitNote((_a2 = await this.versionText(entry, defaultVersion.id)) != null ? _a2 : "").frontmatter) != null ? _c : "";
     const defaultText = await this.versionText(entry, defaultVersion.id);
     if (!defaultText)
       return 0;
-    const defaultBody = normalizeManagedMarkerSpacing(setFrontmatterList(ensureManagedRegion(sanitizeFrontmatter(defaultText)), "other-versions", otherLinks));
-    let written = await this.writeLive(file.path, defaultBody) ? 1 : 0;
+    const otherLinks = otherVersionReferences(entry, defaultVersion.id);
+    let written = 0;
+    const changeDefault = () => {
+      const body = normalizeManagedMarkerSpacing(`${outside}${managedRegionText(defaultText)}`);
+      return setFrontmatterList(joinNote(frontmatter, body), "other-versions", otherLinks);
+    };
+    if (await this.writeLive(file.path, changeDefault()))
+      written += 1;
     const defaultLink = versionLink(entry, defaultVersion);
     for (const version of entry.versions) {
       const path2 = versionNotePath(entry, version);
@@ -13902,8 +13924,10 @@ var VersionStore = class {
       const text = await this.versionText(entry, version.id);
       if (!text)
         continue;
-      const links = otherVersionReferences(file, entry, version.id);
-      const withVersion = addVersionFrontmatter(text, version.id, links, versionLabel(version));
+      const links = otherVersionReferences(entry, version.id);
+      const region = managedRegionText(text);
+      const versionBody = normalizeManagedMarkerSpacing(region);
+      const withVersion = addVersionFrontmatter(joinNote(frontmatter, versionBody), version.id, links, versionLabel(version));
       if (await this.writeLive(path2, addUpLink(withVersion, defaultLink)))
         written += 1;
     }
