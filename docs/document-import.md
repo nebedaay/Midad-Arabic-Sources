@@ -40,7 +40,7 @@ All running-text source bodies go through one content postprocessor before rende
 - **Migrate imported sources to the current naming scheme** — one-off; moves works that predate the repository-qualifier convention to the current folder and file names.
 - **Check imported sources** — find works whose notes or cached model are missing and offer to restore them.
 - **Check for source updates** — ask each repository whether a text changed upstream (also on the **Check repositories every … days** cadence, default 7).
-- **Archive this source…** — write `.midad-arabic-sources/source-archives/<collection>/<id>.zip` with the work's model and rendered notes, remove the live notes, and keep its annotations and a restorable manifest entry. Turn **Archive rendered notes** off in General settings to store only the model and re-render on restore.
+- **Archive this source…** — write `.midad-arabic-sources/source-archives/<collection>/<id>.zip` with the work's model and rendered notes, remove the live notes, and keep its annotations and a restorable manifest entry. See [Versions, removal, and cleanup](./versions.md#removing-a-source) for removal and re-download behaviour. Turn **Archive rendered notes** off in General settings to store only the model and re-render on restore.
 - **Annotate the selected text**, **Edit annotation**, **Delete annotation**, **Resize annotation to selection**, **Re-anchor orphaned annotation…**, **Open Midad sidebar**, and **Copy source with annotations** — the annotation commands. See [Annotations](#annotations).
 
 ## Re-rendering and your edits

@@ -29,11 +29,11 @@ See [Transcription](./transcription.md) and [Translation](./translation.md).
 - **Escape literal brackets in transcriptions and translations** — apply the shared bracket pass alone, without re-running every other formatting step; useful for a large batch.
 - **Add managed region tags to this note** — wrap the note body in `mas-managed` markers if it lacks a region.
 - **Add managed region tags to all Midad-managed notes** — apply that boundary to every managed content note that lacks it, with backups and a confirmation.
-- **Manage versions of this note…** — save, overwrite, select, archive, delete, and choose a default version. Version 0 is virtual for installed/model-backed sources: it re-renders the source and stores no snapshot. User versions are stored in per-work archives; selected non-default versions are rendered as `.VersionN.md` notes.
+- **Manage versions of this note…** — save, overwrite, select, archive, delete, and choose a default version. Version 0 is virtual for installed/model-backed sources: it re-renders the source and stores no snapshot. User versions are stored in per-work archives; selected non-default versions are rendered as `.VersionN.md` notes. See [Versions, removal, and cleanup](./versions.md).
 - **Cache managed-region hashes for all managed notes** — seed missing baseline hashes used to detect edits against Version 0.
-- **Consolidate archived corrections into saved versions…** — convert legacy `.corrections.json` sidecars into saved versions and retire them with backups.
-- **Unadopt this note…** — remove Midad identity, managed tags, saved versions, and adopted-note registration while keeping the note content.
-- **Clean up orphaned Midad data…** — prune hash and adopted-registry records whose notes no longer exist.
+- **Consolidate archived corrections into saved versions…** — convert legacy `.corrections.json` sidecars into saved versions and retire them with backups. See [Versions, removal, and cleanup](./versions.md#corrections).
+- **Unadopt this note (remove Midad identity and managed tags)…** — remove Midad identity, managed tags, saved versions, and adopted-note registration while keeping the note content. See [Versions, removal, and cleanup](./versions.md#unadopt-and-cleanup).
+- **Clean up orphaned Midad data…** — prune hash and adopted-registry records whose notes no longer exist. See [Versions, removal, and cleanup](./versions.md#unadopt-and-cleanup).
 - **Update Markdown formatting in this note** — apply the safe Markdown-update layer to an already-rendered note: escape literal brackets, normalize block spacing, and detect/link unmarked Qur’ān quotes without rerunning raw-source page numbering or OCR conversion.
 - **Put selected text in a poetry callout** — format the selection as Arabic-poetry callouts: blank-line-separated verse groups become nested hemistich items, single short lines become direct items, and lines over 80 characters stay as ordinary paragraphs.
 - **Commit edits to archived transcription/translation** — save the current note’s page bodies beside its archive, so a later re-render from that archive keeps your corrections (poetry, page numbers, and body text).
@@ -59,6 +59,8 @@ See [Document import](./document-import.md) and [Templates](./templates.md).
 - **Check imported sources** — find works whose notes or cached model are missing.
 - **Check for source updates** — ask each repository whether a text changed upstream.
 - **Archive this source…** — zip the work's model and rendered notes, remove the live notes, and keep its annotations.
+- **Stop source import or render** — cancel the running source operation.
+- **Check imported source note sizes** — report generated notes that exceed the large-note warning threshold.
 - **Re-download source/model…** and **Delete cached model only…** — available from an installed source’s context menu in Manage text sources.
 - Removing a source preserves notes with user-written text by default; the removal dialog offers a full-deletion alternative.
 

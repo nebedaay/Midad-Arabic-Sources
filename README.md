@@ -31,6 +31,7 @@ The full guides are in [`docs/`](./docs/); this README is a summary. Every page 
 - [Transcription](./docs/transcription.md) — the Gemini OCR pipeline, post-processing, status, and reprocessing.
 - [Translation](./docs/translation.md) — translating a finished transcription.
 - [Document import](./docs/document-import.md) — collections, the Manage text sources dialogue, naming, and updates.
+- [Versions, removal, and cleanup](./docs/versions.md) — Version 0, saved versions, re-rendering, removal, model deletion, corrections, Unadopt, and orphan cleanup.
 - [Templates](./docs/templates.md) — the ETA templates and the render-model variable reference.
 - [Zotero](./docs/zotero.md) — Local / Web / CSL-JSON export, update-in-place, and auto-sync.
 - [Midad Arabic Transliteration Zotero plugin](./docs/midad-arabic-transliteration.md) — the optional Zotero 7 companion (downloaded and installed separately from the Obsidian plugin) that romanizes an item's Arabic fields using Midad’s local transliteration server.

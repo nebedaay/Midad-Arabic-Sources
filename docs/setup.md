@@ -129,7 +129,7 @@ The plugin keeps its cache and bookkeeping in `.midad-arabic-sources/` at the va
 | `source-catalog.json` | The cached catalogue of available works (7-day TTL). |
 | `source-stats.json` | Measured sizes and the per-template render watermarks. |
 | `template-history.json` | The content-hash timeline that decides whether a template change affects notes. |
-| `note-hashes.json` | Managed-region baseline hashes and saved-version hashes. |
+| `note-hashes.json` | Managed-region baseline hashes and saved-version hashes. See [Versions, removal, and cleanup](./versions.md). |
 | `version-archives/<work>-<hash>.zip` | Per-work saved-version metadata and snapshot notes. |
 | `archive/` | Archived transcription batches. |
 | `jobs/` | The persisted state of running pipeline jobs. |
