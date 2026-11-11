@@ -21887,9 +21887,13 @@ var AnnotationService = class {
     await this.refreshViews();
   }
   async cleanupMissingAdopted() {
+    var _a2, _b2;
     let removed = 0;
+    const summary = this.annotationSummary();
     for (const entry of this.adoption.all()) {
       if (this.app.vault.getAbstractFileByPath((0, import_obsidian18.normalizePath)(entry.path)))
+        continue;
+      if (((_b2 = (_a2 = summary[entry.workKey]) == null ? void 0 : _a2.count) != null ? _b2 : 0) > 0)
         continue;
       if (await this.adoption.remove(entry.path))
         removed += 1;
@@ -27119,9 +27123,6 @@ ${lines.join("\n")}`;
   async cleanupOrphanedData() {
     var _a2, _b2;
     const keep = new Set(this.app.vault.getMarkdownFiles().map((file) => (0, import_obsidian20.normalizePath)(file.path)));
-    const store = new VersionStore(this.app, this.vaultPath());
-    for (const entry of await store.allEntries())
-      keep.add((0, import_obsidian20.normalizePath)(entry.path));
     const hashes = this.hashStore().pruneMissing(keep);
     const adopted = (_b2 = await ((_a2 = this.annotations) == null ? void 0 : _a2.cleanupMissingAdopted())) != null ? _b2 : 0;
     new import_obsidian20.Notice(`Cleaned up ${hashes} orphaned hash record(s) and ${adopted} adopted-note record(s).`);

@@ -5454,8 +5454,6 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 	/** Prune hidden hash/adoption records for notes that no longer exist. */
 	async cleanupOrphanedData(): Promise<void> {
 		const keep = new Set(this.app.vault.getMarkdownFiles().map((file) => normalizePath(file.path)));
-		const store = new VersionStore(this.app, this.vaultPath());
-		for (const entry of await store.allEntries()) keep.add(normalizePath(entry.path));
 		const hashes = this.hashStore().pruneMissing(keep);
 		const adopted = await this.annotations?.cleanupMissingAdopted() ?? 0;
 		new Notice(`Cleaned up ${hashes} orphaned hash record(s) and ${adopted} adopted-note record(s).`);
