@@ -14188,8 +14188,15 @@ var _ManageVersionsModal = class extends import_obsidian3.Modal {
     }
   }
   hasChanges() {
-    var _a2;
-    return !((_a2 = this.entry) == null ? void 0 : _a2.versions.length) || !this.matchesSaved;
+    var _a2, _b2;
+    if (((_a2 = this.entry) == null ? void 0 : _a2.virtualOriginal) && this.entry.defaultId === "v0") {
+      if (this.originalMatches === true)
+        return false;
+      if (this.originalMatches === false)
+        return true;
+      return this.entry.versions.length ? !this.matchesSaved : true;
+    }
+    return !((_b2 = this.entry) == null ? void 0 : _b2.versions.length) || !this.matchesSaved;
   }
   hasUnsavedChanges() {
     var _a2, _b2;

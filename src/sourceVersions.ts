@@ -741,6 +741,11 @@ export class ManageVersionsModal extends Modal {
 	}
 
 	private hasChanges(): boolean {
+		if (this.entry?.virtualOriginal && this.entry.defaultId === "v0") {
+			if (this.originalMatches === true) return false;
+			if (this.originalMatches === false) return true;
+			return this.entry.versions.length ? !this.matchesSaved : true;
+		}
 		return !this.entry?.versions.length || !this.matchesSaved;
 	}
 
