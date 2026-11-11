@@ -5300,10 +5300,35 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			}
 		}
 
+		const canonicalPath = file.path.replace(/\.Version\d+\.md$/i, ".md");
+		const changed = await this.findChangedSourceNotes([canonicalPath]);
+		let saveOriginalAsVersion = false;
+		if (changed.length) {
+			const choice = await new Promise<"cancel" | "skip" | "save" | "overwrite" | "original">((resolve) => {
+				new SourceChangeReviewModal(this.app, changed.map((entry) => entry.path), resolve).open();
+			});
+			if (choice === "cancel" || choice === "skip") return;
+			const store = new VersionStore(this.app, this.vaultPath());
+			for (const entry of changed) {
+				const existing = await store.entryFor(entry.file);
+				await store.saveVersion(entry.file, false, undefined, {
+					startAt: existing ? undefined : 1,
+					virtualOriginal: !existing,
+					makeDefault: choice === "original",
+				});
+			}
+			saveOriginalAsVersion = choice === "original";
+		}
 		for (const entry of chosen) {
 			await this.runWithProgress(`Re-rendering @${info.citekey}`, ["reprocess", "--zip", entry.zip.path]);
 		}
-		const canonicalPath = file.path.replace(/\.Version\d+\.md$/i, ".md");
+		if (saveOriginalAsVersion) {
+			const store = new VersionStore(this.app, this.vaultPath());
+			for (const entry of changed) {
+				const note = this.app.vault.getAbstractFileByPath(normalizePath(entry.path));
+				if (note instanceof TFile) await store.saveVersion(note, false, undefined, { makeDefault: false, label: "Original source (saved)" });
+			}
+		}
 		await this.applySavedVersions([canonicalPath]);
 		await this.updateNoteBaselines([canonicalPath]);
 		new Notice(`Re-rendered ${chosen.length} archived batch(es) for @${info.citekey}.`);
