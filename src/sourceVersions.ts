@@ -570,6 +570,28 @@ export class VersionStore {
 		return !saved || managedHash(live) !== managedHash(saved);
 	}
 
+	/** Recreate a missing canonical note from the best saved version snapshot. */
+	async restoreRemovedEntry(entry: NoteVersionEntry): Promise<boolean> {
+		if (this.app.vault.getAbstractFileByPath(normalizePath(entry.path))) return false;
+		const version = entry.versions.find((v) => v.id === entry.defaultId)
+			?? entry.versions.find((v) => v.selected)
+			?? entry.versions[0];
+		if (!version) return false;
+		const text = await this.versionText(entry, version.id);
+		if (!text) return false;
+		const clean = stripVersionProperties(text);
+		const path = normalizePath(entry.path);
+		const folder = path.slice(0, path.lastIndexOf("/"));
+		if (folder) await ensureFolder(this.app, folder);
+		const file = await this.app.vault.create(path, clean);
+		if (entry.defaultId !== version.id) {
+			entry.defaultId = version.id;
+			this.save();
+		}
+		await this.apply(file, entry);
+		return true;
+	}
+
 	async syncVersionName(file: TFile): Promise<boolean> {
 		const text = await this.app.vault.read(file);
 		const versionMatch = /^midad-version:[ \t]*["']?([^"'\n]+)["']?[ \t]*$/m.exec(text);

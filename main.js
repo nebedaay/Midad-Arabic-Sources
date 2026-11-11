@@ -14197,6 +14197,29 @@ var VersionStore = class {
     const saved = await this.versionText(entry, id);
     return !saved || managedHash(live) !== managedHash(saved);
   }
+  async restoreRemovedEntry(entry) {
+    var _a2, _b2;
+    if (this.app.vault.getAbstractFileByPath((0, import_obsidian4.normalizePath)(entry.path)))
+      return false;
+    const version = (_b2 = (_a2 = entry.versions.find((v) => v.id === entry.defaultId)) != null ? _a2 : entry.versions.find((v) => v.selected)) != null ? _b2 : entry.versions[0];
+    if (!version)
+      return false;
+    const text = await this.versionText(entry, version.id);
+    if (!text)
+      return false;
+    const clean3 = stripVersionProperties(text);
+    const path2 = (0, import_obsidian4.normalizePath)(entry.path);
+    const folder = path2.slice(0, path2.lastIndexOf("/"));
+    if (folder)
+      await ensureFolder(this.app, folder);
+    const file = await this.app.vault.create(path2, clean3);
+    if (entry.defaultId !== version.id) {
+      entry.defaultId = version.id;
+      this.save();
+    }
+    await this.apply(file, entry);
+    return true;
+  }
   async syncVersionName(file) {
     const text = await this.app.vault.read(file);
     const versionMatch = /^midad-version:[ \t]*["']?([^"'\n]+)["']?[ \t]*$/m.exec(text);
@@ -22855,6 +22878,19 @@ var MidadArabicSourcesPlugin = class extends import_obsidian20.Plugin {
       }
     });
     this.addCommand({
+      id: "restore-removed-versions",
+      name: "Restore saved versions from removed sources\u2026",
+      callback: async () => {
+        const store = new VersionStore(this.app, this.vaultPath());
+        const entries = (await store.allEntries()).filter((entry) => entry.versions.length > 0 && !this.app.vault.getAbstractFileByPath((0, import_obsidian20.normalizePath)(entry.path)));
+        if (!entries.length) {
+          new import_obsidian20.Notice("No saved versions from removed notes were found.");
+          return;
+        }
+        new RemovedVersionsModal(this.app, store, entries).open();
+      }
+    });
+    this.addCommand({
       id: "add-managed-tags-this-note",
       name: "Add managed region tags to this note",
       callback: async () => {
@@ -24798,6 +24834,18 @@ var MidadArabicSourcesPlugin = class extends import_obsidian20.Plugin {
       }
     }
     return [...paths].sort();
+  }
+  async deleteSourceModel(work) {
+    const modelPath = `${this.vaultPath()}/.midad-arabic-sources/source-models/${work.collection}/${work.id}.json`;
+    try {
+      if (fs4.existsSync(modelPath))
+        fs4.unlinkSync(modelPath);
+      new import_obsidian20.Notice(`Deleted the cached model for \u201C${work.title || work.dir}\u201D. Use Re-download source/model to fetch it again.`);
+      return true;
+    } catch (error) {
+      new import_obsidian20.Notice(`Could not delete the model: ${error instanceof Error ? error.message : error}`);
+      return false;
+    }
   }
   async deleteRenderedNotes(work, model) {
     var _a2;
@@ -29947,6 +29995,35 @@ var TurathUrlModal = class extends import_obsidian20.Modal {
     this.contentEl.empty();
   }
 };
+var RemovedVersionsModal = class extends import_obsidian20.Modal {
+  constructor(app, store, entries) {
+    super(app);
+    this.store = store;
+    this.entries = entries;
+  }
+  onOpen() {
+    this.titleEl.setText("Restore removed versions");
+    const { contentEl } = this;
+    contentEl.createEl("p", { text: "These notes are gone, but their saved version snapshots still exist. Restoring recreates the default note and its selected versions." });
+    const list = contentEl.createEl("ul");
+    for (const entry of this.entries) {
+      const row = list.createEl("li");
+      row.createEl("strong", { text: entry.title || entry.path });
+      row.createEl("div", { cls: "mas-manage__mut", text: entry.path });
+      row.createEl("div", { cls: "mas-manage__mut", text: `${entry.versions.length} saved version(s)` });
+      const button = row.createEl("button", { text: "Restore" });
+      button.onclick = async () => {
+        button.disabled = true;
+        const ok = await this.store.restoreRemovedEntry(entry);
+        new import_obsidian20.Notice(ok ? `Restored \u201C${entry.title || entry.path}\u201D.` : "Could not restore that note.");
+        this.close();
+      };
+    }
+  }
+  onClose() {
+    this.contentEl.empty();
+  }
+};
 var SourceRemovalModal = class extends import_obsidian20.Modal {
   constructor(app, works, resolve) {
     super(app);
@@ -29958,24 +30035,30 @@ var SourceRemovalModal = class extends import_obsidian20.Modal {
     this.titleEl.setText("Remove sources");
     const { contentEl } = this;
     contentEl.createEl("p", {
-      text: "Generated notes will be removed, along with the cached model. Notes containing your own text outside a managed region will be kept, with only the generated region removed."
+      text: "Generated notes and the cached model will be removed. Notes containing your own text outside a managed region can be kept, with only the generated region removed."
     });
     const list = contentEl.createEl("ul");
     for (const work of this.works)
       list.createEl("li", { text: work.title || work.dir });
     const buttons = contentEl.createDiv({ cls: "modal-button-container" });
     buttons.createEl("button", { text: "Cancel" }).onclick = () => this.close();
-    const remove = buttons.createEl("button", { text: "Remove sources", cls: "mod-warning" });
-    remove.onclick = () => {
+    const keep = buttons.createEl("button", { text: "Remove, keep my notes" });
+    keep.onclick = () => {
       this.chosen = true;
-      this.resolve(true);
+      this.resolve("keep");
+      this.close();
+    };
+    const all = buttons.createEl("button", { text: "Remove everything", cls: "mod-warning" });
+    all.onclick = () => {
+      this.chosen = true;
+      this.resolve("delete");
       this.close();
     };
   }
   onClose() {
     this.contentEl.empty();
     if (!this.chosen)
-      this.resolve(false);
+      this.resolve("cancel");
   }
 };
 var SourceChangeReviewModal = class extends import_obsidian20.Modal {
@@ -30241,6 +30324,19 @@ var ManageSourcesModal = class extends import_obsidian20.Modal {
             }).open();
           }));
         }
+        if (isInstalledNow && !isArchivedNow) {
+          menu.addItem((item) => item.setTitle("Delete cached model only\u2026").setIcon("trash-2").onClick(() => {
+            new ConfirmModal(this.app, {
+              title: "Delete cached model",
+              message: `Delete only the cached model for \u201C${w.title || w.dir}\u201D? Rendered notes and saved versions stay. You can re-download the model later.`,
+              confirmText: "Delete model",
+              onConfirm: async () => {
+                await this.plugin.deleteSourceModel(w);
+                void this.plugin.openManageSources(true);
+              }
+            }).open();
+          }));
+        }
         if (isArchivedNow) {
           menu.addItem((item) => item.setTitle("Restore from archive").setIcon("archive-restore").onClick(() => {
             this.close();
@@ -30447,12 +30543,14 @@ var ManageSourcesModal = class extends import_obsidian20.Modal {
         new import_obsidian20.Notice("Nothing to change.");
         return;
       }
+      let removalMode = "keep";
       if (toRemove.length) {
-        const confirmed = await new Promise((resolve) => {
+        const choice = await new Promise((resolve) => {
           new SourceRemovalModal(this.app, toRemove, resolve).open();
         });
-        if (!confirmed)
+        if (choice === "cancel")
           return;
+        removalMode = choice;
       }
       this.close();
       const progress = new import_obsidian20.Notice(`Applying\u2026 (${toInstall.length} to install, ${toRestore.length} to restore, ${toRemove.length} to remove)`, 0);
@@ -30464,7 +30562,7 @@ var ManageSourcesModal = class extends import_obsidian20.Modal {
           const nth = `${++n}/${toRemove.length}`;
           progress.setMessage(`Removing ${nth}: ${name}\u2026`);
           try {
-            await this.plugin.removeSource(w, (done, total) => progress.setMessage(`Removing ${nth}: ${name} \u2014 ${done}/${total} files\u2026`));
+            await this.plugin.removeSource(w, (done, total) => progress.setMessage(`Removing ${nth}: ${name} \u2014 ${done}/${total} files\u2026`), { keepUserContent: removalMode === "keep" });
             if (deleteAnnotationsOnRemove.checked && this.plugin.annotations) {
               await this.plugin.annotations.trashAnnotationsForWork(w.key);
             }

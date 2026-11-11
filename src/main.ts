@@ -835,6 +835,18 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			callback: async () => { await this.cacheAllNoteBaselines(); },
 		});
 		this.addCommand({
+			id: "restore-removed-versions",
+			name: "Restore saved versions from removed sources…",
+			callback: async () => {
+				const store = new VersionStore(this.app, this.vaultPath());
+				const entries = (await store.allEntries()).filter((entry) =>
+					entry.versions.length > 0 && !this.app.vault.getAbstractFileByPath(normalizePath(entry.path))
+				);
+				if (!entries.length) { new Notice("No saved versions from removed notes were found."); return; }
+				new RemovedVersionsModal(this.app, store, entries).open();
+			},
+		});
+		this.addCommand({
 			id: "add-managed-tags-this-note",
 			name: "Add managed region tags to this note",
 			callback: async () => { await this.addManagedTagsToNote(this.app.workspace.getActiveFile()); },
@@ -2975,6 +2987,19 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			}
 		}
 		return [...paths].sort();
+	}
+
+	/** Delete only the cached model; notes and saved versions remain. */
+	async deleteSourceModel(work: JsonObject): Promise<boolean> {
+		const modelPath = `${this.vaultPath()}/.midad-arabic-sources/source-models/${work.collection}/${work.id}.json`;
+		try {
+			if (fs.existsSync(modelPath)) fs.unlinkSync(modelPath);
+			new Notice(`Deleted the cached model for “${work.title || work.dir}”. Use Re-download source/model to fetch it again.`);
+			return true;
+		} catch (error) {
+			new Notice(`Could not delete the model: ${error instanceof Error ? error.message : error}`);
+			return false;
+		}
 	}
 
 	/** Remove a work's rendered notes, returning any per-file errors. */
@@ -8876,12 +8901,45 @@ class TurathUrlModal extends Modal {
 	}
 }
 
+class RemovedVersionsModal extends Modal {
+	private readonly store: VersionStore;
+	private readonly entries: NoteVersionEntry[];
+
+	constructor(app: App, store: VersionStore, entries: NoteVersionEntry[]) {
+		super(app);
+		this.store = store;
+		this.entries = entries;
+	}
+
+	onOpen(): void {
+		this.titleEl.setText("Restore removed versions");
+		const { contentEl } = this;
+		contentEl.createEl("p", { text: "These notes are gone, but their saved version snapshots still exist. Restoring recreates the default note and its selected versions." });
+		const list = contentEl.createEl("ul");
+		for (const entry of this.entries) {
+			const row = list.createEl("li");
+			row.createEl("strong", { text: entry.title || entry.path });
+			row.createEl("div", { cls: "mas-manage__mut", text: entry.path });
+			row.createEl("div", { cls: "mas-manage__mut", text: `${entry.versions.length} saved version(s)` });
+			const button = row.createEl("button", { text: "Restore" });
+			button.onclick = async () => {
+				button.disabled = true;
+				const ok = await this.store.restoreRemovedEntry(entry);
+				new Notice(ok ? `Restored “${entry.title || entry.path}”.` : "Could not restore that note.");
+				this.close();
+			};
+		}
+	}
+
+	onClose(): void { this.contentEl.empty(); }
+}
+
 class SourceRemovalModal extends Modal {
 	private readonly works: SourceWork[];
-	private readonly resolve: (confirmed: boolean) => void;
+	private readonly resolve: (choice: "keep" | "delete" | "cancel") => void;
 	private chosen = false;
 
-	constructor(app: App, works: SourceWork[], resolve: (confirmed: boolean) => void) {
+	constructor(app: App, works: SourceWork[], resolve: (choice: "keep" | "delete" | "cancel") => void) {
 		super(app);
 		this.works = works;
 		this.resolve = resolve;
@@ -8891,19 +8949,21 @@ class SourceRemovalModal extends Modal {
 		this.titleEl.setText("Remove sources");
 		const { contentEl } = this;
 		contentEl.createEl("p", {
-			text: "Generated notes will be removed, along with the cached model. Notes containing your own text outside a managed region will be kept, with only the generated region removed.",
+			text: "Generated notes and the cached model will be removed. Notes containing your own text outside a managed region can be kept, with only the generated region removed.",
 		});
 		const list = contentEl.createEl("ul");
 		for (const work of this.works) list.createEl("li", { text: work.title || work.dir });
 		const buttons = contentEl.createDiv({ cls: "modal-button-container" });
 		buttons.createEl("button", { text: "Cancel" }).onclick = () => this.close();
-		const remove = buttons.createEl("button", { text: "Remove sources", cls: "mod-warning" });
-		remove.onclick = () => { this.chosen = true; this.resolve(true); this.close(); };
+		const keep = buttons.createEl("button", { text: "Remove, keep my notes" });
+		keep.onclick = () => { this.chosen = true; this.resolve("keep"); this.close(); };
+		const all = buttons.createEl("button", { text: "Remove everything", cls: "mod-warning" });
+		all.onclick = () => { this.chosen = true; this.resolve("delete"); this.close(); };
 	}
 
 	onClose(): void {
 		this.contentEl.empty();
-		if (!this.chosen) this.resolve(false);
+		if (!this.chosen) this.resolve("cancel");
 	}
 }
 
@@ -9191,6 +9251,22 @@ class ManageSourcesModal extends Modal {
 							}).open();
 						}));
 				}
+				if (isInstalledNow && !isArchivedNow) {
+					menu.addItem((item) => item
+						.setTitle("Delete cached model only…")
+						.setIcon("trash-2")
+						.onClick(() => {
+							new ConfirmModal(this.app, {
+								title: "Delete cached model",
+								message: `Delete only the cached model for “${w.title || w.dir}”? Rendered notes and saved versions stay. You can re-download the model later.`,
+								confirmText: "Delete model",
+								onConfirm: async () => {
+									await this.plugin.deleteSourceModel(w);
+									void this.plugin.openManageSources(true);
+								},
+							}).open();
+						}));
+				}
 				if (isArchivedNow) {
 					menu.addItem((item) => item
 						.setTitle("Restore from archive")
@@ -9401,11 +9477,13 @@ class ManageSourcesModal extends Modal {
 				new Notice("Nothing to change.");
 				return;
 			}
+			let removalMode: "keep" | "delete" = "keep";
 			if (toRemove.length) {
-				const confirmed = await new Promise<boolean>((resolve) => {
+				const choice = await new Promise<"keep" | "delete" | "cancel">((resolve) => {
 					new SourceRemovalModal(this.app, toRemove, resolve).open();
 				});
-				if (!confirmed) return;
+				if (choice === "cancel") return;
+				removalMode = choice;
 			}
 			this.close();
 			const progress = new Notice(
@@ -9421,7 +9499,8 @@ class ManageSourcesModal extends Modal {
 					progress.setMessage(`Removing ${nth}: ${name}…`);
 					try {
 						await this.plugin.removeSource(w, (done, total) =>
-							progress.setMessage(`Removing ${nth}: ${name} — ${done}/${total} files…`)
+							progress.setMessage(`Removing ${nth}: ${name} — ${done}/${total} files…`),
+							{ keepUserContent: removalMode === "keep" }
 						);
 						if (deleteAnnotationsOnRemove.checked && this.plugin.annotations) {
 							await this.plugin.annotations.trashAnnotationsForWork(w.key);
