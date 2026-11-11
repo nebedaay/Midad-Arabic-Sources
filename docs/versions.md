@@ -93,7 +93,7 @@ On startup, or with **Consolidate archived corrections into saved versions…**,
 - Saved versions and hash records.
 - Adopted-note registration.
 
-The note itself and its content remain.
+The note itself and its content remain. See [Managed regions, identity, and adoption](./managed-regions.md#unadopting) for the region and identity model.
 
 **Clean up orphaned Midad data…** prunes:
 

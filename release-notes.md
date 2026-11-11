@@ -1,17 +1,18 @@
-# 0.2.1
+# 0.2.2
 
-Documentation release for the source/version lifecycle.
+Documentation release for managed regions and cross-source identity.
 
 ### New guide
 
-- Added **Versions, removal, and cleanup** (`docs/versions.md`), covering Version 0, saved versions, per-work archives, hash baselines, re-rendering, source removal, model-only deletion, re-download, correction consolidation, Unadopt, and orphan cleanup.
+- Added **Managed regions, identity, and adoption** (`docs/managed-regions.md`), covering:
+  - the `mas-managed` marker boundary and spacing;
+  - adding managed tags to one note or all managed notes;
+  - `midad-id` and retired identity properties;
+  - adoption and Unadopt;
+  - preservation during re-render and source removal;
+  - identity cleanup and hash pruning.
 
-### Command reference
+### Links
 
-- Added the missing **Stop source import or render** and **Check imported source note sizes** commands.
-- Documented version caching, correction consolidation, Unadopt, and cleanup commands.
-- Linked the new guide from the README, Commands, Document import, Setup, and Transcription guides.
-
-### Documentation links
-
-- Version management is now discoverable from the places where users encounter it instead of being scattered across four guides.
+- Linked the guide from the README, Commands, Document import, Templates, and Versions guides.
+- The command reference now covers every registered command, including **Stop source import or render** and **Check imported source note sizes**.

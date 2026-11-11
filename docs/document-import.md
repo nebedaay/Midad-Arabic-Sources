@@ -45,7 +45,7 @@ All running-text source bodies go through one content postprocessor before rende
 
 ## Re-rendering and your edits
 
-Regenerating a note never overwrites your work. Generated content lives inside a managed region (`<span class="mas-managed">…</span>`), and only template-declared frontmatter properties are reconciled. Everything else — including a `related:` property you edited — is preserved. See [Templates](./templates.md) for how the merge strategies work.
+Regenerating a note never overwrites your work. Generated content lives inside a managed region (`<span class="mas-managed">…</span>`), and only template-declared frontmatter properties are reconciled. See [Managed regions, identity, and adoption](./managed-regions.md). Everything else — including a `related:` property you edited — is preserved. See [Templates](./templates.md) for how the merge strategies work.
 
 A re-render also removes generated note files that the current model no longer lists — renamed chapters, a reorganised dictionary, or old letter/fasl names — while leaving hand-written notes in the work folder alone. Archive removes the live notes after saving them in its source archive. Remove deletes generated-only notes and cached models; notes containing user-written text outside the managed region are kept by default, with only the generated region removed. Choose **Remove everything** to delete those too. For the canonical Qur'ān, removal also covers the sūra notes outside the work folder.
 

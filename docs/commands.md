@@ -27,7 +27,7 @@ See [Transcription](./transcription.md) and [Translation](./translation.md).
 - **Post-process this transcription/translation** — run the current local post-processing scripts over the open note, without an archive or Gemini. Also rebuilds the native YAML, volume parent, and literature-note list.
 - **Post-process all transcriptions and translations** — run that same post-processor over every recognised note, with a confirmation and per-note backup.
 - **Escape literal brackets in transcriptions and translations** — apply the shared bracket pass alone, without re-running every other formatting step; useful for a large batch.
-- **Add managed region tags to this note** — wrap the note body in `mas-managed` markers if it lacks a region.
+- **Add managed region tags to this note** — wrap the note body in `mas-managed` markers if it lacks a region. See [Managed regions, identity, and adoption](./managed-regions.md).
 - **Add managed region tags to all Midad-managed notes** — apply that boundary to every managed content note that lacks it, with backups and a confirmation.
 - **Manage versions of this note…** — save, overwrite, select, archive, delete, and choose a default version. Version 0 is virtual for installed/model-backed sources: it re-renders the source and stores no snapshot. User versions are stored in per-work archives; selected non-default versions are rendered as `.VersionN.md` notes. See [Versions, removal, and cleanup](./versions.md).
 - **Cache managed-region hashes for all managed notes** — seed missing baseline hashes used to detect edits against Version 0.

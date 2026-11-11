@@ -266,7 +266,7 @@ Per-property merge strategies: `replace` (default — the template wins), `appen
 
 ## Auto-update when a template changes
 
-The plugin keeps a template-hash timeline in `.midad-arabic-sources/template-history.json`. Each note records when it was rendered (`updated:`), so the plugin can tell which notes predate the current template.
+Managed regions, adoption, and identity are covered in [Managed regions, identity, and adoption](./managed-regions.md). The plugin keeps a template-hash timeline in `.midad-arabic-sources/template-history.json`. Each note records when it was rendered (`updated:`), so the plugin can tell which notes predate the current template.
 
 When you edit a template, the plugin offers to re-render the affected notes (the setting **“Update notes when templates change”** controls *Ask* / *Always* / *Never*). You can always re-render manually with **“Re-render imported sources”**.
 
