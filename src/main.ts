@@ -2797,12 +2797,30 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		}
 	}
 
+	/** Content outside a managed region, or the whole body when untagged. */
+	private noteOutsideManaged(text: string): string {
+		const prior = splitNote(text);
+		const region = findManagedRegion(prior.body);
+		return region
+			? `${prior.body.slice(0, region.start)}${prior.body.slice(region.end)}`.trim()
+			: prior.body.trim();
+	}
+
+	/** Keep user text while dropping the generated managed region. */
+	private stripManagedRegion(text: string): string {
+		const prior = splitNote(text);
+		const region = findManagedRegion(prior.body);
+		if (!region) return text;
+		const outside = `${prior.body.slice(0, region.start)}${prior.body.slice(region.end)}`;
+		return joinNote(prior.frontmatter ?? "", outside);
+	}
+
 	/**
 	 * Delete a work's notes, its cached model, and its manifest entry.
 	 * `onProgress(done, total)` reports per-file progress so a slow removal is
 	 * not silent.
 	 */
-	async removeSource(work: JsonObject, onProgress?: (done: number, total: number) => void): Promise<boolean> {
+	async removeSource(work: JsonObject, onProgress?: (done: number, total: number) => void, options: { keepUserContent?: boolean } = {}): Promise<boolean> {
 		const outRoot = this.installedSourcesRoot();
 		const dir = work.dir as string;
 		const adapter = this.app.vault.adapter;
@@ -2852,22 +2870,33 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			}
 			const total = files.size;
 			let done = 0;
+			const preserved: string[] = [];
 			onProgress?.(0, total);
 
 			for (const f of files) {
 				try {
+					if (options.keepUserContent !== false && f.toLowerCase().endsWith(".md")) {
+						const text = await adapter.read(f);
+						if (this.noteOutsideManaged(text)) {
+							await adapter.write(f, this.stripManagedRegion(text));
+							preserved.push(f);
+							onProgress?.(++done, total);
+							continue;
+						}
+					}
 					await adapter.remove(f);
 				} catch (e) {
 					problems.push(`${f}: ${e instanceof Error ? e.message : e}`);
 				}
 				onProgress?.(++done, total);
 			}
-			// Clear any now-empty folders left behind.
-			if (await adapter.exists(folderPath)) {
+			// Clear empty folders, but leave a folder that still holds user content.
+			if (!preserved.some((path) => path === folderPath || path.startsWith(`${folderPath}/`)) && await adapter.exists(folderPath)) {
 				try {
 					await adapter.rmdir(folderPath, true);
 				} catch { /* already gone */ }
 			}
+			if (preserved.length) new Notice(`Kept ${preserved.length} note${preserved.length === 1 ? "" : "s"} containing user-written content.`);
 
 			// Fully removed: drop it from the manifest (which is the status list).
 			// On a problem the entry stays, still flagged "deleting", so the next
@@ -8847,6 +8876,37 @@ class TurathUrlModal extends Modal {
 	}
 }
 
+class SourceRemovalModal extends Modal {
+	private readonly works: SourceWork[];
+	private readonly resolve: (confirmed: boolean) => void;
+	private chosen = false;
+
+	constructor(app: App, works: SourceWork[], resolve: (confirmed: boolean) => void) {
+		super(app);
+		this.works = works;
+		this.resolve = resolve;
+	}
+
+	onOpen(): void {
+		this.titleEl.setText("Remove sources");
+		const { contentEl } = this;
+		contentEl.createEl("p", {
+			text: "Generated notes will be removed, along with the cached model. Notes containing your own text outside a managed region will be kept, with only the generated region removed.",
+		});
+		const list = contentEl.createEl("ul");
+		for (const work of this.works) list.createEl("li", { text: work.title || work.dir });
+		const buttons = contentEl.createDiv({ cls: "modal-button-container" });
+		buttons.createEl("button", { text: "Cancel" }).onclick = () => this.close();
+		const remove = buttons.createEl("button", { text: "Remove sources", cls: "mod-warning" });
+		remove.onclick = () => { this.chosen = true; this.resolve(true); this.close(); };
+	}
+
+	onClose(): void {
+		this.contentEl.empty();
+		if (!this.chosen) this.resolve(false);
+	}
+}
+
 class SourceChangeReviewModal extends Modal {
 	private readonly paths: string[];
 	private readonly resolve: (choice: "cancel" | "skip" | "save" | "overwrite" | "original") => void;
@@ -9114,6 +9174,23 @@ class ManageSourcesModal extends Modal {
 							}).open();
 						}));
 				}
+				if (isInstalledNow && !isArchivedNow) {
+					menu.addItem((item) => item
+						.setTitle("Re-download source/model…")
+						.setIcon("download")
+						.onClick(() => {
+							new ConfirmModal(this.app, {
+								title: "Re-download source",
+								message: `Download the model and notes for “${w.title || w.dir}” again? Existing user-written content will be preserved.`,
+								confirmText: "Re-download",
+								onConfirm: async () => {
+									this.close();
+									await this.plugin.importSources([w.key], true);
+									void this.plugin.openManageSources(true);
+								},
+							}).open();
+						}));
+				}
 				if (isArchivedNow) {
 					menu.addItem((item) => item
 						.setTitle("Restore from archive")
@@ -9323,6 +9400,12 @@ class ManageSourcesModal extends Modal {
 			if (!toInstall.length && !toRestore.length && !toRemove.length) {
 				new Notice("Nothing to change.");
 				return;
+			}
+			if (toRemove.length) {
+				const confirmed = await new Promise<boolean>((resolve) => {
+					new SourceRemovalModal(this.app, toRemove, resolve).open();
+				});
+				if (!confirmed) return;
 			}
 			this.close();
 			const progress = new Notice(

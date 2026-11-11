@@ -24656,7 +24656,21 @@ var MidadArabicSourcesPlugin = class extends import_obsidian20.Plugin {
       loading.hide();
     }
   }
-  async removeSource(work, onProgress) {
+  noteOutsideManaged(text) {
+    const prior = splitNote(text);
+    const region = findManagedRegion(prior.body);
+    return region ? `${prior.body.slice(0, region.start)}${prior.body.slice(region.end)}`.trim() : prior.body.trim();
+  }
+  stripManagedRegion(text) {
+    var _a2;
+    const prior = splitNote(text);
+    const region = findManagedRegion(prior.body);
+    if (!region)
+      return text;
+    const outside = `${prior.body.slice(0, region.start)}${prior.body.slice(region.end)}`;
+    return joinNote((_a2 = prior.frontmatter) != null ? _a2 : "", outside);
+  }
+  async removeSource(work, onProgress, options = {}) {
     var _a2;
     const outRoot = this.installedSourcesRoot();
     const dir = work.dir;
@@ -24696,21 +24710,33 @@ var MidadArabicSourcesPlugin = class extends import_obsidian20.Plugin {
       }
       const total = files.size;
       let done = 0;
+      const preserved = [];
       onProgress == null ? void 0 : onProgress(0, total);
       for (const f of files) {
         try {
+          if (options.keepUserContent !== false && f.toLowerCase().endsWith(".md")) {
+            const text = await adapter.read(f);
+            if (this.noteOutsideManaged(text)) {
+              await adapter.write(f, this.stripManagedRegion(text));
+              preserved.push(f);
+              onProgress == null ? void 0 : onProgress(++done, total);
+              continue;
+            }
+          }
           await adapter.remove(f);
         } catch (e) {
           problems.push(`${f}: ${e instanceof Error ? e.message : e}`);
         }
         onProgress == null ? void 0 : onProgress(++done, total);
       }
-      if (await adapter.exists(folderPath)) {
+      if (!preserved.some((path2) => path2 === folderPath || path2.startsWith(`${folderPath}/`)) && await adapter.exists(folderPath)) {
         try {
           await adapter.rmdir(folderPath, true);
         } catch (e) {
         }
       }
+      if (preserved.length)
+        new import_obsidian20.Notice(`Kept ${preserved.length} note${preserved.length === 1 ? "" : "s"} containing user-written content.`);
       if (!problems.length) {
         const manifest = await this.loadSourceManifest();
         await this.saveSourceManifest(manifest.filter((w) => !(w.collection === work.collection && w.id === work.id) && w.dir !== dir));
@@ -29921,6 +29947,37 @@ var TurathUrlModal = class extends import_obsidian20.Modal {
     this.contentEl.empty();
   }
 };
+var SourceRemovalModal = class extends import_obsidian20.Modal {
+  constructor(app, works, resolve) {
+    super(app);
+    this.chosen = false;
+    this.works = works;
+    this.resolve = resolve;
+  }
+  onOpen() {
+    this.titleEl.setText("Remove sources");
+    const { contentEl } = this;
+    contentEl.createEl("p", {
+      text: "Generated notes will be removed, along with the cached model. Notes containing your own text outside a managed region will be kept, with only the generated region removed."
+    });
+    const list = contentEl.createEl("ul");
+    for (const work of this.works)
+      list.createEl("li", { text: work.title || work.dir });
+    const buttons = contentEl.createDiv({ cls: "modal-button-container" });
+    buttons.createEl("button", { text: "Cancel" }).onclick = () => this.close();
+    const remove = buttons.createEl("button", { text: "Remove sources", cls: "mod-warning" });
+    remove.onclick = () => {
+      this.chosen = true;
+      this.resolve(true);
+      this.close();
+    };
+  }
+  onClose() {
+    this.contentEl.empty();
+    if (!this.chosen)
+      this.resolve(false);
+  }
+};
 var SourceChangeReviewModal = class extends import_obsidian20.Modal {
   constructor(app, paths, resolve) {
     super(app);
@@ -30170,6 +30227,20 @@ var ManageSourcesModal = class extends import_obsidian20.Modal {
             }).open();
           }));
         }
+        if (isInstalledNow && !isArchivedNow) {
+          menu.addItem((item) => item.setTitle("Re-download source/model\u2026").setIcon("download").onClick(() => {
+            new ConfirmModal(this.app, {
+              title: "Re-download source",
+              message: `Download the model and notes for \u201C${w.title || w.dir}\u201D again? Existing user-written content will be preserved.`,
+              confirmText: "Re-download",
+              onConfirm: async () => {
+                this.close();
+                await this.plugin.importSources([w.key], true);
+                void this.plugin.openManageSources(true);
+              }
+            }).open();
+          }));
+        }
         if (isArchivedNow) {
           menu.addItem((item) => item.setTitle("Restore from archive").setIcon("archive-restore").onClick(() => {
             this.close();
@@ -30375,6 +30446,13 @@ var ManageSourcesModal = class extends import_obsidian20.Modal {
       if (!toInstall.length && !toRestore.length && !toRemove.length) {
         new import_obsidian20.Notice("Nothing to change.");
         return;
+      }
+      if (toRemove.length) {
+        const confirmed = await new Promise((resolve) => {
+          new SourceRemovalModal(this.app, toRemove, resolve).open();
+        });
+        if (!confirmed)
+          return;
       }
       this.close();
       const progress = new import_obsidian20.Notice(`Applying\u2026 (${toInstall.length} to install, ${toRestore.length} to restore, ${toRemove.length} to remove)`, 0);
