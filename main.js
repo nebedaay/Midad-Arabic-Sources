@@ -22667,6 +22667,13 @@ var MidadArabicSourcesPlugin = class extends import_obsidian19.Plugin {
       }
     });
     this.addCommand({
+      id: "cache-managed-baselines",
+      name: "Cache managed-region hashes for all managed notes",
+      callback: async () => {
+        await this.cacheAllNoteBaselines();
+      }
+    });
+    this.addCommand({
       id: "add-managed-tags-this-note",
       name: "Add managed region tags to this note",
       callback: async () => {
@@ -25663,6 +25670,24 @@ var MidadArabicSourcesPlugin = class extends import_obsidian19.Plugin {
     if (!previous)
       return null;
     return this.noteContentHash(await this.app.vault.read(file)) === previous;
+  }
+  async cacheAllNoteBaselines() {
+    const notes = await this.loadNoteBaselines();
+    let added = 0;
+    for (const file of this.app.vault.getMarkdownFiles()) {
+      if (/\.Version\d+\.md$/i.test(file.path))
+        continue;
+      const key = (0, import_obsidian19.normalizePath)(file.path);
+      if (notes[key])
+        continue;
+      const text = await this.app.vault.read(file);
+      if (!findManagedRegion(splitNote(text).body))
+        continue;
+      notes[key] = this.noteContentHash(text);
+      added += 1;
+    }
+    await this.saveNoteBaselines(notes);
+    new import_obsidian19.Notice(added ? `Cached ${added} managed-region baseline(s).` : "All managed notes already have baselines.");
   }
   async updateNoteBaselines(paths) {
     const notes = await this.loadNoteBaselines();

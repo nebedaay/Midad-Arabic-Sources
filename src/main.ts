@@ -829,6 +829,11 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			callback: () => { this.openVersionManager(); },
 		});
 		this.addCommand({
+			id: "cache-managed-baselines",
+			name: "Cache managed-region hashes for all managed notes",
+			callback: async () => { await this.cacheAllNoteBaselines(); },
+		});
+		this.addCommand({
 			id: "add-managed-tags-this-note",
 			name: "Add managed region tags to this note",
 			callback: async () => { await this.addManagedTagsToNote(this.app.workspace.getActiveFile()); },
@@ -4112,6 +4117,23 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		const previous = baselines[normalizePath(file.path)];
 		if (!previous) return null;
 		return this.noteContentHash(await this.app.vault.read(file)) === previous;
+	}
+
+	/** Seed missing baselines from the current managed content. */
+	async cacheAllNoteBaselines(): Promise<void> {
+		const notes = await this.loadNoteBaselines();
+		let added = 0;
+		for (const file of this.app.vault.getMarkdownFiles()) {
+			if (/\.Version\d+\.md$/i.test(file.path)) continue;
+			const key = normalizePath(file.path);
+			if (notes[key]) continue;
+			const text = await this.app.vault.read(file);
+			if (!findManagedRegion(splitNote(text).body)) continue;
+			notes[key] = this.noteContentHash(text);
+			added += 1;
+		}
+		await this.saveNoteBaselines(notes);
+		new Notice(added ? `Cached ${added} managed-region baseline(s).` : "All managed notes already have baselines.");
 	}
 
 	private async updateNoteBaselines(paths: string[]): Promise<void> {
