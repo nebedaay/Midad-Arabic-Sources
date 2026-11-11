@@ -841,7 +841,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		});
 		this.addCommand({
 			id: "unadopt-note",
-			name: "Unadopt this note (remove Midad identity and generated content)…",
+			name: "Unadopt this note (remove Midad identity and managed tags)…",
 			callback: async () => { await this.unadoptActiveNote(); },
 		});
 		this.addCommand({
@@ -2814,6 +2814,13 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		return region
 			? `${prior.body.slice(0, region.start)}${prior.body.slice(region.end)}`.trim()
 			: prior.body.trim();
+	}
+
+	/** Remove only the managed-region marker lines, keeping their content. */
+	private removeManagedMarkers(text: string): string {
+		return text.split("\n").filter((line) =>
+			!/^\s*(?:<span class="mas-managed">\/?mas-managed<\/span>|%%\/?mas-managed%%)\s*$/.test(line)
+		).join("\n");
 	}
 
 	/** Keep user text while dropping the generated managed region. */
@@ -5469,7 +5476,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		}
 		new ConfirmModal(this.app, {
 			title: "Unadopt note",
-			message: "Remove this note’s Midad identity, generated managed content, and saved versions? Text outside the managed region is kept.",
+			message: "Remove this note’s Midad identity, managed tags, and saved versions? The content inside the tags is kept.",
 			confirmText: "Unadopt",
 			onConfirm: async () => {
 				const store = new VersionStore(this.app, this.vaultPath());
@@ -5483,8 +5490,8 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 					}
 				});
 				const current = await this.app.vault.read(file);
-				await this.app.vault.modify(file, this.stripManagedRegion(current));
-				new Notice("Note unadopted. Its user-written content was kept.");
+				await this.app.vault.modify(file, this.removeManagedMarkers(current));
+				new Notice("Note unadopted. Its content was kept; only the managed tags and Midad identity were removed.");
 			},
 		}).open();
 	}

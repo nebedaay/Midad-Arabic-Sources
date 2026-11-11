@@ -23003,7 +23003,7 @@ var MidadArabicSourcesPlugin = class extends import_obsidian20.Plugin {
     });
     this.addCommand({
       id: "unadopt-note",
-      name: "Unadopt this note (remove Midad identity and generated content)\u2026",
+      name: "Unadopt this note (remove Midad identity and managed tags)\u2026",
       callback: async () => {
         await this.unadoptActiveNote();
       }
@@ -24814,6 +24814,9 @@ var MidadArabicSourcesPlugin = class extends import_obsidian20.Plugin {
     const prior = splitNote(text);
     const region = findManagedRegion(prior.body);
     return region ? `${prior.body.slice(0, region.start)}${prior.body.slice(region.end)}`.trim() : prior.body.trim();
+  }
+  removeManagedMarkers(text) {
+    return text.split("\n").filter((line) => !/^\s*(?:<span class="mas-managed">\/?mas-managed<\/span>|%%\/?mas-managed%%)\s*$/.test(line)).join("\n");
   }
   stripManagedRegion(text) {
     var _a2;
@@ -27138,7 +27141,7 @@ ${lines.join("\n")}`;
     }
     new ConfirmModal(this.app, {
       title: "Unadopt note",
-      message: "Remove this note\u2019s Midad identity, generated managed content, and saved versions? Text outside the managed region is kept.",
+      message: "Remove this note\u2019s Midad identity, managed tags, and saved versions? The content inside the tags is kept.",
       confirmText: "Unadopt",
       onConfirm: async () => {
         var _a3;
@@ -27154,8 +27157,8 @@ ${lines.join("\n")}`;
           }
         });
         const current = await this.app.vault.read(file);
-        await this.app.vault.modify(file, this.stripManagedRegion(current));
-        new import_obsidian20.Notice("Note unadopted. Its user-written content was kept.");
+        await this.app.vault.modify(file, this.removeManagedMarkers(current));
+        new import_obsidian20.Notice("Note unadopted. Its content was kept; only the managed tags and Midad identity were removed.");
       }
     }).open();
   }
