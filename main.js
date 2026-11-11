@@ -13645,6 +13645,14 @@ var _NoteHashStore = class {
     record.versions[id] = hash;
     this.save();
   }
+  deleteNote(path2) {
+    const index = this.load();
+    const key = (0, import_obsidian3.normalizePath)(path2);
+    if (!(key in index.notes))
+      return;
+    delete index.notes[key];
+    this.save();
+  }
   deleteVersionHash(path2, id) {
     const index = this.load();
     const key = (0, import_obsidian3.normalizePath)(path2);
@@ -13664,6 +13672,19 @@ var _NoteHashStore = class {
     index.notes[newKey] = { ...(_a2 = index.notes[newKey]) != null ? _a2 : {}, ...index.notes[oldKey] };
     delete index.notes[oldKey];
     this.save();
+  }
+  pruneMissing(keep) {
+    const index = this.load();
+    let removed = 0;
+    for (const path2 of Object.keys(index.notes)) {
+      if (keep.has((0, import_obsidian3.normalizePath)(path2)))
+        continue;
+      delete index.notes[path2];
+      removed += 1;
+    }
+    if (removed)
+      this.save();
+    return removed;
   }
   allBaselines() {
     const out = {};
@@ -14287,6 +14308,16 @@ var VersionStore = class {
       return managedHash(live) !== recorded;
     const saved = await this.versionText(entry, id);
     return !saved || managedHash(live) !== managedHash(saved);
+  }
+  async deleteEntry(entry) {
+    for (const version of entry.versions) {
+      delete this.files[version.file];
+      this.hashes.deleteVersionHash(entry.path, version.id);
+      await this.deleteVersionNote(versionNotePath(entry, version), version.id);
+    }
+    this.hashes.deleteNote(entry.path);
+    delete this.load().notes[entry.key];
+    this.save();
   }
   async syncVersionName(file) {
     const text = await this.app.vault.read(file);
@@ -21855,6 +21886,24 @@ var AnnotationService = class {
     await this.refreshParent();
     await this.refreshViews();
   }
+  async cleanupMissingAdopted() {
+    let removed = 0;
+    for (const entry of this.adoption.all()) {
+      if (this.app.vault.getAbstractFileByPath((0, import_obsidian18.normalizePath)(entry.path)))
+        continue;
+      if (await this.adoption.remove(entry.path))
+        removed += 1;
+    }
+    if (removed)
+      await this.refreshViews();
+    return removed;
+  }
+  async unadoptNote(file) {
+    const changed = await this.adoption.remove(file.path);
+    if (changed)
+      await this.refreshViews();
+    return changed;
+  }
   async onSourceRemoved(workKey2) {
     await this.setSourceStatus(workKey2, "removed");
   }
@@ -22950,6 +22999,20 @@ var MidadArabicSourcesPlugin = class extends import_obsidian20.Plugin {
       name: "Add managed region tags to this note",
       callback: async () => {
         await this.addManagedTagsToNote(this.app.workspace.getActiveFile());
+      }
+    });
+    this.addCommand({
+      id: "unadopt-note",
+      name: "Unadopt this note (remove Midad identity and generated content)\u2026",
+      callback: async () => {
+        await this.unadoptActiveNote();
+      }
+    });
+    this.addCommand({
+      id: "cleanup-orphaned-midad-data",
+      name: "Clean up orphaned Midad data\u2026",
+      callback: async () => {
+        await this.cleanupOrphanedData();
       }
     });
     this.addCommand({
@@ -27049,6 +27112,52 @@ ${lines.join("\n")}`;
   managedTaggedBody(text) {
     const next = ensureManagedRegion(text);
     return next === text ? null : next;
+  }
+  async cleanupOrphanedData() {
+    var _a2, _b2;
+    const keep = new Set(this.app.vault.getMarkdownFiles().map((file) => (0, import_obsidian20.normalizePath)(file.path)));
+    const store = new VersionStore(this.app, this.vaultPath());
+    for (const entry of await store.allEntries())
+      keep.add((0, import_obsidian20.normalizePath)(entry.path));
+    const hashes = this.hashStore().pruneMissing(keep);
+    const adopted = (_b2 = await ((_a2 = this.annotations) == null ? void 0 : _a2.cleanupMissingAdopted())) != null ? _b2 : 0;
+    new import_obsidian20.Notice(`Cleaned up ${hashes} orphaned hash record(s) and ${adopted} adopted-note record(s).`);
+  }
+  async unadoptActiveNote() {
+    var _a2;
+    const file = this.app.workspace.getActiveFile();
+    if (!(file instanceof import_obsidian20.TFile) || file.extension !== "md") {
+      new import_obsidian20.Notice("Open a Markdown note first.");
+      return;
+    }
+    const text = await this.app.vault.read(file);
+    const frontmatter = (_a2 = this.app.metadataCache.getFileCache(file)) == null ? void 0 : _a2.frontmatter;
+    if (!(frontmatter == null ? void 0 : frontmatter["midad-id"]) && !findManagedRegion(splitNote(text).body)) {
+      new import_obsidian20.Notice("This note is not Midad-managed.");
+      return;
+    }
+    new ConfirmModal(this.app, {
+      title: "Unadopt note",
+      message: "Remove this note\u2019s Midad identity, generated managed content, and saved versions? Text outside the managed region is kept.",
+      confirmText: "Unadopt",
+      onConfirm: async () => {
+        var _a3;
+        const store = new VersionStore(this.app, this.vaultPath());
+        const entry = await store.entryFor(file);
+        if (entry)
+          await store.deleteEntry(entry);
+        this.hashStore().deleteNote(file.path);
+        await ((_a3 = this.annotations) == null ? void 0 : _a3.unadoptNote(file));
+        await this.app.fileManager.processFrontMatter(file, (fm) => {
+          for (const key of ["midad-id", "midad-kind", "midad-work", "midad-unit", "midad-source", "midad-version", "midad-version-name", "midad-up", "other-versions"]) {
+            delete fm[key];
+          }
+        });
+        const current = await this.app.vault.read(file);
+        await this.app.vault.modify(file, this.stripManagedRegion(current));
+        new import_obsidian20.Notice("Note unadopted. Its user-written content was kept.");
+      }
+    }).open();
   }
   async addManagedTagsToNote(file) {
     if (!(file instanceof import_obsidian20.TFile) || file.extension !== "md") {

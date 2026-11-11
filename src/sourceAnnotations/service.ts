@@ -1928,6 +1928,24 @@ export class AnnotationService {
 		await this.refreshViews();
 	}
 
+	/** Drop adopted-registry entries whose files no longer exist. */
+	async cleanupMissingAdopted(): Promise<number> {
+		let removed = 0;
+		for (const entry of this.adoption.all()) {
+			if (this.app.vault.getAbstractFileByPath(normalizePath(entry.path))) continue;
+			if (await this.adoption.remove(entry.path)) removed += 1;
+		}
+		if (removed) await this.refreshViews();
+		return removed;
+	}
+
+	/** Remove a note from the adopted-note registry when it is detached from Midad. */
+	async unadoptNote(file: TFile): Promise<boolean> {
+		const changed = await this.adoption.remove(file.path);
+		if (changed) await this.refreshViews();
+		return changed;
+	}
+
 	async onSourceRemoved(workKey: string): Promise<void> {
 		await this.setSourceStatus(workKey, "removed");
 	}

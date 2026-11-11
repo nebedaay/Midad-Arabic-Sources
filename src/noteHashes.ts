@@ -157,6 +157,14 @@ export class NoteHashStore {
 		this.save();
 	}
 
+	deleteNote(path: string): void {
+		const index = this.load();
+		const key = normalizePath(path);
+		if (!(key in index.notes)) return;
+		delete index.notes[key];
+		this.save();
+	}
+
 	deleteVersionHash(path: string, id: string): void {
 		const index = this.load();
 		const key = normalizePath(path);
@@ -174,6 +182,19 @@ export class NoteHashStore {
 		index.notes[newKey] = { ...(index.notes[newKey] ?? {}), ...index.notes[oldKey] };
 		delete index.notes[oldKey];
 		this.save();
+	}
+
+	/** Drop records whose notes no longer exist and have no saved versions. */
+	pruneMissing(keep: Set<string>): number {
+		const index = this.load();
+		let removed = 0;
+		for (const path of Object.keys(index.notes)) {
+			if (keep.has(normalizePath(path))) continue;
+			delete index.notes[path];
+			removed += 1;
+		}
+		if (removed) this.save();
+		return removed;
 	}
 
 	allBaselines(): Record<string, string> {

@@ -651,6 +651,18 @@ export class VersionStore {
 		return !saved || managedHash(live) !== managedHash(saved);
 	}
 
+	/** Remove a note's version entries, snapshots, and version notes. */
+	async deleteEntry(entry: NoteVersionEntry): Promise<void> {
+		for (const version of entry.versions) {
+			delete this.files[version.file];
+			this.hashes.deleteVersionHash(entry.path, version.id);
+			await this.deleteVersionNote(versionNotePath(entry, version), version.id);
+		}
+		this.hashes.deleteNote(entry.path);
+		delete this.load().notes[entry.key];
+		this.save();
+	}
+
 	async syncVersionName(file: TFile): Promise<boolean> {
 		const text = await this.app.vault.read(file);
 		const versionMatch = /^midad-version:[ \t]*["']?([^"'\n]+)["']?[ \t]*$/m.exec(text);

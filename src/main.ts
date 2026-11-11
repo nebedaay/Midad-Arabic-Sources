@@ -839,6 +839,16 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			name: "Add managed region tags to this note",
 			callback: async () => { await this.addManagedTagsToNote(this.app.workspace.getActiveFile()); },
 		});
+		this.addCommand({
+			id: "unadopt-note",
+			name: "Unadopt this note (remove Midad identity and generated content)…",
+			callback: async () => { await this.unadoptActiveNote(); },
+		});
+		this.addCommand({
+			id: "cleanup-orphaned-midad-data",
+			name: "Clean up orphaned Midad data…",
+			callback: async () => { await this.cleanupOrphanedData(); },
+		});
 
 		this.addCommand({
 			id: "add-managed-tags-all-notes",
@@ -5432,6 +5442,51 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 	private managedTaggedBody(text: string): string | null {
 		const next = ensureManagedRegion(text);
 		return next === text ? null : next;
+	}
+
+	/** Prune hidden hash/adoption records for notes that no longer exist. */
+	async cleanupOrphanedData(): Promise<void> {
+		const keep = new Set(this.app.vault.getMarkdownFiles().map((file) => normalizePath(file.path)));
+		const store = new VersionStore(this.app, this.vaultPath());
+		for (const entry of await store.allEntries()) keep.add(normalizePath(entry.path));
+		const hashes = this.hashStore().pruneMissing(keep);
+		const adopted = await this.annotations?.cleanupMissingAdopted() ?? 0;
+		new Notice(`Cleaned up ${hashes} orphaned hash record(s) and ${adopted} adopted-note record(s).`);
+	}
+
+	/** Detach the active note from Midad, keeping its user-written text. */
+	async unadoptActiveNote(): Promise<void> {
+		const file = this.app.workspace.getActiveFile();
+		if (!(file instanceof TFile) || file.extension !== "md") {
+			new Notice("Open a Markdown note first.");
+			return;
+		}
+		const text = await this.app.vault.read(file);
+		const frontmatter = this.app.metadataCache.getFileCache(file)?.frontmatter as Record<string, unknown> | undefined;
+		if (!frontmatter?.["midad-id"] && !findManagedRegion(splitNote(text).body)) {
+			new Notice("This note is not Midad-managed.");
+			return;
+		}
+		new ConfirmModal(this.app, {
+			title: "Unadopt note",
+			message: "Remove this note’s Midad identity, generated managed content, and saved versions? Text outside the managed region is kept.",
+			confirmText: "Unadopt",
+			onConfirm: async () => {
+				const store = new VersionStore(this.app, this.vaultPath());
+				const entry = await store.entryFor(file);
+				if (entry) await store.deleteEntry(entry);
+				this.hashStore().deleteNote(file.path);
+				await this.annotations?.unadoptNote(file);
+				await this.app.fileManager.processFrontMatter(file, (fm: Record<string, unknown>) => {
+					for (const key of ["midad-id", "midad-kind", "midad-work", "midad-unit", "midad-source", "midad-version", "midad-version-name", "midad-up", "other-versions"]) {
+						delete fm[key];
+					}
+				});
+				const current = await this.app.vault.read(file);
+				await this.app.vault.modify(file, this.stripManagedRegion(current));
+				new Notice("Note unadopted. Its user-written content was kept.");
+			},
+		}).open();
 	}
 
 	private async addManagedTagsToNote(file: TAbstractFile | null): Promise<void> {
