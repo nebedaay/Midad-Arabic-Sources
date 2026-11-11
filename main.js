@@ -26298,7 +26298,7 @@ ${MANAGED_CLOSE}
           const isMidad = !!(fm == null ? void 0 : fm["midad-id"]) || type.includes("text-source") || file.path.startsWith(`${this.transcriptionsFolder()}/`) || file.path.startsWith(`${this.translationsFolder()}/`);
           if (!isMidad)
             continue;
-          const text = await this.app.vault.read(file);
+          const text = await this.app.vault.cachedRead(file);
           const next = this.managedTaggedBody(text);
           if (!next)
             continue;

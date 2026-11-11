@@ -5278,7 +5278,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 					const type = typeof fm?.["document-type"] === "string" ? String(fm["document-type"]) : "";
 					const isMidad = !!fm?.["midad-id"] || type.includes("text-source") || file.path.startsWith(`${this.transcriptionsFolder()}/`) || file.path.startsWith(`${this.translationsFolder()}/`);
 					if (!isMidad) continue;
-					const text = await this.app.vault.read(file);
+					const text = await this.app.vault.cachedRead(file);
 					const next = this.managedTaggedBody(text);
 					if (!next) continue;
 					try {
