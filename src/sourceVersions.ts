@@ -351,6 +351,11 @@ export class VersionStore {
 		}
 		this.files[version.file] = strToU8(cleanText);
 		this.save();
+		if (!options.activeVersionId && entry.defaultId === version.id) {
+			await this.app.fileManager.processFrontMatter(file, (fm: Record<string, unknown>) => {
+				fm["midad-version-name"] = version.label;
+			});
+		}
 		if (options.activeVersionId) {
 			const live = await this.app.vault.read(file);
 			const links = otherVersionReferences(entry, version.id);
@@ -496,7 +501,9 @@ export class VersionStore {
 		let written = 0;
 		const changeDefault = () => {
 			const body = normalizeManagedMarkerSpacing(`${outside}${managedRegionText(defaultText)}`);
-			return setFrontmatterList(stripVersionProperties(joinNote(frontmatter, body)), "other-versions", otherLinks);
+			const clean = stripVersionProperties(joinNote(frontmatter, body));
+			const withName = setFrontmatterProperty(clean, "midad-version-name", `"${versionLabel(defaultVersion).replace(/"/g, '\\"')}"`);
+			return setFrontmatterList(withName, "other-versions", otherLinks);
 		};
 		if (await this.writeLive(file.path, changeDefault())) written += 1;
 		const defaultLink = versionLink(entry, defaultVersion);

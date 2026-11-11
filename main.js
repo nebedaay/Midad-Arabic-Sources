@@ -13562,6 +13562,21 @@ function removeFrontmatterProperty(content, key) {
 function stripVersionProperties(content) {
   return removeFrontmatterProperty(removeFrontmatterProperty(content, "midad-version"), "midad-version-name");
 }
+function setFrontmatterProperty(content, key, value) {
+  const clean3 = removeFrontmatterProperty(content, key);
+  const line = `${key}: ${value}`;
+  if (clean3.startsWith("---")) {
+    const end = clean3.indexOf("\n---", 3);
+    if (end >= 0)
+      return `${clean3.slice(0, end + 1)}${line}
+${clean3.slice(end + 1)}`;
+  }
+  return `---
+${line}
+---
+
+${clean3}`;
+}
 function setFrontmatterList(content, key, values) {
   var _a2;
   const prior = splitNote(content);
@@ -13778,6 +13793,11 @@ var VersionStore = class {
     }
     this.files[version.file] = strToU8(cleanText);
     this.save();
+    if (!options.activeVersionId && entry.defaultId === version.id) {
+      await this.app.fileManager.processFrontMatter(file, (fm) => {
+        fm["midad-version-name"] = version.label;
+      });
+    }
     if (options.activeVersionId) {
       const live = await this.app.vault.read(file);
       const links = otherVersionReferences(entry, version.id);
@@ -13930,7 +13950,9 @@ var VersionStore = class {
     let written = 0;
     const changeDefault = () => {
       const body = normalizeManagedMarkerSpacing(`${outside}${managedRegionText(defaultText)}`);
-      return setFrontmatterList(stripVersionProperties(joinNote(frontmatter, body)), "other-versions", otherLinks);
+      const clean3 = stripVersionProperties(joinNote(frontmatter, body));
+      const withName = setFrontmatterProperty(clean3, "midad-version-name", `"${versionLabel(defaultVersion).replace(/"/g, '\\"')}"`);
+      return setFrontmatterList(withName, "other-versions", otherLinks);
     };
     if (await this.writeLive(file.path, changeDefault()))
       written += 1;

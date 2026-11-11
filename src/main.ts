@@ -5364,7 +5364,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			return;
 		}
 		const frontmatter = this.app.metadataCache.getFileCache(file)?.frontmatter as Record<string, unknown> | undefined;
-		const activeVersionId = typeof frontmatter?.["midad-version"] === "string"
+		const activeVersionId = /\.Version\d+\.md$/i.test(file.path) && typeof frontmatter?.["midad-version"] === "string"
 			? frontmatter["midad-version"].trim()
 			: undefined;
 		const store = new VersionStore(this.app, this.vaultPath());
