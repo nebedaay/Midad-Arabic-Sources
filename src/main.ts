@@ -4166,7 +4166,6 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		}
 		const expected = batch.flatMap((model) => expectedNotePaths(model, outRoot, canonicalRoot, canonicalId));
 		const changed = await this.findChangedSourceNotes(expected);
-		const originalPaths = new Set<string>();
 		if (changed.length) {
 			const choice = await new Promise<"cancel" | "skip" | "save" | "overwrite" | "original">((resolve) => {
 				new SourceChangeReviewModal(this.app, changed.map((entry) => entry.path), resolve).open();
@@ -4194,7 +4193,6 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 					});
 				}
 			}
-			if (choice === "original") for (const entry of changed) originalPaths.add(normalizePath(entry.path));
 		}
 		const written: string[] = [];
 		const contentPaths: string[] = [];
@@ -4225,16 +4223,6 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 					undefined, seen, shouldCancel);
 				written.push(...w);
 				contentPaths.push(...w);
-				if (originalPaths.size) {
-					const store = new VersionStore(this.app, this.vaultPath());
-					for (const path of w) {
-						if (!originalPaths.has(normalizePath(path))) continue;
-						const file = this.app.vault.getAbstractFileByPath(normalizePath(path));
-						if (file instanceof TFile) {
-							await store.saveVersion(file, false, undefined, { makeDefault: false, label: "Original source (saved)" });
-						}
-					}
-				}
 				await this.applySavedVersions(w);
 				// A full render brings every template the work uses up to date.
 				const key = this.workKey(model.work);
@@ -5302,7 +5290,6 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 
 		const canonicalPath = file.path.replace(/\.Version\d+\.md$/i, ".md");
 		const changed = await this.findChangedSourceNotes([canonicalPath]);
-		let saveOriginalAsVersion = false;
 		if (changed.length) {
 			const choice = await new Promise<"cancel" | "skip" | "save" | "overwrite" | "original">((resolve) => {
 				new SourceChangeReviewModal(this.app, changed.map((entry) => entry.path), resolve).open();
@@ -5317,17 +5304,9 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 					makeDefault: choice === "original",
 				});
 			}
-			saveOriginalAsVersion = choice === "original";
 		}
 		for (const entry of chosen) {
 			await this.runWithProgress(`Re-rendering @${info.citekey}`, ["reprocess", "--zip", entry.zip.path]);
-		}
-		if (saveOriginalAsVersion) {
-			const store = new VersionStore(this.app, this.vaultPath());
-			for (const entry of changed) {
-				const note = this.app.vault.getAbstractFileByPath(normalizePath(entry.path));
-				if (note instanceof TFile) await store.saveVersion(note, false, undefined, { makeDefault: false, label: "Original source (saved)" });
-			}
 		}
 		await this.applySavedVersions([canonicalPath]);
 		await this.updateNoteBaselines([canonicalPath]);
@@ -8788,7 +8767,7 @@ class SourceChangeReviewModal extends Modal {
 			button.onclick = () => { this.chosen = true; this.resolve(choice); this.close(); };
 		};
 		add("Save changes as versions", "save", true);
-		add("Save original as a non-default version", "original");
+		add("Keep my changes as Version 1 (Version 0 stays the model)", "original");
 		add("Overwrite with the original", "overwrite");
 		add("Skip re-rendering", "skip");
 		add("Cancel", "cancel");

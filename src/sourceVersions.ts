@@ -98,7 +98,9 @@ function otherVersionReferences(entry: NoteVersionEntry, excludeId?: string): st
 		.filter((v) => v.id !== excludeId)
 		.sort((a, b) => a.id === entry.defaultId ? -1 : b.id === entry.defaultId ? 1 : versionNumber(a.id) - versionNumber(b.id))
 		.map((v) => versionReference(entry, v));
-	if (entry.virtualOriginal && excludeId !== "v0") refs.unshift("Original source");
+	if (entry.virtualOriginal && excludeId !== "v0" && !entry.versions.some((v) => v.id === "v0")) {
+		refs.unshift("Original source");
+	}
 	return refs;
 }
 
@@ -291,7 +293,7 @@ export class VersionStore {
 	async ensureVirtualOriginal(file: TFile, entry: NoteVersionEntry): Promise<NoteVersionEntry> {
 		if (entry.virtualOriginal) return entry;
 		entry.virtualOriginal = true;
-		const legacy = entry.versions.find((v) => v.id === "v0");
+		const legacy = entry.versions.find((v) => v.id === "v0" && v.kind === "user");
 		if (legacy) {
 			let next = 1;
 			while (entry.versions.some((v) => v.id === `v${next}`)) next++;
@@ -744,7 +746,7 @@ export class ManageVersionsModal extends Modal {
 
 		if (!this.activeVersionId) {
 			const list = contentEl.createDiv({ cls: "mas-versions-list" });
-			if (this.entry?.virtualOriginal) {
+			if (this.entry?.virtualOriginal && !this.entry.versions.some((v) => v.id === "v0")) {
 				const row = list.createDiv({ cls: "mas-versions-row" });
 				if (this.entry.defaultId === "v0") row.addClass("is-default");
 				const main = row.createDiv({ cls: "mas-versions-main" });

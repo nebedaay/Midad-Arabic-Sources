@@ -849,7 +849,8 @@ def write_note(body: str, citekey: str, doc_type: str, related: list[str] = None
                       title_ar=title_ar, authors_ar=authors_ar,
                       shorttitle_ar=shorttitle_ar, editors_ar=editors_ar,
                       unit=unit, up=_existing_list(dest, "up"), arabic=is_arabic)
-    dest.write_text(yaml + "\n" + _managed_body(dest, body) + "\n", encoding="utf-8")
+    text = normalize_managed_marker_spacing(yaml + "\n" + _managed_body(dest, body))
+    dest.write_text(text, encoding="utf-8")
     if not standalone and not unit:
         parent = dest_path(citekey, doc_type, None, standalone)
         _ensure_yaml_properties(parent, title_ar, authors_ar)

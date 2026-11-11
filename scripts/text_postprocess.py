@@ -141,6 +141,8 @@ def normalize_managed_marker_spacing(text: str) -> str:
                 i += 1
             if i < len(lines):
                 out.append("")
+            else:
+                out.extend(["", ""])
             continue
         out.append(lines[i])
         i += 1

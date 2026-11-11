@@ -42,7 +42,8 @@ export function splitNote(content: string): SplitNote {
 
 export function joinNote(frontmatter: string, body: string): string {
 	const fm = frontmatter.replace(/\r\n?/g, "\n").replace(/^\n+|\n+$/g, "");
-	return `---\n${fm}\n---\n${body}`;
+	const cleanBody = body.replace(/\r\n?/g, "\n").replace(/^\n+/, "");
+	return normalizeManagedMarkerSpacing(`---\n${fm}\n---\n\n${cleanBody}`);
 }
 
 export interface FrontmatterProperty {
@@ -195,6 +196,7 @@ export function normalizeManagedMarkerSpacing(text: string): string {
 			i += 1;
 			while (i < lines.length && lines[i].trim() === "") i += 1;
 			if (i < lines.length) out.push("");
+			else out.push("", "");
 			i -= 1;
 			continue;
 		}
