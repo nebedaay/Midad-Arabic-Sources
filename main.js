@@ -23020,6 +23020,13 @@ var MidadArabicSourcesPlugin = class extends import_obsidian20.Plugin {
       }
     });
     this.addCommand({
+      id: "consolidate-archived-corrections",
+      name: "Consolidate archived corrections into saved versions\u2026",
+      callback: async () => {
+        await this.consolidateArchivedCorrections();
+      }
+    });
+    this.addCommand({
       id: "add-managed-tags-all-notes",
       name: "Add managed region tags to all Midad-managed notes",
       callback: async () => {
@@ -27119,6 +27126,53 @@ ${lines.join("\n")}`;
   managedTaggedBody(text) {
     const next = ensureManagedRegion(text);
     return next === text ? null : next;
+  }
+  async consolidateArchivedCorrections() {
+    const archiveDir = `${this.vaultPath()}/.midad-arabic-sources/archive`;
+    const backupDir = `${this.vaultPath()}/.midad-arabic-sources/backups/corrections-consolidated`;
+    let files = [];
+    try {
+      files = fs4.readdirSync(archiveDir);
+    } catch (e) {
+    }
+    const sidecars = files.filter((name) => name.endsWith(".corrections.json"));
+    if (!sidecars.length) {
+      new import_obsidian20.Notice("No archived correction sidecars were found.");
+      return;
+    }
+    const store = new VersionStore(this.app, this.vaultPath());
+    let consolidated = 0;
+    const skipped = [];
+    fs4.mkdirSync(backupDir, { recursive: true });
+    for (const name of sidecars) {
+      const sidecar = `${archiveDir}/${name}`;
+      try {
+        const parsed = JSON.parse(fs4.readFileSync(sidecar, "utf8"));
+        const notePath = parsed.note ? (0, import_obsidian20.normalizePath)(parsed.note) : "";
+        const note = notePath ? this.app.vault.getAbstractFileByPath(notePath) : null;
+        if (!(note instanceof import_obsidian20.TFile)) {
+          skipped.push(name);
+          continue;
+        }
+        const existing = await store.entryFor(note);
+        await store.saveVersion(note, false, void 0, {
+          startAt: existing ? void 0 : 1,
+          virtualOriginal: !existing,
+          label: "Committed corrections"
+        });
+        fs4.copyFileSync(sidecar, `${backupDir}/${name}`);
+        fs4.unlinkSync(sidecar);
+        const rendered = `${sidecar.replace(/\.corrections\.json$/, ".rendered.json")}`;
+        if (fs4.existsSync(rendered)) {
+          fs4.copyFileSync(rendered, `${backupDir}/${rendered.split("/").pop()}`);
+          fs4.unlinkSync(rendered);
+        }
+        consolidated += 1;
+      } catch (error) {
+        skipped.push(`${name}: ${error instanceof Error ? error.message : error}`);
+      }
+    }
+    new import_obsidian20.Notice(skipped.length ? `Consolidated ${consolidated} correction sidecar(s); skipped ${skipped.length}.` : `Consolidated ${consolidated} correction sidecar(s) into saved versions.`);
   }
   async cleanupOrphanedData() {
     var _a2, _b2;

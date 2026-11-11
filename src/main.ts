@@ -849,6 +849,11 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			name: "Clean up orphaned Midad data…",
 			callback: async () => { await this.cleanupOrphanedData(); },
 		});
+		this.addCommand({
+			id: "consolidate-archived-corrections",
+			name: "Consolidate archived corrections into saved versions…",
+			callback: async () => { await this.consolidateArchivedCorrections(); },
+		});
 
 		this.addCommand({
 			id: "add-managed-tags-all-notes",
@@ -5449,6 +5454,48 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 	private managedTaggedBody(text: string): string | null {
 		const next = ensureManagedRegion(text);
 		return next === text ? null : next;
+	}
+
+	/** Turn legacy archive correction sidecars into saved versions, then retire them. */
+	async consolidateArchivedCorrections(): Promise<void> {
+		const archiveDir = `${this.vaultPath()}/.midad-arabic-sources/archive`;
+		const backupDir = `${this.vaultPath()}/.midad-arabic-sources/backups/corrections-consolidated`;
+		let files: string[] = [];
+		try { files = fs.readdirSync(archiveDir); } catch { /* no archive folder */ }
+		const sidecars = files.filter((name) => name.endsWith(".corrections.json"));
+		if (!sidecars.length) { new Notice("No archived correction sidecars were found."); return; }
+		const store = new VersionStore(this.app, this.vaultPath());
+		let consolidated = 0;
+		const skipped: string[] = [];
+		fs.mkdirSync(backupDir, { recursive: true });
+		for (const name of sidecars) {
+			const sidecar = `${archiveDir}/${name}`;
+			try {
+				const parsed = JSON.parse(fs.readFileSync(sidecar, "utf8")) as { note?: string };
+				const notePath = parsed.note ? normalizePath(parsed.note) : "";
+				const note = notePath ? this.app.vault.getAbstractFileByPath(notePath) : null;
+				if (!(note instanceof TFile)) { skipped.push(name); continue; }
+				const existing = await store.entryFor(note);
+				await store.saveVersion(note, false, undefined, {
+					startAt: existing ? undefined : 1,
+					virtualOriginal: !existing,
+					label: "Committed corrections",
+				});
+				fs.copyFileSync(sidecar, `${backupDir}/${name}`);
+				fs.unlinkSync(sidecar);
+				const rendered = `${sidecar.replace(/\.corrections\.json$/, ".rendered.json")}`;
+				if (fs.existsSync(rendered)) {
+					fs.copyFileSync(rendered, `${backupDir}/${rendered.split("/").pop()}`);
+					fs.unlinkSync(rendered);
+				}
+				consolidated += 1;
+			} catch (error) {
+				skipped.push(`${name}: ${error instanceof Error ? error.message : error}`);
+			}
+		}
+		new Notice(skipped.length
+			? `Consolidated ${consolidated} correction sidecar(s); skipped ${skipped.length}.`
+			: `Consolidated ${consolidated} correction sidecar(s) into saved versions.`);
 	}
 
 	/** Prune hidden hash/adoption records for notes that no longer exist. */
