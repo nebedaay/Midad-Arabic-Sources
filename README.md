@@ -9,8 +9,9 @@ Some of its many features:
 - **translates** those transcriptions into English
 - **transliterates** Arabic passages for integration into English writing
 - **provides an annotation interface** similar to Zotero’s PDF annotation features, preserving your annotations even if the source document is updated or removed from Obsidian
-- **auto-updates and re-renders** generated source notes when templates and upstream sources change
-- **manages saved versions** per note, with virtual Version 0 for the installed model, per-work version archives, and safe restoration after a source is removed
+- **archives sources as ZIP files** so you can “shelf” sources you’re not actively using, keeping your annotations handy and your Obsidian vault lean.
+- **auto-updates and re-renders** generated source notes when templates and upstream sources change, without overwriting any corrections you may have made.
+- **manages saved versions** per note when you correct OCR errors, with virtual Version 0 for the installed model, per-work version archives, and safe restoration after you remove or archive a source
 - **preserves user-written content** when sources are removed, while allowing explicit full deletion or model-only cleanup
 - **exports sources** as auto-updated Zotero items
 

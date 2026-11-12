@@ -1,22 +1,17 @@
-# 0.2.3
+# 0.2.4
 
-Documentation cleanup and clarification.
+Code-quality and documentation sync release.
 
-### Automatic transcription/translation recognition
+### Lint and review cleanup
 
-- Documented the exact filename forms Midad recognizes automatically:
-  - `@citekey - transcription` / `translation`
-  - `mas-citekey - transcription` / `translation`
-  - optional `- vol. N` and final variant suffix
-- Explained that `@citekey` means a Zotero/ScholarWeft literature note and `mas-` means a standalone PDF.
-- Clarified that recognition is filename-based, not dependent on a special YAML property, and that the title comes from `title:` frontmatter when present.
+- Reduced lint output from 36 warnings to one deliberate `JsonObject` `any` in the render-model type.
+- Fixed floating promises, unnecessary assertions, unused imports, unsafe JSON assignments, and sentence-case warnings.
+- Switched version-note deletion to `FileManager.trashFile()` so the user’s file-deletion preference is respected.
+- Corrected the annotation-sidebar version notice and version-manager labels to sentence case.
 
-### Documentation cleanup
+### Documentation
 
-- Removed obsolete legacy-marker, retired-property, and migration notes from the guides.
-- Consolidated Unadopt under **Managed regions, identity, and adoption** instead of repeating it in the versions guide.
-- Updated links so version lifecycle and identity/cleanup have distinct homes.
+- Synced the latest vault `Midad Docs` README and Zotero guide into the repository.
+- Kept `Midad Docs/` as the documentation source of truth; local builds sync it automatically.
 
-### Documentation workflow
-
-- `Midad Docs/` in the vault is the source of truth. `npm run sync-docs` copies it into the development repo, and local builds run the sync automatically.
+The remaining `JsonObject` `any` is intentional: the acquisition render model is template-driven and loosely typed.

@@ -833,7 +833,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		this.addCommand({
 			id: "manage-versions",
 			name: "Manage versions of this note…",
-			callback: () => { this.openVersionManager(); },
+			callback: () => { void this.openVersionManager(); },
 		});
 		this.addCommand({
 			id: "cache-managed-baselines",
@@ -5448,7 +5448,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			["postprocess"],
 			this.settings.sourceImportScript
 		);
-		const models = (result?.models as string[] | undefined) ?? [];
+		const models = result?.models ?? [];
 		if (!models.length) {
 			new Notice("Cached source models are already normalized.");
 			return;
@@ -5628,7 +5628,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			},
 			renderVersionZero: async () => {
 				const entry = await store.entryFor(file);
-				if (entry && await this.renderVersionZeroFor(file, entry)) new Notice("Rendered Version 0 as a separate note.");
+				if (entry && await this.renderVersionZeroFor(file, entry)) new Notice("Rendered version 0 as a separate note.");
 			},
 			matchesOriginal: async () => this.noteMatchesBaseline(file),
 			updateBaseline: async () => { await this.updateNoteBaselines([file.path]); },
@@ -5685,7 +5685,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			rendered = await this.rerenderArchivedNote(file, { outPath, skipApply: true, skipChangeReview: true, onlyCurrentVolume: true });
 		}
 		if (!rendered) {
-			new Notice("Could not render Version 0 for this note.");
+			new Notice("Could not render version 0 for this note.");
 			return false;
 		}
 		await store.writeVersionZeroNote(file, entry, rendered);
@@ -5754,7 +5754,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		let baseline: { pages?: Array<{ index?: number; hash?: string }> } | null = null;
 		try {
 			const baselinePath = `${archive.zip.path}.rendered.json`;
-			if (fs.existsSync(baselinePath)) baseline = JSON.parse(fs.readFileSync(baselinePath, "utf8"));
+			if (fs.existsSync(baselinePath)) baseline = JSON.parse(fs.readFileSync(baselinePath, "utf8")) as { pages?: Array<{ index?: number; hash?: string }> };
 		} catch { baseline = null; }
 		const baselinePages = new Map((baseline?.pages ?? []).map((entry) => [Number(entry.index), entry.hash]));
 		const pages = allPages.filter((page) => {

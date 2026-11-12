@@ -53,7 +53,7 @@ import {
 	selectionExclusion,
 	type SelectionExclusion,
 } from "./text";
-import { ensureManagedRegion, joinNote, splitNote } from "../sourceImport/merge";
+import { ensureManagedRegion, splitNote } from "../sourceImport/merge";
 import { identityOfFrontmatter, sourceIdToYaml } from "../sourceIds";
 import type {
 	AdoptionOptions,
@@ -1281,7 +1281,7 @@ export class AnnotationService {
 	): Promise<void> {
 		if (!file) return;
 		if (this.isVersionNote(file)) {
-			new Notice("Annotations are available only in the default version. Open it from the Annotations sidebar.");
+			new Notice("Annotations are available only in the default version. Open it from the annotations sidebar.");
 			return;
 		}
 		const draft = this.draftFromEditor(editor, file, range);

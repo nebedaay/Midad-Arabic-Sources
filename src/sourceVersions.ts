@@ -1,4 +1,4 @@
-import { App, Menu, Modal, Notice, Setting, TFile, normalizePath, setIcon } from "obsidian";
+import { App, Modal, Notice, Setting, TFile, normalizePath, setIcon } from "obsidian";
 import { strFromU8, strToU8, unzipSync, zipSync } from "fflate";
 import * as fs from "fs";
 import { hashString } from "./sourceImport/history";
@@ -53,11 +53,6 @@ function normalizedHash(text: string): string {
 }
 
 
-
-function noteKey(file: TFile, frontmatter: Record<string, unknown> | undefined): string {
-	const id = typeof frontmatter?.["midad-id"] === "string" ? frontmatter["midad-id"].trim() : "";
-	return id ? `id:${id}` : `path:${file.path}`;
-}
 
 function noteKeyFromText(file: TFile, text: string): string {
 	const match = /^midad-id:[ \t]*["']?([^"'\n]+)["']?[ \t]*$/m.exec(text);
@@ -468,7 +463,7 @@ export class VersionStore {
 			// The default context overwrites the current default version, not the
 			// highest-numbered branch from another lineage.
 			version = entry.versions.find((v) => v.id === entry.defaultId)
-				?? [...entry.versions].sort((a, b) => versionNumber(a.id) - versionNumber(b.id)).at(-1) as SavedVersion;
+				?? [...entry.versions].sort((a, b) => versionNumber(a.id) - versionNumber(b.id)).at(-1);
 			version.savedAt = new Date().toISOString();
 			version.kind = "user";
 		} else {
@@ -577,7 +572,7 @@ export class VersionStore {
 				if (normalizePath(file.path) === normalizePath(targetPath)) fm["midad-version-name"] = value;
 				const current = Array.isArray(fm["other-versions"]) ? fm["other-versions"] as unknown[] : [];
 				const next = current.map((item) => {
-					const text = String(item);
+					const text = typeof item === "string" ? item : "";
 					if (text === oldLabel) return value;
 					if (text.includes(targetPath.replace(/\.md$/, "")) || text.includes(targetPath)) {
 						return targetLink;
@@ -605,7 +600,7 @@ export class VersionStore {
 	async deleteVersion(entry: NoteVersionEntry, id: string, file?: TFile): Promise<void> {
 		const target = entry.versions.find((v) => v.id === id);
 		if (target?.kind === "source") {
-			new Notice("This is the original source version. Its source model must be removed from Manage Sources.");
+			new Notice("This is the original source version. Its source model must be removed from Manage sources.");
 			return;
 		}
 		if (entry.defaultId === id) {
@@ -737,7 +732,7 @@ export class VersionStore {
 		try {
 			const text = await this.app.vault.read(existing);
 			if (new RegExp(`^midad-version:\\s*["']?${id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}["']?\\s*$`, "m").test(text)) {
-				await this.app.vault.delete(existing);
+				await this.app.fileManager.trashFile(existing);
 			}
 		} catch { /* leave a note we cannot verify */ }
 	}
@@ -881,7 +876,7 @@ export class ManageVersionsModal extends Modal {
 		if (!this.activeVersionId) {
 			contentEl.createEl("p", {
 				cls: "mas-versions-help",
-				text: "Selected versions are rendered as markdown; deselect a version to archive it. Click ‘Set as default’ to render a version on the main note without a version suffix. Click the trash icon to delete a version.",
+				text: "Selected versions are rendered as Markdown; deselect a version to archive it. Click ‘set as default’ to render a version on the main note without a version suffix. Click the trash icon to delete a version.",
 			});
 		}
 		if (this.renderChanged) {
@@ -924,7 +919,7 @@ export class ManageVersionsModal extends Modal {
 						new Notice("The default version must remain selected.");
 						return;
 					}
-					await this.options.store.setVirtualSelected(this.entry!, !this.entry!.virtualSelected, this.options.file);
+					await this.options.store.setVirtualSelected(this.entry, !this.entry.virtualSelected, this.options.file);
 					this.selectionDirty = true;
 					await this.refresh();
 				};
@@ -938,7 +933,7 @@ export class ManageVersionsModal extends Modal {
 					const setDefault = status.createEl("button", { cls: "mas-versions-default-button", text: "Set as default" });
 					setDefault.onclick = async (event) => {
 						event.stopPropagation();
-						await this.options.store.setDefault(this.entry!, "v0");
+						await this.options.store.setDefault(this.entry, "v0");
 						this.selectionDirty = true;
 						await this.refresh();
 					};
@@ -965,7 +960,7 @@ export class ManageVersionsModal extends Modal {
 				rename.onclick = (event) => {
 					event.stopPropagation();
 					new RenameVersionModal(this.app, versionLabel(version), async (name) => {
-						if (await this.options.store.renameVersion(this.entry!, version.id, name)) await this.refresh();
+						if (await this.options.store.renameVersion(this.entry, version.id, name)) await this.refresh();
 					}).open();
 				};
 				const main = row.createDiv({ cls: "mas-versions-main" });
@@ -978,7 +973,7 @@ export class ManageVersionsModal extends Modal {
 				} else {
 					const setDefault = status.createEl("button", { cls: "mas-versions-default-button", text: "Set as default" });
 					setDefault.onclick = async () => {
-						await this.options.store.setDefault(this.entry!, version.id);
+						await this.options.store.setDefault(this.entry, version.id);
 						this.selectionDirty = true;
 						await this.refresh();
 					};
@@ -1004,30 +999,30 @@ export class ManageVersionsModal extends Modal {
 
 	private async setSelectedWithPrompt(version: SavedVersion, selected: boolean): Promise<void> {
 		if (selected) {
-			await this.options.store.setSelected(this.entry!, version.id, true);
+			await this.options.store.setSelected(this.entry, version.id, true);
 			await this.refresh();
 			return;
 		}
 		if (version.id === this.entry?.defaultId) return;
-		const modified = await this.options.store.versionModified(this.options.file, this.entry!, version.id);
+		const modified = await this.options.store.versionModified(this.options.file, this.entry, version.id);
 		if (!modified) {
-			await this.options.store.setSelected(this.entry!, version.id, false);
+			await this.options.store.setSelected(this.entry, version.id, false);
 			await this.refresh();
 			return;
 		}
 		new ManagedVersionChangesModal(this.app, {
 			onSaveNew: async () => {
 				await this.saveVersionNote(version, false);
-				await this.options.store.setSelected(this.entry!, version.id, false);
+				await this.options.store.setSelected(this.entry, version.id, false);
 				await this.refresh();
 			},
 			onOverwrite: async () => {
 				await this.saveVersionNote(version, true);
-				await this.options.store.setSelected(this.entry!, version.id, false);
+				await this.options.store.setSelected(this.entry, version.id, false);
 				await this.refresh();
 			},
 			onDiscard: async () => {
-				await this.options.store.setSelected(this.entry!, version.id, false);
+				await this.options.store.setSelected(this.entry, version.id, false);
 				await this.refresh();
 			},
 		}).open();
@@ -1038,27 +1033,27 @@ export class ManageVersionsModal extends Modal {
 			new Notice("Choose another default version before deleting this one.");
 			return;
 		}
-		const modified = await this.options.store.versionModified(this.options.file, this.entry!, version.id);
+		const modified = await this.options.store.versionModified(this.options.file, this.entry, version.id);
 		if (!modified) {
-			await this.options.store.deleteVersion(this.entry!, version.id, this.options.file);
+			await this.options.store.deleteVersion(this.entry, version.id, this.options.file);
 			await this.refresh();
 			return;
 		}
 		new ManagedVersionChangesModal(this.app, {
 			onSaveNew: async () => {
 				await this.saveVersionNote(version, false);
-				await this.options.store.deleteVersion(this.entry!, version.id, this.options.file);
+				await this.options.store.deleteVersion(this.entry, version.id, this.options.file);
 				await this.refresh();
 			},
 			onDiscard: async () => {
-				await this.options.store.deleteVersion(this.entry!, version.id, this.options.file);
+				await this.options.store.deleteVersion(this.entry, version.id, this.options.file);
 				await this.refresh();
 			},
 		}).open();
 	}
 
 	private async saveVersionNote(version: SavedVersion, overwrite: boolean): Promise<void> {
-		const path = versionNotePath(this.entry!, version);
+		const path = versionNotePath(this.entry, version);
 		const note = this.options.app.vault.getAbstractFileByPath(normalizePath(path));
 		if (!(note instanceof TFile)) return;
 		await this.options.store.saveVersion(note, overwrite, this.renderFingerprint, { activeVersionId: version.id });
@@ -1134,7 +1129,7 @@ export class ManageVersionsModal extends Modal {
 		}
 		if (this.entry?.virtualOriginal && this.entry.defaultId === "v0" && this.options.renderOriginal) {
 			const renderOriginal = async () => {
-				await this.options.renderOriginal!();
+				await this.options.renderOriginal();
 				this.close();
 			};
 			if (this.hasUnsavedChanges()) {
@@ -1167,19 +1162,19 @@ export class ManageVersionsModal extends Modal {
 		if (this.hasUnsavedChanges()) {
 			new UnsavedVersionModal(this.app, {
 				onDiscard: async () => {
-					await this.options.store.apply(this.options.file, this.entry!);
+					await this.options.store.apply(this.options.file, this.entry);
 					this.close();
 				},
 				onSaveNew: async () => {
 					await this.options.store.saveVersion(this.options.file, false, this.renderFingerprint);
 					await this.refresh();
-					await this.options.store.apply(this.options.file, this.entry!);
+					await this.options.store.apply(this.options.file, this.entry);
 					this.close();
 				},
 				onOverwrite: async () => {
 					await this.options.store.saveVersion(this.options.file, true, this.renderFingerprint);
 					await this.refresh();
-					await this.options.store.apply(this.options.file, this.entry!);
+					await this.options.store.apply(this.options.file, this.entry);
 					this.close();
 				},
 				onCancel: () => undefined,

@@ -207,7 +207,7 @@ export class AnnotationSidebarView extends ItemView {
 			const link = notice.createEl("a", { text: "Open the default version", href: "#" });
 			link.onclick = (event) => {
 				event.preventDefault();
-				const file = this.app.vault.getAbstractFileByPath(normalizePath(data.versionDefaultPath!));
+				const file = this.app.vault.getAbstractFileByPath(normalizePath(data.versionDefaultPath));
 				if (file instanceof TFile) void this.app.workspace.getLeaf(false).openFile(file);
 			};
 			return;
