@@ -1,17 +1,26 @@
-# 0.2.4
+# 0.2.5
 
-Code-quality and documentation sync release.
+Community-scorecard cleanup.
 
-### Lint and review cleanup
+### CSS review warnings
 
-- Reduced lint output from 36 warnings to one deliberate `JsonObject` `any` in the render-model type.
-- Fixed floating promises, unnecessary assertions, unused imports, unsafe JSON assignments, and sentence-case warnings.
-- Switched version-note deletion to `FileManager.trashFile()` so the user’s file-deletion preference is respected.
-- Corrected the annotation-sidebar version notice and version-manager labels to sentence case.
+- Removed `!important` from the poetry, Qurʾān, footnote, TOC, and version-manager rules, using more specific selectors where needed.
+- Replaced the flagged `column-gap` with the `gap` shorthand.
+- Removed a duplicate `margin-block` declaration.
+- Replaced the flagged `text-indent` hanging indent with padding/margin spacing.
 
-### Documentation
+### Code review warnings from 0.2.4
 
-- Synced the latest vault `Midad Docs` README and Zotero guide into the repository.
-- Kept `Midad Docs/` as the documentation source of truth; local builds sync it automatically.
+- Floating promises, unnecessary assertions, unused imports, unsafe JSON assignment, and file-deletion preference warnings are fixed.
+- Lint now reports one deliberate warning: the template-driven `JsonObject` uses `any`.
 
-The remaining `JsonObject` `any` is intentional: the acquisition render model is template-driven and loosely typed.
+### Remaining disclosures
+
+These are intentional and documented in the README rather than code warnings:
+
+- Direct filesystem access for PDFs and pipeline files outside the vault.
+- Shell execution for the local Python pipeline.
+- Clipboard access for transliteration.
+- Vault enumeration for indexing.
+- Network access for imports, Zotero, and LLM services.
+- GPL-3.0 copyleft licensing.
