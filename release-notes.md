@@ -1,26 +1,16 @@
-# 0.2.5
+# 0.2.6
 
-Community-scorecard cleanup.
+Qur'ānic font rendering fix.
 
-### CSS review warnings
+### U+06DF small high rounded zero
 
-- Removed `!important` from the poetry, Qurʾān, footnote, TOC, and version-manager rules, using more specific selectors where needed.
-- Replaced the flagged `column-gap` with the `gap` shorthand.
-- Removed a duplicate `margin-block` declaration.
-- Replaced the flagged `text-indent` hanging indent with padding/margin spacing.
+- KFGQPC HAFS maps U+06DF (the mark after wāw in forms such as `أُو۟لَٰٓئِكَ`) to a dotted-circle placeholder.
+- Added a range-scoped `mas-quran-mark` face that routes only U+06DF through Amiri Quran, Scheherazade New, or Noto Naskh Arabic, while the rest of the verse keeps KFGQPC.
 
-### Code review warnings from 0.2.4
+### Bottom clipping
 
-- Floating promises, unnecessary assertions, unused imports, unsafe JSON assignment, and file-deletion preference warnings are fixed.
-- Lint now reports one deliberate warning: the template-driven `JsonObject` uses `any`.
+- Expanded the painted box around Arabic verse text and inline `.quran-quote` text so the gilded background covers descenders and combining marks instead of clipping their lower edge.
 
-### Remaining disclosures
+### Documentation
 
-These are intentional and documented in the README rather than code warnings:
-
-- Direct filesystem access for PDFs and pipeline files outside the vault.
-- Shell execution for the local Python pipeline.
-- Clipboard access for transliteration.
-- Vault enumeration for indexing.
-- Network access for imports, Zotero, and LLM services.
-- GPL-3.0 copyleft licensing.
+- Noted the U+06DF font routing in the Setup guide’s font section.

@@ -31,6 +31,18 @@
     unicode-range: U+0600-06FF, U+0750-077F, U+08A0-08FF, U+FB50-FDFF, U+FE70-FEFF;
 }
 
+/* KFGQPC HAFS maps U+06DF (the small high rounded zero after wāw) to a
+   dotted-circle placeholder. Route that one mark through Amiri Quran /
+   Scheherazade, which draw it correctly; all other Qur'ānic characters keep
+   the preferred KFGQPC face. */
+@font-face {
+    font-family: 'mas-quran-mark';
+    src: local("Amiri Quran"), local("AmiriQuran"),
+         local("Scheherazade New"), local("ScheherazadeNew"),
+         local("Noto Naskh Arabic"), local("NotoNaskhArabic");
+    unicode-range: U+06DF;
+}
+
 /* One face per emblem candidate, so its ascent/descent can be overridden
    individually. The overrides put the ۝ ink at the centre of its line box;
    without them KFGQPC, Amiri Quran and Scheherazade each draw the glyph at a
@@ -85,7 +97,7 @@
     /* Qur'ān text and end-of-āya glyph (۝ is U+06DD, present in KFGQPC HAFS and
        in Amiri Quran). See the `mas-quran` @font-face above: KFGQPC HAFS local,
        else Amiri Quran, else the same Arabic chain. */
-    --quran-font: "mas-quran", "KFGQPC Uthmanic Script HAFS", "Amiri Quran",
+    --quran-font: "mas-quran-mark", "mas-quran", "KFGQPC Uthmanic Script HAFS", "Amiri Quran",
         "Scheherazade New", "Noto Naskh Arabic", "Traditional Arabic",
         "Al Bayan", "Geeza Pro", serif;
     /* The emblem uses the metric-overridden faces above, not --quran-font. */
@@ -672,6 +684,7 @@ body .quran-en h1 {
 body .quran-ar .cm-line:not(.HyperMD-header-1), body .quran-ar p,
 body .callout[data-callout="quran"] .el-p, body .callout[data-callout="quran"] .cm-line {
     padding-right: 3.5em; /* Matches the width allocated for the marker */
+    padding-block: 0.12em;
     text-align: justify;
     text-rendering: optimizeLegibility;
     font-feature-settings: "mark" on, "mkmk" on, "liga" on;
@@ -704,6 +717,7 @@ body .quran-quote, body [class*="quran-quote"],
 body .markdown-preview-view .quran-quote, body .markdown-rendered .quran-quote,
 body .markdown-source-view.mod-cm6 .quran-quote {
     font-family: var(--quran-font);
+    padding-block: 0.12em;
 }
 
 /* Taller line spacing only for RTL/Arabic Qur'ān text and quotes; an English

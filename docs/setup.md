@@ -59,7 +59,7 @@ The stacks are defined once in `styles.css`:
 
 - `--latin-font`: Noto Serif, then Charter, Georgia, Times New Roman, Liberation Serif.
 - `--arabic-font`: Scheherazade New, Noto Naskh Arabic, Amiri, then the system faces (Traditional Arabic, Arabic Typesetting, Simplified Arabic, Sakkal Majalla on Windows; Al Bayan, Geeza Pro, Baghdad on macOS).
-- `--quran-font`: KFGQPC Uthmanic Script HAFS, Amiri Quran, then the Arabic stack. The ۝ end-of-āya glyph comes from the same face.
+- `--quran-font`: KFGQPC Uthmanic Script HAFS, Amiri Quran, then the Arabic stack. The ۝ end-of-āya glyph comes from the same face. KFGQPC HAFS has a dotted-circle placeholder for U+06DF (the small high rounded zero after wāw), so that one mark is routed through Amiri Quran or Scheherazade New while the rest of the verse keeps KFGQPC.
 
 If a face is missing, rendering continues with the next one; nothing breaks. To use a different typeface, override these variables in a CSS snippet:
 
