@@ -1,16 +1,14 @@
-# 0.2.6
+# 0.2.7
 
-Qur'ānic font rendering fix.
+Font and footnote refinements.
 
-### U+06DF small high rounded zero
+### Qur'ānic text font restored
 
-- KFGQPC HAFS maps U+06DF (the mark after wāw in forms such as `أُو۟لَٰٓئِكَ`) to a dotted-circle placeholder.
-- Added a range-scoped `mas-quran-mark` face that routes only U+06DF through Amiri Quran, Scheherazade New, or Noto Naskh Arabic, while the rest of the verse keeps KFGQPC.
+- Restored **DigitalKhatt New Madina** as the preferred Qur'ānic text face.
+- KFGQPC Uthmanic Script HAFS is again reserved for the ۝ verse emblem.
+- The U+06DF mark still uses DigitalKhatt first, with Amiri Quran / Scheherazade as fallbacks.
+- Updated the README and Setup font documentation to reflect the intended stack.
 
-### Bottom clipping
+### Footnote anchors
 
-- Expanded the painted box around Arabic verse text and inline `.quran-quote` text so the gilded background covers descenders and combining marks instead of clipping their lower edge.
-
-### Documentation
-
-- Noted the U+06DF font routing in the Setup guide’s font section.
+- Arabic footnote superscripts are now 75% of the surrounding text with no additional line box.

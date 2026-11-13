@@ -52,14 +52,15 @@ The plugin **downloads no fonts and embeds none** — Obsidian's review rules fo
 | **Noto Serif** | Latin text and transliteration | Google Fonts (SIL OFL) |
 | **Scheherazade New** | Arabic text | Google Fonts (SIL OFL) |
 | **Noto Naskh Arabic** | Arabic fallback | Google Fonts (SIL OFL) |
-| **Amiri Quran** | Qur'ānic text | Google Fonts (SIL OFL) |
-| **KFGQPC Uthmanic Script HAFS** | Qur'ānic text (preferred) | King Fahd Complex (free download) |
+| **DigitalKhatt New Madina** | Qur'ānic text (preferred) | DigitalKhatt project (free) |
+| **Amiri Quran** | Qur'ānic text fallback | Google Fonts (SIL OFL) |
+| **KFGQPC Uthmanic Script HAFS** | ۝ verse emblem | King Fahd Complex (free download) |
 
 The stacks are defined once in `styles.css`:
 
 - `--latin-font`: Noto Serif, then Charter, Georgia, Times New Roman, Liberation Serif.
 - `--arabic-font`: Scheherazade New, Noto Naskh Arabic, Amiri, then the system faces (Traditional Arabic, Arabic Typesetting, Simplified Arabic, Sakkal Majalla on Windows; Al Bayan, Geeza Pro, Baghdad on macOS).
-- `--quran-font`: KFGQPC Uthmanic Script HAFS, Amiri Quran, then the Arabic stack. The ۝ end-of-āya glyph comes from the same face. KFGQPC HAFS has a dotted-circle placeholder for U+06DF (the small high rounded zero after wāw), so that one mark is routed through Amiri Quran or Scheherazade New while the rest of the verse keeps KFGQPC.
+- `--quran-font`: DigitalKhatt New Madina, then KFGQPC HAFS, Amiri Quran, and the Arabic stack. DigitalKhatt supplies the Qur'ānic text and the U+06DF mark; KFGQPC is used for the ۝ verse emblem through `--quran-emblem-font`.
 
 If a face is missing, rendering continues with the next one; nothing breaks. To use a different typeface, override these variables in a CSS snippet:
 

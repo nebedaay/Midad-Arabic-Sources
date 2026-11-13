@@ -108,8 +108,9 @@ The plugin **downloads no fonts** and embeds none. It requests the faces it was 
 | **Noto Serif** | Latin text and transliteration | SIL OFL |
 | **Scheherazade New** | Arabic text | SIL OFL |
 | **Noto Naskh Arabic** | Arabic fallback | SIL OFL |
-| **Amiri Quran** | Qur'ānic text | SIL OFL |
-| **KFGQPC Uthmanic Script HAFS** | Qur'ānic text (preferred) | Free from the King Fahd Complex |
+| **DigitalKhatt New Madina** | Qur'ānic text (preferred) | Free from the DigitalKhatt project |
+| **Amiri Quran** | Qur'ānic text fallback | SIL OFL |
+| **KFGQPC Uthmanic Script HAFS** | ۝ verse emblem | Free from the King Fahd Complex |
 
 The stacks live in `styles.css` as `--latin-font`, `--arabic-font`, and `--quran-font`; override those variables in a CSS snippet to use different faces. The fallback chains are documented in [Setup](./docs/setup.md#fonts).
 

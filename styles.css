@@ -8,7 +8,8 @@
    system face. Install the recommended fonts for the intended look; see
    docs/setup.md → Fonts. */
 
-/* Qur'ān text and the ۝ end-of-āya glyph. Each face is range-scoped, so Latin
+/* Qur'ān text uses DigitalKhatt New Madina; the ۝ end-of-āya glyph is supplied
+   by the separate emblem stack. Each face is range-scoped, so Latin
    (transliteration, digits) renders in a Latin face while the Arabic stays in
    the Qur'ān face. `local()` never touches the network: if no listed face is
    installed, this @font-face simply has no source and the next family in
@@ -21,7 +22,10 @@
 }
 @font-face {
     font-family: 'mas-quran';
-    src: local("KFGQPC Uthmanic Script HAFS"),
+    src: local("DigitalKhatt New Madina"),
+         local("DigitalKhattNewMadinaRegular"),
+         local("DigitalKhattV2"),
+         local("KFGQPC Uthmanic Script HAFS"),
          local("KFGQPC Uthmanic Script HAFS Regular"),
          local("KFGQPCUthmanicScriptHAFS"),
          local("Amiri Quran"), local("AmiriQuran"),
@@ -31,13 +35,15 @@
     unicode-range: U+0600-06FF, U+0750-077F, U+08A0-08FF, U+FB50-FDFF, U+FE70-FEFF;
 }
 
-/* KFGQPC HAFS maps U+06DF (the small high rounded zero after wāw) to a
-   dotted-circle placeholder. Route that one mark through Amiri Quran /
-   Scheherazade, which draw it correctly; all other Qur'ānic characters keep
-   the preferred KFGQPC face. */
+/* If DigitalKhatt is unavailable, KFGQPC HAFS maps U+06DF (the small high
+   rounded zero after wāw) to a dotted-circle placeholder. Route that one mark
+   through DigitalKhatt, then Amiri Quran / Scheherazade. */
 @font-face {
     font-family: 'mas-quran-mark';
-    src: local("Amiri Quran"), local("AmiriQuran"),
+    src: local("DigitalKhatt New Madina"),
+         local("DigitalKhattNewMadinaRegular"),
+         local("DigitalKhattV2"),
+         local("Amiri Quran"), local("AmiriQuran"),
          local("Scheherazade New"), local("ScheherazadeNew"),
          local("Noto Naskh Arabic"), local("NotoNaskhArabic");
     unicode-range: U+06DF;
@@ -94,10 +100,9 @@
         "Noto Naskh Arabic", "NotoNaskhArabic", "Amiri",
         "Traditional Arabic", "Arabic Typesetting", "Simplified Arabic",
         "Sakkal Majalla", "Al Bayan", "Geeza Pro", "Baghdad";
-    /* Qur'ān text and end-of-āya glyph (۝ is U+06DD, present in KFGQPC HAFS and
-       in Amiri Quran). See the `mas-quran` @font-face above: KFGQPC HAFS local,
-       else Amiri Quran, else the same Arabic chain. */
-    --quran-font: "mas-quran-mark", "mas-quran", "KFGQPC Uthmanic Script HAFS", "Amiri Quran",
+    /* Qur'ān text uses DigitalKhatt New Madina. The ۝ end-of-āya emblem uses
+       the separate --quran-emblem-font stack (KFGQPC HAFS, Amiri Quran, …). */
+    --quran-font: "mas-quran-mark", "mas-quran", "DigitalKhatt New Madina", "DigitalKhattNewMadinaRegular", "KFGQPC Uthmanic Script HAFS", "Amiri Quran",
         "Scheherazade New", "Noto Naskh Arabic", "Traditional Arabic",
         "Al Bayan", "Geeza Pro", serif;
     /* The emblem uses the metric-overridden faces above, not --quran-font. */
@@ -804,6 +809,12 @@ body .mas-managed {
 .mas-src-note {
     color: var(--text-muted);
     font-size: 0.75em;
+}
+
+/* Arabic footnote anchors: 75% of the surrounding text, with no added line box. */
+sup {
+    font-size: 75%;
+    line-height: 0;
 }
 
 /* ── Manage sources modal ─────────────────────────────────────────────────────
