@@ -158,3 +158,103 @@ LEGACY_MANAGED_CLOSE = "%%/mas-managed%%"
 def wrap_managed_body(body: str) -> str:
     """The one canonical wrapper for generated managed content."""
     return f"{MANAGED_OPEN}\n\n{body.strip()}\n\n{MANAGED_CLOSE}"
+
+
+_FOOTNOTE_HEADER = re.compile(r"^\s*>\s*\[!arabic-footnotes\]\s*$", re.I)
+_PAGE_HEADING = re.compile(r"^####\s+p\.")
+_PAGE_NUMBER = re.compile(r"^\s*(?:[0-9٠-٩]+)\s*$")
+_FOOTNOTE_NUMBER = re.compile(r"^\(?([0-9٠-٩]+)\)?\s*[-–—:]\s*")
+_FOOTNOTE_SEPARATOR = re.compile(r"^\s*>\s*$")
+
+
+def _footnote_paragraphs(page: list[str]) -> tuple[list[tuple[str, bool]], int]:
+    """Collect paragraphs from every footnote callout on one page.
+
+    Returns (paragraph, separator-before) pairs and the first non-footnote tail
+    line index. A plain paragraph immediately after a callout is included: pages
+    have no body material after footnotes, so it is a continuation.
+    """
+    first = next((i for i, line in enumerate(page) if _FOOTNOTE_HEADER.match(line)), None)
+    if first is None:
+        return [], len(page)
+    paragraphs: list[tuple[str, bool]] = []
+    seen: set[str] = set()
+    pending_separator = False
+    i = first + 1
+    while i < len(page):
+        line = page[i]
+        stripped = line.strip()
+        if _PAGE_HEADING.match(line):
+            break
+        if stripped == "---":
+            break
+        if not stripped or _FOOTNOTE_SEPARATOR.match(line):
+            pending_separator = True
+            i += 1
+            continue
+        if _PAGE_NUMBER.match(stripped):
+            break
+        if _FOOTNOTE_HEADER.match(line):
+            i += 1
+            continue
+        if line.lstrip().startswith(">"):
+            content = re.sub(r"^\s*>\s?", "", line).strip()
+            if content.startswith("- "):
+                content = content[2:].strip()
+            elif content.startswith("-"):
+                content = content[1:].strip()
+        else:
+            content = stripped
+        if content and content not in seen:
+            seen.add(content)
+            paragraphs.append((content, pending_separator))
+            pending_separator = False
+        i += 1
+    return paragraphs, i
+
+
+def _normalize_footnote_page(page: list[str]) -> list[str]:
+    first = next((i for i, line in enumerate(page) if _FOOTNOTE_HEADER.match(line)), None)
+    if first is None:
+        return page
+    paragraphs, tail = _footnote_paragraphs(page)
+    if not paragraphs:
+        # Drop an empty/mangled callout, keeping any tail page number.
+        return page[:first] + page[tail:]
+    rendered = [">[!arabic-footnotes]"]
+    previous_number: str | None = None
+    for index, (text, had_separator) in enumerate(paragraphs):
+        match = _FOOTNOTE_NUMBER.match(text)
+        number = match.group(1) if match else previous_number
+        same_footnote = index > 0 and number == previous_number
+        if index > 0 and (had_separator or same_footnote):
+            rendered.append(">")
+        rendered.append(f"> - {text}")
+        previous_number = number
+    if tail < len(page) and page[tail].strip():
+        rendered.append("")
+    return page[:first] + rendered + page[tail:]
+
+
+def normalize_arabic_footnotes(text: str) -> str:
+    """Make one arabic-footnotes callout per page and normalize its paragraphs.
+
+    Only pages with a footnote callout are touched. Callout lines become
+    ``> - ...``; continuation paragraphs under the same footnote get a ``>``
+    separator. Existing separators are preserved, so an already-correct callout
+    is unchanged. A paragraph after a callout is folded into it.
+    """
+    lines = text.split("\n")
+    out: list[str] = []
+    i = 0
+    while i < len(lines):
+        if _PAGE_HEADING.match(lines[i]):
+            j = i + 1
+            while j < len(lines) and not _PAGE_HEADING.match(lines[j]):
+                j += 1
+            out.extend(_normalize_footnote_page(lines[i:j]))
+            i = j
+            continue
+        out.append(lines[i])
+        i += 1
+    return "\n".join(out)

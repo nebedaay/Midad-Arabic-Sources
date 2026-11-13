@@ -1,14 +1,21 @@
-# 0.2.7
+# 0.2.8
 
-Font and footnote refinements.
+Footnote rendering and superscript fixes.
 
-### Qur'ānic text font restored
+### Footnote normalization
 
-- Restored **DigitalKhatt New Madina** as the preferred Qur'ānic text face.
-- KFGQPC Uthmanic Script HAFS is again reserved for the ۝ verse emblem.
-- The U+06DF mark still uses DigitalKhatt first, with Amiri Quran / Scheherazade as fallbacks.
-- Updated the README and Setup font documentation to reflect the intended stack.
+- New shared `normalize_arabic_footnotes` pass, used by the raw transcription formatter and the Level 2 Markdown-update layer.
+- Each page is reduced to one `arabic-footnotes` callout.
+- All footnote paragraphs are written as `> - ...`.
+- Continuation paragraphs under the same footnote, or under no number, receive a `>` separator.
+- A paragraph following a footnote callout on the same page is folded into the callout.
+- Existing correct callouts are preserved; the pass is idempotent.
 
 ### Footnote anchors
 
-- Arabic footnote superscripts are now 75% of the surrounding text with no additional line box.
+- Increased the CSS specificity of the superscript rule so Obsidian’s core default and the Qur'ān `inline-block` rule cannot override it.
+- Arabic footnote anchors are now 75% of the surrounding text.
+
+### Documentation
+
+- Documented the one-callout-per-page footnote convention in the Transcription guide.

@@ -22,7 +22,7 @@ SCRIPTS = Path(__file__).resolve().parent
 if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
-from text_postprocess import escape_literal_brackets, normalize_managed_marker_spacing
+from text_postprocess import escape_literal_brackets, normalize_arabic_footnotes, normalize_managed_marker_spacing
 
 
 def _load(name: str):
@@ -110,6 +110,7 @@ def update_markdown(text: str, *, quran: bool = True, tafsir: bool = False) -> s
     # RTL without touching existing TOC links.
     fmt = _load("transcription-format.py")
     body = fmt.format_toc_entries(body)
+    body = normalize_arabic_footnotes(body)
     # The source formatter's spacing rules are block-level and idempotent; the
     # raw-only page-number, OCR-heading, poetry, footnote, and TOC conversions
     # deliberately do not run here.

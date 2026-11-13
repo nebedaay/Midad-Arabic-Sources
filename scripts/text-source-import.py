@@ -4372,7 +4372,7 @@ def _turath_page(text: str, headings: list[dict], section_level: int,
     body = _turath_mark_footnote_markers(body, numbers)
     if foot_lines:
         foot_lines = [smart_quotes(line) for line in foot_lines]
-        callout = ">[!arabic-footnotes]\n" + "\n".join(f">- {line}" for line in foot_lines)
+        callout = ">[!arabic-footnotes]\n" + "\n".join(f"> - {line}" for line in foot_lines)
         body = f"{body}\n\n{callout}" if body.strip() else callout
 
     # The same citation pass as every other collection. A Turath book is not a

@@ -811,10 +811,19 @@ body .mas-managed {
     font-size: 0.75em;
 }
 
-/* Arabic footnote anchors: 75% of the surrounding text, with no added line box. */
-sup {
+/* Arabic footnote anchors: 75% of the surrounding text, with no added line box.
+   The extra selectors override Obsidian's core sup sizing and the Qur'ān
+   `display: inline-block` rule for descendants. */
+body sup,
+body .markdown-preview-view sup,
+body .markdown-rendered sup,
+body .markdown-source-view.mod-cm6 sup,
+body .quran-ar .cm-content sup,
+body .quran-quote sup {
     font-size: 75%;
     line-height: 0;
+    vertical-align: super;
+    display: inline;
 }
 
 /* ── Manage sources modal ─────────────────────────────────────────────────────

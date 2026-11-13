@@ -28,7 +28,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
-from text_postprocess import escape_literal_brackets
+from text_postprocess import escape_literal_brackets, normalize_arabic_footnotes
 
 LQ = '\uFD3F'
 LQE = '\uFD3E'
@@ -748,6 +748,7 @@ def process(input_path):
     c = re.sub(r'>\[!arabic-footnotes\]\n(?!>)', '', c)
     c = re.sub(r'>\[!arabic-footnotes\]\n\n', '', c)
     print(f"  Footnotes (***): {c.count('>[!arabic-footnotes]')} callouts")
+    c = normalize_arabic_footnotes(c)
 
     # ── 5. TOC formatting ─────────────────────────────────────
     c = re.sub(r'-\s+(.+?)\s+\[\[####\s*p\.\s+(\d+)\|(\d+)\]\]',
