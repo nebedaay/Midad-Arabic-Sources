@@ -1,7 +1,7 @@
 import { App, TFile, normalizePath } from "obsidian";
 import { makeEngine, SourceTemplateEngine } from "./engine";
 import { YamlFieldSpec } from "./yaml";
-import { joinNote, mergeFrontmatter, mergeNote, normalizeManagedMarkerSpacing, splitNote, substantiveContentDiffers } from "./merge";
+import { joinNote, mergeFrontmatter, mergeNote, normalizeManagedMarkerSpacing, splitNote, substantiveContentDiffers, unwrapQuranQuotes } from "./merge";
 import { ensureFolder, safeFileSegment } from "../sourcePaths";
 
 /** Loosely-typed JSON data: importer work/unit models (fields are template-driven). */
@@ -292,6 +292,7 @@ export async function deleteNote(app: App, path: string): Promise<void> {
 export async function writeMerged(app: App, path: string, out: RenderOutput, force = false, replaceUnmanaged = true): Promise<void> {
 	// Never blank a note: an empty render means a template failed to load.
 	if (!out.content.trim()) return;
+	out.content = unwrapQuranQuotes(out.content);
 	const existing = await readVaultFile(app, path);
 	if (existing == null || existing.trim() === "") {
 		// New (or previously blanked) note: write the full render.
@@ -299,7 +300,7 @@ export async function writeMerged(app: App, path: string, out: RenderOutput, for
 		return;
 	}
 	const merged = mergeNote(existing, out.content, out.specs, { managesRegion: true, replaceUnmanaged });
-	const normalized = normalizeManagedMarkerSpacing(merged);
+	const normalized = normalizeManagedMarkerSpacing(unwrapQuranQuotes(merged));
 	if (force || substantiveContentDiffers(existing, normalized)) await writeNote(app, path, normalized);
 }
 

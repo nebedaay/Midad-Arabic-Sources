@@ -56,6 +56,8 @@ import {
 import { BUNDLED_ASSETS } from "./assets.generated";
 import { localDate } from "./time";
 import { formatPoetrySelection } from "./poetry";
+import { registerQuranQuoteRendering } from "./quranQuote";
+import { registerVerseMarkers } from "./verseMarkers";
 import { ManageVersionsModal, NoteVersionEntry, VersionStore } from "./sourceVersions";
 import { NoteHashStore, managedHash } from "./noteHashes";
 import { ensureManagedRegion, findManagedRegion, joinNote, splitNote } from "./sourceImport/merge";
@@ -695,6 +697,8 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		this.extractBundledAssets();
 		await this.ensureSourceLayout();
 		this.addSettingTab(new MidadArabicSourcesSettingTab(this.app, this));
+		registerQuranQuoteRendering(this);
+		registerVerseMarkers(this);
 		try {
 			this.annotations = await registerAnnotations({
 				app: this.app,
@@ -706,6 +710,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 				upgradeTranscriptionInPlace: (file) => this.postprocessTranscriptionNote(file, undefined, true, true),
 				confirmAdoption: (file) => this.confirmAdoption(file),
 				moveAdoptionFile: (file) => this.moveAdoptionFile(file),
+				archiveAdoptedVersion: (file) => this.archiveAdoptedVersion(file),
 			});
 			await this.refreshAnnotationParent();
 		} catch (error) {
@@ -722,6 +727,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			window.setTimeout(() => { void this.repairTopicLinks(); }, 2500);
 			void this.refreshSourceRegistry();
 			void this.refreshSourcesIndex();
+			window.setTimeout(() => { void this.archiveAdoptedVersions(true); }, 2500);
 			try {
 				const archiveDir = `${this.vaultPath()}/.midad-arabic-sources/archive`;
 				if (fs.readdirSync(archiveDir).some((name) => name.endsWith(".corrections.json"))) {
@@ -854,6 +860,11 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			id: "cleanup-orphaned-midad-data",
 			name: "Clean up orphaned Midad data…",
 			callback: async () => { await this.cleanupOrphanedData(); },
+		});
+		this.addCommand({
+			id: "archive-adopted-versions",
+			name: "Archive current versions of adopted notes",
+			callback: async () => { await this.archiveAdoptedVersions(); },
 		});
 		this.addCommand({
 			id: "consolidate-archived-corrections",
@@ -5353,6 +5364,14 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			.sort((a, b) => (a.info.volume ?? -1) - (b.info.volume ?? -1));
 
 		if (!batches.length) {
+			if (options.outPath && file instanceof TFile) {
+				// Rendering Version 0 must never rewrite the live note. A legacy
+				// note has no archived batch, so there is nothing older to
+				// re-render; the note as it stands becomes the Version 0 baseline.
+				const current = await this.app.vault.read(file);
+				await this.app.vault.adapter.write(options.outPath, current);
+				return current;
+			}
 			if (info.type) {
 				// Legacy notes predate the archive format; the current local
 				// post-processor can still improve them in place.
@@ -5510,6 +5529,32 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		const hashes = this.hashStore().pruneMissing(keep);
 		const adopted = await this.annotations?.cleanupMissingAdopted() ?? 0;
 		new Notice(`Cleaned up ${hashes} orphaned hash record(s) and ${adopted} adopted-note record(s).`);
+	}
+
+	/** Save the current body of an adopted note as its explicit Version 0. */
+	async archiveAdoptedVersion(file: TFile): Promise<void> {
+		const store = new VersionStore(this.app, this.vaultPath());
+		await store.saveAdoptedOriginal(file);
+	}
+
+	/** Backfill Version 0 for existing adopted notes that have no version history. */
+	async archiveAdoptedVersions(silent = false): Promise<void> {
+		const paths = this.annotations?.adoptedPaths() ?? [];
+		if (!paths.length) {
+			if (!silent) new Notice("No adopted notes were found.");
+			return;
+		}
+		const store = new VersionStore(this.app, this.vaultPath());
+		let saved = 0;
+		for (const path of paths) {
+			const file = this.app.vault.getAbstractFileByPath(normalizePath(path));
+			if (!(file instanceof TFile)) continue;
+			const entry = await store.entryFor(file);
+			if (entry?.versions.length) continue;
+			if (await store.saveAdoptedOriginal(file)) saved += 1;
+		}
+		if (saved) new Notice(`Archived Version 0 for ${saved} adopted note${saved === 1 ? "" : "s"}.`);
+		else if (!silent) new Notice("Adopted notes already have version history.");
 	}
 
 	/** Detach the active note from Midad, keeping its user-written text. */

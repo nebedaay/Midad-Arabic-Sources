@@ -50,7 +50,7 @@ _SCRIPTS_DIR = Path(__file__).resolve().parent
 if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
 
-from text_postprocess import escape_literal_brackets
+from text_postprocess import escape_literal_brackets, unwrap_quran_quotes
 
 
 # ── Paths ────────────────────────────────────────────────────────────────────
@@ -1146,7 +1146,7 @@ def link_source_content(
         text = link_quote_citations(
             text, surah=surah, ayah=ayah, delims=delims, linear=linear,
         )
-    return escape_literal_brackets(text)
+    return unwrap_quran_quotes(escape_literal_brackets(text))
 
 
 def canonical_aliases(work: dict) -> list[str]:

@@ -33,6 +33,7 @@ See [Transcription](./transcription.md) and [Translation](./translation.md).
 - **Cache managed-region hashes for all managed notes** — seed missing baseline hashes used to detect edits against Version 0.
 - **Unadopt this note (remove Midad identity and managed tags)…** — remove Midad identity, managed tags, saved versions, and adopted-note registration while keeping the note content. See [Managed regions, identity, and adoption](./managed-regions.md#unadopting).
 - **Clean up orphaned Midad data…** — prune hash and adopted-registry records whose notes no longer exist. See [Managed regions, identity, and adoption](./managed-regions.md#cleanup).
+- **Archive current versions of adopted notes** — backfill an explicit Version 0 for existing adopted notes that have no version history.
 - **Update Markdown formatting in this note** — apply the safe Markdown-update layer to an already-rendered note: escape literal brackets, normalize block spacing, and detect/link unmarked Qur’ān quotes without rerunning raw-source page numbering or OCR conversion.
 - **Put selected text in a poetry callout** — format the selection as Arabic-poetry callouts: blank-line-separated verse groups become nested hemistich items, single short lines become direct items, and lines over 80 characters stay as ordinary paragraphs.
 - **Commit edits to archived transcription/translation** — save the current note’s page bodies beside its archive, so a later re-render from that archive keeps your corrections (poetry, page numbers, and body text).

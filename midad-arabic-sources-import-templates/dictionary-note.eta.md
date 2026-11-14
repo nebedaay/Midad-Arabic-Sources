@@ -1,7 +1,7 @@
 <% const isProse = work.body === 'prose'; -%>
 <% start_YAML(); -%>
 <% add_property('document-type', '[[text-source]]'); -%>
-<% add_property('created', generated); -%>
+<% add_property('created', generated, { merge: 'keep' }); -%>
 <% add_property('updated', updated()); -%>
 <% add_property('midad-up', [unit.section_page ? wikilink(unit.section_page) : null, wikilink(work.dir)].filter(Boolean)); -%>
 <% add_property('related', [], { force: true, merge: 'keep' }); -%>

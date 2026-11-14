@@ -28,7 +28,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
-from text_postprocess import escape_literal_brackets, normalize_arabic_footnotes
+from text_postprocess import cleanup_quran_citations, escape_literal_brackets, normalize_arabic_footnotes, unwrap_quran_quotes
 
 LQ = '\uFD3F'
 LQE = '\uFD3E'
@@ -434,8 +434,8 @@ def remove_pdf_headings(text):
     return text
 
 
-TOC_BARE = re.compile(r"^>-\s+([0-9\u0660-\u0669]+)\s+(.+)$")
-TOC_LINK = re.compile(r"^>-\s+\[\[#\s*p\.\s*[0-9\u0660-\u0669]+\|")
+TOC_BARE = re.compile(r"^>\s*(?:-\s*)?(?:\*\*)?([0-9\u0660-\u0669]+)(?:\*\*)?\s+(.+)$")
+TOC_LINK = re.compile(r"\[\[#\s*p\.\s*[0-9\u0660-\u0669]+\|")
 
 
 def _western_numeral(value: str) -> str:
@@ -443,11 +443,11 @@ def _western_numeral(value: str) -> str:
 
 
 def format_toc_entries(text: str) -> str:
-    """Link bare Arabic/Western TOC page items, leaving existing links alone.
+    """Link every numbered TOC callout entry, regardless of its prefix style.
 
-    A fihris often arrives as ``>- ٢ مقدمة لكتاب الإعتقاد`` with no links. Add
-    ``[[#p. 2|٢]]`` without adding invisible direction characters; Obsidian's
-    CSS already renders Arabic callouts RTL outside the editing cursor.
+    Accepts ``>- 2 title``, ``> 2 title``, ``> **2** title`` and
+    ``> - **2** title``. Existing ``[[#p. N|N]]`` links are normalized but
+    never duplicated.
     """
     lines = text.split("\n")
     out: list[str] = []
@@ -458,19 +458,17 @@ def format_toc_entries(text: str) -> str:
             in_toc = True
             out.append(line)
             continue
-        if in_toc and s.startswith(">- "):
-            if "[[" not in s:
-                match = TOC_BARE.match(s)
-                if match:
-                    label = match.group(1)
-                    page = _western_numeral(label)
-                    title = match.group(2).strip()
-                    out.append(f">- [[#p. {page}|{label}]] {title}")
-                    continue
-            elif TOC_LINK.match(s):
-                # Normalize an older ``[[# p. N|N]]`` spelling; the space after
-                # `#` is not part of the heading anchor.
-                out.append(re.sub(r"^(>-\s+)\[\[#\s*p\.", r"\1[[#p.", line))
+        if in_toc and s.startswith(">"):
+            if "[[#p." in s:
+                out.append(re.sub(r"\[\[#\s*p\.", "[[#p.", line))
+                continue
+            match = TOC_BARE.match(s)
+            if match:
+                label = match.group(1)
+                page = _western_numeral(label)
+                title = match.group(2).strip()
+                suffix = f" {title}" if title else ""
+                out.append(f"> - [[#p. {page}|{label}]]{suffix}")
                 continue
             out.append(line)
             continue
@@ -925,7 +923,7 @@ def process(input_path):
     c = re.sub(r'^(####\s+p\.\s*\d+(?::\d+)?)(?=[^\d\s])', r'\1\n\n', c, flags=re.M)
     print(f"  Spacing normalized")
 
-    return c
+    return cleanup_quran_citations(unwrap_quran_quotes(c))
 
 
 if __name__ == '__main__':

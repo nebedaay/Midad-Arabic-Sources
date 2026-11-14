@@ -1,6 +1,6 @@
 <% start_YAML(); -%>
 <% add_property('document-type', '[[text-source]]'); -%>
-<% add_property('created', generated); -%>
+<% add_property('created', generated, { merge: 'keep' }); -%>
 <% add_property('updated', updated()); -%>
 <% const pub = work.publication || {}; -%>
 <% const yamlId = (value) => String(value).replace(/:/g, '/'); -%>

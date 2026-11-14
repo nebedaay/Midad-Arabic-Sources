@@ -175,7 +175,79 @@ export function ensureManagedRegion(content: string): string {
 	return normalizeManagedMarkerSpacing(ensured);
 }
 
+/** Collapse blank runs and internal space runs, preserving fenced code and YAML. */
+function normalizeWhitespace(text: string): string {
+	const prior = splitNote(text);
+	const lines = prior.body.split("\n");
+	const trailingBlank = lines.length >= 2 && lines[lines.length - 1].trim() === "" && lines[lines.length - 2].trim() === "";
+	const out: string[] = [];
+	let inFence = false;
+	let fence = "";
+	for (const line of lines) {
+		const trimmed = line.trim();
+		if (trimmed.startsWith("```") || trimmed.startsWith("~~~")) {
+			const marker = trimmed.slice(0, 3);
+			if (!inFence) { inFence = true; fence = marker; }
+			else if (marker === fence) inFence = false;
+		}
+		if (inFence) {
+			out.push(line);
+			continue;
+		}
+		if (!trimmed) {
+			if (out.length && out[out.length - 1] !== "") out.push("");
+			continue;
+		}
+		const leading = /^[ \t]*/.exec(line)?.[0] ?? "";
+		const rest = line.slice(leading.length).replace(/[ \t]{2,}/g, " ").replace(/[ \t]+$/, "");
+		out.push(leading + rest);
+	}
+	if (trailingBlank && out.length) out.push("");
+	const body = out.join("\n");
+	return prior.frontmatter == null ? body : `---\n${prior.frontmatter}\n---\n\n${body}`;
+}
+
+/** Keep the first opening and last closing marker, removing nested/duplicate marker lines. */
+function collapseManagedRegions(text: string): string {
+	const prior = splitNote(text);
+	const lines = prior.body.split("\n");
+	let firstOpen = -1;
+	let lastClose = -1;
+	let inFence = false;
+	let fence = "";
+	for (let i = 0; i < lines.length; i++) {
+		const trimmed = lines[i].trim();
+		if (trimmed.startsWith("```") || trimmed.startsWith("~~~")) {
+			const marker = trimmed.slice(0, 3);
+			if (!inFence) { inFence = true; fence = marker; }
+			else if (marker === fence) inFence = false;
+			continue;
+		}
+		if (inFence) continue;
+		const isOpen = trimmed === MANAGED_OPEN || trimmed === LEGACY_MANAGED_OPEN
+			|| (trimmed.startsWith('<span class="mas-managed') && !trimmed.includes("/mas-managed"));
+		const isClose = trimmed === MANAGED_CLOSE || trimmed === LEGACY_MANAGED_CLOSE
+			|| trimmed.includes("/mas-managed</span>") || trimmed.includes("%%/mas-managed%%");
+		if (isOpen && firstOpen < 0) firstOpen = i;
+		if (isClose && firstOpen >= 0) lastClose = i;
+	}
+	if (firstOpen < 0 || lastClose <= firstOpen) return text;
+	const body: string[] = [...lines.slice(0, firstOpen)];
+	body.push(MANAGED_OPEN);
+	for (let i = firstOpen + 1; i < lastClose; i++) {
+		const trimmed = lines[i].trim();
+		const marker = trimmed === MANAGED_OPEN || trimmed === LEGACY_MANAGED_OPEN || trimmed === MANAGED_CLOSE || trimmed === LEGACY_MANAGED_CLOSE
+			|| (trimmed.startsWith('<span class="mas-managed') && trimmed.includes("/mas-managed"));
+		if (!marker) body.push(lines[i]);
+	}
+	body.push(MANAGED_CLOSE, ...lines.slice(lastClose + 1));
+	const collapsed = body.join("\n");
+	return prior.frontmatter == null ? collapsed : `---\n${prior.frontmatter}\n---\n${collapsed}`;
+}
+
 export function normalizeManagedMarkerSpacing(text: string): string {
+	text = collapseManagedRegions(text);
+	text = normalizeWhitespace(text);
 	const lines = text.split("\n");
 	const out: string[] = [];
 	let inFence = false;
@@ -203,6 +275,13 @@ export function normalizeManagedMarkerSpacing(text: string): string {
 		out.push(lines[i]);
 	}
 	return out.join("\n");
+}
+
+/** Remove Markdown Attributes wrappers from ornate Qur'ān parentheses. */
+export function unwrapQuranQuotes(text: string): string {
+	return text
+		.replace(/\*?﴿([^﴾\n]+)﴾\*?\{\.quran-quote\}\*?/g, "﴿$1﴾")
+		.replace(/\{\.quran-quote\}/g, "");
 }
 
 export function findManagedRegion(body: string): ManagedRegion | null {

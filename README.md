@@ -55,7 +55,7 @@ Settings cover the server URL and script, the engine (`bert` / `mle` / `none`), 
 
 ### Transcription and translation (scanned PDFs)
 
-A Gemini pipeline turns a literature item’s PDFs into page-separated Arabic markdown (and translations), with local post-processing for Qurʾān quotes, poetry callouts, footnotes, and tashkīl. The Zotero route assumes a `@citekey` literature note with the item’s `zotero-key` and attachments, normally created by **[ScholarWeft](https://github.com/nebedaay/ScholarWeft)** or **[ZotLit](https://github.com/aidenlx/zotlit)**; Midad does not create those notes. Without one, use **Transcribe a PDF…**.
+A Gemini pipeline turns a literature item’s PDFs into page-separated Arabic markdown (and translations), with local post-processing for Qurʾān quotes, poetry callouts, footnotes, tashkīl, and (in a tafsīr) a `#####` verse heading wherever a new āya is introduced. The Zotero route assumes a `@citekey` literature note with the item’s `zotero-key` and attachments, normally created by **[ScholarWeft](https://github.com/nebedaay/ScholarWeft)** or **[ZotLit](https://github.com/aidenlx/zotlit)**; Midad does not create those notes. Without one, use **Transcribe a PDF…**.
 
 - **Transcribe this item’s PDF file(s)** — burst to page PDFs, OCR via Gemini batch mode, post-process.
 - **Transcribe a PDF…** — pick any PDF on disk; Gemini guesses the title and author from the title page, and a verification dialog saves them into the new transcription’s bibliography.

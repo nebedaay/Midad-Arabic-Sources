@@ -15,7 +15,7 @@ Both transliteration commands open a small dialog first, with two toggles:
 - **Full vocalization** — retain case endings and tanwīn (with pausal shortening at the end of a passage).
 - **Use LLM** — romanize with the configured API instead of the rule engine. Your choices are remembered as the new defaults.
 
-Only Arabic-script runs are changed. Markdown, newlines, link targets, and `{.quran-quote}` attributes pass through untouched; a link’s alias is transliterated.
+Only Arabic-script runs are changed. Markdown, newlines, and link targets pass through untouched; a link’s alias is transliterated.
 
 ## The resident server
 

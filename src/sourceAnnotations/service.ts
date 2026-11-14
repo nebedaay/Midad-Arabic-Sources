@@ -81,6 +81,8 @@ export interface AnnotationHost {
 	confirmAdoption?: (file: TFile) => Promise<AdoptionOptions | null>;
 	/** Move a legacy note to its canonical folder and return the moved file. */
 	moveAdoptionFile?: (file: TFile) => Promise<TFile | null>;
+	/** Archive the adopted note's current body as Version 0. */
+	archiveAdoptedVersion?: (file: TFile) => Promise<void>;
 }
 
 function cmOf(view: MarkdownView): EditorView | null {
@@ -441,8 +443,9 @@ export class AnnotationService {
 			await this.app.vault.adapter.write(normalizePath(file.path), ensured);
 		}
 		this.resolver.invalidate();
+		await this.host.archiveAdoptedVersion?.(file);
 		void this.host.refreshRegistry?.();
-		new Notice("Note adopted. Select text to annotate it; move the mas-managed tags if you want some content outside the generated region.");
+		new Notice("Note adopted. Select text to annotate it; its current body was saved as version 0.");
 		window.setTimeout(() => {
 			void this.refreshViews();
 			refreshReadingViews(this.app);
@@ -1941,6 +1944,11 @@ export class AnnotationService {
 		return removed;
 	}
 
+
+	/** Paths currently registered as adopted notes. */
+	adoptedPaths(): string[] {
+		return this.adoption.all().filter((entry) => entry.kind === "note").map((entry) => entry.path);
+	}
 
 	/** Remove a note from the adopted-note registry when it is detached from Midad. */
 	async unadoptNote(file: TFile): Promise<boolean> {

@@ -230,6 +230,12 @@ def run(input_path, out_path=None, metadata=False, tafsir=False):
     content, open_links = tfq.link_open_fragments(content, tafsir=tafsir)
     print(f"  Open-fragment links: {open_links}")
 
+    if tafsir:
+        content, short_fragments = tfq.mark_short_fragments(content)
+        print(f"  Short verse fragments: {short_fragments}")
+        content, repeated = tfq.keep_first_verse_link(content)
+        print(f"  Repeated verse links removed: {repeated}")
+
     content, stripped = tfq.strip_false_quran(content)
     print(f"  False Qur'an stripped: {stripped}")
     
@@ -257,6 +263,10 @@ def run(input_path, out_path=None, metadata=False, tafsir=False):
     markers = len(re.findall(r'\{\.quran-quote\}', content))
     print(f"  Total markers: {markers}")
 
+    if tafsir:
+        content, verse_headings = tfq.insert_verse_headings(content)
+        print(f"  Verse headings: {verse_headings}")
+
     # Final repair of page headings, in case the Qur'an/tashkīl steps touched
     # one (e.g. "#### p * 310", or a heading glued onto a preceding line).
     content = re.sub(r'([^\n])(####\s+p\.?\s*\*?\s*\d+\s*)$', r'\1\n\n\2', content, flags=re.M)
@@ -265,6 +275,7 @@ def run(input_path, out_path=None, metadata=False, tafsir=False):
     # Enforce one blank line between all blocks (fixes "text\n---" setext
     # headings) and collapse any excess.
     content = pp.normalize_spacing(content)
+    content = pp.normalize_page_separators(content)
     content = tfq.strip_orphan_quote_classes(content)
     content, raw_citations = tfq.strip_raw_quran_citations(content)
     print(f"  Raw Qur'an citations removed: {raw_citations}")
@@ -272,7 +283,10 @@ def run(input_path, out_path=None, metadata=False, tafsir=False):
     print(f"  Redundant raw citations removed: {redundant_citations}")
     content, display_fixed = tfq.normalize_quran_link_display(content)
     print(f"  Qur'an link displays normalised: {display_fixed}")
-    content, repeated_links = tfq.dedupe_same_verse_links(content)
+    if tafsir:
+        content, repeated_links = tfq.keep_first_verse_link(content)
+    else:
+        content, repeated_links = tfq.dedupe_same_verse_links(content)
     print(f"  Repeated same-verse links removed: {repeated_links}")
 
     # Escape source citations last, after every citation/link pass has run.

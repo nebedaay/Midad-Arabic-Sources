@@ -55,12 +55,16 @@ The plugin **downloads no fonts and embeds none** — Obsidian's review rules fo
 | **DigitalKhatt New Madina** | Qur'ānic text (preferred) | DigitalKhatt project (free) |
 | **Amiri Quran** | Qur'ānic text fallback | Google Fonts (SIL OFL) |
 | **KFGQPC Uthmanic Script HAFS** | ۝ verse emblem | King Fahd Complex (free download) |
+| **KFGQPC Warsh** or **DigitalKhatt Warsh** | Warsh riwāya (preferred) | King Fahd Complex / DigitalKhatt project |
+| **Harmattan** | Warsh riwāya (Maghribi / West African) | Google Fonts (SIL OFL) |
 
 The stacks are defined once in `styles.css`:
 
 - `--latin-font`: Noto Serif, then Charter, Georgia, Times New Roman, Liberation Serif.
 - `--arabic-font`: Scheherazade New, Noto Naskh Arabic, Amiri, then the system faces (Traditional Arabic, Arabic Typesetting, Simplified Arabic, Sakkal Majalla on Windows; Al Bayan, Geeza Pro, Baghdad on macOS).
 - `--quran-font`: DigitalKhatt New Madina, then KFGQPC HAFS, Amiri Quran, and the Arabic stack. DigitalKhatt supplies the Qur'ānic text and the U+06DF mark; KFGQPC is used for the ۝ verse emblem through `--quran-emblem-font`.
+
+A Warsh note carries `quran-warsh`, which selects its own stack (`--quran-warsh-font`): **Harmattan** first (the SIL Maghribi face), then the dedicated Warsh fonts, then Scheherazade New. Warsh editions print Maghribi Qur'ānic marks such as U+06EC (rounded high stop) and the imāla signs; a font without those glyphs shows a dotted circle for each one.
 
 If a face is missing, rendering continues with the next one; nothing breaks. To use a different typeface, override these variables in a CSS snippet:
 

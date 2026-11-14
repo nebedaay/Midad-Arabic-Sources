@@ -221,7 +221,13 @@ def strip_raw_quran_citations(content: str) -> tuple[str, int]:
             return ''
         return value
 
-    return pattern.sub(repl, content), removed
+    # A heading's own link is navigation, not a source citation: never strip it.
+    lines = content.split("\n")
+    for index, line in enumerate(lines):
+        if line.lstrip().startswith("#"):
+            continue
+        lines[index] = pattern.sub(repl, line)
+    return "\n".join(lines), removed
 
 
 def strip_redundant_raw_citations(content: str) -> tuple[str, int]:
@@ -268,7 +274,13 @@ def normalize_quran_link_display(content: str) -> tuple[str, int]:
             changed += 1
         return replacement
 
-    return pattern.sub(repl, content), changed
+    # Verse headings carry a `S:V` display that must stay as written.
+    lines = content.split("\n")
+    for index, line in enumerate(lines):
+        if line.lstrip().startswith("#"):
+            continue
+        lines[index] = pattern.sub(repl, line)
+    return "\n".join(lines), changed
 
 
 def dedupe_same_verse_links(content: str) -> tuple[str, int]:
@@ -401,6 +413,8 @@ def find_verse_in_text(arabic_text: str, possible_suras: list[int] = None,
       3. the whole Qur'an.
     """
     normalized_input = normalize_arabic(arabic_text)
+    # A short fragment is still resolvable inside the verse a commentary is
+    # discussing; only a whole-Qur'ān search needs the longer minimum.
     if len(normalized_input) < 5:
         return []
 
@@ -641,7 +655,7 @@ def _extract_tashkil_by_index(
         result.append(verse[vi])
         vi += 1
     
-    fragment = "".join(result)
+    fragment = _strip_leading_marks("".join(result))
     
     # Verify: if normalized output doesn't match expected, try ±2 offset
     expected_norm = normalized_verse[norm_idx:norm_idx + norm_len]
@@ -658,7 +672,7 @@ def _extract_tashkil_by_index(
                 adj_result.append(verse[vi2])
                 col2 += contrib[vi2] if vi2 < len(contrib) else 0
                 vi2 += 1
-            adj_frag = "".join(adj_result)
+            adj_frag = _strip_leading_marks("".join(adj_result))
             if norm_func(adj_frag) == expected_norm:
                 return adj_frag
     
@@ -836,8 +850,6 @@ def discover_and_mark_quotes(content: str, tafsir: bool = False) -> tuple[str, l
                 hint_verse=focus_v if tafsir else None,
             )
         if not results and not hint and tafsir and focus_s and len(text_clean.split()) <= 4:
-            # In a commentary a very short fragment is usually the next words
-            # of the verse already under discussion.
             after = find_verse_after(normalize_arabic(text_clean), focus_s, focus_v, 0)
             if after:
                 verse_no = after[0]
@@ -1263,6 +1275,394 @@ def add_missing_refs(content: str) -> tuple[str, int]:
 
 
 # ── Cross-page Qur'an quotes ────────────────────────────────────────────────
+
+BARE_QUOTE_REF = re.compile(
+    "\ufd3f([^\ufd3e\n]{1,400})\ufd3e"          # ﴿ quote ﴾ on one line
+    r"(\s*\(\[\[(\d{3})\s+[^#\]]+#(\d+)\|[^\]]*\]\])"  # ([[004 An-Nisa#129|…]])
+)
+
+
+def _fragment_span(verse_text: str, fragment: str) -> bool:
+    """True when `fragment` sits on whole words inside the canonical verse.
+
+    A match that begins or ends in the middle of a word is almost certainly a
+    coincidental alignment (the normalizer drops whitespace and alefs), so the
+    caller keeps the author's spelling instead.
+    """
+    position = verse_text.find(fragment)
+    if position < 0:
+        return False
+    if position > 0:
+        before = verse_text[position - 1]
+        if before.isalpha() or unicodedata.category(before).startswith("Mn"):
+            return False
+    end = position + len(fragment)
+    if end < len(verse_text):
+        after = verse_text[end]
+        if after.isalpha() or unicodedata.category(after).startswith("Mn"):
+            return False
+    return True
+
+
+def _strip_leading_marks(text: str) -> str:
+    """Drop combining marks that belong to the word before a fragment."""
+    text = text.lstrip()
+    index = 0
+    while index < len(text) and unicodedata.category(text[index]).startswith("Mn"):
+        index += 1
+    return text[index:]
+
+
+def canonicalize_quran_quotes(content: str) -> tuple[str, int]:
+    """Rewrite bare ``﴿…﴾`` quotes as the canonical tashkīl of the cited verse.
+
+    Matching runs through `normalize_arabic`, which drops whitespace and
+    diacritics, so OCR spacing slips such as ``فَ إِنَّ`` are repaired to the
+    canonical ``فَإِنَّ`` instead of being preserved. Only quotes that already
+    carry a single-verse citation are touched: cross-verse ranges, quotes
+    assembled from several fragments, and quotes that do not match their verse
+    are left exactly as they are.
+
+    This is the final safety net for already-rendered notes, where the quote
+    text arrived from OCR and the citation link was added later.
+    """
+    changed = 0
+
+    def _replace(match: re.Match) -> str:
+        nonlocal changed
+        quote = match.group(1)
+        if " * " in quote or "\ufd3f" in quote or "\ufd3e" in quote:
+            return match.group(0)
+        surah, verse = int(match.group(3)), int(match.group(4))
+        fragment = get_tashkil_fragment(quote, surah, verse)
+        if not fragment:
+            return match.group(0)
+        fragment = _strip_leading_marks(fragment).rstrip()
+        if not fragment or fragment == quote.strip():
+            return match.group(0)
+        verse_text = load_verse(surah, verse) or ""
+        if not _fragment_span(verse_text, fragment):
+            # The match begins or ends inside a canonical word: a coincidental
+            # alignment (the normalizer drops spaces and alefs). Keep the
+            # author's spelling instead of emitting a broken fragment.
+            return match.group(0)
+        changed += 1
+        return f"\ufd3f{fragment}\ufd3e{match.group(2)}"
+
+    return BARE_QUOTE_REF.sub(_replace, content), changed
+
+
+_VERSE_QUOTE_REF = re.compile(
+    r"(?:\*)?\ufd3f[^\ufd3e\n]{1,400}\ufd3e(?:\{\.quran-quote\})?\*?"
+    r"[ \t]*\(\[\[\s*(\d{3})[^#\]]*#(\d+)\|[^\]]*\]\]"
+    r"(?:[ \t]*[\u2013\u2014-][ \t]*\[\[\s*(\d{3})[^#\]]*#(\d+)\|[^\]]*\]\])?\)"
+)
+
+_VERSE_HEADING = re.compile(
+    r"^#####[ \t]+\[\[\s*\d{3}[^#\]]*#\d+\|\d+:\d+\]\]"
+    r"(?:[ \t]*[\u2013\u2014-][ \t]*\[\[\s*\d{3}[^#\]]*#\d+\|\d+:\d+\]\])?[ \t]*$"
+)
+
+_EMPTY_VERSE_HEADING = re.compile(r"^#####[ \t]*(?:\\?\[\])*[ \t]*$")
+
+
+def _verse_heading(stem: str, surah: int, start: int, end: int | None) -> str:
+    if end and end != start:
+        return (
+            f"##### [[{stem}#{start}|{surah}:{start}]]"
+            f"\u2013[[{stem}#{end}|{surah}:{end}]]"
+        )
+    return f"##### [[{stem}#{start}|{surah}:{start}]]"
+
+
+def _surah_continues(quotes, start: int, surah: int, window: int, least: int) -> bool:
+    return sum(1 for q in quotes[start:start + window] if q[2] == surah) >= least
+
+
+_VERSE_LINK = (
+    r"\[\[\s*\d{3}[^#\]]*#\d+\|\d+:\d+(?:[\u2013\u2014-]\d+:\d+)?\]\]"
+)
+_LEGACY_VERSE_LINK = (
+    r"\[\[\s*\d{3}[^#\]]*#\d+\|\d+:\d+\]\]"
+    r"(?:[ \t]*[\u2013\u2014-][ \t]*\[\[\s*\d{3}[^#\]]*#\d+\|\d+:\d+\]\])?"
+)
+_VERSE_HEADING = re.compile(r"^#####[ \t]+" + _LEGACY_VERSE_LINK + r"[ \t]*$")
+_VERSE_MARKER = re.compile(
+    r"\*\*(?:" + _VERSE_LINK + r"|" + _LEGACY_VERSE_LINK + r")\*\*")
+_EMPTY_VERSE_HEADING = re.compile(r"^#####[ \t]*(?:\\?\[\])*[ \t]*$")
+
+
+def _verse_marker(stem: str, surah: int, start: int, end: int | None) -> str:
+    """One link carries the marker; a range is the link's display text.
+
+    Keeping the whole marker a single wikilink means the editor renders it as
+    one link, and the plugin can style that link's text directly.
+    """
+    display = f"{surah}:{start}" if not end or end == start else f"{surah}:{start}\u2013{surah}:{end}"
+    return f"**[[{stem}#{start}|{display}]]**"
+
+
+def insert_verse_headings(content: str) -> tuple[str, int]:
+    """Mark each newly introduced verse inline, at the point it is quoted.
+
+    A tafsīr works through the muṣḥaf in order, citing other verses in passing.
+    The main verse therefore advances by one (a verse or two may be skipped),
+    while a passing citation goes backwards, jumps far ahead, or belongs to
+    another sūra. The marker is written inline as ``**[[004 An-Nisa#26|4:26]]**``
+    and the plugin moves it into the note's right margin, so a verse may change
+    mid-sentence without breaking the paragraph. A range gets a range marker.
+
+    Older renders used a ``#####`` block heading instead, which split the
+    paragraph. Those headings are converted back to inline markers and the
+    paragraph is rejoined before the markers are recomputed.
+
+    The pass is idempotent: markers from a previous run are removed first.
+    """
+    lines = content.split("\n")
+
+    # 1. Legacy block headings become inline markers, and the paragraph they
+    #    split is rejoined (the split added the heading plus one blank line).
+    rejoined: list[str] = []
+    in_fence = False
+    i = 0
+    while i < len(lines):
+        stripped = lines[i].strip()
+        if stripped.startswith("```") or stripped.startswith("~~~"):
+            in_fence = not in_fence
+            rejoined.append(lines[i])
+            i += 1
+            continue
+        heading = None if in_fence else _VERSE_HEADING.match(stripped)
+        empty = None if in_fence else _EMPTY_VERSE_HEADING.match(stripped)
+        if heading or empty:
+            marker = "**" + stripped[5:].strip() + "**" if heading else ""
+            j = i + 1
+            while j < len(lines) and not lines[j].strip():
+                j += 1
+            if j < len(lines):
+                # The heading was inserted mid-paragraph, so the break it made
+                # is removed: the marker goes between the two halves, and the
+                # paragraph is rejoined. Only a heading after a callout, page
+                # rule, or another heading cannot be joined backwards.
+                previous = ""
+                for line in reversed(rejoined):
+                    if line.strip():
+                        previous = line.strip()
+                        break
+                joinable = bool(previous) and not previous.startswith((">", "#")) and previous != "---"
+                if joinable:
+                    while rejoined and not rejoined[-1].strip():
+                        rejoined.pop()
+                    rejoined[-1] = rejoined[-1].rstrip() + " " + marker + lines[j].lstrip()
+                else:
+                    lines[j] = marker + lines[j]
+                    rejoined.append(lines[j])
+                i = j + 1
+                continue
+            i += 1
+            continue
+        rejoined.append(lines[i])
+        i += 1
+    lines = rejoined
+
+    # 1b. A marker that starts its own paragraph is still holding a break the
+    #     old heading made. Join it back to the paragraph above, so the marker
+    #     sits inside the sentence where the verse actually changes.
+    merged: list[str] = []
+    for line in lines:
+        stripped = line.lstrip()
+        marker = _VERSE_MARKER.match(stripped)
+        if marker and merged:
+            k = len(merged) - 1
+            while k >= 0 and not merged[k].strip():
+                k -= 1
+            previous = merged[k].strip() if k >= 0 else ""
+            joinable = bool(previous) and not previous.startswith((">", "#", "<")) and previous != "---"
+            if joinable:
+                del merged[k + 1:]
+                merged[k] = (merged[k].rstrip() + " "
+                             + stripped[:marker.end()] + stripped[marker.end():])
+                continue
+        merged.append(line)
+    lines = merged
+
+    # 2. Drop markers from a previous run; they are re-derived from the links.
+    lines = [_VERSE_MARKER.sub("", line) for line in lines]
+
+    # 3. Collect the quoted verses in document order.
+    quotes: list[tuple[int, int, int, int, int]] = []
+    in_fence = False
+    for index, line in enumerate(lines):
+        stripped = line.lstrip()
+        if stripped.startswith("```") or stripped.startswith("~~~"):
+            in_fence = not in_fence
+            continue
+        if in_fence or stripped.startswith((">", "|", "#")):
+            continue
+        for match in _VERSE_QUOTE_REF.finditer(line):
+            surah = int(match.group(1))
+            verse = int(match.group(2))
+            end = int(match.group(4)) if match.group(4) else verse
+            if quotes and quotes[-1][2:] == (surah, verse, end):
+                continue
+            quotes.append((index, match.start(), surah, verse, end))
+
+    # 4. Walk the progression and place a marker where each new verse begins.
+    marks: dict[int, list[tuple[int, str]]] = {}
+    current: tuple[int, int] | None = None
+    stems: dict[int, str] = {}
+    for i, (line_index, offset, surah, verse, end) in enumerate(quotes):
+        if current is None:
+            new_verse = True
+        else:
+            current_surah, current_verse = current
+            if surah == current_surah and 1 <= verse - current_verse <= 3:
+                # The discussion runs forwards; a verse or two may be skipped.
+                # A bigger forward jump is a passing cross-reference.
+                new_verse = True
+            elif verse <= 10 and surah > current_surah and _surah_continues(
+                    quotes, i + 1, surah, 6, 3):
+                new_verse = True
+            else:
+                # Earlier verse or another sūra: a passing cross-reference.
+                new_verse = False
+        if not new_verse:
+            continue
+        if surah not in stems:
+            stems[surah] = get_surah_name(surah)[0]
+        marks.setdefault(line_index, []).append(
+            (offset, _verse_marker(stems[surah], surah, verse, end)))
+        current = (surah, end)
+
+    # 5. Insert inline, from the end of each line backwards so offsets hold.
+    out: list[str] = []
+    for index, line in enumerate(lines):
+        for offset, text in sorted(marks.get(index, ()), reverse=True):
+            line = line[:offset] + text + line[offset:]
+        out.append(line)
+    return "\n".join(out), sum(len(items) for items in marks.values())
+
+
+
+
+def keep_first_verse_link(content: str) -> tuple[str, int]:
+    """In a commentary, cite a verse once, not on every repetition.
+
+    The link is kept on the first quotation of a verse and on the first one
+    after a cross-reference to a different verse; the repeats in between lose
+    their link but keep the quote. This is what keeps a tafsīr readable when it
+    returns to the same words again and again.
+    """
+    pattern = re.compile(
+        r"﴿([^﴾\n]{1,400})﴾"
+        r"(\s*)\(\[\[(\d{3})[^#\]]*#(\d+)\|[^\]]*\]\]\)"
+    )
+    edits: list[tuple[int, int]] = []
+    previous: tuple[int, int] | None = None
+    for match in pattern.finditer(content):
+        target = (int(match.group(3)), int(match.group(4)))
+        if target == previous:
+            edits.append((match.start(2), match.end()))
+        previous = target
+    for start, end in reversed(edits):
+        content = content[:start] + content[end:]
+    return content, len(edits)
+
+
+def mark_short_fragments(content: str) -> tuple[str, int]:
+    """Mark a bare parenthetical that quotes the verse under discussion.
+
+    A tafsīr quotes a verse word by word — `(أَنْ تَبْتَغُوا) …` — and a
+    whole-Qur'ān search cannot resolve one or two words. In a commentary the
+    phrase is unambiguous when it follows the verse just quoted:
+
+      1. the next words of that verse, tracked with a cursor so the excerpts
+         advance through the āya in order (this is what makes even one word
+         safe);
+      2. elsewhere in the same verse, when it is a multi-word phrase;
+      3. the opening words of the next verse, when the previous quotation
+         reached the end of its verse.
+
+    "قال" is not required: a bare parenthetical is a candidate on its own.
+    """
+    verse_ref = re.compile(r"\(\[\[(\d{3})[^#\]]*#(\d+)\|[^\]]*\]\]\)")
+    paren = re.compile(r"\(([^()\n]{2,160})\)")
+    edits: list[tuple[int, int, str]] = []
+    cursor: tuple[int, int, int] | None = None
+    for match in paren.finditer(content):
+        inner = match.group(1)
+        if not re.search(r"[\u0621-\u064A]", inner):
+            continue
+        if "[[" in inner or "]]" in inner or "|" in inner:
+            continue  # a citation link's display, not a quotation
+        before = content[:match.start()]
+        if before.rstrip().endswith(("\ufdfa", "\ufdf3")):
+            continue
+        if "﴿" in before[-200:] and "﴾" not in before[before.rfind("﴿"):]:
+            continue  # inside an open quote
+        refs = list(verse_ref.finditer(before))
+        if not refs:
+            continue
+        surah, verse = int(refs[-1].group(1)), int(refs[-1].group(2))
+        norm = normalize_arabic(inner)
+        if len(norm) < 2:
+            continue
+
+        found: tuple[int, int, str] | None = None
+        verse_text = load_verse(surah, verse) or ""
+        normalized_verse = normalize_arabic(verse_text)
+
+        # 1. Continue from the cursor in this verse. The cursor is anchored to
+        # the words of the quotation that precedes this fragment, so a gloss
+        # word that merely appears somewhere in the verse cannot match.
+        start_at = 0
+        if cursor and cursor[0] == surah and cursor[1] == verse:
+            start_at = cursor[2]
+        quotes_before = list(re.finditer(r"﴿([^﴾]{1,120})﴾", before))
+        if quotes_before:
+            quote_norm = normalize_arabic(quotes_before[-1].group(1))
+            quote_at = normalized_verse.find(quote_norm, start_at)
+            if quote_at >= 0:
+                start_at = quote_at + len(quote_norm)
+        idx = normalized_verse.find(norm, start_at)
+        if idx >= 0 and idx == start_at:
+            candidate = _extract_tashkil_by_index(verse_text, idx, len(norm), normalized_verse)
+            if _fragment_span(verse_text, candidate):
+                found = (surah, verse, candidate)
+                cursor = (surah, verse, idx + len(norm))
+
+        # 2. A multi-word phrase may sit anywhere in the verse.
+        if found is None and len(inner.split()) >= 2:
+            idx = normalized_verse.find(norm)
+            if idx >= 0:
+                candidate = _extract_tashkil_by_index(verse_text, idx, len(norm), normalized_verse)
+                if _fragment_span(verse_text, candidate):
+                    found = (surah, verse, candidate)
+                    cursor = (surah, verse, idx + len(norm))
+
+        # 3. The opening words of the next verse.
+        if found is None:
+            following = load_verse(surah, verse + 1)
+            if following:
+                opening = " ".join(following.split()[:6])
+                if norm in normalize_arabic(opening):
+                    nxt = normalize_arabic(following)
+                    idx = nxt.find(norm)
+                    if idx >= 0:
+                        candidate = _extract_tashkil_by_index(following, idx, len(norm), nxt)
+                        if _fragment_span(following, candidate):
+                            found = (surah, verse + 1, candidate)
+                            cursor = (surah, verse + 1, idx + len(norm))
+
+        if not found:
+            continue
+        edits.append((match.start(), match.end(),
+                      render_quran_quote(found[2], "full", found[0], found[1])))
+
+    for start, end, replacement in reversed(edits):
+        content = content[:start] + replacement + content[end:]
+    return content, len(edits)
+
 
 def _norm_char(c: str) -> str:
     """Per-character equivalent of normalize_arabic (for index mapping)."""

@@ -44,6 +44,7 @@ try:
         MANAGED_CLOSE,
         MANAGED_OPEN,
         normalize_managed_marker_spacing,
+        unwrap_quran_quotes,
         wrap_managed_body,
     )
 except Exception:  # direct use without the shared module
@@ -52,6 +53,8 @@ except Exception:  # direct use without the shared module
     LEGACY_MANAGED_OPEN = "%%mas-managed%%"
     LEGACY_MANAGED_CLOSE = "%%/mas-managed%%"
     def normalize_managed_marker_spacing(text):
+        return text
+    def unwrap_quran_quotes(text):
         return text
     def wrap_managed_body(body):
         return f"{MANAGED_OPEN}\n\n{body.strip()}\n\n{MANAGED_CLOSE}"
@@ -539,7 +542,8 @@ def build_yaml(citekey: str, doc_type: str, related: list[str], volume: int = No
                title_ar: str = "", authors_ar: list[str] | None = None,
                shorttitle_ar: str = "", editors_ar: list[str] | None = None,
                unit: str | None = None,
-               up: list[str] | None = None, arabic: bool = False) -> str:
+               up: list[str] | None = None, arabic: bool = False,
+               cssclasses: list[str] | None = None, tafsir: bool = False) -> str:
     """Build YAML frontmatter from the Zotero reference and the aliases.
 
     A standalone transcription (a PDF the user chose directly, with no Zotero
@@ -668,6 +672,13 @@ title: "{_yaml_quote(title)}"
     else:
         yaml += "topics: []\n"
 
+    classes = [c for c in (cssclasses or []) if c and c != "tafsir"]
+    if tafsir:
+        classes.insert(0, "tafsir")
+    if classes:
+        yaml += "cssclasses:\n"
+        for value in classes:
+            yaml += f'  - "{_yaml_quote(value)}"\n'
     yaml += "---\n"
     return yaml
 
@@ -813,7 +824,7 @@ def write_note(body: str, citekey: str, doc_type: str, related: list[str] = None
                volume: int = None, standalone: bool = False,
                title: str | None = None, authors: list[str] | None = None,
                unit: str | None = None, cover: dict | None = None,
-               dest_override: Path | None = None) -> Path:
+               dest_override: Path | None = None, tafsir: bool = False) -> Path:
     """Build the YAML and write the finished note. Returns its path."""
     related = related or []
     cover = cover or {}
@@ -848,7 +859,13 @@ def write_note(body: str, citekey: str, doc_type: str, related: list[str] = None
                       authors=authors, editors=editors, topics=_existing_topics(dest),
                       title_ar=title_ar, authors_ar=authors_ar,
                       shorttitle_ar=shorttitle_ar, editors_ar=editors_ar,
-                      unit=unit, up=_existing_list(dest, "up"), arabic=is_arabic)
+                      unit=unit, up=_existing_list(dest, "up"), arabic=is_arabic,
+                      cssclasses=_existing_list(dest, "cssclasses"),
+                      tafsir=tafsir)
+    existing_created = _existing_scalar(dest, "created")
+    if existing_created:
+        yaml = re.sub(r"^created:.*$", f"created: {existing_created}", yaml, count=1, flags=re.M)
+    body = unwrap_quran_quotes(body)
     text = normalize_managed_marker_spacing(yaml + "\n" + _managed_body(dest, body))
     dest.write_text(text, encoding="utf-8")
     if not standalone and not unit:

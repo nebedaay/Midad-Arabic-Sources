@@ -22,7 +22,19 @@ SCRIPTS = Path(__file__).resolve().parent
 if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
-from text_postprocess import escape_literal_brackets, normalize_arabic_footnotes, normalize_managed_marker_spacing
+from text_postprocess import (
+    MANAGED_CLOSE,
+    MANAGED_OPEN,
+    LEGACY_MANAGED_CLOSE,
+    LEGACY_MANAGED_OPEN,
+    escape_literal_brackets,
+    normalize_arabic_footnotes,
+    normalize_managed_marker_spacing,
+    normalize_page_separators,
+    cleanup_quran_citations,
+    unwrap_quran_quotes,
+    wrap_quran_quotes_for_processing,
+)
 
 
 def _load(name: str):
@@ -97,27 +109,80 @@ def normalize_markdown_spacing(text: str) -> str:
     while len(out) > 1 and out[-1] == "" and out[-2] == "":
         out.pop()
     return "\n".join(out)
-def update_markdown(text: str, *, quran: bool = True, tafsir: bool = False) -> str:
-    """Apply the guarded Markdown-update layer."""
-    body, fences = _protect_fences(text)
+def _update_markdown_body(body: str, *, quran: bool, tafsir: bool) -> str:
+    body = unwrap_quran_quotes(body)
+    body = wrap_quran_quotes_for_processing(body)
+    tfq = _load("transcription-quran.py")
+    if tafsir:
+        # Split first: the heading pass breaks a page-wide paragraph at each
+        # verse, which also lets quote discovery see short passages it would
+        # otherwise skip.
+        body, _ = tfq.insert_verse_headings(body)
     if quran:
-        tfq = _load("transcription-quran.py")
         body, _ = tfq.discover_and_mark_quotes(body, tafsir=tafsir)
         body, _ = tfq.add_missing_refs(body)
         body, _ = tfq.fix_wikilinks(body)
+    if tafsir:
+        body, _ = tfq.mark_short_fragments(body)
+        body, _ = tfq.insert_verse_headings(body)
     body = escape_literal_brackets(body)
     # Add links to bare Arabic/Western TOC entries and force Arabic TOC lines
     # RTL without touching existing TOC links.
     fmt = _load("transcription-format.py")
     body = fmt.format_toc_entries(body)
     body = normalize_arabic_footnotes(body)
+    body = cleanup_quran_citations(body)
+    body = unwrap_quran_quotes(body)
+    body, _ = tfq.canonicalize_quran_quotes(body)
+    if tafsir:
+        body, _ = tfq.keep_first_verse_link(body)
+    body = cleanup_quran_citations(body)
     # The source formatter's spacing rules are block-level and idempotent; the
     # raw-only page-number, OCR-heading, poetry, footnote, and TOC conversions
     # deliberately do not run here.
     body = normalize_markdown_spacing(body)
+    body = normalize_page_separators(body)
+    return body
+
+
+def update_markdown(text: str, *, quran: bool = True, tafsir: bool = False) -> str:
+    """Apply the guarded Markdown-update layer, preserving managed markers."""
+    body, fences = _protect_fences(text)
+    body = normalize_managed_marker_spacing(body)
+    marker = next(
+        (
+            (open_mark, close_mark)
+            for open_mark, close_mark in (
+                (MANAGED_OPEN, MANAGED_CLOSE),
+                (LEGACY_MANAGED_OPEN, LEGACY_MANAGED_CLOSE),
+            )
+            if body.find(open_mark) >= 0 and body.find(close_mark, body.find(open_mark) + len(open_mark)) >= 0
+        ),
+        None,
+    )
+    if marker:
+        open_mark, close_mark = marker
+        start = body.find(open_mark)
+        end = body.find(close_mark, start + len(open_mark)) + len(close_mark)
+        before = body[:start]
+        inner = body[start + len(open_mark):end - len(close_mark)].strip("\n")
+        after = body[end:]
+        inner = _update_markdown_body(inner, quran=quran, tafsir=tafsir)
+        body = f"{before}{open_mark}\n\n{inner}\n\n{close_mark}{after}"
+    else:
+        body = _update_markdown_body(body, quran=quran, tafsir=tafsir)
     body = normalize_managed_marker_spacing(body)
     body = _restore_fences(body, fences)
     return body
+
+def _looks_like_tafsir(yaml_text: str) -> bool:
+    """Whether a note's frontmatter marks it as a tafsīr transcription."""
+    if not yaml_text:
+        return False
+    text = yaml_text.lower()
+    if re.search(r"midad-transcription-mode:\s*[\"']?tafsir", text):
+        return True
+    return "midad topic - tafs" in text
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -132,7 +197,8 @@ def main(argv: list[str] | None = None) -> int:
     note = Path(args.note).resolve()
     original = note.read_text(encoding="utf-8")
     yaml, body = _split_frontmatter(original)
-    updated = update_markdown(body, quran=not args.no_quran, tafsir=args.tafsir)
+    tafsir = args.tafsir or _looks_like_tafsir(yaml)
+    updated = update_markdown(body, quran=not args.no_quran, tafsir=tafsir)
     result = (yaml.rstrip("\n") + "\n\n" + updated) if yaml else updated
     changed = result != original
     if changed:

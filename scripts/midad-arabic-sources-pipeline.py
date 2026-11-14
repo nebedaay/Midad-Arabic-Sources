@@ -1003,7 +1003,7 @@ def cmd_postprocess_note(args) -> int:
         dest = mv.write_note(
             processed_body, citekey, doc_type, related=related,
             volume=volume, standalone=standalone, title=title, authors=authors,
-            unit=unit,
+            unit=unit, tafsir=tafsir,
             dest_override=note if getattr(args, "in_place", False) else None)
     consolidated = None
     if volume is not None:

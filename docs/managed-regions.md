@@ -56,7 +56,7 @@ mas-citekey - translation
 
 This is the format Midad’s own transcription/translation pipeline writes. A file named differently is not auto-recognized; use **Adopt note for annotations** instead.
 
-For any other Markdown note, **Adopt note for annotations** adds an `adopted/<uuid>` identity and wraps its body in a managed region. Annotations and saved versions are tied to the note’s identity, so adopt before making extensive annotations when possible.
+For any other Markdown note, **Adopt note for annotations** adds an `adopted/<uuid>` identity, wraps its body in a managed region, and archives the current body as an explicit **Version 0**. Later changes can be saved as Version 1 and later, or reverted to the adopted original. Annotations and saved versions are tied to the note’s identity, so adopt before making extensive annotations when possible.
 
 ## Unadopting
 

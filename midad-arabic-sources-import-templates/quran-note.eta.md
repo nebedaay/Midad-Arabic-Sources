@@ -3,7 +3,7 @@
 <% /* Retired: quran notes are identified by their template/model and path. */ -%>
 <% add_property('tags', '', { merge: 'remove' }); -%>
 <% add_property('total_verses', unit.blocks.length); -%>
-<% add_property('created', generated); -%>
+<% add_property('created', generated, { merge: 'keep' }); -%>
 <% add_property('updated', updated()); -%>
 <% add_property('midad-up', [unit.section_page ? wikilink(unit.section_page) : null, wikilink(work.dir)].filter(Boolean)); -%>
 <% add_property('related', [], { force: true, merge: 'keep' }); -%>
@@ -14,16 +14,25 @@
 <% const aliasList = work.aliases.slice(0, 1).map(a => `${a} - ${unit.base}`); -%>
 <% if (work.canonical) { aliasList.push(unit.translit, unit.arabic); } -%>
 <% add_property('aliases', aliasList); -%>
-<% add_property('cssclasses', [work.language === 'ar' ? 'quran-ar' : 'quran-en'], { quote: 'never' }); -%>
+<% const riwayaKey = String(work.dir || work.title || '').normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase(); -%>
+<% const quranClasses = [work.language === 'ar' ? 'quran-ar' : 'quran-en']; -%>
+<% for (const [key, cls] of [['warsh', 'quran-warsh'], ['qalun', 'quran-qalun'], ['duri', 'quran-duri'], ['susi', 'quran-susi']]) { if (riwayaKey.includes(key)) quranClasses.push(cls); } -%>
+<% add_property('cssclasses', quranClasses, { quote: 'never' }); -%>
 <%~ end_YAML() %>
 <span class="mas-managed">mas-managed</span>
 
+<% const firstBody = (unit.blocks && unit.blocks[0] && unit.blocks[0].body) || ""; -%>
+<% const firstPlain = firstBody.normalize("NFKD").replace(/[\u0300-\u036f\u064b-\u065f\u0670\u06d6-\u06ed]/g, "").replace(/[\u0671\u0622\u0623\u0625]/g, "\u0627").replace(/\s+/g, ""); -%>
+<% if (!firstPlain.startsWith("\u0628\u0633\u0645") && String(unit.id) !== "9") { -%>
+بِسْمِ ٱللَّهِ ٱلرَّحْمَٰنِ ٱلرَّحِيمِ
+
+<% } -%>
 <% let prevHafs = []; -%>
 <% for (const b of unit.blocks) { -%>
 # <%= b.number %>
 
 <% const match = (b.hafs || []).find((n) => !prevHafs.includes(n)); -%>
-<% if (match != null) { -%>
+<% if (!work.canonical && match != null) { -%>
 ## [[<%= unit.base %>#<%= match %>|Ḥafṣ <%= match %>]]
 
 <% } -%>

@@ -146,7 +146,7 @@ Languages are derived from the source catalogue: each work gets a code and its E
 
 `note_stem` is added at render time and is the **authoritative name of the unit’s note** — the same value is used for the file and for the hub’s link to it, so a link can never name a note that was not written. (For the canonical riwāya it is the bare `base`, since its sūra notes are unprefixed in `canonical_root`.)
 
-`blocks[].ref` is a ready-made link such as `[[002 Al-Baqarah#2|البقرة : ٢]]`, so `[[Tafsīr al-Jalālayn - 002 Al-Baqarah#2]]` parallels `[[002 Al-Baqarah#2]]`. `blocks[].body` already has Qur’ān spans marked as `*﴿…﴾{.quran-quote}*`.
+`blocks[].ref` is a ready-made link such as `[[002 Al-Baqarah#2|البقرة : ٢]]`, so `[[Tafsīr al-Jalālayn - 002 Al-Baqarah#2]]` parallels `[[002 Al-Baqarah#2]]`. `blocks[].body` already has Qur’ān spans written as bare `﴿…﴾`; the plugin styles those spans in Live Preview and Reading view.
 
 ### Ḥadīth unit fields (`unit.kind === "hadith"`)
 
@@ -211,7 +211,7 @@ The classical dictionaries use the source’s own **`فصل`** level and the dic
 | `section_page` | the letter page’s name for a letter-index work; otherwise the volume note’s name (used by `midad-up`) |
 | `pages[]` | `{ vol, page, page_label, body }` — `page_label` is the printed page or `[unnumbered]` (a page the source leaves unnumbered); body is ready markdown |
 
-`toc-N` anchors are `<span data-type="title" id=toc-N>`; the chapter’s own anchor is dropped (the title carries it) and deeper ones become `##`/`###`. `﴿…﴾` becomes the vault’s `{.quran-quote}` span, and bracketed `sūra: āya` refs are linked to the canonical Qur’ān notes.
+`toc-N` anchors are `<span data-type="title" id=toc-N>`; the chapter’s own anchor is dropped (the title carries it) and deeper ones become `##`/`###`. `﴿…﴾` stays as bare ornate parentheses (the plugin styles it in Live Preview and Reading view), and bracketed `sūra: āya` refs are linked to the canonical Qur’ān notes.
 
 ### Book letter unit fields (`unit.kind === "book-letter"`)
 
@@ -266,7 +266,7 @@ Per-property merge strategies: `replace` (default — the template wins), `appen
 
 ## Auto-update when a template changes
 
-Managed regions, adoption, and identity are covered in [Managed regions, identity, and adoption](./managed-regions.md). The plugin keeps a template-hash timeline in `.midad-arabic-sources/template-history.json`. Each note records when it was rendered (`updated:`), so the plugin can tell which notes predate the current template.
+Managed regions, adoption, and identity are covered in [Managed regions, identity, and adoption](./managed-regions.md). The plugin keeps a template-hash timeline in `.midad-arabic-sources/template-history.json`. Each note records when it was rendered (`updated:`), so the plugin can tell which notes predate the current template. `created:` is merge-kept: the first-created timestamp survives every re-render.
 
 When you edit a template, the plugin offers to re-render the affected notes (the setting **“Update notes when templates change”** controls *Ask* / *Always* / *Never*). You can always re-render manually with **“Re-render imported sources”**.
 

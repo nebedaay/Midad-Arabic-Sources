@@ -157,7 +157,7 @@ function setFrontmatterList(content: string, key: string, values: string[]): str
 	const out: string[] = [];
 	let skip = false;
 	for (const line of lines) {
-		const property = /^([A-Za-z][\w-]*):/.exec(line);
+		const property = /^\s*([A-Za-z][\w-]*)\s*:/.exec(line);
 		if (property) {
 			skip = property[1] === key;
 			if (!skip) out.push(line);
@@ -171,7 +171,7 @@ function setFrontmatterList(content: string, key: string, values: string[]): str
 		out.push(`${key}:`);
 		for (const value of values) out.push(`  - "${value.replace(/"/g, '\\"')}"`);
 	}
-	return normalizeManagedMarkerSpacing(ensureManagedRegion(joinNote(out.join("\n"), prior.body)));
+	return sanitizeFrontmatter(normalizeManagedMarkerSpacing(ensureManagedRegion(joinNote(out.join("\n"), prior.body))));
 }
 
 function sanitizeFrontmatter(content: string): string {
@@ -185,10 +185,13 @@ function sanitizeFrontmatter(content: string): string {
 	let seen = new Set<string>();
 	const seenProperties = new Set<string>();
 	for (const line of front) {
-		const property = /^([A-Za-z][\w-]*):/.exec(line);
+		// Tolerate `  key :` variants: a duplicate that is not detected here is
+		// what makes the note's YAML invalid.
+		const property = /^\s*([A-Za-z][\w-]*)\s*:/.exec(line);
 		if (property) {
 			key = property[1];
-			if ((key === "midad-version" || key === "midad-version-name") && seenProperties.has(key)) continue;
+			if ((key === "midad-version" || key === "midad-version-name" || key === "other-versions"
+				|| key === "midad-transcription-mode") && seenProperties.has(key)) continue;
 			seenProperties.add(key);
 			seen = new Set<string>();
 			out.push(line);
@@ -229,7 +232,7 @@ function addVersionFrontmatter(content: string, id: string, otherLinks: string[]
 	const out: string[] = [];
 	let skip = false;
 	for (const line of lines) {
-		const property = /^([A-Za-z][\w-]*):/.exec(line);
+		const property = /^\s*([A-Za-z][\w-]*)\s*:/.exec(line);
 		if (property) {
 			skip = property[1] === "midad-version" || property[1] === "midad-version-name" || property[1] === "other-versions";
 			if (!skip) out.push(line);
@@ -404,6 +407,47 @@ export class VersionStore {
 
 	versionZeroPath(entry: NoteVersionEntry): string {
 		return versionZeroNotePath(entry);
+	}
+
+	/** Archive the current adopted-note body as its explicit Version 0. */
+	async saveAdoptedOriginal(file: TFile): Promise<NoteVersionEntry | null> {
+		const manifest = this.load();
+		const text = await this.app.vault.read(file);
+		const cleanText = sanitizeFrontmatter(text);
+		const key = noteKeyFromText(file, text);
+		let entry = manifest.notes[key];
+		if (entry?.versions.length) return null;
+		if (!entry) {
+			entry = {
+				key,
+				path: file.path,
+				title: file.basename.replace(/\.Version\d+$/i, ""),
+				defaultId: "v0",
+				versions: [],
+			};
+			manifest.notes[key] = entry;
+		}
+		const hash = normalizedHash(cleanText);
+		const version: SavedVersion = {
+			id: "v0",
+			label: "Version 0",
+			kind: "source",
+			savedAt: new Date().toISOString(),
+			file: versionFile(key, "v0"),
+			selected: true,
+			archived: false,
+		};
+		entry.versions.push(version);
+		entry.defaultId = "v0";
+		entry.virtualOriginal = false;
+		this.files[version.file] = strToU8(cleanText);
+		this.hashes.setVersionHash(entry.path, "v0", hash);
+		this.hashes.setBaseline(entry.path, hash);
+		this.save();
+		await this.app.fileManager.processFrontMatter(file, (fm: Record<string, unknown>) => {
+			fm["midad-version-name"] = "Version 0";
+		});
+		return entry;
 	}
 
 	/** Write the separately rendered Version 0 note without archiving a snapshot. */
@@ -739,15 +783,19 @@ export class VersionStore {
 
 	private async writeLive(path: string, text: string): Promise<boolean> {
 		const normalized = normalizePath(path);
+		// Every live write passes the same guard: a duplicated singleton
+		// property (midad-version-name and friends) makes the note's YAML
+		// invalid, and it must never reach the file.
+		const safe = sanitizeFrontmatter(text);
 		const folder = normalized.slice(0, normalized.lastIndexOf("/"));
 		if (folder) await ensureFolder(this.app, folder);
 		const existing = this.app.vault.getAbstractFileByPath(normalized);
 		if (existing instanceof TFile) {
-			if (await this.app.vault.read(existing) === text) return false;
-			await this.app.vault.modify(existing, text);
+			if (await this.app.vault.read(existing) === safe) return false;
+			await this.app.vault.modify(existing, safe);
 			return true;
 		}
-		await this.app.vault.create(normalized, text);
+		await this.app.vault.create(normalized, safe);
 		return true;
 	}
 }

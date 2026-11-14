@@ -10,7 +10,7 @@ Version 0 is the installed source itself.
 - For a transcription or translation, Version 0 is the archived JSON batch.
 - Version 0 is virtual: it has no snapshot in the version archive. Re-rendering it reads the model or archive again.
 - Version 0 cannot be renamed or edited as a version. Editing the note changes your working copy of Version 0; save those changes as a version if you want to keep them.
-- Version 0 can be selected, rendered as a separate `.Version0.md` note, or set as the default.
+- Version 0 can be selected, rendered as a separate `.Version0.md` note, or set as the default. Rendering it only ever writes that separate note; the default note and its properties are left untouched. A legacy transcription with no archived batch has nothing older to re-render, so its `.Version0.md` is written from the note as it stands, and the link from the default note points at it.
 - An adopted note has no installed model to regenerate. Its Version 0 must be an explicitly saved snapshot.
 
 ## Saved versions
