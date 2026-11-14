@@ -127,6 +127,10 @@
        `--quran-number-shift` is a separate, smaller nudge for the number alone
        inside the emblem (in `em` of the number size). */
     --quran-ar-marker-shift: -.2rem;
+    /* Right gutter: the marker box plus a 10px gap to the text. */
+    /* 4.5 × 0.75rem marker box + a 10px gap, written as plain addition so
+       every engine resolves it. */
+    --quran-gutter: calc(3.375rem + 5px);
     --quran-en-marker-shift: -.9rem;
     --quran-number-shift: 0em;
     /* English translation: the left gutter clears the marker, and the Arabic
@@ -635,6 +639,7 @@ body .quran-en h1::before {
     align-items: center;
     justify-content: center;
     font-family: var(--quran-emblem-font);
+    font-weight: normal;
     font-size: var(--quran-emblem-size);
     line-height: 1;
     z-index: -1;
@@ -706,7 +711,7 @@ body .quran-en h1 {
    .cm-content > * { margin: 0 !important }`. */
 body .quran-ar .cm-line:not(.HyperMD-header-1), body .quran-ar p,
 body .callout:is([data-callout="quran"], [data-callout="quran-warsh"]) .el-p, body .callout:is([data-callout="quran"], [data-callout="quran-warsh"]) .cm-line {
-    padding-right: 3.5em; /* Matches the width allocated for the marker */
+    padding-right: var(--quran-gutter); /* marker box + gap */
     padding-block: 0.12em;
     text-align: justify;
     text-rendering: optimizeLegibility;
@@ -2709,8 +2714,20 @@ body .internal-embed[src*="Warsh"] .cm-line.HyperMD-header-1 {
 body .quran-ar .cm-line:not(.HyperMD-header-1),
 body .quran-ar p,
 body .quran-warsh .cm-line:not(.HyperMD-header-1),
-body .quran-warsh p {
-    padding-right: 3.6rem !important;
+body .quran-warsh p,
+body .callout:is([data-callout="quran"], [data-callout="quran-warsh"]) .markdown-embed-content p,
+body .callout:is([data-callout="quran"], [data-callout="quran-warsh"]) .el-p,
+body .callout:is([data-callout="quran"], [data-callout="quran-warsh"]) .cm-line:not(.HyperMD-header-1):not(.HyperMD-header-2) {
+    padding-right: var(--quran-gutter) !important;
+}
+
+/* The page column must not add a second right margin beside the gutter. */
+body .quran-ar .cm-content,
+body .quran-warsh .cm-content,
+body .markdown-preview-view.quran-ar .markdown-preview-sizer,
+body .markdown-preview-view.quran-warsh .markdown-preview-sizer,
+body .callout:is([data-callout="quran"], [data-callout="quran-warsh"]) .markdown-embed-content {
+    padding-right: 0 !important;
 }
 
 /* In Reading view the Ḥafṣ link is moved inside the verse marker element, so it
@@ -2871,4 +2888,78 @@ body .markdown-preview-view .mas-verse-paragraph {
 
 body .markdown-preview-view .mas-verse-section {
     position: relative;
+}
+
+/* A Qur'ān callout mirrors the sūra page: the riwāya reference sits in the same
+   left gutter, and the verse text keeps clear of it. */
+body .callout:is([data-callout="quran"], [data-callout="quran-warsh"]) h2,
+body .callout:is([data-callout="quran"], [data-callout="quran-warsh"]) .cm-line.HyperMD-header-2 {
+    position: absolute !important;
+    left: 5px !important;
+    right: auto !important;
+    top: auto !important;
+    width: 2.6rem !important;
+    margin: 4px 0 0 0 !important;
+    padding: 0 !important;
+    transform: none !important;
+    font-family: var(--latin-font), serif !important;
+    font-size: 0.58rem !important;
+    font-weight: normal !important;
+    line-height: 1.05 !important;
+    text-align: left !important;
+    white-space: normal !important;
+    overflow-wrap: anywhere;
+    direction: ltr !important;
+    color: var(--link-color) !important;
+    opacity: 0.75;
+    z-index: 3;
+}
+
+body .callout:is([data-callout="quran"], [data-callout="quran-warsh"]) .markdown-embed-content p,
+body .callout:is([data-callout="quran"], [data-callout="quran-warsh"]) .el-p,
+body .callout:is([data-callout="quran"], [data-callout="quran-warsh"]) .cm-line:not(.HyperMD-header-1):not(.HyperMD-header-2) {
+    padding-left: 3rem !important;
+}
+
+/* Placeholders in the Qur'ān reference dialogues are hints, not values: a
+   fainter grey keeps them from reading as pre-filled text. */
+.mas-quran-ref-modal input::placeholder {
+    color: var(--text-faint) !important;
+    opacity: 0.75;
+}
+
+/* Keep the embedded sūra inside the callout: the left-gutter padding and the
+   absolutely positioned marker/reference must not create horizontal overflow. */
+body .callout:is([data-callout="quran"], [data-callout="quran-warsh"]) .markdown-embed-content,
+body .callout:is([data-callout="quran"], [data-callout="quran-warsh"]) .markdown-embed-content > *,
+body .callout:is([data-callout="quran"], [data-callout="quran-warsh"]) p,
+body .callout:is([data-callout="quran"], [data-callout="quran-warsh"]) .el-p {
+    max-width: 100% !important;
+    box-sizing: border-box !important;
+}
+
+body .callout:is([data-callout="quran"], [data-callout="quran-warsh"]) .markdown-embed-content {
+    overflow-x: clip;
+}
+
+/* The editor's scroller adds its own 32px on the right. Instead of removing it,
+   the marker moves into that band and the text reserve is reduced by the same
+   amount, so the total margin matches Reading view. */
+body .markdown-source-view.mod-cm6.quran-ar .cm-line.HyperMD-header-1,
+body .markdown-source-view.mod-cm6.quran-warsh .cm-line.HyperMD-header-1 {
+    right: -32px !important;
+}
+
+body .markdown-source-view.mod-cm6.quran-ar .cm-line:not(.HyperMD-header-1),
+body .markdown-source-view.mod-cm6.quran-ar p,
+body .markdown-source-view.mod-cm6.quran-warsh .cm-line:not(.HyperMD-header-1),
+body .markdown-source-view.mod-cm6.quran-warsh p {
+    padding-right: calc(var(--quran-gutter) - 32px) !important;
+}
+
+/* Reading view: the section spans the note-wide padding as well, so `right: 0`
+   put the marker out in that margin. Anchor it to the text column instead. */
+body .markdown-preview-view.quran-ar h1,
+body .markdown-preview-view.quran-warsh h1 {
+    right: 32px !important;
 }

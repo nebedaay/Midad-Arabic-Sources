@@ -214,6 +214,11 @@ interface MidadArabicSourcesSettings {
 	sourceTemplateFolder: string;
 	canonicalQuranRiwāya: string;
 	canonicalQuranFolder: string;
+	/** Prefix remembered by "Insert linked Qur'an reference". */
+	quranRefPrefix?: string;
+	/** Prefix/suffix remembered per riwāya for "Insert linked Qur'an reference". */
+	quranRefTemplates?: Record<string, { prefix: string; suffix: string }>;
+	quranRefLastRiwaya?: string;
 	sourceMocParent: string;
 	// Annotations
 	annotationNoteFolder: string;
@@ -861,6 +866,27 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			name: "Clean up orphaned Midad data…",
 			callback: async () => { await this.cleanupOrphanedData(); },
 		});
+		this.registerEvent(this.app.workspace.on("editor-menu", (menu, editor) => {
+			const selection = editor.getSelection();
+			if (!selection) return;
+			const works = this.quranWorks();
+			if (!works.length) return;
+			const work = works.find((entry) => entry.path === this.settings.quranRefLastRiwaya) ?? works[0];
+			if (this.quranReferencesInSelection(selection, work.path) === selection) return;
+			menu.addItem((item) => item.setTitle("Convert Qur'an references to links").onClick(() => {
+				editor.replaceSelection(this.quranReferencesInSelection(editor.getSelection(), work.path));
+			}));
+		}));
+		this.addCommand({
+			id: "insert-quran-verse-callout",
+			name: "Insert Qur'an verse callout",
+			callback: () => new InsertQuranCalloutModal(this.app, this).open(),
+		});
+		this.addCommand({
+			id: "insert-linked-quran-reference",
+			name: "Insert linked Qur'an reference",
+			callback: () => new InsertQuranRefModal(this.app, this).open(),
+		});
 		this.addCommand({
 			id: "archive-adopted-versions",
 			name: "Archive current versions of adopted notes",
@@ -1168,6 +1194,62 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			if (typeof adapter?.getBasePath === "function") return adapter.getBasePath();
 		} catch { /* ignore */ }
 		return adapter?.basePath ?? "";
+	}
+
+	/** The installed Qur'ān works: canonical first, then each riwāya. */
+	quranWorks(): Array<{ path: string; label: string; key: string }> {
+		const canonical = this.settings.canonicalQuranFolder?.trim()
+			|| `${this.settings.sourceImportRoot}/Quran`;
+		const counts = new Map<string, number>();
+		for (const file of this.app.vault.getFiles()) {
+			if (!/^\d{3} .+\.md$/.test(file.name)) continue;
+			const path = file.parent?.path ?? "";
+			counts.set(path, (counts.get(path) ?? 0) + 1);
+		}
+		const found = [...counts.entries()]
+			.filter(([, count]) => count >= 100)
+			.map(([path]) => ({
+				path,
+				key: path === canonical ? "canonical" : path,
+				label: path === canonical
+					? `${this.settings.canonicalQuranRiwāya?.trim() || "Ḥafṣ"} (canonical)`
+					: (path.split("/").pop() ?? path),
+			}));
+		found.sort((a, b) => (a.path === canonical ? -1 : 0) - (b.path === canonical ? -1 : 0));
+		return found;
+	}
+
+	/** The `NNN Sura` note for a sūra in one Qur'ān work. */
+	quranFile(workPath: string, surah: number): TFile | null {
+		const prefix = `${String(surah).padStart(3, "0")} `;
+		return this.app.vault.getFiles().find((file) => file.parent?.path === workPath
+			&& file.extension === "md" && file.name.startsWith(prefix)) ?? null;
+	}
+
+	/** Rewrite the verse references inside arbitrary text as Qur'ān links. */
+	quranReferencesInSelection(text: string, workPath: string): string {
+		const pattern = new RegExp(QURAN_REFERENCE_IN_TEXT.source, "g");
+		return text.replace(pattern, (match) => {
+			const digits = match.replace(/^[^0-9\u0660-\u0669\u06F0-\u06F9]+/, "");
+			const parsed = parseQuranReference(digits);
+			if (!parsed) return match;
+			const file = this.quranFile(workPath, parsed.surah);
+			if (!file) return match;
+			const total = Number(this.app.metadataCache.getFileCache(file)?.frontmatter?.total_verses ?? 0);
+			if (total && parsed.end > total) return match;
+			return `[[${file.basename}#${parsed.start}|${match}]]`;
+		});
+	}
+
+	/** The callout type for a Qur'ān work: `quran` for canonical, else per riwāya. */
+	riwayaCallout(workPath: string): string {
+		const work = this.quranWorks().find((entry) => entry.path === workPath);
+		if (!work || work.key === "canonical") return "quran";
+		const label = work.label.toLowerCase();
+		for (const key of ["warsh", "qalun", "duri", "susi"]) {
+			if (label.includes(key)) return `quran-${key}`;
+		}
+		return "quran";
 	}
 
 	sourcesRoot(): string {
@@ -7557,6 +7639,266 @@ class LogModal extends Modal {
 			overflow: "auto",
 			fontSize: "var(--font-ui-smaller)",
 		});
+	}
+
+	onClose(): void {
+		this.contentEl.empty();
+	}
+}
+
+interface QuranReference {
+	surah: number;
+	start: number;
+	end: number;
+	arabic: boolean;
+}
+
+/** `4:34`, `4:152-153`, `Q 4:34`, with Western or Arabic-Indic digits. */
+const QURAN_REFERENCE_IN_TEXT = /(?:([^\s\d:：]+)\s+)?([0-9\u0660-\u0669\u06F0-\u06F9]{1,3})\s*[:：]\s*([0-9\u0660-\u0669\u06F0-\u06F9]{1,3})(?:\s*[-\u2013\u2014]\s*([0-9\u0660-\u0669\u06F0-\u06F9]{1,3}))?/g;
+
+function parseQuranReference(text: string): QuranReference | null {
+	const cleaned = text.replace(/[\u200e\u200f]/g, "").trim();
+	const match = /^(\d{1,3})\s*[:：]\s*(\d{1,3})(?:\s*[-\u2013\u2014]\s*(\d{1,3}))?$/.exec(westernDigits(cleaned));
+	if (!match) return null;
+	const surah = Number(match[1]);
+	const start = Number(match[2]);
+	const end = match[3] ? Number(match[3]) : start;
+	if (surah < 1 || surah > 114 || start < 1 || end < start) return null;
+	return { surah, start, end, arabic: hasArabicDigits(cleaned) };
+}
+
+const EASTERN_DIGITS = "٠١٢٣٤٥٦٧٨٩";
+const EXTENDED_DIGITS = "۰۱۲۳۴۵۶۷۸۹";
+
+function westernDigits(value: string): string {
+	return value.replace(/[\u0660-\u0669\u06F0-\u06F9]/g, (digit) => {
+		const eastern = EASTERN_DIGITS.indexOf(digit);
+		if (eastern >= 0) return String(eastern);
+		const extended = EXTENDED_DIGITS.indexOf(digit);
+		return extended >= 0 ? String(extended) : digit;
+	});
+}
+
+function hasArabicDigits(value: string): boolean {
+	return /[\u0660-\u0669\u06F0-\u06F9]/.test(value);
+}
+
+function toArabicDigits(value: string): string {
+	return value.replace(/[0-9]/g, (digit) => EASTERN_DIGITS[Number(digit)]);
+}
+
+class InsertQuranCalloutModal extends Modal {
+	plugin: MidadArabicSourcesPlugin;
+
+	constructor(app: App, plugin: MidadArabicSourcesPlugin) {
+		super(app);
+		this.plugin = plugin;
+	}
+
+	onOpen(): void {
+		const { contentEl } = this;
+		this.setTitle("Insert Qur'an verse callout");
+		contentEl.addClass("mas-quran-ref-modal");
+		const works = this.plugin.quranWorks();
+		if (!works.length) {
+			contentEl.createEl("p", { text: "No installed Qur'ān works were found." });
+			new Setting(contentEl).addButton((button) => button.setButtonText("Close").onClick(() => this.close()));
+			return;
+		}
+		let selected = works.find((work) => work.path === this.plugin.settings.quranRefLastRiwaya) ?? works[0];
+		let reference = "";
+
+		new Setting(contentEl)
+			.setName("Riwāya")
+			.addDropdown((dropdown) => {
+				for (const work of works) dropdown.addOption(work.path, work.label);
+				dropdown.setValue(selected.path).onChange((value) => {
+					selected = works.find((work) => work.path === value) ?? works[0];
+				});
+			});
+
+		new Setting(contentEl)
+			.setName("Reference")
+			.setDesc("Sūra:āya or a range, e.g. 2:2, 2:255-256 or ٢:٢٥٥–٢٥٦.")
+			.addText((text) => {
+				text.setPlaceholder("2:255-256").onChange((value) => { reference = value; });
+				window.setTimeout(() => text.inputEl.focus(), 0);
+			});
+
+		new Setting(contentEl)
+			.addButton((button) => button.setButtonText("Insert").setCta().onClick(() => {
+				void this.insert(selected, reference);
+			}))
+			.addButton((button) => button.setButtonText("Cancel").onClick(() => this.close()));
+	}
+
+	private async insert(work: { path: string; label: string; key: string }, reference: string): Promise<void> {
+		const parsed = parseQuranReference(reference);
+		if (!parsed) {
+			new Notice("Enter a sūra:āya reference, such as 2:2 or 2:255-256.");
+			return;
+		}
+		const file = this.plugin.quranFile(work.path, parsed.surah);
+		if (!file) {
+			new Notice(`Sūra ${parsed.surah} was not found in ${work.path}.`);
+			return;
+		}
+		const total = Number(this.app.metadataCache.getFileCache(file)?.frontmatter?.total_verses ?? 0);
+		if (total && parsed.end > total) {
+			new Notice(`Sūra ${parsed.surah} has ${total} verses; ${parsed.end} is out of range.`);
+			return;
+		}
+		const embeds: string[] = [];
+		for (let verse = parsed.start; verse <= parsed.end; verse += 1) {
+			embeds.push(`![[${file.basename}#${verse}]]`);
+		}
+		const block = `>[!${this.plugin.riwayaCallout(work.path)}]\n>${embeds.join(" ")}`;
+
+		const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+		const editor = view?.editor;
+		if (!editor) {
+			new Notice("Open a Markdown note and place the cursor where the callout should go.");
+			return;
+		}
+		editor.replaceSelection(block);
+		this.plugin.settings.quranRefLastRiwaya = work.path;
+		await this.plugin.saveSettings();
+		this.close();
+	}
+
+	onClose(): void {
+		this.contentEl.empty();
+	}
+}
+
+class InsertQuranRefModal extends Modal {
+	plugin: MidadArabicSourcesPlugin;
+
+	constructor(app: App, plugin: MidadArabicSourcesPlugin) {
+		super(app);
+		this.plugin = plugin;
+	}
+
+	private templateFor(key: string): { prefix: string; suffix: string } {
+		const templates = this.plugin.settings.quranRefTemplates ?? {};
+		const saved = templates[key] ?? (key === "canonical" ? undefined : templates.canonical);
+		return {
+			prefix: saved?.prefix ?? this.plugin.settings.quranRefPrefix ?? "Q",
+			suffix: saved?.suffix ?? "",
+		};
+	}
+
+	onOpen(): void {
+		const { contentEl } = this;
+		this.setTitle("Insert linked Qur'an reference");
+		contentEl.addClass("mas-quran-ref-modal");
+		const works = this.plugin.quranWorks();
+		if (!works.length) {
+			contentEl.createEl("p", { text: "No installed Qur'ān works were found." });
+			new Setting(contentEl).addButton((button) => button.setButtonText("Close").onClick(() => this.close()));
+			return;
+		}
+
+		let selected = works.find((work) => work.path === this.plugin.settings.quranRefLastRiwaya) ?? works[0];
+		let template = this.templateFor(selected.key);
+		let reference = "";
+		let parentheses = false;
+		let prefixInput: TextComponent | null = null;
+		let suffixInput: TextComponent | null = null;
+
+		new Setting(contentEl)
+			.setName("Riwāya")
+			.addDropdown((dropdown) => {
+				for (const work of works) dropdown.addOption(work.path, work.label);
+				dropdown.setValue(selected.path).onChange((value) => {
+					selected = works.find((work) => work.path === value) ?? works[0];
+					template = this.templateFor(selected.key);
+					prefixInput?.setValue(template.prefix);
+					suffixInput?.setValue(template.suffix);
+				});
+			});
+
+		new Setting(contentEl)
+			.setName("Reference")
+			.setDesc("Sūra:āya, e.g. 2:2 or ٢:٢ — Western or Arabic-Indic digits.")
+			.addText((text) => {
+				text.setPlaceholder("2:2").onChange((value) => { reference = value; });
+				window.setTimeout(() => text.inputEl.focus(), 0);
+			});
+
+		new Setting(contentEl)
+			.setName("Prefix")
+			.setDesc("Before the reference, e.g. Q or القرآن; leave empty for none.")
+			.addText((text) => {
+				prefixInput = text;
+				text.setValue(template.prefix).onChange((value) => { template.prefix = value; });
+			});
+
+		new Setting(contentEl)
+			.setName("Suffix")
+			.setDesc("After the reference, e.g. (Warsh); leave empty for none.")
+			.addText((text) => {
+				suffixInput = text;
+				text.setValue(template.suffix).onChange((value) => { template.suffix = value; });
+			});
+
+		new Setting(contentEl)
+			.setName("Enclose in parentheses")
+			.addToggle((toggle) => toggle.setValue(parentheses).onChange((value) => { parentheses = value; }));
+
+		new Setting(contentEl)
+			.addButton((button) => button.setButtonText("Insert").setCta().onClick(() => {
+				void this.insert(selected, template, reference, parentheses);
+			}))
+			.addButton((button) => button.setButtonText("Cancel").onClick(() => this.close()));
+	}
+
+	/** Resolve the sūra note, build the link, and insert it at the cursor. */
+	private async insert(
+		work: { path: string; label: string; key: string },
+		template: { prefix: string; suffix: string },
+		reference: string,
+		parentheses: boolean,
+	): Promise<void> {
+		const parsed = parseQuranReference(reference);
+		if (!parsed) {
+			new Notice("Enter a sūra:āya reference, such as 2:2 or 2:255-256.");
+			return;
+		}
+		const { surah, start: verseStart, end: verseEnd } = parsed;
+		const file = this.plugin.quranFile(work.path, surah);
+		if (!file) {
+			new Notice(`Sūra ${surah} was not found in ${work.path}.`);
+			return;
+		}
+		const total = Number(this.app.metadataCache.getFileCache(file)?.frontmatter?.total_verses ?? 0);
+		if (total && verseEnd > total) {
+			new Notice(`Sūra ${surah} has ${total} verses; ${verseEnd} is out of range.`);
+			return;
+		}
+		const arabic = parsed.arabic || /[\u0600-\u06FF]/.test(template.prefix) || /[\u0600-\u06FF]/.test(template.suffix);
+		const surahLabel = arabic ? toArabicDigits(String(surah)) : String(surah);
+		const startLabel = arabic ? toArabicDigits(String(verseStart)) : String(verseStart);
+		const endLabel = arabic ? toArabicDigits(String(verseEnd)) : String(verseEnd);
+		const range = verseStart === verseEnd ? startLabel : `${startLabel}\u2013${endLabel}`;
+		const parts = [template.prefix.trim(), `${surahLabel}:${range}`, template.suffix.trim()].filter(Boolean);
+		const label = parts.join(" ");
+		const link = `[[${file.basename}#${verseStart}|${label}]]`;
+		const text = parentheses ? `(${link})` : link;
+
+		const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+		const editor = view?.editor;
+		if (!editor) {
+			new Notice("Open a Markdown note and place the cursor where the reference should go.");
+			return;
+		}
+		editor.replaceSelection(text);
+		const templates = this.plugin.settings.quranRefTemplates ?? {};
+		templates[work.key] = { prefix: template.prefix, suffix: template.suffix };
+		this.plugin.settings.quranRefTemplates = templates;
+		this.plugin.settings.quranRefLastRiwaya = work.path;
+		await this.plugin.saveSettings();
+		this.close();
 	}
 
 	onClose(): void {

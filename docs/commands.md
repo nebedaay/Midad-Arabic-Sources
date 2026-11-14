@@ -8,6 +8,13 @@ The plugin scripts also provide a **command-line interface** for use outside Obs
 
 - **Open documentation** — open the in-app guide (this collection of pages).
 
+## Notes and citations
+
+- **Insert Qur'an verse callout** — a sūra:āya pair or range (`2:255-256`) and a riwāya; inserts a `[!quran]` or `[!quran-warsh]` callout whose verse embeds sit on one line: `>[!quran-warsh]` / `>![[… - 004 An-Nisa#152]] ![[… - 004 An-Nisa#153]]`.
+- **Insert linked Qur'an reference** — opens a dialogue for a sūra:āya pair (`2:2`). A **Riwāya** dropdown lists the installed Qur'ān works, canonical first, so a reference can point at Warsh or another riwāya instead of Ḥafṣ. **Prefix** and **Suffix** are remembered per riwāya (for example `Q` / `(Warsh)`, or an empty prefix for just `4:34 (Warsh)`), and the result is inserted as `[[002 Al-Baqarah#2|Q 2:2]]` — or `[[Qurʾān (riwāyat Warsh) (quran-json) - 002 Al-Baqarah#2|2:2 (Warsh)]]`. Arabic-Indic digits (and an Arabic prefix or suffix) are detected and reproduced in the alias, a range (`2:255-256`) links to its first verse and prints `Q 2:255–256`, and **Enclose in parentheses** wraps the link in `(…)`.
+
+Selecting text with verse references and using the editor's context menu → **Convert Qur'an references to links** rewrites just those references (`Q 2:2`, `2:2`, `2:255-256`), leaving the rest of the selection untouched; references that do not resolve are skipped. The target is the last riwāya chosen in the insertion dialogues.
+
 ## Transliteration
 
 See [Transliteration](./transliteration.md).
