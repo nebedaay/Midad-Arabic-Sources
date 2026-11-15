@@ -744,10 +744,18 @@ body .markdown-source-view.mod-cm6 .quran-quote {
    English translation in a quran-en note keeps the normal text face. */
 body .quran-ar .cm-line:not(.HyperMD-header-1), body .quran-ar p,
 body .callout:is([data-callout="quran"], [data-callout="quran-warsh"]) .el-p, body .callout:is([data-callout="quran"], [data-callout="quran-warsh"]) .cm-line,
-body .quran-quote, body [class*="quran-quote"],
+body .quran-quote, body [class*="quran-quote"], body .mas-quran-quote,
 body .markdown-preview-view .quran-quote, body .markdown-rendered .quran-quote,
-body .markdown-source-view.mod-cm6 .quran-quote {
-    font-family: var(--quran-font);
+body .markdown-source-view.mod-cm6 .quran-quote,
+body .markdown-preview-view .mas-quran-quote,
+body .markdown-rendered .mas-quran-quote,
+body .markdown-source-view.mod-cm6 .mas-quran-quote {
+    /* `!important` is load-bearing: in Reading view the generic
+       `body .markdown-rendered :dir(rtl)` rule matches the quote span itself
+       and is more specific than the class hook, which is why a Qur'ān passage
+       in a tafsīr kept the ordinary Arabic face there but not in Live
+       Preview. A Warsh page overrides this below with its own face. */
+    font-family: var(--quran-font) !important;
     padding-block: 0.12em;
 }
 
@@ -2406,9 +2414,11 @@ body .markdown-source-view.mod-cm6.tafsir {
     --tafsir-verse-margin: 3.5em;
 }
 
+/* The marker column is on the LEFT for an RTL text, so the page itself needs
+   no right inset; the verse paragraphs reserve the column. */
 body .markdown-preview-view.tafsir .markdown-preview-sizer,
 body .markdown-source-view.mod-cm6.tafsir .cm-content {
-    padding-right: var(--tafsir-verse-margin);
+    padding-right: 0;
 }
 
 /* The heading is positioned against the text column. */
@@ -2459,10 +2469,6 @@ body .markdown-source-view.mod-cm6.tafsir .cm-line.HyperMD-header-5 {
 /* Inline verse markers (`**[[…#V|S:V]]**`). The appearance and placement are
    set inline by the plugin, so there is nothing to fight here: only the
    positioning context and the paragraph direction belong in CSS. */
-body .markdown-source-view.mod-cm6.tafsir .cm-line {
-    position: relative;
-}
-
 /* A paragraph that carries a marker must stay RTL even when the marker (an
    LTR link) is its first inline element. The plugin also sets `dir="rtl"` on
    the paragraph, which is what the note's Arabic sizing rules key on. */
@@ -2526,7 +2532,7 @@ body .callout:is([data-callout="quran"], [data-callout="quran-warsh"]) > .callou
 /* The verse number becomes the same emblem-marked marker as on a Qur'ān page. */
 body .callout:is([data-callout="quran"], [data-callout="quran-warsh"]) h1 {
     position: absolute !important;
-    top: 0 !important;
+    top: 0.6rem !important;
     right: 0 !important;
     display: flex;
     align-items: center;
@@ -2635,9 +2641,8 @@ body .callout[data-callout="quran-warsh"] .cm-line.HyperMD-header-2 {
     /* Keep the line's own vertical position (each verse's link follows its own
        marker) and shift it below the marker box. */
     transform: translateY(3.4rem);
-    width: auto !important;
-    max-width: 14rem;
-    white-space: nowrap !important;
+    width: 3.4rem !important;
+    min-width: 3.4rem !important;
     margin: 0 !important;
     padding: 0 !important;
     font-family: var(--latin-font), serif !important;
@@ -2646,7 +2651,8 @@ body .callout[data-callout="quran-warsh"] .cm-line.HyperMD-header-2 {
     line-height: 1.15 !important;
     text-align: center !important;
     white-space: normal !important;
-    overflow-wrap: anywhere;
+    overflow-wrap: normal;
+    word-break: keep-all;
     direction: ltr !important;
     color: var(--link-color) !important;
     z-index: 3;
@@ -2761,14 +2767,12 @@ body .quran-ar h1 .mas-riwaya {
 /* The number and the emblem are the same in every riwāya; a face difference is
    a face difference, not a size difference. */
 
-/* Live Preview renders the blank line between a heading and its text; with the
-   headings in the gutter those empties are pure vertical space. Collapse them
-   in the editor only (Reading view already ignores them). */
-body .markdown-source-view.mod-cm6.quran-ar .cm-line:has(> br:only-child),
-body .markdown-source-view.mod-cm6.quran-warsh .cm-line:has(> br:only-child) {
-    height: 0 !important;
-    line-height: 0 !important;
-    font-size: 0 !important;
+/* Zero-height blank lines break CodeMirror's height map: it stops laying out
+   later verses as you scroll. The blank lines the template needs stay, and the
+   managed-region boundaries get their space from a margin instead. */
+body .markdown-source-view.mod-cm6.quran-ar .cm-line:has(.mas-managed),
+body .markdown-source-view.mod-cm6.quran-warsh .cm-line:has(.mas-managed) {
+    margin-block: 1em;
 }
 
 /* Reading view keeps the page's own marker offset; the editor needs the nudge
@@ -2825,12 +2829,12 @@ body .markdown-source-view.mod-cm6.quran-warsh .cm-line.HyperMD-header-2 {
     left: 5px !important;
     right: auto !important;
     top: auto !important;
-    width: 2.6rem !important;
+    width: 3.4rem !important;
     margin: 4px 0 0 0 !important;
     padding: 0 !important;
     transform: none !important;
     font-family: var(--latin-font), serif !important;
-    font-size: 0.58rem !important;
+    font-size: 0.6rem !important;
     font-weight: normal !important;
     line-height: 1.05 !important;
     opacity: 0.75;
@@ -2848,7 +2852,7 @@ body .quran-ar .cm-line:not(.HyperMD-header-1):not(.HyperMD-header-2),
 body .quran-ar p,
 body .quran-warsh .cm-line:not(.HyperMD-header-1):not(.HyperMD-header-2),
 body .quran-warsh p {
-    padding-left: 3rem !important;
+    padding-left: 3.4rem !important;
 }
 
 /* Reading view: the verse marker and the paragraph that carries it. The class
@@ -2879,16 +2883,14 @@ body .markdown-preview-view .mas-verse-marker-link {
     text-decoration: none !important;
 }
 
+/* Only the direction belongs here: the paragraph's face, size and leading come
+   from the note class, and repeating them at this weight overrode the Qur'ān
+   and Warsh faces in Reading view. */
 body .markdown-preview-view .mas-verse-paragraph {
     direction: rtl !important;
-    font-size: var(--arabic-font-size) !important;
-    font-family: var(--latin-font), var(--arabic-font), serif !important;
-    line-height: var(--arabic-line-height) !important;
 }
 
-body .markdown-preview-view .mas-verse-section {
-    position: relative;
-}
+
 
 /* A Qur'ān callout mirrors the sūra page: the riwāya reference sits in the same
    left gutter, and the verse text keeps clear of it. */
@@ -2908,7 +2910,8 @@ body .callout:is([data-callout="quran"], [data-callout="quran-warsh"]) .cm-line.
     line-height: 1.05 !important;
     text-align: left !important;
     white-space: normal !important;
-    overflow-wrap: anywhere;
+    overflow-wrap: break-word;
+    word-break: normal;
     direction: ltr !important;
     color: var(--link-color) !important;
     opacity: 0.75;
@@ -2918,7 +2921,8 @@ body .callout:is([data-callout="quran"], [data-callout="quran-warsh"]) .cm-line.
 body .callout:is([data-callout="quran"], [data-callout="quran-warsh"]) .markdown-embed-content p,
 body .callout:is([data-callout="quran"], [data-callout="quran-warsh"]) .el-p,
 body .callout:is([data-callout="quran"], [data-callout="quran-warsh"]) .cm-line:not(.HyperMD-header-1):not(.HyperMD-header-2) {
-    padding-left: 3rem !important;
+    padding-left: 1.5rem !important;
+    padding-right: calc(var(--quran-gutter) - 30px) !important;
 }
 
 /* Placeholders in the Qur'ān reference dialogues are hints, not values: a
@@ -2947,19 +2951,309 @@ body .callout:is([data-callout="quran"], [data-callout="quran-warsh"]) .markdown
    amount, so the total margin matches Reading view. */
 body .markdown-source-view.mod-cm6.quran-ar .cm-line.HyperMD-header-1,
 body .markdown-source-view.mod-cm6.quran-warsh .cm-line.HyperMD-header-1 {
-    right: -32px !important;
+    right: 0 !important;
 }
 
 body .markdown-source-view.mod-cm6.quran-ar .cm-line:not(.HyperMD-header-1),
 body .markdown-source-view.mod-cm6.quran-ar p,
 body .markdown-source-view.mod-cm6.quran-warsh .cm-line:not(.HyperMD-header-1),
 body .markdown-source-view.mod-cm6.quran-warsh p {
-    padding-right: calc(var(--quran-gutter) - 32px) !important;
+    padding-right: var(--quran-gutter) !important;
 }
 
-/* Reading view: the section spans the note-wide padding as well, so `right: 0`
-   put the marker out in that margin. Anchor it to the text column instead. */
+/* Reading view: the section spans the note-wide padding, so the marker is
+   anchored 32px in from that edge — the same band the editor reserves — which
+   is what makes the two views match. */
 body .markdown-preview-view.quran-ar h1,
 body .markdown-preview-view.quran-warsh h1 {
     right: 32px !important;
+}
+
+/* Inside a callout the embedded sūra adds its own content padding on top of
+   the verse gutter, so the marker drifts away from the text. Only the verse
+   padding should remain. */
+body .callout:is([data-callout="quran"], [data-callout="quran-warsh"]) .callout-content,
+body .callout:is([data-callout="quran"], [data-callout="quran-warsh"]) .markdown-embed,
+body .callout:is([data-callout="quran"], [data-callout="quran-warsh"]) .markdown-embed-content {
+    padding-right: 0 !important;
+    margin-right: 0 !important;
+}
+
+
+/* Reading view: the marker is anchored 32px in, so the paragraph's reserve is
+   reduced by the same 32px (as in the editor) and the text stops before it. */
+body .markdown-preview-view.quran-ar p,
+body .markdown-preview-view.quran-warsh p,
+body .markdown-preview-view.quran-ar .el-p,
+body .markdown-preview-view.quran-warsh .el-p,
+body .markdown-preview-view.quran-ar li,
+body .markdown-preview-view.quran-warsh li {
+    padding-right: calc(var(--quran-gutter) - 32px) !important;
+}
+
+/* Reading view has no scroller band: put the marker at the column edge and let
+   the full gutter keep the text clear. Anchoring it inward only works if the
+   reserve grows by the same amount, which leaves a much wider margin. */
+body .markdown-preview-view.quran-ar h1,
+body .markdown-preview-view.quran-warsh h1 {
+    right: 0 !important;
+}
+
+body .markdown-preview-view.quran-ar p,
+body .markdown-preview-view.quran-warsh p,
+body .markdown-preview-view.quran-ar .el-p,
+body .markdown-preview-view.quran-warsh .el-p,
+body .markdown-preview-view.quran-ar li,
+body .markdown-preview-view.quran-warsh li {
+    /* The emblem is narrower than its box; trim the empty part of the box so
+       the text sits close to the glyph rather than to the box edge. */
+    padding-right: calc(var(--quran-gutter) - 30px) !important;
+}
+
+/* The correspondence reference sits slightly higher in the editor than in
+   Reading view because the line box differs. */
+
+/* The verse marker is absolutely positioned, so its containing block must be
+   the text column in every Qur'ān view. Stating it unconditionally avoids the
+   Ḥafṣ page anchoring the marker to the window instead. */
+body .markdown-source-view.mod-cm6 .cm-content {
+    position: relative;
+}
+
+/* Reading view: make the text section the positioning context from CSS, so the
+   absolute verse marker does not depend on a class added at render time. */
+body .markdown-preview-view.quran-ar .markdown-preview-section,
+body .markdown-preview-view.quran-warsh .markdown-preview-section {
+    position: relative;
+}
+
+/* The marker's paragraph hook is Arabic-only. */
+body .quran-en .mas-verse-paragraph {
+    direction: inherit !important;
+    font-size: inherit !important;
+    font-family: inherit !important;
+    line-height: inherit !important;
+}
+
+/* An English translation needs the same positioning context for its marker. */
+body .markdown-preview-view.quran-en .markdown-preview-section {
+    position: relative;
+}
+
+/* English translations: the canonical marker sits inside the text column's
+   right gutter (not past it), and is raised to the first line's centre. */
+body .quran-en p,
+body .quran-en .el-p,
+body .quran-en .cm-line:not(.HyperMD-header-1) {
+    position: relative;
+}
+
+body .quran-en .mas-verse-marker,
+body .quran-en strong.mas-verse-marker {
+    left: auto !important;
+    right: 0 !important;
+    top: 0 !important;
+    transform: none !important;
+    width: auto !important;
+}
+
+body .quran-en p,
+body .quran-en .el-p,
+body .quran-en .cm-line:not(.HyperMD-header-1) {
+    padding-right: 2.6rem !important;
+}
+
+
+/* English translations: the inline canonical marker lives in the text column's
+   right margin, and the paragraph reserves the band for it. */
+body .quran-en p,
+body .quran-en .el-p,
+body .quran-en .cm-line:not(.HyperMD-header-1) {
+    position: relative;
+    padding-right: 2.6rem !important;
+}
+
+body .quran-en .mas-verse-marker,
+body .quran-en strong.mas-verse-marker {
+    position: absolute !important;
+    left: auto !important;
+    right: 0 !important;
+    top: 0 !important;
+    transform: none !important;
+    width: auto !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    font-family: var(--latin-font), serif !important;
+    font-size: 0.75rem !important;
+    font-weight: normal !important;
+    line-height: 1.1 !important;
+    color: var(--link-color) !important;
+    white-space: nowrap !important;
+    direction: ltr !important;
+    z-index: 2;
+}
+
+/* English translation text keeps the note's Latin face, normal weight and text
+   size; only the marker is special. */
+body .quran-en p,
+body .quran-en .el-p,
+body .quran-en .cm-line:not(.HyperMD-header-1) {
+    font-family: var(--font-text, var(--latin-font)) !important;
+    font-size: var(--font-text-size) !important;
+    font-weight: normal !important;
+    direction: ltr;
+}
+
+/* The `# N` emblem marker is absolutely placed in Reading view exactly as the
+   Arabic one; left in the flow it lands below the verse's first lines. */
+body .markdown-preview-view.quran-en h1 {
+    position: absolute !important;
+    top: auto !important;
+    right: auto !important;
+    width: max(var(--quran-marker-size), var(--quran-emblem-size)) !important;
+    height: max(var(--quran-marker-size), var(--quran-emblem-size)) !important;
+    margin: 0 !important;
+    padding: 0 !important;
+}
+
+/* Live Preview only: the template's blank lines between a verse heading and its
+   text render as full lines. Halving their leading tightens the spacing
+   without the zero-height trick that breaks CodeMirror's height map. */
+body .markdown-source-view.mod-cm6.quran-ar .cm-line:has(> br:only-child),
+body .markdown-source-view.mod-cm6.quran-warsh .cm-line:has(> br:only-child),
+body .markdown-source-view.mod-cm6.quran-en .cm-line:has(> br:only-child) {
+    font-size: 0.5em !important;
+    line-height: 0.5 !important;
+}
+
+/* --- Verse markers: one class, one gutter side -----------------------------
+
+   Every source writes its correspondence to the canonical Qur'ān as
+   `**[[canonical#V|S:V]]**` at the start of the verse text. The class is the
+   same everywhere, and so is this placement: the LEFT gutter of an RTL text
+   (Arabic — riwāyāt and tafsīr alike) and the RIGHT gutter of an LTR one (a
+   translation). The emphasis is structural, never a style: a bare wikilink is
+   an editor widget that CSS cannot move.
+
+   The `# N` emblem is a different thing and keeps its own side: it is the
+   page's own verse number, at the start of the verse, so it sits on the RIGHT
+   of an RTL page (where the verse begins) and on the LEFT of an LTR page. A
+   page therefore reserves both bands, and a Ḥafṣ page and a Warsh page are
+   laid out identically — only the face changes. */
+
+/* RTL: the correspondence marker in the left gutter. The view class is named
+   so these rules outweigh the generic editor rule that follows. */
+body .markdown-source-view.mod-cm6.tafsir .mas-verse-marker,
+body .markdown-preview-view.tafsir .mas-verse-marker,
+body .markdown-source-view.mod-cm6.quran-ar .mas-verse-marker,
+body .markdown-preview-view.quran-ar .mas-verse-marker,
+body .markdown-source-view.mod-cm6.quran-warsh .mas-verse-marker,
+body .markdown-preview-view.quran-warsh .mas-verse-marker {
+    position: absolute !important;
+    left: 0 !important;
+    right: auto !important;
+    top: auto !important;
+    width: 3.4rem !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    font-family: var(--latin-font), serif !important;
+    font-size: 0.72rem !important;
+    font-weight: normal !important;
+    line-height: 1.1 !important;
+    color: var(--link-color) !important;
+    white-space: nowrap !important;
+    direction: ltr !important;
+    text-align: center !important;
+    z-index: 2;
+}
+
+/* LTR: the same marker in the right gutter, right-aligned against the margin. */
+body .markdown-source-view.mod-cm6.quran-en .mas-verse-marker,
+body .markdown-preview-view.quran-en .mas-verse-marker {
+    position: absolute !important;
+    left: auto !important;
+    right: 0 !important;
+    top: auto !important;
+    width: auto !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    font-family: var(--latin-font), serif !important;
+    font-size: 0.75rem !important;
+    font-weight: normal !important;
+    line-height: 1.1 !important;
+    color: var(--link-color) !important;
+    white-space: nowrap !important;
+    direction: ltr !important;
+    text-align: right !important;
+    z-index: 2;
+}
+
+/* The RTL text clears the left marker column; its right-hand emblem gutter is
+   `--quran-gutter` and is declared with the verse text above. A tafsīr has no
+   emblem, so it reserves only the marker column. */
+body .quran-ar p,
+body .quran-ar li,
+body .quran-ar .el-p,
+body .quran-ar .cm-line:not(.HyperMD-header-1),
+body .quran-warsh p,
+body .quran-warsh li,
+body .quran-warsh .el-p,
+body .quran-warsh .cm-line:not(.HyperMD-header-1) {
+    padding-left: 3.4rem !important;
+}
+
+body .tafsir p,
+body .tafsir .el-p,
+body .markdown-source-view.mod-cm6.tafsir .cm-line:not(.HyperMD-header-1) {
+    padding-left: 3.4rem !important;
+    padding-right: 0 !important;
+}
+
+/* The marker lives inside the paragraph but is not in its flow, so the
+   paragraph has to be the positioning context in the editor. */
+body .markdown-source-view.mod-cm6.quran-ar .cm-line:has(.mas-verse-marker),
+body .markdown-source-view.mod-cm6.quran-warsh .cm-line:has(.mas-verse-marker),
+body .markdown-source-view.mod-cm6.tafsir .cm-line:has(.mas-verse-marker) {
+    position: relative;
+}
+
+/* Reading view: the marker is anchored to the section, which must not scroll
+   away from it. */
+body .markdown-preview-view.quran-ar .markdown-preview-section,
+body .markdown-preview-view.quran-warsh .markdown-preview-section,
+body .markdown-preview-view.tafsir .markdown-preview-section,
+body .markdown-preview-view.quran-en .markdown-preview-section {
+    position: relative;
+}
+
+/* --- The Qur'ān face belongs to the verse, in both views -------------------
+   `body .markdown-rendered :dir(rtl)` is written for ordinary Arabic notes, but
+   it is more specific than the class-scoped verse rules, so in Reading view it
+   replaced the Qur'ān face with the general Arabic one — and a `.mas-verse-
+   paragraph` marker hook did the same on any paragraph that carried a marker.
+   Restating the face with the view class in the selector makes the two views
+   agree: DigitalKhatt on a Ḥafṣ page, Harmattan on a Warsh one. */
+body .markdown-preview-view.quran-ar p,
+body .markdown-preview-view.quran-ar li,
+body .markdown-preview-view.quran-ar .el-p,
+body .markdown-preview-view.quran-ar .quran-quote,
+body .markdown-preview-view.quran-ar [class*="quran-quote"],
+body .markdown-source-view.mod-cm6.quran-ar .cm-line:not(.HyperMD-header-1),
+body .markdown-source-view.mod-cm6.quran-ar .quran-quote {
+    font-family: var(--quran-font) !important;
+}
+
+/* A riwāya keeps its own face; this follows the Ḥafṣ rule so that it wins. */
+body .markdown-preview-view.quran-warsh p,
+body .markdown-preview-view.quran-warsh li,
+body .markdown-preview-view.quran-warsh .el-p,
+body .markdown-preview-view.quran-warsh .quran-quote,
+body .markdown-preview-view.quran-warsh [class*="quran-quote"],
+body .markdown-source-view.mod-cm6.quran-warsh .cm-line:not(.HyperMD-header-1),
+body .markdown-source-view.mod-cm6.quran-warsh .quran-quote,
+body .callout[data-callout="quran-warsh"] p,
+body .callout[data-callout="quran-warsh"] li,
+body .callout[data-callout="quran-warsh"] .el-p,
+body .callout[data-callout="quran-warsh"] .cm-line {
+    font-family: var(--quran-warsh-font) !important;
 }

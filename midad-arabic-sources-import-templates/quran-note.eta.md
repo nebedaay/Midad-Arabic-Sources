@@ -33,10 +33,10 @@
 
 <% const match = (b.hafs || []).find((n) => !prevHafs.includes(n)); -%>
 <% if (!work.canonical && match != null) { -%>
-## [[<%= unit.base %>#<%= match %>|Ḥafṣ <%= match %>]]
-
-<% } -%>
+**[[<%= unit.base %>#<%= match %>|<%= unit.id %>:<%= match %>]]**﻿<%~ b.body %>
+<% } else { -%>
 <%~ b.body %>
+<% } -%>
 
 <% prevHafs = b.hafs || []; -%>
 <% } -%>

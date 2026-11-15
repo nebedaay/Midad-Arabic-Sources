@@ -16,6 +16,7 @@
   const link = topicLink(topic);
   if (!upLinks.includes(link)) upLinks.push(link);
 } -%>
+<% if (work.moc) { const mocLink = topicLink(work.moc); if (!upLinks.includes(mocLink)) upLinks.unshift(mocLink); } -%>
 <% upLinks.push('[[Midad Arabic Sources]]'); -%>
 <% add_property('midad-up', upLinks); -%>
 <% add_property('midad-id', yamlId('repo:' + work.key)); -%>

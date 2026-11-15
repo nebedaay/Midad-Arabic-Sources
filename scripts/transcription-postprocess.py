@@ -11,6 +11,13 @@ from importlib.machinery import SourceFileLoader
 
 VAULT = Path(os.environ.get("OBSIDIAN_VAULT", os.path.expanduser("~/Documents/Obsidian Vault")))
 SCRIPTS = Path(__file__).resolve().parent
+if str(SCRIPTS) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS))
+
+# Page separators are owned by the shared postprocessor; import the pass
+# directly so a missing definition fails loudly instead of silently skipping
+# the normalisation.
+from text_postprocess import normalize_page_separators
 
 # Metadata lines the standalone-PDF prompt asks Gemini to put above the first
 # page. They are not part of the transcription, so remove them before
@@ -275,7 +282,7 @@ def run(input_path, out_path=None, metadata=False, tafsir=False):
     # Enforce one blank line between all blocks (fixes "text\n---" setext
     # headings) and collapse any excess.
     content = pp.normalize_spacing(content)
-    content = pp.normalize_page_separators(content)
+    content = normalize_page_separators(content)
     content = tfq.strip_orphan_quote_classes(content)
     content, raw_citations = tfq.strip_raw_quran_citations(content)
     print(f"  Raw Qur'an citations removed: {raw_citations}")

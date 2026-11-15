@@ -42,6 +42,8 @@ The full guides are in [`docs/`](./docs/); this README is a summary. Every page 
 
 ## What it does
 
+Read imported sources in **Reading view**. The generated layout — Qur'ān verse emblems and markers, the gilded quotes, and a tafsīr's margin references — is drawn for Reading view, and that is where annotation works; keep Live Preview for the note you are actively editing. See [Templates](./docs/templates.md).
+
 ### Transliteration
 
 The rule-based/LLM romanizer talks to a resident Python service (CAMeL), so Obsidian and Zotero do not reload the model on every call.

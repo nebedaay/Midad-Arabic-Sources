@@ -207,7 +207,11 @@ def strip_raw_quran_citations(content: str) -> tuple[str, int]:
     not citations and are left alone.
     """
     lookup = _build_surah_lookup()
-    pattern = re.compile(r'\[[^\[\]\n]{1,120}\]|\([^()\n]{1,120}\)')
+    # A citation is a *single* bracket span. The lookarounds keep the pattern
+    # out of a wikilink's inner brackets (`[[stem#V|S:V]]` would otherwise look
+    # like `[stem#V|S:V]` and the marker would be deleted), and out of an
+    # already-escaped `\[…\]`.
+    pattern = re.compile(r'(?<!\[)\[[^\[\]\n]{1,120}\](?!\])|\([^()\n]{1,120}\)')
     removed = 0
 
     def repl(m: re.Match) -> str:
@@ -247,7 +251,11 @@ def strip_redundant_raw_citations(content: str) -> tuple[str, int]:
 
 
 def normalize_quran_link_display(content: str) -> tuple[str, int]:
-    """Use the sūra name and Arabic-Indic numerals in every Qur'ān link."""
+    """Use the sūra name and Arabic-Indic numerals in every citation link.
+
+    A verse marker's `S:V` display is the exception: it is Latin digits on
+    every page, in every riwāya, and stays as written.
+    """
     w_to_a = str.maketrans('0123456789', '\u0660\u0661\u0662\u0663\u0664\u0665\u0666\u0667\u0668\u0669')
     pattern = re.compile(r'\[\[(\d{3})\s+([^#\]]+)#(\d+)(?:-(\d+))?\|([^\]]+)\]\]')
     changed = 0
@@ -258,6 +266,10 @@ def normalize_quran_link_display(content: str) -> tuple[str, int]:
         verse = m.group(3)
         end_verse = m.group(4)
         display = m.group(5)
+        # A verse marker's display is `S:V` in Latin digits by design, in every
+        # riwāya; it is not a citation to normalise.
+        if _MARKER_DISPLAY.match(display):
+            return m.group(0)
         stem, arabic = get_surah_name(surah)
         verse_label = str(verse).translate(w_to_a)
         if end_verse:
@@ -1030,11 +1042,17 @@ def link_open_fragments(content: str, tafsir: bool = False) -> tuple[str, int]:
     for index, line in enumerate(lines):
         if '.quran-quote' in line:
             continue
-        match = re.search(r'(?<![*﴿])([«“"])([^»”"\n]{1,40})\s*$', line)
+        # A generated span is not prose: `class="mas-managed">` ends with a
+        # quotation mark and would otherwise read as an open quotation.
+        if re.search(r'</?[A-Za-z][\w-]*\b', line):
+            continue
+        match = re.search(r'(?<![=*﴿])([«“"])([^»”"\n]{1,40})\s*$', line)
         if not match:
             continue
         fragment = match.group(2).strip()
         if len(fragment) < 2 or len(fragment.split()) > 4:
+            continue
+        if re.search(r'[<>]', fragment):
             continue
         before = "\n".join(lines[:index]) + "\n" + line[:match.start()]
         prior = None
@@ -1388,8 +1406,13 @@ _LEGACY_VERSE_LINK = (
 )
 _VERSE_HEADING = re.compile(r"^#####[ \t]+" + _LEGACY_VERSE_LINK + r"[ \t]*$")
 _VERSE_MARKER = re.compile(
-    r"\*\*(?:" + _VERSE_LINK + r"|" + _LEGACY_VERSE_LINK + r")\*\*")
+    r"\*{0,2}(?:" + _VERSE_LINK + r"|" + _LEGACY_VERSE_LINK + r")\*{0,2}")
 _EMPTY_VERSE_HEADING = re.compile(r"^#####[ \t]*(?:\\?\[\])*[ \t]*$")
+# `S:V` (optionally a range) is a marker's display, not a citation to rewrite.
+_MARKER_DISPLAY = re.compile(r"^\d+:\d+(?:[\u2013\u2014-]\d+:\d+)?$")
+# A marker whose link was eaten (by an older raw-citation pass) is left as
+# `**\[]`; it carries nothing, so a re-run drops it before re-deriving.
+_DAMAGED_MARKER = re.compile(r"\*\*\\\[\]\*{0,2}")
 
 
 def _verse_marker(stem: str, surah: int, start: int, end: int | None) -> str:
@@ -1487,7 +1510,9 @@ def insert_verse_headings(content: str) -> tuple[str, int]:
     lines = merged
 
     # 2. Drop markers from a previous run; they are re-derived from the links.
+    #    A marker the old raw-citation pass broke (`**\[]`) is debris too.
     lines = [_VERSE_MARKER.sub("", line) for line in lines]
+    lines = [_DAMAGED_MARKER.sub("", line) for line in lines]
 
     # 3. Collect the quoted verses in document order.
     quotes: list[tuple[int, int, int, int, int]] = []

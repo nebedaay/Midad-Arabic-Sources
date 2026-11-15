@@ -15,9 +15,14 @@
 <span class="mas-managed">mas-managed</span>
 
 <% for (const b of unit.blocks) { -%>
-# <%= b.number %><% if (b.ref) { %> <%~ b.ref.replace(/ : /g, ' ') %><% } %>
+<% const compactRef = b.ref ? b.ref.replace(/\|[^\]]+\]\]/, `|${unit.id}:${b.number}]]`) : ""; -%>
+# <%= b.number %>
 
+<% if (compactRef) { -%>
+**<%= compactRef %>**﻿<%~ b.body %>
+<% } else { -%>
 <%~ b.body %>
+<% } -%>
 
 <% } -%>
 <% if (!unit.blocks || !unit.blocks.length) { -%>

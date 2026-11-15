@@ -560,12 +560,15 @@ def normalize_page_separators(text: str) -> str:
         if not _PAGE_HEADING_TITLE.match(line.strip()):
             out.append(line)
             continue
-        while out and not out[-1].strip():
-            out.pop()
-        while out and out[-1].strip() == "---":
-            out.pop()
-        while out and not out[-1].strip():
-            out.pop()
+        # Drop any blanks and rules already in front of the heading, repeated,
+        # so `---`, `---\n\n---` and a hand-written stack all become one.
+        while True:
+            if out and not out[-1].strip():
+                out.pop()
+            elif out and out[-1].strip() == "---":
+                out.pop()
+            else:
+                break
         if out:
             out.append("")
             out.append("---")
@@ -580,7 +583,7 @@ def normalize_page_separators(text: str) -> str:
     return "\n".join(collapsed)
 
 
-_QURAN_WRAPPED = re.compile(r"\*?﴿([^﴾\n]+)﴾\*?\{\.quran-quote[^}]*\}\*?")
+_QURAN_WRAPPED = re.compile(r"(?<!\*)\*?﴿([^﴾\n]+)﴾\*?\{\.quran-quote[^}]*\}\*?")
 _QURAN_CLASS = re.compile(r"\{\.quran-quote[^}]*\}\*?")
 
 

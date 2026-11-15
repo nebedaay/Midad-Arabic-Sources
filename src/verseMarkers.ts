@@ -8,17 +8,17 @@ import { RangeSetBuilder } from "@codemirror/state";
  *     **[[004 An-Nisa#86|4:86]]**
  *     **[[006 Al-An'am#29|6:29]]–[[006 Al-An'am#30|6:30]]**
  *
- * The bold is only a signal: the plugin takes the marker out of the text flow
- * and places the reference in the note's right margin, beside the line where
+ * The bold is structural, not decorative: a bare wikilink becomes an editor
+ * widget that CSS cannot move, while the emphasis keeps the alias as ordinary
+ * text. The plugin takes the marker out of the text flow and places it in the
+ * gutter — left for an RTL text, right for an LTR one — beside the line where
  * the verse changes. It is never rendered bold, so a verse may change in the
  * middle of a sentence without breaking the paragraph.
  */
 
-const MARKER = /\*\*\[\[(\d{3}[^#\]]*#\d+)\|(\d+:\d+(?:[–-]\d+:\d+)?)\]\]\*\*/g;
+const MARKER = /\*{1,2}\[\[(\d{3}[^#\]]*#\d+)\|(\d+:\d+(?:[–-]\d+:\d+)?)\]\]\*{1,2}/g;
 const MARKER_TEXT = /^\d+:\d+(?:[–-]\d+:\d+)?$/;
 const MARKER_CLASS = "mas-verse-marker";
-/** `## [[004 An-Nisa#153|Ḥafṣ 153]]` — a riwāya correspondence link. */
-const RIWAYA_LINK = /^##\s+\[\[(\d{3}[^#\]]*#\d+)\|([^\]]+)\]\]/m;
 
 function isMarkerLink(text: string): boolean {
 	const clean = text.replace(/[\u200e\u200f\u202a-\u202e\s]/g, "");
@@ -27,7 +27,6 @@ function isMarkerLink(text: string): boolean {
 
 /** Reading view: tag the <strong> that wraps a marker link. */
 function decorateReadingElement(root: HTMLElement): void {
-	let found = false;
 	for (const strong of Array.from(root.querySelectorAll("strong"))) {
 		if (!isMarkerLink(strong.textContent ?? "")) continue;
 		// Obsidian may wrap the link in the bold (`<strong><a>`) or the bold in
@@ -37,23 +36,21 @@ function decorateReadingElement(root: HTMLElement): void {
 		if (!link) continue;
 		strong.addClass(MARKER_CLASS);
 		link.addClass("mas-verse-marker-link");
-		const paragraph = strong.closest("p, li, div.el-p") as HTMLElement | null;
-		if (paragraph) paragraph.addClass("mas-verse-paragraph");
-		found = true;
+		// An English translation keeps its own face and direction; only an
+		// Arabic paragraph needs the RTL paragraph class.
+		const preview = root.closest(".markdown-preview-view");
+		if (!(preview instanceof HTMLElement && /(^|\s)quran-en(\s|$)/.test(preview.className))) {
+			const paragraph = strong.closest("p, li, div.el-p") as HTMLElement | null;
+			if (paragraph) paragraph.addClass("mas-verse-paragraph");
+		}
 	}
-	if (found) {
-		tagContainer(root, ".markdown-preview-view");
-		const section = root.closest(".markdown-preview-section");
-		if (section.instanceOf(HTMLElement)) section.addClass("mas-verse-section");
+	for (const link of Array.from(root.querySelectorAll("a.internal-link"))) {
+		const text = (link.textContent ?? "").trim();
+		if (/^\d+:\d+(?:[–-]\d+:\d+)?$/.test(text)) link.addClass(MARKER_CLASS);
 	}
+
 }
 
-/** The note's own `cssclasses` may be absent; tag the view so the margin rules
- *  apply. */
-function tagContainer(el: HTMLElement, selector: string): void {
-	const container = el.closest(selector);
-	if (container.instanceOf(HTMLElement)) container.classList.add("tafsir");
-}
 
 interface Placed {
 	from: number;
@@ -74,10 +71,8 @@ function buildMarkerDecorations(view: EditorView): DecorationSet {
 			const bar = match[0].indexOf("|");
 			const aliasStart = markerStart + bar + 1;
 			const aliasEnd = aliasStart + (match[2]?.length ?? 0);
-			// Hide only the `**`; the link text itself gets the marker class,
-			// which is a real text range (unlike the link syntax around it).
-			placed.push({ from: markerStart, to: markerStart + 2, value: Decoration.replace({}) });
-			placed.push({ from: markerEnd - 2, to: markerEnd, value: Decoration.replace({}) });
+			// CodeMirror already hides the emphasis markers; decorating only the
+			// link text avoids overlapping its own replacements.
 			const line = view.state.doc.lineAt(markerStart);
 			placed.push({
 				from: line.from,
@@ -104,22 +99,6 @@ function buildMarkerDecorations(view: EditorView): DecorationSet {
 							+ "color:var(--link-color);white-space:nowrap;direction:ltr;text-align:left;z-index:2;"
 							+ "font-style:normal;text-decoration:none;",
 					},
-				}),
-			});
-		}
-		const link = RIWAYA_LINK.exec(text);
-		if (link) {
-			const lineStart = view.state.doc.lineAt(range.from + link.index).from;
-			const bar = link[0].indexOf("|");
-			const close = link[0].lastIndexOf("]]");
-			const aliasStart = lineStart + bar + 1;
-			const aliasEnd = lineStart + close;
-			placed.push({
-				from: aliasStart,
-				to: aliasEnd,
-				value: Decoration.mark({
-					class: "mas-riwaya-link",
-					attributes: { "data-href": link[1] },
 				}),
 			});
 		}
@@ -150,7 +129,6 @@ const verseMarkerExtension = ViewPlugin.fromClass(
 		constructor(view: EditorView) {
 			this.decorations = buildMarkerDecorations(view);
 			if (this.decorations.size) {
-				tagContainer(view.dom, ".markdown-source-view");
 				if (!(view.dom).dataset.masVerseClick) {
 					(view.dom).dataset.masVerseClick = "1";
 					view.dom.addEventListener("mousedown", handleMarkerClick, true);
@@ -161,7 +139,6 @@ const verseMarkerExtension = ViewPlugin.fromClass(
 		update(update: ViewUpdate): void {
 			if (update.docChanged || update.viewportChanged) {
 				this.decorations = buildMarkerDecorations(update.view);
-				if (this.decorations.size) tagContainer(update.view.dom, ".markdown-source-view");
 			}
 		}
 	},

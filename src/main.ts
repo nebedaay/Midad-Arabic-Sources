@@ -1202,7 +1202,9 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			|| `${this.settings.sourceImportRoot}/Quran`;
 		const counts = new Map<string, number>();
 		for (const file of this.app.vault.getFiles()) {
-			if (!/^\d{3} .+\.md$/.test(file.name)) continue;
+			// Canonical files are `004 An-Nisa.md`; a riwāya's are prefixed with
+			// the work name (`Qurʾān (riwāyat Warsh) … - 004 An-Nisa.md`).
+			if (!/(?:^| - )\d{3} .+\.md$/.test(file.name)) continue;
 			const path = file.parent?.path ?? "";
 			counts.set(path, (counts.get(path) ?? 0) + 1);
 		}
@@ -1223,7 +1225,8 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 	quranFile(workPath: string, surah: number): TFile | null {
 		const prefix = `${String(surah).padStart(3, "0")} `;
 		return this.app.vault.getFiles().find((file) => file.parent?.path === workPath
-			&& file.extension === "md" && file.name.startsWith(prefix)) ?? null;
+			&& file.extension === "md"
+			&& (file.name.startsWith(prefix) || file.name.includes(` - ${prefix}`))) ?? null;
 	}
 
 	/** Rewrite the verse references inside arbitrary text as Qur'ān links. */
@@ -3555,10 +3558,12 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			items = front.slice(index + 1, endIndex).filter((line) => line.trim());
 			front.splice(index, endIndex - index, "midad-up:");
 		}
+		// Topic links are additive: this pass adds the user's `topics` and drops
+		// exact duplicates, but never removes a topic a template supplied. The
+		// work's own `up` topics are not in `topics`, and pruning them here made
+		// every render add them and the repair pass delete them again.
 		const seen = new Set<string>();
 		items = items.filter((line) => {
-			const target = /\[\[(Midad topic - [^\]|]+)/.exec(line);
-			if (target && !active.has(target[1])) return false;
 			const key = line.trim();
 			if (!key || seen.has(key)) return false;
 			seen.add(key);
@@ -6171,6 +6176,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			this.cancelSourceOperation();
 		});
 		let done = 0;
+		const contentPaths: string[] = [];
 		try {
 			for (const it of items) {
 				if (this.isSourceCancelled(op)) break;
@@ -6201,13 +6207,12 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 						notice.setMessage(`Updating imported sources: ${nth} — ${label} — ${step}/${steps} notes (${pct}%)`);
 					};
 					const seen = new Map(Object.entries(stats[key]?.units ?? {}));
-					if (yamlOnly) {
-						await renderModelToVault(this.app, templates, model, outRoot, false, onStep,
-							it.kinds ?? undefined, seen, () => this.isSourceCancelled(op), true);
-					} else {
-						await renderModelToVault(this.app, templates, model, outRoot, false, onStep,
+					const written = yamlOnly
+						? await renderModelToVault(this.app, templates, model, outRoot, false, onStep,
+							it.kinds ?? undefined, seen, () => this.isSourceCancelled(op), true)
+						: await renderModelToVault(this.app, templates, model, outRoot, false, onStep,
 							it.kinds ?? undefined, seen, () => this.isSourceCancelled(op));
-					}
+					contentPaths.push(...written);
 					// Record which templates this render brought up to date. A scoped
 					// render marks only the rendered kinds (plus the hub); a full render
 					// (kinds === null) marks every template the work uses. On the first
@@ -6239,6 +6244,9 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			}
 		} finally {
 			notice.hide();
+			// Every render must leave the baseline matching what it wrote, or the
+			// next pass reports its own output as a user edit.
+			await this.updateNoteBaselines(contentPaths);
 			await this.saveSourceStats(stats);
 			void this.reportLargeSourceNotes(false);
 			const cancelled = this.isSourceCancelled(op);
