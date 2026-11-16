@@ -6289,7 +6289,13 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 	async recordPipelineHash(): Promise<{ hash: string; at: number }> {
 		const hash = await this.pipelineScriptHash();
 		const store = await this.loadSourceHashes();
+		const known = !!store.templates["pipeline"];
 		const { store: next } = recordTemplateHashes(store, { pipeline: hash }, Date.now());
+		// The first record is a change like any other: the notes on disk were
+		// produced by an older build's scripts, so they are compared against now
+		// once. (A template key keeps `at: 0` because a *new* template has no
+		// older notes to fix; a script does.)
+		if (!known) next.templates["pipeline"] = { hash, at: Date.now() };
 		await this.saveSourceHashes(next);
 		return { hash, at: templateChangedAt(next, "pipeline") };
 	}

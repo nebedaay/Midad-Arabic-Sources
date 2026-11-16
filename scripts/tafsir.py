@@ -9,6 +9,7 @@ normalise their own source structure and then call in here.
 from __future__ import annotations
 
 import re
+import unicodedata
 
 import quran
 from quran import (
@@ -238,6 +239,75 @@ def _choose_verse_markers(quotes: list[tuple[int, int, int, int, int]],
     return kinds
 
 
+# How close two markers must be to risk landing on the same rendered line.
+_MARKER_REACH = 75
+
+
+def _rendered_gap(line: str, start: int, end: int) -> int:
+    """Approximate how much rendered text separates two offsets.
+
+    Diacritics take no horizontal space and the markers themselves are drawn in
+    the margin, so the count is of the characters a reader sees between the two
+    anchors.
+    """
+    if end <= start:
+        return 0
+    return sum(1 for ch in line[start:end]
+               if not unicodedata.category(ch).startswith("Mn"))
+
+
+def _merge_marker_group(items: list[tuple[int, str, bool]]) -> list[tuple[int, str, bool]]:
+    """One marker for verses introduced together, or the first of them.
+
+    A group is markers close enough to collide. They become a range marker —
+    the link points at the first verse and the alias says where it ends — when
+    they are the same sūra and within a couple of verses; otherwise the first
+    keeps the place and the rest are dropped, because one margin slot can hold
+    only one link.
+    """
+    if len(items) == 1:
+        return items
+    # A one-off cross-reference cannot share a margin slot with the passage's
+    # own marker; the passage wins that slot.
+    if not all(is_mark for _off, _text, is_mark in items):
+        items = [item for item in items if item[2]][:1]
+        if len(items) == 1:
+            return items
+    parsed = [re.match(r"\*\*\[\[([^#\]]+)#(\d+)\|(\d+):(\d+)", text)
+              for _off, text, _is_mark in items]
+    close = all(parsed) and all(
+        int(parsed[k + 1].group(4)) - int(parsed[k].group(4)) <= 3
+        for k in range(len(parsed) - 1))
+    if (close
+            and len({p.group(1) for p in parsed}) == 1
+            and len({p.group(3) for p in parsed}) == 1):
+        surah_num = int(parsed[0].group(3))
+        first_verse = int(parsed[0].group(4))
+        last_verse = int(parsed[-1].group(4))
+        if last_verse > first_verse:
+            return [(items[0][0],
+                     _verse_marker(parsed[0].group(1), surah_num,
+                                   first_verse, last_verse),
+                     True)]
+    # Not a range (another sūra, or too far apart in verse numbers): they still
+    # collide, so the stylesheet stacks them in the margin. Three is the depth
+    # the gutter can hold without reaching the next line.
+    return items[:3]
+
+
+def _marker_groups(line: str,
+                   items: list[tuple[int, str, bool]]
+                   ) -> list[list[tuple[int, str, bool]]]:
+    """Markers grouped by whether they can collide in the margin."""
+    groups: list[list[tuple[int, str, bool]]] = []
+    for entry in items:
+        if groups and _rendered_gap(line, groups[-1][-1][0], entry[0]) <= _MARKER_REACH:
+            groups[-1].append(entry)
+        else:
+            groups.append([entry])
+    return [_merge_marker_group(group) for group in groups]
+
+
 def _write_verse_markers(lines: list[str],
                          quotes: list[tuple[int, int, int, int, int]],
                          kinds: list[int], skip_leading: bool) -> tuple[str, int]:
@@ -257,42 +327,24 @@ def _write_verse_markers(lines: list[str],
     inserted = 0
     out: list[str] = []
     for index, line in enumerate(lines):
-        # The margin holds one marker per line: several markers on one line are
-        # absolutely positioned at the same place and would overlap, so the
-        # passage's marker wins and the rest are dropped.
-        items = sorted(marks.get(index, ()))
-        if not items:
-            items = sorted(spares.get(index, ()))[:1]
+        items = sorted(
+            [(off, text, True) for off, text in marks.get(index, ())]
+            + [(off, text, False) for off, text in spares.get(index, ())])
         if skip_leading and index == 0:
             # The template has already written the block's own marker at the
             # start of the body — which is that line.
             items = []
-        elif len(items) > 1:
-            # Verses introduced together on one line become one range marker:
-            # the link points at the first, the alias says where it ends, so a
-            # skipped verse is visibly accounted for. The verses must be close
-            # together, or the range would claim a passage that does not exist.
-            parsed = [re.match(
-                r"\*\*\[\[([^#\]]+)#(\d+)\|(\d+):(\d+)", text) for _off, text in items]
-            close = all(parsed) and all(
-                int(parsed[k + 1].group(4)) - int(parsed[k].group(4)) <= 3
-                for k in range(len(parsed) - 1))
-            if (close
-                    and len({p.group(1) for p in parsed}) == 1
-                    and len({p.group(3) for p in parsed}) == 1):
-                surah_num = int(parsed[0].group(3))
-                first_verse = int(parsed[0].group(4))
-                last_verse = int(parsed[-1].group(4))
-                if last_verse > first_verse:
-                    items = [(items[0][0],
-                              _verse_marker(parsed[0].group(1), surah_num,
-                                            first_verse, last_verse))]
-                else:
-                    items = items[:1]
-            else:
-                items = items[:1]
+        else:
+            # A marker is taken out of the text flow and put in the margin at
+            # its own vertical position, so two markers only collide when their
+            # anchors would land on the same *rendered* line — not merely in the
+            # same paragraph. Nothing knows where the wrap falls, but anchors
+            # within `_MARKER_REACH` rendered characters are close enough to
+            # collide; farther apart they are separate links, which is what a
+            # page of long paragraphs needs.
+            items = [m for group in _marker_groups(line, items) for m in group]
         inserted += len(items)
-        for offset, text in reversed(items):
+        for offset, text, _is_mark in reversed(items):
             line = line[:offset] + text + line[offset:]
         out.append(line)
     return "\n".join(out), inserted

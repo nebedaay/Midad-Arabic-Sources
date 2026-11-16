@@ -20,6 +20,19 @@ const MARKER = /\*{1,2}\[\[(\d{3}[^#\]]*#\d+)\|(\d+:\d+(?:[–-]\d+:\d+)?)\]\]\*
 const MARKER_TEXT = /^\d+:\d+(?:[–-]\d+:\d+)?$/;
 const MARKER_CLASS = "mas-verse-marker";
 
+/** Rendered characters within which two markers can share one line. */
+const MARKER_REACH = 75;
+
+/** Approximate the rendered text between two offsets (diacritics take no space). */
+function renderedGap(text: string, start: number, end: number): number {
+	if (end <= start) return 0;
+	let count = 0;
+	for (const ch of text.slice(start, end)) {
+		if (!/\p{Mn}/u.test(ch)) count += 1;
+	}
+	return count;
+}
+
 function isMarkerLink(text: string): boolean {
 	const clean = text.replace(/[\u200e\u200f\u202a-\u202e\s]/g, "");
 	return MARKER_TEXT.test(clean);
@@ -27,7 +40,7 @@ function isMarkerLink(text: string): boolean {
 
 /** Reading view: tag the <strong> that wraps a marker link. */
 function decorateReadingElement(root: HTMLElement): void {
-	const ordinals = new Map<Element, number>();
+	const placed = new Map<Element, HTMLElement[]>();
 	for (const strong of Array.from(root.querySelectorAll("strong"))) {
 		if (!isMarkerLink(strong.textContent ?? "")) continue;
 		// Obsidian may wrap the link in the bold (`<strong><a>`) or the bold in
@@ -37,18 +50,32 @@ function decorateReadingElement(root: HTMLElement): void {
 		if (!link) continue;
 		strong.addClass(MARKER_CLASS);
 		link.addClass("mas-verse-marker-link");
-		// Two markers on one line (a source range and the recognised verse) are
-		// stacked in the gutter; the ordinal lets the stylesheet offset each.
+		// A marker is drawn beside its own anchor, so whether two collide is a
+		// question about the *rendered* lines — answered here by measuring, once
+		// the paragraphs have been laid out.
 		const scope = strong.closest("p, li, div.el-p, .markdown-preview-section") ?? root;
-		const ordinal = ordinals.get(scope) ?? 0;
-		ordinals.set(scope, ordinal + 1);
-		if (ordinal > 0) strong.dataset.markerIndex = String(ordinal);
+		const list = placed.get(scope) ?? [];
+		list.push(strong);
+		placed.set(scope, list);
 		// An English translation keeps its own face and direction; only an
 		// Arabic paragraph needs the RTL paragraph class.
 		const preview = root.closest(".markdown-preview-view");
 		if (!(preview instanceof HTMLElement && /(^|\s)quran-en(\s|$)/.test(preview.className))) {
 			const paragraph = strong.closest("p, li, div.el-p") as HTMLElement | null;
 			if (paragraph) paragraph.addClass("mas-verse-paragraph");
+		}
+	}
+	// Stack only the markers that actually share a rendered line. Two markers a
+	// paragraph apart keep their own anchors and their own positions.
+	for (const list of placed.values()) {
+		let previousTop: number | null = null;
+		let ordinal = 0;
+		for (const strong of list) {
+			const top = strong.getBoundingClientRect().top;
+			ordinal = previousTop != null && Math.abs(top - previousTop) < 8 ? ordinal + 1 : 0;
+			if (ordinal > 0) strong.dataset.markerIndex = String(ordinal);
+			else delete strong.dataset.markerIndex;
+			previousTop = top;
 		}
 	}
 	for (const link of Array.from(root.querySelectorAll("a.internal-link"))) {
@@ -73,7 +100,7 @@ function buildMarkerDecorations(view: EditorView): DecorationSet {
 		MARKER.lastIndex = 0;
 		let match: RegExpExecArray | null;
 		let ordinal = 0;
-		let lastLine = -1;
+		let lastMarkerEnd = -1;
 		while ((match = MARKER.exec(text)) !== null) {
 			const markerStart = range.from + match.index;
 			const bar = match[0].indexOf("|");
@@ -95,13 +122,15 @@ function buildMarkerDecorations(view: EditorView): DecorationSet {
 					},
 				}),
 			});
-			const lineFrom = view.state.doc.lineAt(markerStart).from;
-			if (lineFrom !== lastLine) {
-				lastLine = lineFrom;
-				ordinal = 0;
-			} else {
-				ordinal += 1;
-			}
+			// Markers are drawn beside their own anchor, so two only collide when
+			// they would land on the same rendered line. Nothing knows where the
+			// wrap falls; anchors this close are the ones at risk, and farther apart
+			// they are ordinary separate links (the pipeline keeps those unmerged).
+			// Measure from the previous marker's end, so the marker's own source text
+			// is not counted as text between them.
+			const gap = lastMarkerEnd < 0 ? Infinity : renderedGap(text, lastMarkerEnd, match.index);
+			ordinal = gap <= MARKER_REACH ? ordinal + 1 : 0;
+			lastMarkerEnd = match.index + match[0].length;
 			placed.push({
 				from: aliasStart,
 				to: aliasEnd,
