@@ -58,6 +58,7 @@ If the note differs from its saved version, the manager asks whether to save, ov
 ## Re-rendering and restoring
 
 - Re-rendering Version 0 reads the current model or archive.
+- Re-rendering a transcription's **parent note** — the volume index of a multi-volume item — re-renders every volume note in it, the same way re-rendering a multi-volume work's MOC re-renders its volumes. The same applies to **Post-process this transcription/translation** and to assigning a topic, which re-processes all the volumes at once.
 - Reinstalling a source reapplies its saved versions automatically.
 - Restoring an archived source reapplies saved versions automatically.
 - Annotations are stored separately and are restored through the normal annotation lifecycle.

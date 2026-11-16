@@ -5223,7 +5223,13 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 				if (info.volume != null || !this.noteHasVolumes(info.citekey, info.type)) {
 					await this.postprocessTranscriptionNote(target, info);
 				} else {
-					new Notice("Topic saved. Open a volume note to post-process it.");
+					// The parent is an index; the volumes are what the topic
+					// re-processes, so run them all rather than sending the user
+					// off to open each one.
+					const done = await this.postprocessTranscriptionVolumes(info.citekey, info.type);
+					new Notice(done
+						? `Topic saved. Re-processed ${done} volume ${done === 1 ? "note" : "notes"}.`
+						: "Topic saved.");
 				}
 			})();
 		}).open();
@@ -5278,12 +5284,18 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 	 * version. `write_note` rebuilds the native YAML, creates/updates the native
 	 * volume parent, and refreshes the literature note's
 	 * `transcriptions`/`translations` list.
+	 *
+	 * The parent note of a multi-volume transcription is an index, exactly like a
+	 * multi-volume work's MOC: the text lives in the volume notes. Handed that
+	 * parent, the pass runs over every volume note instead of refusing, so
+	 * re-rendering the work re-renders all of it.
 	 */
 	async postprocessTranscriptionNote(
 		file?: TAbstractFile | null,
 		infoOverride?: ArchivedNoteInfo,
 		metadataOnly = false,
-		inPlace = false
+		inPlace = false,
+		quiet = false
 	): Promise<void> {
 		const target = file ?? this.app.workspace.getActiveFile();
 		if (!(target instanceof TFile) || target.extension !== "md") {
@@ -5296,7 +5308,17 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			return;
 		}
 		if (info.volume == null && !info.unit && this.noteHasVolumes(info.citekey, info.type)) {
-			new Notice("That is a volume index; open the volume note you want to post-process.");
+			const done = await this.postprocessTranscriptionVolumes(
+				info.citekey, info.type, metadataOnly, inPlace);
+			if (!done) {
+				new Notice("That is a volume index; open a volume note to post-process it.");
+				return;
+			}
+			// The volume writes may have regenerated the index note above them.
+			if (this.app.vault.getAbstractFileByPath(target.path) instanceof TFile) {
+				await this.updateNoteBaselines([target.path]);
+			}
+			new Notice(`${metadataOnly ? "Upgraded" : "Post-processed"} ${done} volume ${done === 1 ? "note" : "notes"} of @${info.citekey}.`);
 			return;
 		}
 		const args = [
@@ -5321,9 +5343,53 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		} else if (consolidated?.legacy) {
 			new Notice(`Consolidated ${consolidated.legacy.split("/").pop() ?? consolidated.legacy} into the native parent.`);
 		}
-		if (result?.notes?.length && !metadataOnly) {
+		if (result?.notes?.length && !metadataOnly && !quiet) {
 			new Notice(`Post-processed ${target.basename}.`);
 		}
+	}
+
+	/** The existing volume notes of a multi-volume transcription/translation. */
+	private transcriptionVolumeFiles(citekey: string, type: string): TFile[] {
+		const folder = type === "translation" ? this.translationsFolder() : this.transcriptionsFolder();
+		const found: TFile[] = [];
+		for (const prefix of ["@", "mas-"]) {
+			for (let volume = 1; volume <= 200; volume++) {
+				const path = normalizePath(`${folder}/${prefix}${citekey} - ${type} - vol. ${volume}.md`);
+				const file = this.app.vault.getAbstractFileByPath(path);
+				if (file instanceof TFile) found.push(file);
+			}
+		}
+		return found;
+	}
+
+	/**
+	 * Post-process every volume note of a multi-volume transcription/translation.
+	 *
+	 * The parent note of such a work is an index, so a re-render asked for at the
+	 * parent runs over the volumes — the notes that actually carry text — the way
+	 * a multi-volume work's MOC re-renders its volumes. Returns how many volume
+	 * notes were processed.
+	 */
+	private async postprocessTranscriptionVolumes(
+		citekey: string,
+		type: string,
+		metadataOnly = false,
+		inPlace = false
+	): Promise<number> {
+		let done = 0;
+		const written: string[] = [];
+		for (const volumeFile of this.transcriptionVolumeFiles(citekey, type)) {
+			const volumeInfo = archivedNoteInfo(volumeFile.path);
+			if (!volumeInfo?.type) continue;
+			await this.postprocessTranscriptionNote(volumeFile, volumeInfo, metadataOnly, inPlace, true);
+			done += 1;
+			// A re-render is not an edit, so the fresh note becomes the baseline.
+			if (this.app.vault.getAbstractFileByPath(volumeFile.path) instanceof TFile) {
+				written.push(volumeFile.path);
+			}
+		}
+		if (written.length) await this.updateNoteBaselines(written);
+		return done;
 	}
 
 	/** The remembered adoption choices, or explicit unchecked defaults. */
@@ -5570,10 +5636,27 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 				return null;
 			}
 		}
+		// The parent of a multi-volume work is an index, so re-rendering it must
+		// leave none of its volumes behind: whatever has an archive was replayed
+		// above, and a volume note without one is post-processed in place.
+		let extra = 0;
+		if (info.volume == null && info.type) {
+			const covered = new Set(chosen
+				.map((entry) => entry.info.volume)
+				.filter((volume): volume is number => volume != null));
+			for (const volumeFile of this.transcriptionVolumeFiles(info.citekey, info.type)) {
+				const volumeInfo = archivedNoteInfo(volumeFile.path);
+				if (!volumeInfo?.type || volumeInfo.volume == null) continue;
+				if (covered.has(volumeInfo.volume)) continue;
+				await this.postprocessTranscriptionNote(volumeFile, volumeInfo, false, false, true);
+				extra += 1;
+			}
+		}
 		if (!options.skipApply) {
 			await this.applySavedVersions([canonicalPath]);
 			await this.updateNoteBaselines([canonicalPath]);
-			new Notice(`Re-rendered ${chosen.length} archived batch(es) for @${info.citekey}.`);
+			const also = extra ? ` and post-processed ${extra} volume ${extra === 1 ? "note" : "notes"}` : "";
+			new Notice(`Re-rendered ${chosen.length} archived batch(es) for @${info.citekey}${also}.`);
 		}
 		return null;
 	}
