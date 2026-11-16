@@ -930,6 +930,38 @@ def _consolidate_parent(native_parent: Path, mv) -> dict | None:
     }
 
 
+def cmd_postprocess_body(args) -> int:
+    """Run the local post-processing over a plain body, with no identity.
+
+    An adopted note is a transcription like any other, only without a citekey,
+    a volume, or an archived batch. This is the same body pass a JSON-less
+    transcription gets, so a change to the post-processing scripts reaches an
+    adopted note exactly as it reaches a transcription.
+    """
+    source = Path(args.note).resolve()
+    if not source.exists():
+        fail(f"Body not found: {source}")
+        return 1
+    out_path = Path(args.out).resolve()
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    work = VAULT / ".tmp"
+    work.mkdir(parents=True, exist_ok=True)
+    workdir = Path(tempfile.mkdtemp(prefix="midad-postprocess-body-", dir=str(work)))
+    try:
+        raw = workdir / "raw.md"
+        raw.write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
+        processed = workdir / "processed.md"
+        tpp = load_module("transcription-postprocess.py")
+        with contextlib.redirect_stdout(io.StringIO()):
+            tpp.run(raw, out_path=processed, metadata=False,
+                    tafsir=bool(getattr(args, "tafsir", False)))
+        out_path.write_text(processed.read_text(encoding="utf-8"), encoding="utf-8")
+    finally:
+        shutil.rmtree(workdir, ignore_errors=True)
+    emit("result", result={"notes": [str(out_path)]})
+    return 0
+
+
 def cmd_postprocess_note(args) -> int:
     """Re-run local post-processing on an existing note, without an archive.
 
@@ -1052,6 +1084,12 @@ def main() -> int:
     p.set_defaults(func=cmd_translate)
 
     p = sub.add_parser("reprocess"); p.add_argument("--zip", required=True); p.set_defaults(func=cmd_reprocess)
+
+    p = sub.add_parser("postprocess-body")
+    p.add_argument("note", help="Markdown file holding only the body to post-process.")
+    p.add_argument("--out", required=True, help="Where to write the processed body.")
+    p.add_argument("--tafsir", action="store_true")
+    p.set_defaults(func=cmd_postprocess_body)
 
     p = sub.add_parser("postprocess-note")
     p.add_argument("note")

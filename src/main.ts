@@ -4513,6 +4513,8 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 				const now = Date.now();
 				const rendered: Record<string, number> = { ...(stats[key]?.rendered ?? {}) };
 				for (const tkey of this.templateKeysFor(String(model.work.collection ?? ""))) rendered[tkey] = now;
+				// The scripts that built the model are part of the renderer too.
+				rendered["pipeline"] = now;
 				stats[key] = {
 					...stats[key], rendered, units: Object.fromEntries(seen),
 					// The total, not the number just rewritten: this is the baseline the
@@ -6244,27 +6246,31 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 	}
 
 	/**
-	 * Scripts whose output is a transcription or translation note.
+	 * Every script that writes the content of a note.
 	 *
-	 * A repository source changes when its template changes; a transcription has
-	 * no template, but it is rendered by these scripts, so a change to them is
-	 * the same event: the renderer moved and the notes are out of date.
+	 * One list for all kinds: `text-source-import.py` builds a repository work's
+	 * bodies, the transcription scripts build a transcription's, and both import
+	 * `quran.py`/`tafsir.py`. A change to any of them is the same event — the
+	 * renderer moved, so every note they produced is out of date, whatever kind
+	 * it is.
 	 */
-	static readonly TRANSCRIPTION_SCRIPTS = [
-		"transcription-postprocess.py",
-		"transcription-format.py",
+	static readonly CONTENT_SCRIPTS = [
+		"text-source-import.py",
+		"text_postprocess.py",
 		"quran.py",
 		"tafsir.py",
-		"text_postprocess.py",
+		"transcription-postprocess.py",
+		"transcription-format.py",
 		"transcription-translation-move-to-vault.py",
+		"midad-arabic-sources-pipeline.py",
 		"_timestamp.py",
 	];
 
-	/** A single hash over the transcription post-processing scripts. */
+	/** A single hash over every content-producing script. */
 	async pipelineScriptHash(): Promise<string> {
 		const dir = path.dirname(this.resolveScript(this.settings.pipelineScript));
 		const parts: string[] = [];
-		for (const name of MidadArabicSourcesPlugin.TRANSCRIPTION_SCRIPTS) {
+		for (const name of MidadArabicSourcesPlugin.CONTENT_SCRIPTS) {
 			let body = "";
 			try {
 				body = fs.readFileSync(`${dir}/${name}`, "utf8");
@@ -6318,6 +6324,86 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			out.push(file);
 		}
 		return out;
+	}
+
+	/** Adopted notes produced before the current scripts. */
+	async findStaleAdoptedNotes(pipeline: { hash: string; at: number }): Promise<TFile[]> {
+		const { hash, at } = pipeline;
+		if (!at || !hash) return [];
+		const out: TFile[] = [];
+		for (const path of this.annotations?.adoptedPaths() ?? []) {
+			const file = this.app.vault.getAbstractFileByPath(normalizePath(path));
+			if (!(file instanceof TFile)) continue;
+			if (this.hashStore().render(file.path) === hash) continue;
+			if ((file.stat?.mtime ?? 0) >= at) {
+				this.hashStore().setRenders({ [file.path]: hash });
+				continue;
+			}
+			out.push(file);
+		}
+		return out;
+	}
+
+	/**
+	 * Run the same body post-processing over adopted notes.
+	 *
+	 * An adopted note is a transcription without a citekey, a volume or an
+	 * archived batch, so it gets the same body pass a JSON-less transcription
+	 * gets — inside its managed region, leaving its own YAML and any text outside
+	 * the region untouched.
+	 */
+	async reprocessAdoptedNotes(files: TFile[], pipeline: { hash: string; at: number },
+		kind: "auto" | "explicit" = "auto"): Promise<number> {
+		if (!files.length) return 0;
+		if (kind === "auto" && this.autoReview() === "skip") return 0;
+		if (!(await this.reviewChangedNotes(files.map((file) => file.path),
+			kind === "auto" ? "save" : "ask"))) return 0;
+		const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+		const workDir = normalizePath(`.tmp/midad-adopt-${stamp}`);
+		let done = 0;
+		const stamped: Record<string, string> = {};
+		const notice = new Notice(`Updating ${files.length} adopted note(s)…`, 0);
+		try {
+			for (const [index, file] of files.entries()) {
+				notice.setMessage(`Updating adopted notes: ${index + 1}/${files.length} — ${file.basename}`);
+				const text = await this.app.vault.read(file);
+				const prior = splitNote(text);
+				const region = findManagedRegion(prior.body);
+				if (!region) continue;
+				const inner = prior.body.slice(region.start, region.end);
+				const input = `${workDir}/in-${index}.md`;
+				const output = `${workDir}/out-${index}.md`;
+				try {
+					await this.app.vault.adapter.write(input, inner);
+					const result = await this.runWithProgress(
+						`Updating ${file.basename}`,
+						["postprocess-body", `${this.vaultPath()}/${input}`, "--out", `${this.vaultPath()}/${output}`],
+						this.settings.pipelineScript);
+					if (!result) continue;
+					const processed = await this.app.vault.adapter.read(output);
+					const body = prior.body.slice(0, region.start) + processed + prior.body.slice(region.end);
+					const next = joinNote(prior.frontmatter ?? "", body);
+					try {
+						const backup = `${this.vaultPath()}/.midad-arabic-sources/backups/adopted-${stamp}/${file.path}`;
+						fs.mkdirSync(backup.slice(0, backup.lastIndexOf("/")), { recursive: true });
+						fs.writeFileSync(backup, text, "utf8");
+					} catch { /* best effort */ }
+					await this.app.vault.modify(file, next);
+					stamped[file.path] = pipeline.hash;
+					done += 1;
+				} catch (e) {
+					console.error("[midad-arabic-sources] adopted post-process", file.path, e);
+				}
+			}
+		} finally {
+			notice.hide();
+			try {
+				fs.rmSync(`${this.vaultPath()}/${workDir}`, { recursive: true, force: true });
+			} catch { /* best effort */ }
+			this.hashStore().setRenders(stamped);
+			await this.updateNoteBaselines(Object.keys(stamped));
+		}
+		return done;
 	}
 
 	/**
@@ -6413,12 +6499,12 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 	 * template re-renders only the roots. A scoped render always rewrites the hub
 	 * too, because its `updated` is the work's staleness watermark.
 	 */
-	async findStaleSourceWorks(): Promise<Array<{ work: JsonObject; kinds: Set<string> | null }>> {
+	async findStaleSourceWorks(): Promise<Array<{ work: JsonObject; kinds: Set<string> | null; refetch?: boolean }>> {
 		const store = await this.loadSourceHashes();
 		const manifest = await this.loadSourceManifest();
 		const pending = await this.loadPendingDeletions();
 		const stats = await this.loadSourceStats();
-		const out: Array<{ work: JsonObject; kinds: Set<string> }> = [];
+		const out: Array<{ work: JsonObject; kinds: Set<string> | null; refetch?: boolean }> = [];
 		for (const work of manifest) {
 			if (this.workStatus(work) !== "installed") continue;
 			if (pending.has(this.workKey(work))) continue;
@@ -6438,6 +6524,14 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 				const ms = renderedMs(key);
 				return !ms || ms < at;
 			};
+			// A change to a content script rebuilds the work's model as well as its
+			// notes: the acquisition and the renderer are the same code. So the work
+			// is re-fetched from its cache and re-rendered, not merely re-rendered.
+			const scriptsAt = templateChangedAt(store, "pipeline");
+			if (scriptsAt > 0 && renderedMs("pipeline") < scriptsAt) {
+				out.push({ work, kinds: null, refetch: true });
+				continue;
+			}
 			const kinds = new Set<string>();
 			for (const key of this.templateKeysFor(String(work.collection ?? ""))) {
 				if (key === "hub") continue;
@@ -6559,6 +6653,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 						for (const tkey of this.templateKeysFor(String(it.work.collection ?? ""))) rendered[tkey] = legacy;
 					}
 					rendered["hub"] = now;
+					if (yamlOnly) rendered["pipeline"] = rendered["pipeline"] ?? legacy;
 					for (const tkey of this.templateKeysFor(String(it.work.collection ?? ""))) {
 						if (tkey === "hub") continue;
 						const kind = SOURCE_TEMPLATE_KIND[tkey];
@@ -6673,7 +6768,8 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		// leaves their notes just as out of date.
 		const pipeline = await this.recordPipelineHash();
 		const staleNotes = await this.findStaleTranscriptionNotes(pipeline);
-		if (!incomplete.length && !stale.length && !indexDirty && !staleNotes.length) return;
+		const staleAdopted = await this.findStaleAdoptedNotes(pipeline);
+		if (!incomplete.length && !stale.length && !indexDirty && !staleNotes.length && !staleAdopted.length) return;
 
 		// Repair first, unconditionally: a missing model, or one written by an
 		// older acquisition, cannot be fixed by rendering. This is not a template
@@ -6707,14 +6803,31 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		// One consent for the whole pass: a template change, a script change and a
 		// stale index are the same event to the reader.
 		const finish = async (includeAuto: boolean) => {
-			if (includeAuto) for (const s of stale) rerender.push({ work: s.work, kinds: s.kinds });
+			if (includeAuto) {
+				// A work whose *scripts* moved is rebuilt from its cached source, not
+				// just re-rendered: the model body itself came from those scripts.
+				for (const s of stale) {
+					if (s.refetch) {
+						try {
+							await this.reinstallSource(s.work, "auto");
+						} catch (e) {
+							console.error("[midad-arabic-sources] rebuild", this.workKey(s.work), e);
+						}
+						continue;
+					}
+					rerender.push({ work: s.work, kinds: s.kinds });
+				}
+			}
 			if (rerender.length) {
 				await this.renderStaleScoped(rerender, "auto", yamlOnly && incomplete.length === 0);
 			}
-			if (includeAuto) await this.reprocessTranscriptionNotes(staleNotes, pipeline, "auto");
+			if (includeAuto) {
+				await this.reprocessTranscriptionNotes(staleNotes, pipeline, "auto");
+				await this.reprocessAdoptedNotes(staleAdopted, pipeline, "auto");
+			}
 			if (includeAuto && indexDirty) await this.refreshSourcesIndex();
 		};
-		const autoCount = stale.length + (indexDirty ? 1 : 0) + staleNotes.length;
+		const autoCount = stale.length + (indexDirty ? 1 : 0) + staleNotes.length + staleAdopted.length;
 		if (!autoCount) {
 			await finish(false);
 			return;
