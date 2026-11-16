@@ -55,7 +55,7 @@ import {
 	templateChangedAt,
 } from "./sourceImport/history";
 import { BUNDLED_ASSETS } from "./assets.generated";
-import { localDate } from "./time";
+import { localDate, localTimestamp } from "./time";
 import { formatPoetrySelection } from "./poetry";
 import { registerQuranQuoteRendering } from "./quranQuote";
 import { registerVerseMarkers } from "./verseMarkers";
@@ -501,6 +501,29 @@ interface SourceStat {
 	render?: number;
 	/** Note path → hash of the content last rendered there (see `contentHash`). */
 	units?: Record<string, string>;
+}
+
+/**
+ * Set the `updated:` property on a note, leaving everything else alone.
+ *
+ * Every generated note carries the time Midad last wrote it — repository source,
+ * transcription, translation, adopted note, and the index notes above them — so
+ * the property is set in one place, from the one timestamp helper, rather than
+ * by each kind of writer.
+ */
+function withUpdatedProperty(text: string, stamp: string): string {
+	const prior = splitNote(text);
+	if (prior.frontmatter == null) return joinNote(`updated: ${stamp}`, prior.body);
+	const lines = prior.frontmatter.split("\n");
+	const at = lines.findIndex((line) => /^updated\s*:/.test(line));
+	if (at >= 0) {
+		lines[at] = `updated: ${stamp}`;
+	} else {
+		// Next to `created:` when the note has one, otherwise at the end.
+		const created = lines.findIndex((line) => /^created\s*:/.test(line));
+		lines.splice(created >= 0 ? created + 1 : lines.length, 0, `updated: ${stamp}`);
+	}
+	return joinNote(lines.join("\n"), prior.body);
 }
 
 /**
@@ -1824,8 +1847,13 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		});
 		panel.finish(code === 0);
 		panel.addResultLinks(result?.notes ?? result?.sources ?? []);
-		if (code === 0) new Notice(`${title}: finished.`);
-		else new Notice(`${title}: failed — use “Show pipeline status” to see the log.`);
+		if (code === 0) {
+			// A note the pipeline wrote carries the time it was written, whatever
+			// kind it is. Scratch files under `.tmp` are not notes.
+			await this.stampUpdated((result?.notes ?? [])
+				.filter((path) => !normalizePath(path).includes("/.tmp/")));
+			new Notice(`${title}: finished.`);
+		} else new Notice(`${title}: failed — use “Show pipeline status” to see the log.`);
 		return result;
 	}
 
@@ -3934,6 +3962,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 
 		const parentPath = await this.updateSourceParent(templates, model.file.categories, today);
 		if (parentPath) written.push(parentPath);
+		await this.stampUpdated(written);
 		await saveResourceModel(this.app, model.file);
 		this.annotations?.refreshSidebarOnly();
 		return written;
@@ -4318,6 +4347,30 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		}
 	}
 
+	/**
+	 * Stamp `updated:` on every note a write produced.
+	 *
+	 * Central, so no kind of note can be left without it: a repository page, a
+	 * transcription, a translation, an adopted note, a hub or a volume index all
+	 * record when they were last rendered.
+	 */
+	async stampUpdated(paths: string[]): Promise<void> {
+		const stamp = localTimestamp();
+		const vault = this.vaultPath();
+		for (const raw of [...new Set(paths.map((value) => value.trim()).filter(Boolean))]) {
+			const rel = normalizePath(raw.startsWith("/") ? vaultRelative(vault, raw) : raw);
+			const file = this.app.vault.getAbstractFileByPath(rel);
+			if (!(file instanceof TFile)) continue;
+			try {
+				const text = await this.app.vault.read(file);
+				const next = withUpdatedProperty(text, stamp);
+				if (next !== text) await this.app.vault.modify(file, next);
+			} catch (e) {
+				console.error("[midad-arabic-sources] stamp updated", rel, e);
+			}
+		}
+	}
+
 	private noteContentHash(text: string): string {
 		return managedHash(text);
 	}
@@ -4508,6 +4561,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 				written.push(...w);
 				contentPaths.push(...w);
 				await this.applySavedVersions(w);
+				await this.stampUpdated(w);
 				// A full render brings every template the work uses up to date.
 				const key = this.workKey(model.work);
 				const now = Date.now();
@@ -5398,6 +5452,9 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			new Notice(`Consolidated ${consolidated.legacy.split("/").pop() ?? consolidated.legacy} into the native parent.`);
 		}
 		if (result?.notes?.length) {
+			// The volume index above a volume note is rewritten by the pipeline's
+			// consolidation without being reported, so it is stamped here too.
+			await this.stampUpdated([target.path, this.transcriptionParentFile(target, info).path]);
 			// A review that kept the reader's text as the default version must win
 			// over the fresh render, exactly as it does for a repository source.
 			await this.applySavedVersions([target.path]);
@@ -5711,10 +5768,15 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 	private async applySavedVersions(paths: string[]): Promise<void> {
 		const store = new VersionStore(this.app, this.vaultPath());
 		const entries = await store.entriesForPaths(paths);
+		const applied: string[] = [];
 		for (const entry of entries) {
 			const file = this.app.vault.getAbstractFileByPath(normalizePath(entry.path));
-			if (file instanceof TFile) await store.apply(file, entry);
+			if (file instanceof TFile) {
+				await store.apply(file, entry);
+				applied.push(entry.path);
+			}
 		}
+		if (applied.length) await this.stampUpdated(applied);
 	}
 
 	/** Apply the non-destructive content migration to cached models, then re-render them. */
@@ -6395,6 +6457,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 						fs.writeFileSync(backup, text, "utf8");
 					} catch { /* best effort */ }
 					await this.app.vault.modify(file, next);
+					await this.stampUpdated([file.path]);
 					stamped[file.path] = pipeline.hash;
 					done += 1;
 				} catch (e) {
@@ -6648,6 +6711,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 						: await renderModelToVault(this.app, templates, model, outRoot, false, onStep,
 							it.kinds ?? undefined, seen, () => this.isSourceCancelled(op));
 					contentPaths.push(...written);
+					await this.stampUpdated(written);
 					// Record which templates this render brought up to date. A scoped
 					// render marks only the rendered kinds (plus the hub); a full render
 					// (kinds === null) marks every template the work uses. On the first

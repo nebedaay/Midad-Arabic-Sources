@@ -177,7 +177,13 @@ def _place_verse_markers(quotes: list[tuple[int, int, int, int, int]],
             moved = True
         elif linear:
             if surah != current[0]:
-                moved = False
+                # A quotation from another sūra opens a new passage only when the
+                # commentary settles there: the very next quotation, and more
+                # after it, are from that sūra. A lone citation — or a cluster of
+                # cross-references — is not a new focal sūra and does not move the
+                # margin.
+                moved = (i + 1 < len(quotes) and quotes[i + 1][2] == surah
+                         and sum(1 for q in quotes[i + 1:i + 5] if q[2] == surah) >= 2)
             else:
                 delta = verse - current[1]
                 if 1 <= delta <= 3:
@@ -231,8 +237,17 @@ def _choose_verse_markers(quotes: list[tuple[int, int, int, int, int]],
     for i, kind in enumerate(kinds):
         if kind:
             numbered.update(range(quotes[i][3], quotes[i][4] + 1))
-    for i, (_line_index, _offset, _surah, verse, end) in enumerate(quotes):
+    # A one-off verse is numbered only in the sūra the commentary is actually
+    # discussing. A passing citation of another sūra is a cross-reference: it
+    # gets no marginal link, however often it is quoted.
+    focal = quotes[0][2] if quotes else 0
+    for i, (_line_index, _offset, surah, verse, end) in enumerate(quotes):
+        if kinds[i] == 1:
+            focal = surah
+            continue
         if kinds[i] or verse in numbered:
+            continue
+        if surah != focal:
             continue
         kinds[i] = 2
         numbered.update(range(verse, end + 1))

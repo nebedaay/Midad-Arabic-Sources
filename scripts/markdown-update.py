@@ -117,15 +117,15 @@ def _update_markdown_body(body: str, *, quran: bool, tafsir: bool) -> str:
     if tafsir:
         # Split first: the heading pass breaks a page-wide paragraph at each
         # verse, which also lets quote discovery see short passages it would
-        # otherwise skip.
-        body, _ = tfs.insert_verse_headings(body)
+        # otherwise skip. A tafsīr is linear, so the margin follows its passage.
+        body, _ = tfs.insert_verse_headings(body, linear=True)
     if quran:
         body, _ = tfq.discover_and_mark_quotes(body, tafsir=tafsir)
         body, _ = tfq.add_missing_refs(body)
         body, _ = tfq.fix_wikilinks(body)
     if tafsir:
         body, _ = tfq.mark_short_fragments(body)
-        body, _ = tfs.insert_verse_headings(body)
+        body, _ = tfs.insert_verse_headings(body, linear=True)
     body = escape_literal_brackets(body)
     # Add links to bare Arabic/Western TOC entries and force Arabic TOC lines
     # RTL without touching existing TOC links.

@@ -272,7 +272,9 @@ def run(input_path, out_path=None, metadata=False, tafsir=False):
     print(f"  Total markers: {markers}")
 
     if tafsir:
-        content, verse_headings = tfs.insert_verse_headings(content)
+        # A tafsīr moves through the muṣḥaf in order, across sūras as its volume
+        # does, so the margin follows the passage rather than paragraph order.
+        content, verse_headings = tfs.insert_verse_headings(content, linear=True)
         print(f"  Verse headings: {verse_headings}")
 
     # Final repair of page headings, in case the Qur'an/tashkīl steps touched
