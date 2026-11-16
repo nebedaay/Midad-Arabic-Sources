@@ -7487,7 +7487,17 @@ class MidadArabicSourcesSettingTab extends PluginSettingTab {
 			{
 				type: "page",
 				name: "Source import from repository",
-				desc: "Install, name, and maintain imported text sources.",
+				desc: "Install, name, maintain, and auto-update imported text sources.",
+				// The auto-update state is the thing people come here to check, so
+				// it shows on the page entry instead of only inside the page.
+				displayValue: () => {
+					const mode = this.plugin.settings.autoUpdateSourceTemplates === true
+						? "always"
+						: this.plugin.settings.autoUpdateSourceTemplates === false ? "never" : "ask";
+					const days = this.plugin.settings.sourceUpdateCheckDays ?? 7;
+					const repos = days > 0 ? `every ${days} d` : "manual";
+					return `Templates: ${mode} · Repositories: ${repos}`;
+				},
 				items: [
 					{
 						name: "Importer script",
@@ -7510,8 +7520,8 @@ class MidadArabicSourcesSettingTab extends PluginSettingTab {
 						control: { type: "text", key: "sourceMocParent", placeholder: "Midad Arabic Sources" },
 					},
 					{
-						name: "Update notes when templates change",
-						desc: "Re-render imported source notes automatically when an import template changes.",
+						name: "Auto-update notes when templates change",
+						desc: "Re-render imported source notes automatically when an import template changes. A repository text change is caught by the check below; a model written at an older schema is always re-fetched.",
 						control: {
 							type: "dropdown",
 							key: "autoUpdateSourceTemplates",
@@ -7519,8 +7529,8 @@ class MidadArabicSourcesSettingTab extends PluginSettingTab {
 						},
 					},
 					{
-						name: "Check repositories every … days",
-						desc: "How often to ask the repositories whether an imported text changed (0 = only on the command).",
+						name: "Check repositories for changed texts every … days",
+						desc: "How often to ask each repository whether an imported text changed (0 = only on the command). A changed text is re-fetched and its notes re-rendered.",
 						control: { type: "number", key: "sourceUpdateCheckDays", defaultValue: 7, placeholder: "7", min: 0 },
 					},
 					{

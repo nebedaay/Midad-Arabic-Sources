@@ -291,11 +291,11 @@ Per-property merge strategies: `replace` (default — the template wins), `appen
 
 Managed regions, adoption, and identity are covered in [Managed regions, identity, and adoption](./managed-regions.md). The plugin keeps a template-hash timeline in `.midad-arabic-sources/template-history.json`. Each note records when it was rendered (`updated:`), so the plugin can tell which notes predate the current template. `created:` is merge-kept: the first-created timestamp survives every re-render.
 
-When you edit a template, the plugin offers to re-render the affected notes (the setting **“Update notes when templates change”** controls *Ask* / *Always* / *Never*). You can always re-render manually with **“Re-render imported sources”**.
+When you edit a template, the plugin offers to re-render the affected notes (the setting **“Auto-update notes when templates change”** controls *Ask* / *Always* / *Never*; it sits on **Settings → Midad Arabic Sources → Source import from repository**, and its current state is shown on that page's entry so you can check it without opening the page). You can always re-render manually with **“Re-render imported sources”**.
 
 ## Upstream changes
 
-Each work records the repository’s own `repository-updated` date. **“Check for source updates”** runs a two-stage check: it first asks the repository for that date, and only if it moved does it fetch the item’s **content hash** (a git blob SHA returned by the server — no download). If the hash changed the text changed and it re-downloads and re-renders; if only the date moved (schema/metadata churn) it just records the new date. The check runs at most every **“Check repositories every … days”** (default 7; 0 = command only).
+Each work records the repository’s own `repository-updated` date. **“Check for source updates”** runs a two-stage check: it first asks the repository for that date, and only if it moved does it fetch the item’s **content hash** (a git blob SHA returned by the server — no download). If the hash changed the text changed and it re-downloads and re-renders; if only the date moved (schema/metadata churn) it just records the new date. The check runs at most every **“Check repositories for changed texts every … days”** (default 7; 0 = command only). A model written at an older schema needs no setting either: it is re-fetched on the next pass, because a re-render alone cannot apply an acquisition change.
 
 ## Annotations
 
