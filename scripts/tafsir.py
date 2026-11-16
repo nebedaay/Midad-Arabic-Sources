@@ -428,6 +428,10 @@ def tafsir_passes(content: str, *, hint_surah: int = 0, hint_verse: int = 0,
     every verse shift.
     """
     stats: dict[str, int] = {}
+    # A note processed by an older build can carry a citation chewed into debris;
+    # repair it first, so the linking passes below can see the quotation.
+    content, n = quran.repair_damaged_links(content)
+    stats["damaged_links"] = n
     content, n = add_missing_refs(
         content, hint_surah=hint_surah, hint_verse=hint_verse)
     stats["refs_added"] = n

@@ -55,6 +55,13 @@ def build_wikilink(surah: int, verse: int | str, end_verse: int = None, ar_verse
     stem, arabic = get_surah_name(surah)
     
     if end_verse is not None:
+        # A "range" whose ends are the same verse is just that verse. Compare
+        # through digits: the source may write the same number in Arabic-Indic.
+        _to_w = str.maketrans('\u0660\u0661\u0662\u0663\u0664\u0665\u0666\u0667\u0668\u0669',
+                              '0123456789')
+        if str(end_verse).translate(_to_w) == str(verse).translate(_to_w):
+            end_verse = None
+    if end_verse is not None:
         ar1 = ar_verse or str(verse).translate(w_to_a)
         ar2 = ar_end or str(end_verse).translate(w_to_a)
         return f" ([[{stem}#{verse}|{arabic} : {ar1}]]\u2013[[{stem}#{end_verse}|{ar2}]]) "
@@ -265,7 +272,7 @@ def strip_redundant_raw_citations(content: str) -> tuple[str, int]:
     pattern = re.compile(
         r'(\*[^*\n]*\{\.quran-quote\}\*\s*'
         r'\(\[\[[^\]]+\]\](?:[–-]\[\[[^\]]+\]\])?\))'
-        r'\s*([\[\(][^\]\)\n]*[\d\u0660-\u0669][^\]\)\n]*[\]\)])'
+        r'\s*([\[\(][^\[\]\(\)\n]*[\d\u0660-\u0669][^\[\]\(\)\n]*[\]\)])'
     )
     stripped = 0
     while True:
@@ -2456,6 +2463,14 @@ def _identify_quote_range(quote_text: str):
     return None
 
 
+# A source citation is a single bracket or parenthesis with no bracket inside.
+# The character class excludes `[[`/`]]`, so a citation span can never start at a
+# wikilink's parenthesis and swallow half of it.
+_CITATION_SPAN = re.compile(r"\s*([\[\(][^\[\]\(\)\n]{1,120}[\]\)])")
+# Our own link, optionally wrapped in the source's parentheses.
+_ALREADY_LINKED = re.compile(r"\s*\(?\s*\[\[\d")
+
+
 def convert_gemini_refs(content: str) -> tuple[str, int]:
     """Convert Gemini verse references to proper wikilinks.
     
@@ -2480,12 +2495,12 @@ def convert_gemini_refs(content: str) -> tuple[str, int]:
         end = qm.end()
         after = new_content[end:end+60]
         
-        # Skip if already has a wikilink
-        if re.search(r'\[\[\d', after.lstrip()[:12]):
+        # Skip if already has a wikilink (possibly inside source parentheses)
+        if _ALREADY_LINKED.match(after):
             continue
         
         # Extract citation text — find the parenthesized/bracketed reference
-        cm = re.match(r'\s*([\[\(][^\]\)\n]+[\]\)])', after)
+        cm = _CITATION_SPAN.match(after)
         if not cm:
             continue
         
@@ -2527,11 +2542,11 @@ def citation_hint(text: str, content: str, start: int, end: int) -> tuple[int, i
     lookup = _build_surah_lookup()
     candidates: list[str] = []
     after = content[end:end + 100]
-    match = re.match(r'\s*([\[\(][^\]\)\n]+[\]\)])', after)
+    match = _CITATION_SPAN.match(after)
     if match:
         candidates.append(match.group(1))
     before = content[max(0, start - 100):start]
-    match = re.search(r'([\[\(][^\]\)\n]+[\]\)])\s*$', before)
+    match = re.search(r'([\[\(][^\[\]\(\)\n]{1,120}[\]\)])\s*$', before)
     if match:
         candidates.append(match.group(1))
     for citation in candidates:
@@ -2549,6 +2564,34 @@ def citation_hint(text: str, content: str, start: int, end: int) -> tuple[int, i
     return None
 
 
+def repair_damaged_links(content: str) -> tuple[str, int]:
+    """Repair a citation an earlier run ate into debris.
+
+    A link stripper that could reach inside ``([[stem#V|display]])`` used to
+    consume everything up to the first ``]``, leaving ``]–[[…]])`` (the first
+    half of a range) or ``]])])`` (a trailing bracket). Neither is a citation,
+    and both hide the quotation from the linking passes, so they are restored to
+    a valid single link — the surviving half names the verse — and the linking
+    passes then re-verify or replace it.
+    """
+    repaired = 0
+    # `]–[[stem#V|d]])` → ` ([[stem#V|d]])`: the range's first half is gone, so
+    # the surviving half becomes the citation.
+    def half(m: re.Match) -> str:
+        nonlocal repaired
+        repaired += 1
+        return f" ({m.group(1)})"
+
+    content = re.sub(r"(?<!\])\]\s*[–—-]\s*(\[\[\d{3}[^\]]*\]\])\)",
+                     half, content)
+    # `([[…]])])` / `([[…]])]` → `([[…]])`: debris after a whole link.
+    content, n = re.subn(r"(\[\[\d{3}[^\]]*\]\])\]\)", r"\1)", content)
+    repaired += n
+    content, n = re.subn(r"(\[\[\d{3}[^\]]*\]\])\]", r"\1", content)
+    repaired += n
+    return content, repaired
+
+
 def strip_gemini_refs(content: str) -> tuple[str, int]:
     """Discard Gemini's own verse citations after quote spans.
 
@@ -2564,9 +2607,9 @@ def strip_gemini_refs(content: str) -> tuple[str, int]:
     for qm in reversed(list(quote_end.finditer(new_content))):
         end = qm.end()
         after = new_content[end:end + 60]
-        if re.search(r'\[\[\d', after.lstrip()[:12]):
+        if _ALREADY_LINKED.match(after):
             continue  # already linked
-        cm = re.match(r'\s*([\[\(][^\]\)\n]+[\]\)])', after)
+        cm = _CITATION_SPAN.match(after)
         if not cm:
             continue
         citation = cm.group(1)

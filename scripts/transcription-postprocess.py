@@ -17,7 +17,7 @@ if str(SCRIPTS) not in sys.path:
 # Page separators are owned by the shared postprocessor; import the pass
 # directly so a missing definition fails loudly instead of silently skipping
 # the normalisation.
-from text_postprocess import normalize_page_separators
+from text_postprocess import normalize_page_separators, wrap_quran_quotes_for_processing
 
 # Metadata lines the standalone-PDF prompt asks Gemini to put above the first
 # page. They are not part of the transcription, so remove them before
@@ -217,6 +217,14 @@ def run(input_path, out_path=None, metadata=False, tafsir=False):
     tfq = SourceFileLoader("tfq", str(SCRIPTS / "quran.py")).load_module()
     tfs = SourceFileLoader("tfs", str(SCRIPTS / "tafsir.py")).load_module()
     LF = '\ufd3f'; LE = '\ufd3e'
+
+    content, damaged = tfq.repair_damaged_links(content)
+    print(f"  Damaged citations repaired: {damaged}")
+
+    # Style any `﴿…﴾` span the formatter left bare. Every linking pass below
+    # looks for the styled form, so an unwrapped span is a quotation that would
+    # never be cited at all.
+    content = wrap_quran_quotes_for_processing(content)
 
     content, cross_guillemets = tfq.fix_cross_page_guillemets(content)
     print(f"  Cross-page quoted continuations: {cross_guillemets}")

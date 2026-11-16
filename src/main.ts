@@ -5454,10 +5454,16 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		if (result?.notes?.length) {
 			// The volume index above a volume note is rewritten by the pipeline's
 			// consolidation without being reported, so it is stamped here too.
-			await this.stampUpdated([target.path, this.transcriptionParentFile(target, info).path]);
+			const parentPath = this.transcriptionParentFile(target, info).path;
+			await this.stampUpdated([target.path, parentPath]);
 			// A review that kept the reader's text as the default version must win
 			// over the fresh render, exactly as it does for a repository source.
 			await this.applySavedVersions([target.path]);
+			// The note this pass wrote is the baseline. Without this the next
+			// re-render reads its own output as the reader's edit and asks to save
+			// a version every time.
+			await this.updateNoteBaselines(
+				[target.path, parentPath].filter((path) => this.app.vault.getAbstractFileByPath(normalizePath(path)) instanceof TFile));
 			if (!metadataOnly && !quiet) new Notice(`Post-processed ${target.basename}.`);
 		}
 	}
@@ -5757,7 +5763,17 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		}
 		if (!options.skipApply) {
 			await this.applySavedVersions([canonicalPath]);
-			await this.updateNoteBaselines([canonicalPath]);
+			// A multi-volume re-render writes notes the caller never named; every
+			// one of them becomes a baseline, or the next pass reports its own
+			// output as an unsaved edit.
+			const touched = new Set<string>([canonicalPath]);
+			if (info.type) {
+				for (const volumeFile of this.transcriptionVolumeFiles(info.citekey, info.type)) {
+					touched.add(volumeFile.path);
+				}
+				if (file instanceof TFile) touched.add(this.transcriptionParentFile(file, info).path);
+			}
+			await this.updateNoteBaselines([...touched]);
 			const also = extra ? ` and post-processed ${extra} volume ${extra === 1 ? "note" : "notes"}` : "";
 			new Notice(`Re-rendered ${chosen.length} archived batch(es) for @${info.citekey}${also}.`);
 		}

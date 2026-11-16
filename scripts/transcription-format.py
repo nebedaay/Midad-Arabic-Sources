@@ -578,10 +578,14 @@ def process(input_path):
     c = re.sub(r'(?<!\*)' + LQ + r'([^' + LQE + r']+)' + LQE + r'(?!\{\.quran-quote\})',
                _normalize_quran_span, c)
     # Strip Gemini's Western-style citations: *LF...LE* [ref] or (ref) with digits
-    # Keep Arabic citations (contain Arabic letters) for convert_gemini_refs
+    # Keep Arabic citations (contain Arabic letters) for convert_gemini_refs, and
+    # never let the span reach a wikilink: our own `([[stem#V|display]])` starts
+    # with `(` and would otherwise be eaten to its first `]`, leaving `](` debris
+    # and losing the citation. The class excludes brackets, so a link cannot be
+    # matched at all.
     c = re.sub(
         r'(\*' + LQ + r'[^' + LQE + r']+' + LQE + r'\*)'
-        r'\s*[\[\(](?![\u0600-\u06FF])[^\]\)\n]*[\d][^\]\)\n]*[\]\)]',
+        r'\s*[\[\(](?![\u0600-\u06FF\[\()])(?:[^\[\]\(\)\n]*[\d][^\[\]\(\)\n]*)[\]\)]',
         r'\1', c
     )
     # Fix (*LF...LE*) double-wrapping: strip outer parens, keep inner brackets
