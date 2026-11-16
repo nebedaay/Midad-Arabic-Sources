@@ -497,7 +497,7 @@ def process(input_path):
     try:
         from importlib.machinery import SourceFileLoader
         _tfq = SourceFileLoader(
-            "tfq_cross", str(Path(__file__).with_name("transcription-quran.py"))
+            "tfq_cross", str(Path(__file__).with_name("quran.py"))
         ).load_module()
         c, _cross = _tfq.fix_cross_page_quotes(c)
         if _cross:

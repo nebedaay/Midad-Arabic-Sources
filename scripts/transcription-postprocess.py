@@ -214,7 +214,8 @@ def run(input_path, out_path=None, metadata=False, tafsir=False):
     
     # Step 2: Qur'an tashkīl + wikilinks
     print("Step 2: Qur'an tashkīl...")
-    tfq = SourceFileLoader("tfq", str(SCRIPTS / "transcription-quran.py")).load_module()
+    tfq = SourceFileLoader("tfq", str(SCRIPTS / "quran.py")).load_module()
+    tfs = SourceFileLoader("tfs", str(SCRIPTS / "tafsir.py")).load_module()
     LF = '\ufd3f'; LE = '\ufd3e'
 
     content, cross_guillemets = tfq.fix_cross_page_guillemets(content)
@@ -240,7 +241,7 @@ def run(input_path, out_path=None, metadata=False, tafsir=False):
     if tafsir:
         content, short_fragments = tfq.mark_short_fragments(content)
         print(f"  Short verse fragments: {short_fragments}")
-        content, repeated = tfq.keep_first_verse_link(content)
+        content, repeated = tfs.keep_first_verse_link(content)
         print(f"  Repeated verse links removed: {repeated}")
 
     content, stripped = tfq.strip_false_quran(content)
@@ -271,7 +272,7 @@ def run(input_path, out_path=None, metadata=False, tafsir=False):
     print(f"  Total markers: {markers}")
 
     if tafsir:
-        content, verse_headings = tfq.insert_verse_headings(content)
+        content, verse_headings = tfs.insert_verse_headings(content)
         print(f"  Verse headings: {verse_headings}")
 
     # Final repair of page headings, in case the Qur'an/tashkīl steps touched
@@ -291,7 +292,7 @@ def run(input_path, out_path=None, metadata=False, tafsir=False):
     content, display_fixed = tfq.normalize_quran_link_display(content)
     print(f"  Qur'an link displays normalised: {display_fixed}")
     if tafsir:
-        content, repeated_links = tfq.keep_first_verse_link(content)
+        content, repeated_links = tfs.keep_first_verse_link(content)
     else:
         content, repeated_links = tfq.dedupe_same_verse_links(content)
     print(f"  Repeated same-verse links removed: {repeated_links}")

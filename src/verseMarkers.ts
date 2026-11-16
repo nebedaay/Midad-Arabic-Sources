@@ -27,6 +27,7 @@ function isMarkerLink(text: string): boolean {
 
 /** Reading view: tag the <strong> that wraps a marker link. */
 function decorateReadingElement(root: HTMLElement): void {
+	const ordinals = new Map<Element, number>();
 	for (const strong of Array.from(root.querySelectorAll("strong"))) {
 		if (!isMarkerLink(strong.textContent ?? "")) continue;
 		// Obsidian may wrap the link in the bold (`<strong><a>`) or the bold in
@@ -36,6 +37,12 @@ function decorateReadingElement(root: HTMLElement): void {
 		if (!link) continue;
 		strong.addClass(MARKER_CLASS);
 		link.addClass("mas-verse-marker-link");
+		// Two markers on one line (a source range and the recognised verse) are
+		// stacked in the gutter; the ordinal lets the stylesheet offset each.
+		const scope = strong.closest("p, li, div.el-p, .markdown-preview-section") ?? root;
+		const ordinal = ordinals.get(scope) ?? 0;
+		ordinals.set(scope, ordinal + 1);
+		if (ordinal > 0) strong.dataset.markerIndex = String(ordinal);
 		// An English translation keeps its own face and direction; only an
 		// Arabic paragraph needs the RTL paragraph class.
 		const preview = root.closest(".markdown-preview-view");
@@ -65,9 +72,10 @@ function buildMarkerDecorations(view: EditorView): DecorationSet {
 		const text = view.state.doc.sliceString(range.from, range.to);
 		MARKER.lastIndex = 0;
 		let match: RegExpExecArray | null;
+		let ordinal = 0;
+		let lastLine = -1;
 		while ((match = MARKER.exec(text)) !== null) {
 			const markerStart = range.from + match.index;
-			const markerEnd = markerStart + match[0].length;
 			const bar = match[0].indexOf("|");
 			const aliasStart = markerStart + bar + 1;
 			const aliasEnd = aliasStart + (match[2]?.length ?? 0);
@@ -87,6 +95,13 @@ function buildMarkerDecorations(view: EditorView): DecorationSet {
 					},
 				}),
 			});
+			const lineFrom = view.state.doc.lineAt(markerStart).from;
+			if (lineFrom !== lastLine) {
+				lastLine = lineFrom;
+				ordinal = 0;
+			} else {
+				ordinal += 1;
+			}
 			placed.push({
 				from: aliasStart,
 				to: aliasEnd,
@@ -94,6 +109,7 @@ function buildMarkerDecorations(view: EditorView): DecorationSet {
 					class: MARKER_CLASS,
 					attributes: {
 						"data-href": match[1],
+						...(ordinal ? { "data-marker-index": String(ordinal) } : {}),
 						style: "position:absolute;left:calc(100% + 7px);right:auto;top:auto;margin:0;padding:0;width:auto;"
 							+ "font-family:var(--latin-font),serif;font-size:12px;font-weight:normal;line-height:1.1;"
 							+ "color:var(--link-color);white-space:nowrap;direction:ltr;text-align:left;z-index:2;"

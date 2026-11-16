@@ -58,6 +58,7 @@ import { localDate } from "./time";
 import { formatPoetrySelection } from "./poetry";
 import { registerQuranQuoteRendering } from "./quranQuote";
 import { registerVerseMarkers } from "./verseMarkers";
+import { registerVerseNumberHeadings } from "./verseNumbers";
 import { ManageVersionsModal, NoteVersionEntry, VersionStore } from "./sourceVersions";
 import { NoteHashStore, managedHash } from "./noteHashes";
 import { ensureManagedRegion, findManagedRegion, joinNote, splitNote } from "./sourceImport/merge";
@@ -531,7 +532,19 @@ const SOURCE_CATALOG_SCHEMA = 5;
  */
 const COLLECTION_MODEL_SCHEMA: Record<string, number> = {
 	dictionary: 6,
-	turath: 3,
+	// 6: punctuation ends a Turath quotation; a dash-delimited gloss closes it
+	// and the same verse resumes.
+	turath: 25,
+	// 7: a citation the muḥṣaf does not support is corrected from the words
+	// that follow it, before the quotation is wrapped.
+	// 6: the margin is numbered for the whole chapter (a verse mentioned once
+	// out of order is still numbered, a verse is numbered where it is
+	// discussed), and a one-word quotation beside its citation is formatted.
+	// 3: a tafsīr body runs the shared `tafsir_passes` (citation on first
+	// quotation, short fragments, markers at verse shifts) and the editorial
+	// asides are opaque to every pass.
+	tafsir: 9,
+	"tafsir-qul": 9,
 };
 
 /**
@@ -704,6 +717,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		this.addSettingTab(new MidadArabicSourcesSettingTab(this.app, this));
 		registerQuranQuoteRendering(this);
 		registerVerseMarkers(this);
+		registerVerseNumberHeadings(this);
 		try {
 			this.annotations = await registerAnnotations({
 				app: this.app,
@@ -1291,8 +1305,8 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		const vault = this.vaultPath();
 		if (!vault) return;
 		const base = this.manifest.dir ?? `${this.app.vault.configDir}/plugins/midad-arabic-sources`;
-		for (const asset of BUNDLED_ASSETS) {
-			if (asset.extract === false) continue;
+		const bundled = BUNDLED_ASSETS.filter((asset) => asset.extract !== false);
+		for (const asset of bundled) {
 			try {
 				const dest = `${vault}/${base}/${asset.path}`;
 				if (fs.existsSync(dest) && fs.readFileSync(dest, "utf8") === asset.content) continue;
@@ -1300,6 +1314,33 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 				fs.writeFileSync(dest, asset.content);
 			} catch (e) {
 				console.error("[midad-arabic-sources] asset extract", asset.path, e);
+			}
+		}
+		// Files that are no longer shipped are removed: a renamed or retired
+		// script must not linger in every install. Only the two folders the
+		// plugin owns are pruned, and only their files — an unknown directory is
+		// left alone rather than deleted recursively.
+		const wanted = new Set(bundled.map((asset) => asset.path));
+		for (const prefix of ["scripts/", "midad-arabic-sources-import-templates/"]) {
+			const dir = `${vault}/${base}/${prefix}`;
+			let names: string[];
+			try {
+				names = fs.readdirSync(dir);
+			} catch {
+				continue;
+			}
+			for (const name of names) {
+				if (name.startsWith(".")) continue;  // .DS_Store and the like
+				if (wanted.has(`${prefix}${name}`)) continue;
+				const target = `${dir}/${name}`;
+				try {
+					if (fs.statSync(target).isFile()) {
+						fs.unlinkSync(target);
+						console.log(`[midad-arabic-sources] removed stale asset ${prefix}${name}`);
+					}
+				} catch (e) {
+					console.error("[midad-arabic-sources] asset prune", `${prefix}${name}`, e);
+				}
 			}
 		}
 	}
@@ -5966,8 +6007,62 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			new Notice("No cached source models found.");
 			return [];
 		}
-		const written = await this.renderWithProgress(models, true, "Re-rendering imported sources");
-		new Notice(`Re-rendered ${written.length} notes.`);
+		// A model older than its collection's acquisition schema cannot be fixed by
+		// rendering: the rules that produced its bodies have changed, so the work
+		// must be re-fetched first (cache-backed, so this is not a re-download of
+		// the text). Without this, "Re-render" silently left such a work untouched.
+		const manifest = await this.loadSourceManifest();
+		const byKey = new Map(manifest.map((work) => [this.workKey(work), work]));
+		const byPair = new Map(manifest.map((work) => [`${work.collection}:${work.id}`, work]));
+		const outdated: Array<{ work: JsonObject; path: string }> = [];
+		const current: string[] = [];
+		for (const path of models) {
+			let schema = 0;
+			let collection = "";
+			let id = "";
+			try {
+				// `path` is an absolute filesystem path (the models live beside the
+				// vault), not a vault-relative one, so the adapter cannot read it.
+				const head = fs.readFileSync(path, "utf8");
+				const parsed = JSON.parse(head) as { schema?: number; work?: { collection?: string; id?: string } };
+				schema = Number(parsed.schema ?? 0);
+				collection = String(parsed.work?.collection ?? "");
+				id = String(parsed.work?.id ?? "");
+			} catch { current.push(path); continue; }
+			if (schema < requiredModelSchema(collection)) {
+				const work = byKey.get(`${collection}:${id}`) ?? byPair.get(`${collection}:${id}`)
+					// A work can have a model without a manifest entry (an older
+					// custom import): the fetch only needs its collection and id.
+					?? { key: `${collection}:${id}`, collection, id, title: id, dir: "" };
+				outdated.push({ work, path });
+			} else {
+				current.push(path);
+			}
+		}
+		if (outdated.length) {
+			// A fetch is a long job with its own status panel, but the command's
+			// first seconds would otherwise look idle. Say that fetching is under
+			// way, and keep saying it until every outdated work has been re-fetched.
+			const notice = new Notice(
+				`Re-fetching ${outdated.length} outdated source(s) from cache…`, 0);
+			try {
+				for (const [index, item] of outdated.entries()) {
+					notice.setMessage(
+						`Re-fetching outdated source ${index + 1}/${outdated.length}: `
+						+ `${String(item.work.title ?? item.work.id)}…`);
+					try {
+						await this.reinstallSource(item.work);
+					} catch (e) {
+						console.error("[midad-arabic-sources] re-fetch outdated source", item.work.key, e);
+					}
+				}
+			} finally {
+				notice.hide();
+			}
+		}
+		const written = await this.renderWithProgress(current, true, "Re-rendering imported sources");
+		if (outdated.length) new Notice(`Re-fetched ${outdated.length} outdated source(s); re-rendered ${written.length} notes.`);
+		else new Notice(`Re-rendered ${written.length} notes.`);
 		return written;
 	}
 
@@ -6334,47 +6429,68 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		const stale = await this.findStaleSourceWorks();
 		const indexDirty = changedKeys.some((k) => k === "moc" || k === "sources");
 		if (!incomplete.length && !stale.length && !indexDirty) return;
-		const apply = async () => {
-			// A work whose cached model is present only needs re-rendering; re-fetch
-			// only the ones whose model is gone. (A fetch is cache-backed — it does
-			// not re-download — but it still re-runs acquisition, so skip it when a
-			// plain re-render will do.)
-			const rerender: Array<{ work: JsonObject; kinds: Set<string> | null }> = [];
-			for (const it of incomplete) {
-				const rel = normalizePath(`.midad-arabic-sources/source-models/${it.work.collection}/${it.work.id}.json`);
-				if (it.reason === "notes" && (await this.app.vault.adapter.exists(rel))) {
-					rerender.push({ work: it.work, kinds: null }); // full: recreate the missing notes
-					continue;
+
+		// Repair first, unconditionally: a missing model, or one written by an
+		// older acquisition, cannot be fixed by rendering. This is not a template
+		// preference — the notes would otherwise stay wrong — so it runs whatever
+		// the "update notes when templates change" setting says, and it says so.
+		const rerender: Array<{ work: JsonObject; kinds: Set<string> | null }> = [];
+		if (incomplete.length) {
+			const notice = new Notice(`Repairing ${incomplete.length} source(s)…`, 0);
+			try {
+				for (const [index, it] of incomplete.entries()) {
+					notice.setMessage(
+						`Repairing source ${index + 1}/${incomplete.length}: `
+						+ `${String(it.work.title ?? it.work.id)}…`);
+					const rel = normalizePath(
+						`.midad-arabic-sources/source-models/${it.work.collection}/${it.work.id}.json`);
+					if (it.reason === "notes" && (await this.app.vault.adapter.exists(rel))) {
+						rerender.push({ work: it.work, kinds: null }); // recreate the missing notes
+						continue;
+					}
+					try {
+						await this.reinstallSource(it.work, "auto");
+					} catch (e) {
+						console.error("[midad-arabic-sources] restore", it.work.key, e);
+					}
 				}
-				try {
-					await this.reinstallSource(it.work, "auto");
-				} catch (e) {
-					console.error("[midad-arabic-sources] restore", it.work.key, e);
-				}
+			} finally {
+				notice.hide();
 			}
-			// Stale works: only the unit kinds whose template changed, plus the hub.
-			for (const s of stale) rerender.push({ work: s.work, kinds: s.kinds });
-			await this.renderStaleScoped(rerender, "auto", yamlOnly && incomplete.length === 0);
-			if (indexDirty) await this.refreshSourcesIndex();
+		}
+
+		// Template-driven re-renders keep their own consent setting.
+		const finish = async (includeTemplates: boolean) => {
+			if (includeTemplates) for (const s of stale) rerender.push({ work: s.work, kinds: s.kinds });
+			if (rerender.length) {
+				await this.renderStaleScoped(rerender, "auto", yamlOnly && incomplete.length === 0);
+			}
+			if (includeTemplates && indexDirty) await this.refreshSourcesIndex();
 		};
-		if (this.settings.autoUpdateSourceTemplates === true) {
-			await apply();
-		} else if (this.settings.autoUpdateSourceTemplates === false) {
+		const templateCount = stale.length + (indexDirty ? 1 : 0);
+		if (!templateCount) {
+			await finish(false);
 			return;
+		}
+		if (this.settings.autoUpdateSourceTemplates === true) {
+			await finish(true);
+		} else if (this.settings.autoUpdateSourceTemplates === false) {
+			await finish(false);
 		} else {
 			// Hold the guard while the prompt is open, so another pass cannot stack
 			// behind it and ask the same question twice.
 			this.awaitingSourceConsent = true;
-			new SourceTemplateUpdateConsentModal(this.app, incomplete.length + stale.length + (indexDirty ? 1 : 0), (choice) => {
+			new SourceTemplateUpdateConsentModal(this.app, templateCount, (choice) => {
 				void (async () => {
 					try {
 						if (choice === "yes") {
 							this.settings.autoUpdateSourceTemplates = true;
 							await this.saveSettings();
-							await apply();
+							await finish(true);
 						} else if (choice === "no") {
 							this.settings.autoUpdateSourceTemplates = false;
 							await this.saveSettings();
+							await finish(false);
 						}
 					} finally {
 						this.awaitingSourceConsent = false;

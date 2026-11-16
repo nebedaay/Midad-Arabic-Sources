@@ -2,6 +2,7 @@
 """Retrieve Quran verses with tashkīl. For tashkīl restoration and quote matching."""
 
 import os
+import itertools
 import re
 import unicodedata
 import sqlite3
@@ -25,12 +26,20 @@ SQLITE_DB = QURAN_DIR / ".quran.sqlite"
 def load_verse(surah_num: int, verse: int) -> str | None:
     """Load a single verse with tashkīl from the sura file."""
     prefix = f"{surah_num:03d} "
-    matches = [f for f in QURAN_DIR.glob(f"{prefix}*.md")]
+    # An edition may prefix its notes (`Qurʾān (riwāyat Warsh) … - 045 …`), so
+    # the number is matched wherever it sits in the stem.
+    matches = [f for f in QURAN_DIR.glob(f"*{prefix}*.md")]
     if not matches:
         return None
     text = matches[0].read_text(encoding="utf-8")
     m = re.search(rf'^# {verse}\s*$(.+?)(?=^# |\Z)', text, re.MULTILINE | re.DOTALL)
-    return m.group(1).strip() if m else None
+    if not m:
+        return None
+    body = m.group(1).strip()
+    # A non-canonical edition writes its correspondence marker at the start of
+    # every verse; the verse text itself begins after it.
+    body = re.sub(r"^\*\*\[\[[^\]]+\]\]\*\*\ufeff?", "", body).strip()
+    return body or None
 
 
 def build_wikilink(surah: int, verse: int | str, end_verse: int = None, ar_verse: str = None, ar_end: str = None) -> str:
@@ -170,10 +179,13 @@ def _search_sqlite_loose(loose_text: str, surah: int = None) -> list[tuple[int, 
         return m.group(1).strip()
     return None
 
+_CANONICAL_QURAN_DIR = QURAN_DIR
+
+
 def get_surah_name(surah_num: int) -> tuple[str, str]:
     """Return (wikilink_stem, arabic_name) matching the actual sura filename."""
     prefix = f"{surah_num:03d} "
-    matches = [f for f in QURAN_DIR.glob(f"{prefix}*.md")]
+    matches = [f for f in QURAN_DIR.glob(f"*{prefix}*.md")]
     if not matches:
         return (f"Surah {surah_num}", f"{surah_num}")
     path = matches[0]
@@ -196,6 +208,20 @@ def get_surah_name(surah_num: int) -> tuple[str, str]:
     # Aliases: [romanized, short romanized, Arabic, padded Arabic] in the
     # canonical notes; index 2 is the Arabic form.
     arabic = aliases[2] if len(aliases) > 2 else str(surah_num)
+    if arabic == str(surah_num) and QURAN_DIR != _CANONICAL_QURAN_DIR:
+        # A riwāya's notes carry no Arabic alias of their own; the canonical
+        # edition names the sūra.
+        for fallback in _CANONICAL_QURAN_DIR.glob(f"*{prefix}*.md"):
+            text = fallback.read_text(encoding="utf-8")
+            block = re.search(r'^aliases:[ \t]*\n((?:[ \t]+-[ \t]*.+\n?)+)', text, re.M)
+            if not block:
+                continue
+            values = [line.strip()[2:].strip().strip("\"'")
+                      for line in block.group(1).splitlines()
+                      if line.strip().startswith("- ")]
+            if len(values) > 2:
+                arabic = values[2]
+                break
     return (stem, arabic)
 
 def strip_raw_quran_citations(content: str) -> tuple[str, int]:
@@ -750,6 +776,552 @@ def process_markdown_file(filepath: str, dry_run: bool = False) -> dict:
     }
 
 
+_VERSE_NORM_CACHE: dict[tuple[int, int], str] = {}
+_VERSE_TOKEN_CACHE: dict[tuple[int, int], list[str]] = {}
+_VERSE_WORD_CACHE: dict[tuple[int, int], list[str]] = {}
+
+
+def clear_caches() -> None:
+    """Drop the verse caches (after switching to another riwāya)."""
+    _VERSE_NORM_CACHE.clear()
+    _VERSE_TOKEN_CACHE.clear()
+    _VERSE_WORD_CACHE.clear()
+
+
+def verse_norm(surah: int, verse: int) -> str:
+    """A verse's normalized text, cached."""
+    key = (surah, verse)
+    if key not in _VERSE_NORM_CACHE:
+        _VERSE_NORM_CACHE[key] = normalize_arabic(load_verse(surah, verse) or "")
+    return _VERSE_NORM_CACHE[key]
+
+
+def verse_words(surah: int, verse: int) -> list[str]:
+    """A verse's words with their tashkīl, cached."""
+    key = (surah, verse)
+    if key not in _VERSE_WORD_CACHE:
+        _VERSE_WORD_CACHE[key] = (load_verse(surah, verse) or "").split()
+    return _VERSE_WORD_CACHE[key]
+
+
+def verse_tokens(surah: int, verse: int) -> list[str]:
+    """A verse as normalized words (normalize_arabic removes spaces)."""
+    key = (surah, verse)
+    if key not in _VERSE_TOKEN_CACHE:
+        _VERSE_TOKEN_CACHE[key] = [normalize_arabic(w) for w in verse_words(surah, verse)]
+    return _VERSE_TOKEN_CACHE[key]
+
+
+def match_verse_spans(text: str, verse_tokens_: list[str]) -> list[tuple[int, int, int, int]]:
+    """The runs of `text` that are consecutive words of one verse.
+
+    Punctuation is not in the muṣḥaf, so it ends a quotation; a dash-delimited
+    gloss closes the run and the verse resumes after it. Each run is returned as
+    (start, end, first verse word, last verse word). This is a principle of the
+    corpus, not of one repository: every tafsīr uses it.
+    """
+    words = list(re.finditer(r"\S+", text))
+    vt = verse_tokens_
+    if not words or not vt:
+        return []
+    trail = _WORD_TRAIL
+    enders = ("،", ",", "؛", ";", ".", ":", "!")
+    spans: list[tuple[int, int, int, int]] = []
+    current: int | None = None
+    started_at = 0
+    i = vpos = 0
+
+    def resume(at: int, verse_index: int) -> int | None:
+        fallback = None
+        for k in range(at, min(len(words), at + 12)):
+            if normalize_arabic(words[k].group(0).strip(trail)) != vt[verse_index]:
+                continue
+            if fallback is None:
+                fallback = k
+            if (verse_index + 1 >= len(vt) or
+                    (k + 1 < len(words) and
+                     normalize_arabic(words[k + 1].group(0).strip(trail)) == vt[verse_index + 1])):
+                return k
+        return fallback
+
+    while i < len(words) and vpos < len(vt):
+        raw = words[i].group(0)
+        token = normalize_arabic(raw.strip(trail))
+        if token == vt[vpos]:
+            if current is None:
+                current = i
+                started_at = vpos
+            i += 1
+            vpos += 1
+            ends = raw.endswith(enders) or (
+                i < len(words) and words[i].group(0).startswith(enders))
+            if ends:
+                if current is not None:
+                    spans.append((current, i - 1, started_at, vpos - 1))
+                    current = None
+                break
+            continue
+        if current is not None and i - current >= 1:
+            spans.append((current, i - 1, started_at, vpos - 1))
+            current = None
+        if vpos >= len(vt):
+            break
+        resumed = resume(i, vpos)
+        if resumed is None:
+            break
+        current = resumed
+        started_at = vpos
+        i = resumed + 1
+        vpos += 1
+
+    if current is not None and i - current >= 1:
+        spans.append((current, i - 1, started_at, vpos - 1))
+
+    out: list[tuple[int, int, int, int]] = []
+    for first, last, vfirst, vlast in spans:
+        begin = words[first].start()
+        end = words[last].start() + len(words[last].group(0).rstrip(trail))
+        if end > begin:
+            out.append((begin, end, vfirst, vlast))
+    return out
+
+
+_CITE_LINK = re.compile(r"\(\[\[(\d{3})[^#\]]*#(\d+)\|")
+
+
+def _quotation_words(text: str) -> list[tuple[int, int, str]]:
+    """Each word of `text` as (start, end, token) — the part that can be quoted.
+
+    A word may be wrapped in quotation marks (`وَ«مُسَخَّرَاتٌ»`): what is quoted
+    is the inside, and the prose stays outside the boundary. Punctuation around
+    a word is likewise not part of it.
+    """
+    out: list[tuple[int, int, str]] = []
+    for m in re.finditer(r"\S+", text):
+        begin = m.start()
+        end = m.start() + len(m.group(0).rstrip(_WORD_TRAIL))
+        inner = re.search(r"[«\"“]([^«»\"“”]*)[»\"”]", m.group(0))
+        if inner and inner.group(1).strip(_WORD_TRAIL):
+            begin = m.start() + inner.start(1)
+            end = m.start() + inner.end(1)
+        out.append((begin, end, normalize_arabic(text[begin:end].strip(_WORD_TRAIL))))
+    return out
+
+
+def find_verse_fragment(text: str, verse_tokens: list[str]):
+    """A whole span of `text` that is consecutive words of the verse.
+
+    A quotation may be a phrase from the middle of the verse (`لَحْمًا طَرِيًّا`
+    from 16:14), which the running matcher — which starts at the verse's first
+    word — cannot reach. Returns (start, end, first word, last word) or None.
+    """
+    words = _quotation_words(text)
+    if not words:
+        return None
+    tokens = [w[2] for w in words]
+    # The window may still carry prose before the quotation (no lead-in, no
+    # delimiter): try the longest suffix first, so the commentary is left out.
+    for start in range(len(tokens)):
+        piece = tokens[start:]
+        while piece and not piece[-1]:
+            piece.pop()
+        if not piece or len(piece) > len(verse_tokens):
+            continue
+        for at in range(len(verse_tokens) - len(piece) + 1):
+            if verse_tokens[at:at + len(piece)] == piece:
+                return (words[start][0], words[start + len(piece) - 1][1],
+                        at, at + len(piece) - 1)
+    return None
+
+
+def _quotation_window(content: str, position: int) -> tuple[str, int]:
+    """The words before a citation that can belong to it.
+
+    Never reaches back past a quotation already styled, a lead-in, or the
+    previous link: the quotation is the words between that boundary and the
+    citation. Returns (window, absolute start of the window).
+    """
+    before = content[:position]
+    start = max(0, len(before) - 500)
+    window = before[start:]
+    cut = max(window.rfind("\n"), window.rfind("]]"),
+              window.rfind("~﴾~"), window.rfind("﴾"),
+              window.rfind(":"), window.rfind("："))
+    if cut >= 0:
+        window = window[cut + 1:]
+        start += cut + 1
+    abbr = re.search(r"\s*(?:الْآيَةَ|الْآيَةِ|الآية|الْايَة|الايه)\s*$", window)
+    if abbr:
+        window = window[:abbr.start()]
+    return window, start
+
+
+# The muṣḥaf as `token -> [(surah, verse), …]`, built once per run. A quotation
+# is looked up by its rarest word, so finding where a mis-cited verse really
+# comes from costs a handful of verse comparisons.
+_MUSHAF_INDEX: dict[str, list[tuple[int, int]]] | None = None
+_SURAH_VERSES: dict[int, list[tuple[int, list[str]]]] = {}
+
+
+def _surah_verses(surah: int) -> list[tuple[int, list[str]]]:
+    """Every verse of a sūra with its tokens, reading the note once."""
+    if surah not in _SURAH_VERSES:
+        verses: list[tuple[int, list[str]]] = []
+        verse = 1
+        while True:
+            words = verse_words(surah, verse)
+            if not words:
+                break
+            verses.append((verse, [normalize_arabic(w.strip(_WORD_TRAIL))
+                                   for w in words]))
+            verse += 1
+            if verse > 300:
+                break
+        _SURAH_VERSES[surah] = verses
+    return _SURAH_VERSES[surah]
+
+
+def _mushaf_index() -> dict[str, list[tuple[int, int]]]:
+    global _MUSHAF_INDEX
+    if _MUSHAF_INDEX is None:
+        index: dict[str, list[tuple[int, int]]] = {}
+        for surah in range(1, 115):
+            for verse, tokens in _surah_verses(surah):
+                for token in set(tokens):
+                    index.setdefault(token, []).append((surah, verse))
+        _MUSHAF_INDEX = index
+    return _MUSHAF_INDEX
+
+
+def verse_exists(surah: int, verse: int) -> bool:
+    """Whether the muṣḥaf the vault holds actually has this verse.
+
+    Sūrat al-Naḥl has 128 verses, so a source citing `16:136` is naming a verse
+    that does not exist — which is a fact about the citation, not about the
+    commentary.
+    """
+    return any(v == verse for v, _tokens in _surah_verses(surah))
+
+
+def _index_lookup(index: dict[str, list[tuple[int, int]]],
+                  piece: list[str]) -> list[tuple[int, int]]:
+    """Verses containing `piece` as a contiguous run."""
+    if len(piece) < 3:
+        return []
+    rare = min(piece, key=lambda t: len(index.get(t, ())))
+    hits: list[tuple[int, int]] = []
+    for surah, verse in index.get(rare, ()):
+        tokens = next((t for v, t in _surah_verses(surah) if v == verse), [])
+        for at in range(len(tokens) - len(piece) + 1):
+            if tokens[at:at + len(piece)] == piece:
+                hits.append((surah, verse))
+                break
+    return hits
+
+
+def _prefix_run(tokens: list[str], verse_tokens: list[str], minimum: int = 2) -> int:
+    """The longest opening run of `tokens` that occurs in the verse."""
+    top = min(len(tokens), len(verse_tokens))
+    for k in range(top, minimum - 1, -1):
+        piece = tokens[:k]
+        for at in range(len(verse_tokens) - k + 1):
+            if verse_tokens[at:at + k] == piece:
+                return k
+    return 0
+
+
+def search_quoted_verse(words: list[str], *, trim: int = 6) -> list[tuple[int, int]]:
+    """Every verse the quotation could belong to, from the longest agreement.
+
+    Two readings of the window are tried. A citation normally names the verse
+    where the quotation *begins*, so the opening words are looked up first; and
+    since the window may still carry prose (no lead-in, no delimiter), the words
+    that *reach* the citation are looked up too. The longer agreement wins,
+    because it is the more specific evidence.
+    """
+    words = [w for w in words if w]
+    if len(words) < 3:
+        # Two words are too little to identify a verse: `وَاعْبُدُوا اللَّهَ`
+        # opens dozens of them.
+        return []
+    index = _mushaf_index()
+    best: list[tuple[int, int]] = []
+    best_len = 2
+    for k in range(len(words), 2, -1):
+        hits = _index_lookup(index, words[:k])
+        if hits:
+            best, best_len = hits, k
+            break
+    for start in range(min(trim, len(words) - 2)):
+        piece = words[start:]
+        if len(piece) < 3:
+            break
+        hits = _index_lookup(index, piece)
+        if hits:
+            if len(piece) > best_len:
+                best, best_len = hits, len(piece)
+            break
+    return best
+
+
+def _verse_permutations(surah: int, verse: int) -> list[int]:
+    """Verse numbers an author could have meant by transposing the digits."""
+    digits = str(verse)
+    seen: set[int] = set()
+    for perm in itertools.permutations(digits):
+        if perm[0] == "0":
+            continue
+        number = int("".join(perm))
+        if number != verse and number not in seen and verse_exists(surah, number):
+            seen.add(number)
+    return sorted(seen)
+
+
+def _quotation_is_verse(window: str, surah: int, verse: int) -> bool:
+    """Whether the quotation in front of a citation belongs to that verse.
+
+    A quotation may begin inside the verse (the window still carries prose) or
+    open it and run on into the next verse, so both the opening words and the
+    words that reach the citation are accepted.
+    """
+    tokens = verse_tokens(surah, verse)
+    if not tokens:
+        return False
+    fragment = find_verse_fragment(window, tokens)
+    if fragment and fragment[3] - fragment[2] + 1 >= 3:
+        return True
+    words = [w[2] for w in _quotation_words(window) if w[2]]
+    return bool(words) and _prefix_run(words, tokens) >= 3
+
+
+def _following_window(content: str, end: int) -> str:
+    """The text after a citation, up to the next citation or the line's end.
+
+    Some sources put the citation *before* the words it names
+    (`قال تعالى [[2:5]]: …`), so the quotation is not always in front of it.
+    """
+    tail = content[end:end + 400]
+    cut = tail.find("([[")
+    if cut > 0:
+        tail = tail[:cut]
+    return tail.split("\n")[0]
+
+
+def _intended_verse(surah: int, verse: int,
+                    words: list[str]) -> tuple[int, int] | None:
+    """The verse a citation probably meant, or None when it cannot be told.
+
+    The number is the clue, so the nearest reading of it wins: an adjacent verse
+    in the same sūra (`24:31` → `24:30`), then the same āya number in another
+    sūra (`95:7` → `59:7`), then another verse of the same sūra (`7:124` →
+    `7:142`), and only then a single match anywhere (`16:78` → `16:87`). With no
+    quotation to go on, a citation naming a verse the sūra does not have is
+    corrected only when one transposition of its digits does exist (`16:221` →
+    `16:122`). Anything ambiguous is left exactly as the source wrote it.
+    """
+    hits = search_quoted_verse(words)
+    if hits:
+        for step in (1, -1):
+            adjacent = (surah, verse + step)
+            if adjacent in hits:
+                return adjacent
+        same_verse = [h for h in hits if h[1] == verse]
+        if len(same_verse) == 1:
+            return same_verse[0]
+        same_surah = [h for h in hits if h[0] == surah]
+        if len(same_surah) == 1:
+            return same_surah[0]
+        if len(hits) == 1:
+            return hits[0]
+        return None
+    if not verse_exists(surah, verse):
+        alternatives = _verse_permutations(surah, verse)
+        if len(alternatives) == 1:
+            return (surah, alternatives[0])
+    return None
+
+
+_AR_DIGITS = str.maketrans("0123456789", "\u0660\u0661\u0662\u0663\u0664\u0665\u0666\u0667\u0668\u0669")
+_FULL_CITE_LINK = re.compile(r"\(\[\[(\d{3})([^#\]]*)#(\d+)\|([^\]]*)\]\]\)")
+_REDUNDANT_CITATION = re.compile(
+    r"^[\s\u00a0،,.;:]*"
+    r"(?:الْآيَةَ|الْآيَةِ|الآية|الآيةِ|الْايَة|الايه)?"
+    r"[\s\u00a0،,.;:]*$")
+
+
+def _citation_verdict(content: str, m: re.Match) -> tuple[str, list[str], bool]:
+    """The words before a citation, and whether they verify it.
+
+    `(window, words, failing)`. A citation with no quotation in front of it is a
+    reference rather than a misquotation, so it only fails when its verse does
+    not exist. A quotation that the cited verse does not contain — whether the
+    verse is in front of or after the citation — is a failure.
+    """
+    surah, verse = int(m.group(1)), int(m.group(3))
+    window, _start = _quotation_window(content, m.start())
+    words = [w[2] for w in _quotation_words(window)] if window.strip() else []
+    words = [w for w in words if w]
+    if not words:
+        return window, words, not verse_exists(surah, verse)
+    if _quotation_is_verse(window, surah, verse):
+        return window, words, False
+    if _quotation_is_verse(_following_window(content, m.end()), surah, verse):
+        return window, words, False
+    return window, words, True
+
+
+def repair_citations(content: str) -> tuple[str, list[tuple[int, int, int, int]], list[str]]:
+    """Correct a citation the muṣḥaf does not support, and report each fix.
+
+    The quotation is the evidence: a source mis-numbers a verse by a transposed
+    or dropped digit, and the words it printed belong to one verse. The link is
+    rewritten in place, keeping the source's display style, so the corrected
+    verse is the one that gets quoted, numbered and formatted. A citation that
+    already verifies is never touched, and when the evidence points at more than
+    one verse the source's own number is left alone.
+
+    A text whose citations disagree wholesale is not a text with typos — it is
+    the wrong edition or riwāya — so once two thirds of a page's quotations fail
+    to verify, nothing on that page is rewritten and a warning is returned
+    instead. Occasional errors are corrected; a systematic mismatch is reported.
+    A page needs at least four quotations before its failures can be called
+    systematic at all: three citations are as easily three coincidences.
+    """
+    matches = list(_FULL_CITE_LINK.finditer(content))
+    verdicts = [(m, *_citation_verdict(content, m)) for m in matches]
+    quoted = sum(1 for _m, _w, words, _f in verdicts if words)
+    failing = sum(1 for _m, _w, words, bad in verdicts if words and bad)
+    if quoted >= 4 and failing * 3 > quoted * 2:
+        return content, [], [
+            f"{failing} of {quoted} quotations do not verify — the edition or "
+            "riwāya may differ; left as the source wrote them"]
+
+    corrections: list[tuple[int, int, int, int]] = []
+    edits: list[tuple[int, int, str]] = []
+    previous: tuple[int, int, int] | None = None  # (surah, verse, end offset)
+    for m, window, words, bad in verdicts:
+        surah, verse = int(m.group(1)), int(m.group(3))
+        if (content[:m.start()].rstrip().endswith(("﴾", "~﴾~"))
+                or (words and not bad)):
+            previous = (surah, verse, m.end())
+            continue
+        target = _intended_verse(surah, verse, words)
+        if not target or target == (surah, verse):
+            previous = (surah, verse, m.end())
+            continue
+        new_surah, new_verse = target
+        stem, arabic = get_surah_name(new_surah)
+        if re.search(r"[٠-٩]", m.group(4)):
+            display = f"{arabic} : {str(new_verse).translate(_AR_DIGITS)}"
+        elif any(ch.isalpha() for ch in m.group(4)):
+            display = f"{arabic} : {new_verse}"
+        else:
+            display = f"{new_surah}:{new_verse}"
+        if (previous is not None
+                and previous[:2] == (new_surah, new_verse)
+                and _REDUNDANT_CITATION.match(content[previous[2]:m.start()])):
+            # The corrected verse is the one just cited, with nothing but
+            # `الآية` between: the second link says the same thing twice.
+            edits.append((m.start(), m.end(), ""))
+        else:
+            edits.append((m.start(), m.end(),
+                          f"([[{stem}#{new_verse}|{display}]])"))
+        corrections.append((surah, verse, new_surah, new_verse))
+        previous = (new_surah, new_verse, m.end())
+    for first, last, replacement in reversed(edits):
+        content = content[:first] + replacement + content[last:]
+    return content, corrections, []
+
+
+def wrap_cited_quotes(content: str) -> tuple[str, int]:
+    """Give every verse citation the quotation that belongs to it.
+
+    A source often writes `… وَتَسْتَخْرِجُوا مِنْهُ حِلْيَةً [١٦ \\ ١٤]` with no
+    delimiter: the citation identifies the verse, and the words before it are
+    the quotation. They are matched against the cited verse and wrapped
+    (canonical text inside, invisible boundaries), so identification and
+    formatting always arrive together.
+    """
+    edits: list[tuple[int, int, str]] = []
+    for m in _CITE_LINK.finditer(content):
+        try:
+            surah, verse = int(m.group(1)), int(m.group(2))
+        except ValueError:
+            continue
+        before = content[:m.start()]
+        if before.rstrip().endswith(("﴾", "~﴾~")):
+            continue  # already styled
+        start = max(0, len(before) - 500)
+        window = before[start:]
+        # Never reach back past a quotation already styled, a lead-in, or the
+        # previous link: the quotation is the words between that boundary and
+        # the citation.
+        cut = max(window.rfind("\n"), window.rfind("]]"),
+                  window.rfind("~﴾~"), window.rfind("﴾"),
+                  window.rfind(":"), window.rfind("："))
+        if cut >= 0:
+            window = window[cut + 1:]
+            start += cut + 1
+        abbr = re.search(r"\s*(?:الْآيَةَ|الْآيَةِ|الآية|الْايَة|الايه)\s*$", window)
+        if abbr:
+            window = window[:abbr.start()]
+        if not window.strip():
+            continue
+        spans = match_verse_spans(window, verse_tokens(surah, verse))
+        if not spans:
+            fragment = find_verse_fragment(window, verse_tokens(surah, verse))
+            if fragment:
+                first, last, vfirst, vlast = fragment
+            else:
+                continue
+        else:
+            first, last, vfirst, vlast = spans[-1]
+        if window[last:].strip(_WORD_TRAIL):
+            continue  # the quotation must reach the citation
+        quote = window[first:last]
+        if len(normalize_arabic(quote)) < 2:
+            # A single particle is not a quotation; a real one-word quotation
+            # (`شَيْئًا`, `لَحْمًا`) is, and must be formatted when it verifies.
+            continue
+        canon_words = verse_words(surah, verse)
+        canon = " ".join(canon_words[vfirst:vlast + 1]) if canon_words else ""
+        edit = (start + first, start + last, "~﴿~" + (canon or quote) + "~﴾~")
+        # Two citations must never claim overlapping words (that is what
+        # produced nested boundaries and split words).
+        if any(edit[0] < e[1] and e[0] < edit[1] for e in edits):
+            continue
+        edits.append(edit)
+    for first, last, marker in reversed(edits):
+        content = content[:first] + marker + content[last:]
+    return content, len(edits)
+
+
+def wrap_verse_spans(text: str, spans, surah: int, verse: int, *,
+                     invisible: bool = True, replace: bool = True) -> str:
+    """Wrap matched runs, optionally with the canonical words inside them."""
+    canon_words = verse_words(surah, verse)
+    edits: list[tuple[int, int, str]] = []
+    for first, last, vfirst, vlast in spans:
+        quote = text[first:last]
+        if len(normalize_arabic(quote)) < 3:
+            continue
+        canon = " ".join(canon_words[vfirst:vlast + 1]) if canon_words else ""
+        shown = (canon or quote) if replace else quote
+        marker = ("~﴿~" + shown + "~﴾~") if invisible else ("﴿" + shown + "﴾")
+        edits.append((first, last, marker))
+    for first, last, marker in reversed(edits):
+        text = text[:first] + marker + text[last:]
+    return text
+
+
+
+
+from quran import (  # the general Qur'ān module
+    build_wikilink, normalize_arabic, load_verse, render_quran_quote,
+)
+import quran
+
+
 def discover_and_mark_quotes(content: str, tafsir: bool = False) -> tuple[str, list[dict]]:
     """Discover unmarked Quran quotes and mark them with *﴿...﴾{quran}* ([[ref]]).
 
@@ -1072,9 +1644,20 @@ def link_open_fragments(content: str, tafsir: bool = False) -> tuple[str, int]:
     return "\n".join(lines), added
 
 
-def add_missing_refs(content: str) -> tuple[str, int]:
+def add_missing_refs(content: str, hint_surah: int = 0,
+                     hint_verse: int = 0) -> tuple[str, int]:
     """Add wikilinks to *LF...LE{quran-quote}* quotes that lack them.
-    
+
+    `hint_surah`/`hint_verse` are the passage the body comments on (one block
+    of a corpus tafsīr): the sūra is the file's own, the verse is where its
+    commentary starts. They anchor the focus to that sūra, so a cross-reference
+    — Sūrat Maryam opens with a quotation of 5:82 — is cited but never becomes
+    the verse under discussion. The verse itself is not bounded: no two tafsīrs
+    group āyāt the same way, and a work whose file name names one verse may
+    discuss another. Without them the focus drifts
+    with the recency weighting, which is what a text with no stated passage
+    (a scanned page) has to fall back on.
+
     Returns (new_content, added_count)."""
     LF = '\ufd3f'; LE = '\ufd3e'
     added = 0
@@ -1111,6 +1694,28 @@ def add_missing_refs(content: str) -> tuple[str, int]:
         s = max(surah_w, key=surah_w.get)
         return (s, last_v.get(s))
 
+    # An anchored focus: the passage's own sūra and verse range, and the verse
+    # inside it that the discussion has reached.
+    anchored = bool(hint_surah and hint_verse)
+    main_v = hint_verse
+    main_off = 0
+
+    def commit(s: int, v: int, off: int = 0) -> None:
+        nonlocal main_v, main_off
+        if not anchored:
+            _bump(s, v, off)
+            return
+        if s == hint_surah and v >= main_v:
+            main_v, main_off = v, off
+
+    if anchored:
+        pass  # main_v is the seed; nothing else to set up
+    elif hint_surah and hint_verse:
+        _bump(hint_surah, hint_verse)
+
+    def focus_pair():
+        return (hint_surah, main_v) if anchored else _focus()
+
     def _end_offset(s, v, norm):
         vn = normalize_arabic(load_verse(s, v) or "")
         i = vn.find(norm)
@@ -1128,7 +1733,7 @@ def add_missing_refs(content: str) -> tuple[str, int]:
             if lm:
                 ls, lv = int(lm.group(1)), int(lm.group(2))
                 lt = full_match[full_match.index(LF)+1:full_match.index(LE)]
-                _bump(ls, lv, _end_offset(ls, lv, normalize_arabic(lt)))
+                commit(ls, lv, _end_offset(ls, lv, normalize_arabic(lt)))
             parts.append(keep); continue
 
         text = full_match[full_match.index(LF)+1:full_match.index(LE)]
@@ -1139,7 +1744,7 @@ def add_missing_refs(content: str) -> tuple[str, int]:
             hint_s, hint_v, hint_end = hint
             wikilink = build_wikilink(hint_s, hint_v, end_verse=hint_end)
             parts.append(keep + wikilink)
-            _bump(hint_s, hint_v, _end_offset(hint_s, hint_v, normalize_arabic(text_clean)))
+            commit(hint_s, hint_v, _end_offset(hint_s, hint_v, normalize_arabic(text_clean)))
             added += 1
             continue
         if normalize_arabic(text_clean) in BLACKLISTED_PHRASES:
@@ -1148,16 +1753,16 @@ def add_missing_refs(content: str) -> tuple[str, int]:
             parts.append(keep); continue
 
         norm = normalize_arabic(text_clean)
-        fs, fv = _focus()
+        fs, fv = focus_pair()
         # (a) The next quote is almost always the same words or the words right
         # after the verse currently under discussion — the dominant surah's
         # most recent verse — even if a stray reference intervened.
         if fs is not None:
-            r = find_verse_after(norm, fs, fv, verse_off.get((fs, fv), 0))
+            r = find_verse_after(norm, fs, fv, main_off if anchored else verse_off.get((fs, fv), 0))
             if r:
                 v, off = r
                 parts.append(keep + build_wikilink(fs, v))
-                _bump(fs, v, off)
+                commit(fs, v, off)
                 added += 1
                 continue
 
@@ -1211,8 +1816,8 @@ def add_missing_refs(content: str) -> tuple[str, int]:
                         for sm in segment_matches)
                     parts.append(body)
                     added += len(segment_matches)
-                _bump(segment_matches[-1][3], segment_matches[-1][4],
-                      _end_offset(segment_matches[-1][3], segment_matches[-1][4], norm))
+                commit(segment_matches[-1][3], segment_matches[-1][4],
+                       _end_offset(segment_matches[-1][3], segment_matches[-1][4], norm))
                 continue
 
         matches = [(s, v, t, sc) for s, v, t, sc in results if sc > 0.7]
@@ -1222,7 +1827,7 @@ def add_missing_refs(content: str) -> tuple[str, int]:
         wikilink = (build_wikilink(surah, verse_num, end_verse=verse_range[1])
                     if verse_range else build_wikilink(surah, verse_num))
         parts.append(keep + wikilink)
-        _bump(surah, verse_num, _end_offset(surah, verse_num, norm))
+        commit(surah, verse_num, _end_offset(surah, verse_num, norm))
         added += 1
     parts.append(new_content[pos:])
     new_content = ''.join(parts)
@@ -1370,9 +1975,20 @@ def canonicalize_quran_quotes(content: str) -> tuple[str, int]:
     return BARE_QUOTE_REF.sub(_replace, content), changed
 
 
+# Characters a word may carry around it in running prose (`«مُسَخَّرَاتٌ»`,
+# `(لَحْمًا)`, `شَيْئًا.`). Stripped before a word is matched against the verse,
+# and left outside the quotation when it is wrapped.
+_WORD_TRAIL = " \u00a0،,؛;:.؟!\"'«»“”‘’()[]…\u061f"
+
+
 _VERSE_QUOTE_REF = re.compile(
-    r"(?:\*)?\ufd3f[^\ufd3e\n]{1,400}\ufd3e(?:\{\.quran-quote\})?\*?"
-    r"[ \t]*\(\[\[\s*(\d{3})[^#\]]*#(\d+)\|[^\]]*\]\]"
+    r"(?:~)?(?:\*)?\ufd3f[^\ufd3e\n]{1,400}\ufd3e(?:~)?(?:\{\.quran-quote\})?\*?"
+    # A quotation may be cut short before its citation: `… فَكَذَّبُوهُ. . .
+    # الْآيَةَ ([[…]])`. The elision and `الآية` are still the same quotation.
+    r"[ \t]*[»\"”’\)\]]*[ \t]*"
+    r"(?:[.\u2026][ \t]*)*"
+    r"(?:(?:الْآيَةَ|الْآيَةِ|الآية|الآيةِ|الْايَة|الايه)[ \t]*)?"
+    r"\(\[\[\s*(\d{3})[^#\]]*#(\d+)\|[^\]]*\]\]"
     r"(?:[ \t]*[\u2013\u2014-][ \t]*\[\[\s*(\d{3})[^#\]]*#(\d+)\|[^\]]*\]\])?\)"
 )
 
@@ -1423,175 +2039,6 @@ def _verse_marker(stem: str, surah: int, start: int, end: int | None) -> str:
     """
     display = f"{surah}:{start}" if not end or end == start else f"{surah}:{start}\u2013{surah}:{end}"
     return f"**[[{stem}#{start}|{display}]]**"
-
-
-def insert_verse_headings(content: str) -> tuple[str, int]:
-    """Mark each newly introduced verse inline, at the point it is quoted.
-
-    A tafsīr works through the muṣḥaf in order, citing other verses in passing.
-    The main verse therefore advances by one (a verse or two may be skipped),
-    while a passing citation goes backwards, jumps far ahead, or belongs to
-    another sūra. The marker is written inline as ``**[[004 An-Nisa#26|4:26]]**``
-    and the plugin moves it into the note's right margin, so a verse may change
-    mid-sentence without breaking the paragraph. A range gets a range marker.
-
-    Older renders used a ``#####`` block heading instead, which split the
-    paragraph. Those headings are converted back to inline markers and the
-    paragraph is rejoined before the markers are recomputed.
-
-    The pass is idempotent: markers from a previous run are removed first.
-    """
-    lines = content.split("\n")
-
-    # 1. Legacy block headings become inline markers, and the paragraph they
-    #    split is rejoined (the split added the heading plus one blank line).
-    rejoined: list[str] = []
-    in_fence = False
-    i = 0
-    while i < len(lines):
-        stripped = lines[i].strip()
-        if stripped.startswith("```") or stripped.startswith("~~~"):
-            in_fence = not in_fence
-            rejoined.append(lines[i])
-            i += 1
-            continue
-        heading = None if in_fence else _VERSE_HEADING.match(stripped)
-        empty = None if in_fence else _EMPTY_VERSE_HEADING.match(stripped)
-        if heading or empty:
-            marker = "**" + stripped[5:].strip() + "**" if heading else ""
-            j = i + 1
-            while j < len(lines) and not lines[j].strip():
-                j += 1
-            if j < len(lines):
-                # The heading was inserted mid-paragraph, so the break it made
-                # is removed: the marker goes between the two halves, and the
-                # paragraph is rejoined. Only a heading after a callout, page
-                # rule, or another heading cannot be joined backwards.
-                previous = ""
-                for line in reversed(rejoined):
-                    if line.strip():
-                        previous = line.strip()
-                        break
-                joinable = bool(previous) and not previous.startswith((">", "#")) and previous != "---"
-                if joinable:
-                    while rejoined and not rejoined[-1].strip():
-                        rejoined.pop()
-                    rejoined[-1] = rejoined[-1].rstrip() + " " + marker + lines[j].lstrip()
-                else:
-                    lines[j] = marker + lines[j]
-                    rejoined.append(lines[j])
-                i = j + 1
-                continue
-            i += 1
-            continue
-        rejoined.append(lines[i])
-        i += 1
-    lines = rejoined
-
-    # 1b. A marker that starts its own paragraph is still holding a break the
-    #     old heading made. Join it back to the paragraph above, so the marker
-    #     sits inside the sentence where the verse actually changes.
-    merged: list[str] = []
-    for line in lines:
-        stripped = line.lstrip()
-        marker = _VERSE_MARKER.match(stripped)
-        if marker and merged:
-            k = len(merged) - 1
-            while k >= 0 and not merged[k].strip():
-                k -= 1
-            previous = merged[k].strip() if k >= 0 else ""
-            joinable = bool(previous) and not previous.startswith((">", "#", "<")) and previous != "---"
-            if joinable:
-                del merged[k + 1:]
-                merged[k] = (merged[k].rstrip() + " "
-                             + stripped[:marker.end()] + stripped[marker.end():])
-                continue
-        merged.append(line)
-    lines = merged
-
-    # 2. Drop markers from a previous run; they are re-derived from the links.
-    #    A marker the old raw-citation pass broke (`**\[]`) is debris too.
-    lines = [_VERSE_MARKER.sub("", line) for line in lines]
-    lines = [_DAMAGED_MARKER.sub("", line) for line in lines]
-
-    # 3. Collect the quoted verses in document order.
-    quotes: list[tuple[int, int, int, int, int]] = []
-    in_fence = False
-    for index, line in enumerate(lines):
-        stripped = line.lstrip()
-        if stripped.startswith("```") or stripped.startswith("~~~"):
-            in_fence = not in_fence
-            continue
-        if in_fence or stripped.startswith((">", "|", "#")):
-            continue
-        for match in _VERSE_QUOTE_REF.finditer(line):
-            surah = int(match.group(1))
-            verse = int(match.group(2))
-            end = int(match.group(4)) if match.group(4) else verse
-            if quotes and quotes[-1][2:] == (surah, verse, end):
-                continue
-            quotes.append((index, match.start(), surah, verse, end))
-
-    # 4. Walk the progression and place a marker where each new verse begins.
-    marks: dict[int, list[tuple[int, str]]] = {}
-    current: tuple[int, int] | None = None
-    stems: dict[int, str] = {}
-    for i, (line_index, offset, surah, verse, end) in enumerate(quotes):
-        if current is None:
-            new_verse = True
-        else:
-            current_surah, current_verse = current
-            if surah == current_surah and 1 <= verse - current_verse <= 3:
-                # The discussion runs forwards; a verse or two may be skipped.
-                # A bigger forward jump is a passing cross-reference.
-                new_verse = True
-            elif verse <= 10 and surah > current_surah and _surah_continues(
-                    quotes, i + 1, surah, 6, 3):
-                new_verse = True
-            else:
-                # Earlier verse or another sūra: a passing cross-reference.
-                new_verse = False
-        if not new_verse:
-            continue
-        if surah not in stems:
-            stems[surah] = get_surah_name(surah)[0]
-        marks.setdefault(line_index, []).append(
-            (offset, _verse_marker(stems[surah], surah, verse, end)))
-        current = (surah, end)
-
-    # 5. Insert inline, from the end of each line backwards so offsets hold.
-    out: list[str] = []
-    for index, line in enumerate(lines):
-        for offset, text in sorted(marks.get(index, ()), reverse=True):
-            line = line[:offset] + text + line[offset:]
-        out.append(line)
-    return "\n".join(out), sum(len(items) for items in marks.values())
-
-
-
-
-def keep_first_verse_link(content: str) -> tuple[str, int]:
-    """In a commentary, cite a verse once, not on every repetition.
-
-    The link is kept on the first quotation of a verse and on the first one
-    after a cross-reference to a different verse; the repeats in between lose
-    their link but keep the quote. This is what keeps a tafsīr readable when it
-    returns to the same words again and again.
-    """
-    pattern = re.compile(
-        r"﴿([^﴾\n]{1,400})﴾"
-        r"(\s*)\(\[\[(\d{3})[^#\]]*#(\d+)\|[^\]]*\]\]\)"
-    )
-    edits: list[tuple[int, int]] = []
-    previous: tuple[int, int] | None = None
-    for match in pattern.finditer(content):
-        target = (int(match.group(3)), int(match.group(4)))
-        if target == previous:
-            edits.append((match.start(2), match.end()))
-        previous = target
-    for start, end in reversed(edits):
-        content = content[:start] + content[end:]
-    return content, len(edits)
 
 
 def mark_short_fragments(content: str) -> tuple[str, int]:

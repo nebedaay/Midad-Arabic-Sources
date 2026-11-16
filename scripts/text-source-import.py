@@ -50,7 +50,13 @@ _SCRIPTS_DIR = Path(__file__).resolve().parent
 if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
 
-from text_postprocess import escape_literal_brackets, unwrap_quran_quotes
+import tafsir
+
+from text_postprocess import (
+    escape_literal_brackets,
+    unwrap_quran_quotes,
+    wrap_quran_quotes_for_processing,
+)
 
 
 # ── Paths ────────────────────────────────────────────────────────────────────
@@ -886,7 +892,7 @@ _WESTERN_TO_ARABIC = str.maketrans("0123456789", "٠١٢٣٤٥٦٧٨٩")
 # A number of editions (Muyassar, Saʿdī, Wasīṭ, Iʿrāb …) carry no citations at
 # all, and editorial refs like `[تفسير ابن كثير: ٢ / ١٣٥]` never match a sūra.
 _VerseCitation = re.compile(
-    r"(?P<open>[\[(])\s*(?P<name>[^\[\]()]{1,40}?)\s*:\s*"
+    r"(?P<open>[\[(])\s*(?P<name>[^\[\]()]{1,40}?)\s*[:\\/]\s*"
     r"(?P<ayah>[\u0660-\u0669\d]{1,4}(?:\s*[-\u2013\u060C,]\s*[\u0660-\u0669\d]{1,4})*)\s*(?P<close>[\])])"
 )
 
@@ -965,7 +971,9 @@ def link_verse_citations(text: str, *, skip: tuple[int, int] | None = None) -> s
     text can look like a citation, but a second pass must never nest a link in
     one that is already there.
     """
-    if not text or ":" not in text or _CANONICAL_RIWAYA != "hafs":
+    if not text or _CANONICAL_RIWAYA != "hafs":
+        return text
+    if not re.search(r"[:\\/]", text):
         return text
 
     links: list[str] = []
@@ -1008,10 +1016,23 @@ def link_verse_citations(text: str, *, skip: tuple[int, int] | None = None) -> s
 
 
 _QURAN_MODULE = None
+_TAFSIR_MODULE = None
+
+
+def _tafsir_module():
+    """Load tafsir.py lazily — the tafsīr mode (markers, focal verse)."""
+    global _TAFSIR_MODULE
+    if _TAFSIR_MODULE is None:
+        from importlib.machinery import SourceFileLoader
+        _TAFSIR_MODULE = SourceFileLoader(
+            "tafsir", str(Path(__file__).with_name("tafsir.py"))).load_module()
+    return _TAFSIR_MODULE
 # Quotes already carrying the vault's marker, plus the other delimiters a tafsīr
 # may use for a Qur'ān quote instead of `﴿…﴾`: guillemets, curly quotes, parens.
 # (Digitised tafsīrs rarely mix them, but a few use only one of these.)
 _QuoteMark = re.compile(r"\*﴿(.+?)﴾\{\.quran-quote\}\*(?!\s*\(\[\[)")
+# Invisible boundaries: the span is styled, but no ornament is printed.
+_INVISIBLE_QUOTE = re.compile(r"~﴿~(.+?)~﴾~(?!\s*\(\[\[)")
 _ExtraDelims = {
     "«»": re.compile(r"«([^«»]{1,400}?)»"),
     "“”": re.compile(r"“([^“”]{1,400}?)”"),
@@ -1019,12 +1040,54 @@ _ExtraDelims = {
 }
 
 
+# The source's own editorial apparatus is rendered as a muted `<sup>` aside.
+# It is not the text: a citation or marker must never be read out of it or
+# written into it (`(من ج وك.)` is a manuscript note, not a Qur'ān quotation).
+_SUP_ASIDE = re.compile(r'<sup class="mas-src-note">.*?</sup>', re.DOTALL)
+
+
+def _mask_sups(text: str) -> tuple[str, list[str]]:
+    tokens: list[str] = []
+
+    def repl(m: re.Match) -> str:
+        tokens.append(m.group(0))
+        return f"\x10SUP{len(tokens) - 1}\x11"
+
+    return _SUP_ASIDE.sub(repl, text), tokens
+
+
+def _unmask_sups(text: str, tokens: list[str]) -> str:
+    for index, token in enumerate(tokens):
+        text = text.replace(f"\x10SUP{index}\x11", token)
+    return text
+
+
+# Marks that are in the Warsh text and absent from the Ḥafṣ one (measured on
+# the two canonical editions in this vault): the Maghribi imāla vowels and the
+# sad-lam-alef ligature. They occur only in a fully vocalised text, which is
+# exactly the case in which the riwāya can be read off the page.
+_WARSH_MARKS = ("\u0656", "\u0657", "\u065e", "\u06d6", "\u06de")
+
+
+def detect_riwaya(text: str) -> str | None:
+    """`warsh` when a text is unmistakably vocalised in the Warsh reading.
+
+    The two readings differ mostly in tashkīl and hamza forms, which matching
+    removes; these marks do not survive in a Ḥafṣ text and are frequent in a
+    Warsh one, so a handful of them settles it. An unvocalised text carries no
+    signal — the reading then has to be inferred from the words themselves or
+    from the work's metadata.
+    """
+    hits = sum(text.count(mark) for mark in _WARSH_MARKS)
+    return "warsh" if hits >= 3 else None
+
+
 def _quran_module():
-    """Load transcription-quran.py lazily — it exposes the Qur'ān verse matcher."""
+    """Load quran.py lazily — it exposes the Qur'ān verse matcher."""
     global _QURAN_MODULE
     if _QURAN_MODULE is None:
         from importlib.machinery import SourceFileLoader
-        mod = SourceFileLoader("transcription_quran", str(Path(__file__).with_name("transcription-quran.py"))).load_module()
+        mod = SourceFileLoader("quran", str(Path(__file__).with_name("quran.py"))).load_module()
         mod.QURAN_DIR = QURAN_DIR  # match the importer's canonical Qur'ān folder
         _QURAN_MODULE = mod
     return _QURAN_MODULE
@@ -1059,7 +1122,7 @@ def detect_quote_delims(text: str) -> tuple[str, ...]:
 
 def link_quote_citations(
     text: str, *, surah: int, ayah: int, delims: tuple[str, ...] = (),
-    linear: bool = True,
+    linear: bool = True, cite_current: bool = False, ornate: bool = True,
 ) -> str:
     """Cite every Qur'ān quote that resolves to a verse other than this one.
 
@@ -1091,6 +1154,19 @@ def link_quote_citations(
         res = None
         for seg in segments:
             if len(seg.split()) <= 2:
+                # A one- or two-word span is only a verse quote when it is part
+                # of the verse under discussion (`كهيعص`, `الم`, a divine name).
+                # Matching it against the whole muṣḥaf would cite anything.
+                if not (linear and state["v"]):
+                    continue
+                try:
+                    verse = tfq.normalize_arabic(tfq.load_verse(state["s"], state["v"]) or "")
+                except Exception:  # noqa: BLE001
+                    verse = ""
+                needle = tfq.normalize_arabic(seg)
+                if len(needle) >= 3 and needle in verse:
+                    res = ((state["s"], state["v"]),)
+                    break
                 continue
             try:
                 res = tfq.find_verse_in_text(
@@ -1107,15 +1183,38 @@ def link_quote_citations(
         s, v = res[0][0], res[0][1]
         if linear:
             state["s"], state["v"] = s, v
-        if (s, v) == (surah, ayah):
+        if not cite_current and (s, v) == (surah, ayah):
             return ""
         row = _surah_rows()[s - 1]
         numeral = str(v).translate(_WESTERN_TO_ARABIC)
         return f" ([[{row['base']}#{v}|{row['arabic']} : {numeral}]])"
 
-    text = _QuoteMark.sub(lambda m: m.group(0) + cite(m.group(1).strip()), text)
+    # Many tafsīrs quote in parentheses, so `()` stays a delimiter when the work
+    # uses it. What must never be read as a quotation is the editorial asides:
+    # the source writes them `[[…]]`, acquisition turns them into
+    # `<sup>(…)</sup>`, and those parentheses are ours — `link_source_content`
+    # masks them before this pass runs.
+    text = _INVISIBLE_QUOTE.sub(lambda m: m.group(0) + cite(m.group(1).strip()), text)
+
+    if ornate:
+        text = _QuoteMark.sub(lambda m: m.group(0) + cite(m.group(1).strip()), text)
+        for name in delims:
+            text = _ExtraDelims[name].sub(lambda m: m.group(0) + cite(m.group(1).strip()), text)
+        return text
+
+    # In a tafsīr the ornate spans are left to the shared tafsīr passes, so this
+    # is only discovery: a quotation found in another delimiter (guillemets,
+    # curly quotes, parentheses) is rewritten into the vault's ornate form, and
+    # the one shared pass then cites it and decides about short fragments. No
+    # citation rule lives here.
+    def wrap(m: re.Match) -> str:
+        inner = m.group(1).strip()
+        if not cite(inner):
+            return m.group(0)
+        return f"*\ufd3f{inner}\ufd3e{{.quran-quote}}*"
+
     for name in delims:
-        text = _ExtraDelims[name].sub(lambda m: m.group(0) + cite(m.group(1).strip()), text)
+        text = _ExtraDelims[name].sub(wrap, text)
     return text
 
 
@@ -1140,13 +1239,36 @@ def link_source_content(
     """
     if not text:
         return text
+    # The editorial asides are masked for the whole pass: a manuscript note is
+    # not commentary, and a parenthesis inside it is not a quotation.
+    text, sups = _mask_sups(text)
     skip = (surah, ayah) if skip_current and surah and ayah else None
     text = link_verse_citations(text, skip=skip)
     if language == "ar":
+        if linear:
+            # Commentary (a tafsīr, a transcribed one included) is the place a
+            # source mis-numbers a verse: it quotes a verse and names a number
+            # the muṣḥaf does not have, or one that belongs to another verse.
+            # The quoted words are the evidence, so the citation is corrected
+            # before anything is wrapped, numbered or displayed.
+            text, fixes, notes = _quran_module().repair_citations(text)
+            for old_surah, old_verse, new_surah, new_verse in fixes:
+                emit("log", message=(f"  citation corrected: {old_surah}:{old_verse}"
+                                     f" → {new_surah}:{new_verse}"))
+            for note in notes:
+                emit("log", message=f"  {note}")
+        # A citation is evidence of a quotation, whatever introduces it: the
+        # words before it are matched and wrapped. This is not a tafsīr rule —
+        # any text that cites a verse quotes it.
+        text = _quran_module().wrap_cited_quotes(text)[0]
         text = link_quote_citations(
             text, surah=surah, ayah=ayah, delims=delims, linear=linear,
+            cite_current=not skip_current,
+            # An ornate span is linked by the shared tafsīr passes, so a corpus
+            # tafsīr and a transcribed one follow exactly the same rules here.
+            ornate=not linear,
         )
-    return unwrap_quran_quotes(escape_literal_brackets(text))
+    return _unmask_sups(unwrap_quran_quotes(escape_literal_brackets(text)), sups)
 
 
 def canonical_aliases(work: dict) -> list[str]:
@@ -1976,7 +2098,7 @@ def surah_table() -> list[dict]:
         table.append({"number": i, "base": f"{i:03d} {translit}", "translit": translit, "arabic": arabic})
     if QURAN_DIR.is_dir():
         for f in sorted(QURAN_DIR.glob("*.md")):
-            m = re.match(r"^(\d{1,3})\s+(.+)$", f.stem)
+            m = re.match(r"^(\d{1,3})\s+(.+)$", f.stem) or re.search(r" - (\d{1,3})\s+(.+)$", f.stem)
             if not m:
                 continue
             num = int(m.group(1))
@@ -2080,10 +2202,17 @@ def clean_text(raw: str, *, english: bool) -> str:
     # (<span title=…>) made notes with ~1000 of these hang Obsidian's renderer.
     # Done AFTER smart_quotes (which would otherwise curl attribute quotes);
     # links we add ourselves come later and are not touched.
+    # The apparatus can run over several lines (`[[تمامه:` then the poem's
+    # hemistich, then `]]`), so the pattern is DOTALL and the aside is folded
+    # onto one line: a `<sup>` is inline, and a newline inside it would split
+    # the paragraph.
     body = re.sub(
         r"\[\[(.+?)\]\]",
-        lambda m: f'<sup class="mas-src-note">({html.escape(m.group(1))})</sup>',
+        lambda m: '<sup class="mas-src-note">('
+            + html.escape(re.sub(r"\s+", " ", m.group(1)).strip())
+            + ')</sup>',
         body,
+        flags=re.DOTALL,
     )
     # Double-bracketed text in this source is its editorial apparatus, not a
     # link. It keeps its source-specific superscript-aside rendering above.
@@ -2125,7 +2254,57 @@ def parse_work_file(data, shape: str) -> list[tuple[int, str]]:
 # entry, because a re-render only replays the model and cannot apply an
 # acquisition change. Bump the affected entry whenever this file's output for a
 # collection changes, and mirror it in the plugin's `COLLECTION_MODEL_SCHEMA`.
-MODEL_SCHEMA: dict[str, int] = {"dictionary": 6, "turath": 3}
+MODEL_SCHEMA: dict[str, int] = {
+    "dictionary": 6,
+    # 24/8: the correction follows the nearest reading of the number (adjacent
+    #       verse, then the same āya elsewhere, then the same sūra, then one
+    #       match), needs three agreeing words, and is refused page-wide when
+    #       the quotations fail wholesale (wrong edition or riwāya).
+    # 23/7: a citation the muṣḥaf does not support is corrected from the words
+    #       that follow it (16:136 → 6:136, 16:78 → 16:87, 16:221 → 16:122).
+    # 22/6: the margin is numbered for the whole chapter: a verse mentioned
+    #       once out of order is still numbered, a verse is numbered where it is
+    #       discussed rather than on every return, and a one-word quotation
+    #       beside its citation is formatted.
+    # 21/5: a passage may start at a lower verse after a detour.
+    # 20/4: a citation alone wraps its quotation (no lead-in needed), and a
+    #       phrase from anywhere in the verse is matched.
+    # 19: `لقوله` is a lead-in, and a phrase from the middle of a verse is
+    #     matched, not only one that starts at its first word.
+    # 18: overlapping lead-in quotations cannot nest their boundaries.
+    # 17: every citation wraps its quotation, with no overlapping edits.
+    # 16: a long forward jump is a genuine skip unless the text returns to a
+    #     verse in between (a digression).
+    # 15: a verse citation wraps the quotation before it, so a link and Qur'ān
+    #     formatting always arrive together.
+    # 14: verses introduced together on one line become one range marker.
+    # 13: a one- or two-word quotation is wrapped when it verifies.
+    # 12: an anchor whose own text holds a bracket is part of a citation even
+    #     when the `]` is inside the anchor.
+    # 11: the marker cursor runs across a chapter's pages, and a forward jump
+    #     of more than two verses is a cross-reference.
+    # 10: a work's reading (Ḥafṣ / Warsh / other) is detected or declared, and
+    #     matching, replacement and links follow it.
+    # 9: the sūra hint resolves a bare or numerically prefixed chapter title,
+    #    so markers stay inside the note's sūra on every page.
+    # 8: tafsīr markers are linear within the note's own sūra, and a verse is
+    #    cited once per paragraph.
+    # 7: a matched quotation is replaced by the canonical muṣḥaf text.
+    # 6: punctuation ends a quotation; a dash-delimited gloss closes it and the
+    #    same verse resumes.
+    # 5: a Turath tafsīr runs the shared tafsīr passes (marginal markers,
+    #    citations, invisible boundaries) and carries the `tafsir` class.
+    # 4: a Turath quotation after a lead-in (`قوله تعالى: …`) is identified by
+    #    its citation bracket, or by the longest prefix that is the sūra's
+    #    verse; the editorial-`toc` glitch inside a bracket no longer makes a
+    #    heading.
+    "turath": 25,
+    # 3: a tafsīr body runs the shared `tafsir_passes` (citation on first
+    #    quotation, short fragments, markers at verse shifts) and the editorial
+    #    asides are opaque to every pass.
+    "tafsir": 9,
+    "tafsir-qul": 9,
+}
 BASE_MODEL_SCHEMA = 1
 
 
@@ -2163,11 +2342,31 @@ def _ayah_blocks(surah: dict, records: list[tuple[int, str]], english: bool,
         body = link_source_content(
             body,
             surah=surah["number"], ayah=start,
-            linear=True, skip_current=True, delims=delims,
+            linear=True, skip_current=False, delims=delims,
             language="en" if english else "ar",
         )
         if not body:
             continue
+        # A tafsīr is read as a commentary that moves through the muṣḥaf: cite a
+        # verse on its first quotation, and put a marginal marker wherever the
+        # discussion moves to a new one. This is the same pair of passes the
+        # transcription pipeline runs, so a corpus tafsīr and a transcribed one
+        # are marked identically. `skip_leading` leaves the block's own marker
+        # (written by the template at the start of the body) alone.
+        if not english:
+            tfq = _quran_module()
+            try:
+                # The shared passes read the processing form (`*﴿…﴾{...}*`),
+                # which the clean-text step has already unwrapped for the model.
+                body, sups = _mask_sups(body)
+                body = wrap_quran_quotes_for_processing(body)
+                body, _ = _tafsir_module().tafsir_passes(
+                    body, hint_surah=surah["number"], hint_verse=start,
+                    skip_leading=True,
+                )
+                body = _unmask_sups(unwrap_quran_quotes(body), sups)
+            except Exception as exc:  # noqa: BLE001
+                emit("log", message=f"  tafsīr passes skipped for {surah['base']} {start}: {exc}")
         if end == start:
             out.append({
                 "number": start,
@@ -2181,6 +2380,14 @@ def _ayah_blocks(surah: dict, records: list[tuple[int, str]], english: bool,
                         f"–[[{surah['base']}#{end}|{arabic_numeral(end)}]]"),
                 "body": body,
             })
+    if not english and out:
+        # Number the margin once for the whole sūra: a verse mentioned once gets
+        # its marker even out of order, and a verse the commentary returns to is
+        # numbered where it is discussed.
+        bodies = _rebuild_chapter_markers(
+            [b["body"] for b in out], surah["number"])
+        for block, body in zip(out, bodies):
+            block["body"] = body
     return out
 
 
@@ -2199,6 +2406,7 @@ def build_surah_units(work: dict, table: list[dict], wanted: set[int] | None,
             emit("log", message=f"  skipped {surah['base']}: {exc}")
             continue
         records = parse_work_file(data, COLLECTIONS[work["collection"]]["shape"])
+        _resolve_work_riwaya(work, "\n".join(t for _, t in records))
         units.append({
             "kind": "surah",
             "id": surah["number"],
@@ -4303,8 +4511,304 @@ def _turath_mark_footnote_markers(text: str, numbers: set[str]) -> str:
     )
 
 
+_HARAKAT = "\u064B-\u0652\u0653-\u0655\u0670"
+
+
+def _dt(word: str) -> str:
+    """A word as a regex that tolerates any ḥaraka between its letters."""
+    return "".join(re.escape(ch) + f"[{_HARAKAT}]*" for ch in word)
+
+
+# A commentary introduces a quotation with `قوله تعالى:` / `وقوله:` / `قال:` and
+# then runs the verse text bare — no parentheses, no guillemets. The citation in
+# the bracket after it is what makes the span identifiable.
+_QUOTE_LEADS = ("كقوله", "وقوله", "قوله", "فكقوله", "لقوله", "كقول", "وقول", "قال", "يعني")
+_QUOTE_LEAD = re.compile(
+    "(?:" + "|".join(_dt(w) for w in _QUOTE_LEADS) + ")"
+    r"\s*(?:"
+    + _dt("تعالى") + "|" + _dt("عز") + r"\s*" + _dt("وجل") + "|"
+    + _dt("تبارك") + r"\s*" + _dt("وتعالى") + "|" + _dt("سبحانه")
+    + r")?"
+    # A qualifier may sit between the lead and the colon — `كقوله في البكر:` —
+    # but it stays a few words, never a sentence.
+    r"[^:：\n]{0,40}[:：]"
+)
+_VERSE_ABBR = re.compile(r"\s*(?:الْآيَةَ|الآيَةِ|الآية|الْايَة|الايه)(?![\u0621-\u064A])")
+
+
+def _surah_hint(body: str, pos: int = 0) -> int:
+    """The sūra being commented on at `pos`, from the nearest `سورة …` heading.
+
+    A Turath page opens with the sūra it treats (`سُورَةُ` then the name, often as
+    a `##` heading), and a long page may reach the next one. The last heading
+    before the quotation is the starting point for matching a quotation that has
+    no citation after it."""
+    head = body[:pos or 500]
+    last = 0
+    for m in re.finditer(r"سُورَةُ?\s*\n*\s*(?:#+\s*)?([^\n]{2,30})", head):
+        row = _lookup_surah(m.group(1).strip())
+        if row:
+            last = int(row["number"])
+    return last
+
+
+HAFS_QURAN_DIR = QURAN_DIR
+_EDITION_CACHE: dict[str, "object | None"] = {}
+
+
+def _resolve_work_riwaya(work: dict, sample: str) -> bool:
+    """Settle a work's reading and point matching at it.
+
+    An explicit `riwaya` on the work wins; otherwise the marks decide, and Ḥafṣ
+    is the default. Returns whether the matched text may be replaced by the
+    canonical one (`other` keeps the author's own wording).
+    """
+    if work.get("_riwaya_resolved"):
+        return bool(work.get("_riwaya_replace", True))
+    declared = str(work.get("riwaya") or "").strip().lower()
+    chosen = declared if declared in ("hafs", "warsh", "other") else ""
+    if not chosen:
+        chosen = detect_riwaya(sample) or "hafs"
+    work["riwaya"] = chosen
+    used = _apply_riwaya("hafs" if chosen == "other" else chosen)
+    work["_riwaya_resolved"] = True
+    work["_riwaya_replace"] = used != "other"
+    if chosen == "warsh" and used != "warsh":
+        emit("log", message=f"  {work['title']}: Warsh reading detected, but no "
+                            "Warsh edition is installed; matching Ḥafṣ.")
+    elif chosen != "hafs":
+        emit("log", message=f"  {work['title']}: reading {chosen}.")
+    return work["_riwaya_replace"]
+
+
+def _edition_dir(name: str):
+    """The canonical folder for a riwāya (`warsh`), or None."""
+    key = str(name or "").lower()
+    if key in _EDITION_CACHE:
+        return _EDITION_CACHE[key]
+    target = None
+    if key == "warsh":
+        for folder in sorted(HAFS_QURAN_DIR.parent.iterdir()):
+            if folder.is_dir() and "warsh" in folder.name.lower():
+                target = folder
+                break
+    _EDITION_CACHE[key] = target
+    return target
+
+
+def _apply_riwaya(name: str) -> str:
+    """Point matching at a riwāya's canonical notes for the rest of a work.
+
+    Returns the reading actually used: `hafs`, `warsh`, or `other`. `other`
+    matches against Ḥafṣ but never replaces the text (a comparative work keeps
+    both readings).
+    """
+    global QURAN_DIR, _SURAH_ROWS, _SURAH_NAME_INDEX
+    key = str(name or "hafs").lower()
+    if key not in ("hafs", "warsh", "other"):
+        key = "hafs"
+    target = HAFS_QURAN_DIR
+    if key == "warsh":
+        target = _edition_dir("warsh") or HAFS_QURAN_DIR
+        if target == HAFS_QURAN_DIR:
+            key = "hafs"
+    tfq = _quran_module()
+    tfq.QURAN_DIR = target
+    if target != QURAN_DIR:
+        QURAN_DIR = target
+        _SURAH_ROWS = None
+        _SURAH_NAME_INDEX = None
+        tafsir.clear_caches()
+    return key
+
+
+def _surah_hint_from_title(title: str) -> int:
+    """The sūra a chapter title names.
+
+    A Turath chapter may write it as `سورة النور`, as the bare name (`النحل`), or
+    with a numeric prefix (`016 النحل`); all three have to resolve, because the
+    hint is what confines the marginal markers to the note's own sūra.
+    """
+    text = str(title or "").strip()
+    if not text:
+        return 0
+    plain = _normalize_ayah_name(text)
+    idx = plain.find("سوره")
+    if idx >= 0 and len(plain) > idx + 4:
+        row = _lookup_surah(plain[idx + 4:].strip())
+        if row:
+            return int(row["number"])
+    m = re.match(r"^0*([0-9]{1,3})\b", text)
+    if m and 1 <= int(m.group(1)) <= 114:
+        return int(m.group(1))
+    row = _lookup_surah(text)
+    return int(row["number"]) if row else 0
+
+
+# These are the corpus-wide rules, implemented once in the Qur'ān module so a
+# scanned tafsīr, a repository tafsīr and a book all use the same matching.
+def _verse_norm(tfq, surah: int, verse: int) -> str:
+    return tfq.verse_norm(surah, verse)
+
+
+def _verse_tokens(tfq, surah: int, verse: int) -> list[str]:
+    return tfq.verse_tokens(surah, verse)
+
+
+def _verse_words(tfq, surah: int, verse: int) -> list[str]:
+    return tfq.verse_words(surah, verse)
+
+
+def _match_verse_spans(text: str, verse_tokens: list[str]):
+    return _quran_module().match_verse_spans(text, verse_tokens)
+
+
+def _mark_lead_in_quotes(body: str, hint_surah: int = 0,
+                         invisible: bool = True,
+                         replace: bool = True) -> str:
+    """Wrap the bare quotations that follow a commentary lead-in.
+
+    Turath delimits nothing: `قوله تعالى: الحق من ربك … [٢ \\ ١٤٧]` is a verse,
+    introduced by a lead-in and identified by the bracket after it. The span is
+    matched word by word against the cited verse (or, without a bracket, against
+    the verse found from its opening words), and a gloss interrupting the verse —
+    `… لَجَاءَهُمُ - أي العذاب - الْعَذَابُ …` — closes the quotation, which then
+    resumes where the verse continues. Nothing is wrapped unless it verifies, so
+    a ḥadīth or a poem after `قال:` is left alone.
+    """
+    tfq = _quran_module()
+    edits: list[tuple[int, int, str]] = []
+    for m in _QUOTE_LEAD.finditer(body):
+        start = m.end()
+        # The page's own `سورة …` heading if it has one, else the chapter title.
+        local_hint = _surah_hint(body, m.start()) or hint_surah
+        tail = body[start:start + 900]
+        if tail.lstrip().startswith(("﴿", "~﴿~")):
+            continue
+        cite = _VerseCitation.search(tail)
+        cut = cite.start() if cite and cite.start() <= 600 else None
+        cand = tail[:cut] if cut is not None else tail[:600]
+        lead_ws = len(cand) - len(cand.lstrip())
+        text = cand[lead_ws:].rstrip(" \u00a0،,؛;:.")
+        if not text:
+            continue
+
+        surah = verse = 0
+        if cut is not None:
+            row = _lookup_surah(cite.group("name"))
+            nums = [int(x.translate(_ARABIC_TO_WESTERN))
+                    for x in re.findall(r"[\u0660-\u0669\d]{1,4}", cite.group("ayah"))]
+            if row and nums:
+                surah, verse = int(row["number"]), nums[0]
+
+        spans: list[tuple[int, int, int, int]] = []
+        span_surah = span_verse = 0
+        if surah and verse:
+            verse_norm = _verse_norm(tfq, surah, verse)
+            mm = _VERSE_ABBR.search(text)
+            whole = (text[:mm.start()] if mm else text).rstrip()
+            needle = tfq.normalize_arabic(whole)
+            # Internal punctuation means it is not one continuous quotation
+            # (`… لَجَاءَهُمُ، الْعَذَابُ …`): match it run by run instead.
+            if (needle and len(needle) >= 10
+                    and not re.search(r"[،,؛;.:!?()«»\"“”]", whole)
+                    and (needle in verse_norm or verse_norm in needle)):
+                spans = [(0, len(whole), 0, len(_verse_words(tfq, surah, verse)) - 1)]
+            else:
+                spans = _match_verse_spans(text, _verse_tokens(tfq, surah, verse))
+                if mm:
+                    spans = [sp for sp in spans if sp[0] < mm.start()]
+                if not spans and not mm:
+                    fragment = tfq.find_verse_fragment(
+                        text, _verse_tokens(tfq, surah, verse))
+                    if fragment:
+                        spans = [fragment]
+            span_surah, span_verse = surah, verse
+        else:
+            base = " ".join(text.split()[:3])
+            found = None
+            try:
+                found = tfq.find_verse_in_text(base) if base else None
+            except Exception:  # noqa: BLE001
+                found = None
+            if found and found[0][3] > 0.7:
+                span_surah, span_verse = found[0][0], found[0][1]
+                spans = _match_verse_spans(
+                    text, _verse_tokens(tfq, span_surah, span_verse))
+
+        for first, last, vfirst, vlast in spans:
+            quote = text[first:last]
+            if len(tfq.normalize_arabic(quote)) < 3:
+                continue
+            # The matched words are replaced by the canonical text (with its
+            # tashkīl): every word inside the markers is the muṣḥaf's.
+            canon_words = _verse_words(tfq, span_surah, span_verse)
+            canon = " ".join(canon_words[vfirst:vlast + 1]) if canon_words else ""
+            shown = (canon or quote) if replace else quote
+            marker = ("~﴿~" + shown + "~﴾~") if invisible else ("﴿" + shown + "﴾")
+            edits.append((start + lead_ws + first, start + lead_ws + last, marker))
+
+    # Two lead-ins can describe overlapping quotations; only the first may
+    # claim a range, or the boundaries nest and a word is split.
+    edits.sort()
+    kept: list[tuple[int, int, str]] = []
+    last_end = -1
+    for edit in edits:
+        if edit[0] < last_end:
+            continue
+        kept.append(edit)
+        last_end = edit[1]
+    for first, last, marker in reversed(kept):
+        body = body[:first] + marker + body[last:]
+    return body
+
+
+def _rebuild_chapter_markers(bodies: list[str], surah: int,
+                             start_current: tuple[int, int] | None = None
+                             ) -> list[str]:
+    """Re-derive the marginal markers for a whole chapter, page by page.
+
+    The markers are first placed while each page is rendered, which cannot see
+    the rest of the chapter. This second pass decides for the chapter as a whole:
+    the passage carries across the pages, and a verse the commentary mentions
+    only in passing still gets one marker, at its first mention.
+    """
+    pages, _n = _tafsir_module().insert_verse_headings_chapter(
+        [body or "" for body in bodies], focus_surah=surah, linear=True,
+        start_current=start_current)
+    return pages
+
+
+def _dedupe_paragraph_links(body: str) -> str:
+    """Keep one citation per verse in a paragraph.
+
+    A quotation carries its link, and the same verse is often cited again a few
+    words later (`… (16:11) … (16:11)`) — a second time after an ellipsis. The
+    commentary needs the verse identified once, so the repeated links go; the
+    first one stays.
+    """
+    link = re.compile(r"\(\[\[(\d{3})[^#\]]*#(\d+)\|[^\]]*\]\]\)")
+    lines = body.split("\n")
+    for index, line in enumerate(lines):
+        seen: set[tuple[str, str]] = set()
+        if "[[" not in line:
+            continue
+
+        def keep(m: re.Match) -> str:
+            key = (m.group(1), m.group(2))
+            if key in seen:
+                return ""
+            seen.add(key)
+            return m.group(0)
+
+        lines[index] = link.sub(keep, line)
+    return "\n".join(lines)
+
+
 def _turath_page(text: str, headings: list[dict], section_level: int,
-                 drop: set[int]) -> str:
+                 drop: set[int], surah_hint: int = 0,
+                 tafsir: bool = False, replace: bool = True,
+                 seed_current: tuple[int, int] | None = None) -> str:
     """A page's HTML as markdown, with `toc-N` spans as H2/H3 headings.
 
     `drop` holds the section's own heading: the note title already carries it, so
@@ -4320,6 +4824,22 @@ def _turath_page(text: str, headings: list[dict], section_level: int,
     for m in _TURATH_TITLE.finditer(text):
         out.append(text[pos:m.start()])
         pos = m.end()
+        # `[٢ <span …>[٢ </span>\ ١٤٧]` — an anchor was inserted *inside* a
+        # citation, so its own text is part of the bracket. Treating it as a
+        # heading would split the citation across a `##` line; the span is
+        # unwrapped and its text kept inline, which leaves `[٢ \ ١٤٧]` whole.
+        inner = m.group(2)
+        # The anchor is part of a citation when its own text carries a bracket
+        # (`… [١٦ \ ٥] …` can have the `[` before the span and the `]` inside
+        # it), or when it sits between an unclosed `[` and a nearby `]`.
+        split_bracket = "[" in inner or "]" in inner
+        close_at = text.find("]", m.end())
+        if not split_bracket and close_at >= 0 and close_at - m.end() <= 60:
+            open_at = text.rfind("[", 0, m.start())
+            split_bracket = open_at > text.rfind("]", 0, m.start())
+        if split_bracket:
+            out.append(inner)
+            continue
         try:
             idx = int(m.group(1)) - 1
         except ValueError:
@@ -4356,10 +4876,19 @@ def _turath_page(text: str, headings: list[dict], section_level: int,
         body_lines.append(line)
 
     body = "\n\n".join(body_lines)
+    # A bare quotation after a lead-in is identified by the citation that follows
+    # it; wrap it in the ornate brackets the rest of the pipeline expects.
+    hint = surah_hint or _surah_hint(body)
+    # The source wrote no quotation marks, so none are printed; the tafsīr
+    # passes understand the invisible boundaries.
+    body = _mark_lead_in_quotes(body, hint, invisible=True, replace=replace)
     # Qur'ān quotes get the vault's marker. Smart quotes run here, before any
     # wikilink is generated: a curly apostrophe must never enter a link target
     # (`Al-An’am` would no longer match `Al-An'am`).
-    body = re.sub(r"﴿(.+?)﴾", lambda m: f"*﴿{m.group(1)}﴾{{.quran-quote}}*",
+    # Invisible boundaries (`~﴿~ … ~﴾~`) are already a styled span: wrapping the
+    # ornates inside them would produce `~*﴿…﴾*~` and break the boundary.
+    body = re.sub(r"(?<!~)﴿(.+?)(?<!~)﴾(?!~)",
+                  lambda m: f"*﴿{m.group(1)}﴾{{.quran-quote}}*",
                   body, flags=re.DOTALL)
     body = smart_quotes(body)
 
@@ -4375,9 +4904,19 @@ def _turath_page(text: str, headings: list[dict], section_level: int,
         callout = ">[!arabic-footnotes]\n" + "\n".join(f"> - {line}" for line in foot_lines)
         body = f"{body}\n\n{callout}" if body.strip() else callout
 
-    # The same citation pass as every other collection. A Turath book is not a
-    # tafsīr, so quotes are looked up independently rather than in verse order.
-    return link_source_content(body, language="ar", linear=False)
+    # The same citation pass as every other collection. A Turath book lists its
+    # quotations independently; a Turath **tafsīr** is commentary, so its quotes
+    # are read in verse order, and the tafsīr passes then number the verses in
+    # the margin exactly as they do for a transcribed one.
+    body = link_source_content(body, language="ar", linear=tafsir)
+    if not tafsir:
+        return body
+    tfq = _quran_module()
+    body, sups = _mask_sups(body)
+    body = wrap_quran_quotes_for_processing(body)
+    body, _ = _tafsir_module().tafsir_passes(body, hint_surah=hint, start_current=seed_current)
+    body = _dedupe_paragraph_links(body)
+    return _unmask_sups(unwrap_quran_quotes(body), sups)
 
 
 def _turath_span(blocks: list[dict], multi: bool) -> str:
@@ -4550,7 +5089,12 @@ def build_turath_units(work: dict, args: argparse.Namespace) -> list[dict]:
     # Turath rebuilds each book file, so its `date_built` is the update signal;
     # the volume count drives the hub's volume-index layer.
     work["date_built"] = book["meta"].get("date_built")
+    sample = "".join((p.get("text") or "") for p in book["pages"][:80])
+    replace = _resolve_work_riwaya(work, sample)
     work["volumes"] = len(book["volumes"])
+    is_tafsir = "tafsir" in [str(g).lower() for g in (work.get("genres") or [work.get("genre") or ""])]
+    if is_tafsir:
+        work["cssclass"] = "tafsir"
     headings, pages, page_map = book["headings"], book["pages"], book["page_map"]
     volumes = book["volumes"]
     multi = len(volumes) > 1
@@ -4561,13 +5105,13 @@ def build_turath_units(work: dict, args: argparse.Namespace) -> list[dict]:
 
     if not headings:
         return _turath_volumes(
-            _turath_chunk_chapters(_turath_by_volume(book, multi), work, multi),
+            _turath_chunk_chapters(_turath_by_volume(book, multi, is_tafsir, replace), work, multi),
             volumes, work)
 
     levels = [_int_or(h.get("level"), 1) for h in headings]
     if not levels:
         return _turath_volumes(
-            _turath_chunk_chapters(_turath_by_volume(book, multi), work, multi),
+            _turath_chunk_chapters(_turath_by_volume(book, multi, is_tafsir, replace), work, multi),
             volumes, work)
     section_level = _int_or(work.get("section_level", 1), 1)
     level = min(max(section_level, min(levels)), max(levels))
@@ -4604,10 +5148,12 @@ def build_turath_units(work: dict, args: argparse.Namespace) -> list[dict]:
             starts.append((i, start))
     if not starts:
         return _turath_volumes(
-            _turath_chunk_chapters(_turath_by_volume(book, multi), work, multi),
+            _turath_chunk_chapters(_turath_by_volume(book, multi, is_tafsir, replace), work, multi),
             volumes, work)
-    def page_blocks(start: int, end: int, drop: set[int], own: int | None = None) -> list[dict]:
+    def page_blocks(start: int, end: int, drop: set[int], own: int | None = None,
+                    surah_hint: int = 0) -> list[dict]:
         out: list[dict] = []
+        seed: tuple[int, int] | None = None
         for j in range(start, end + 1):
             text = pages[j].get("text") or ""
             if own is not None and j == start:
@@ -4617,13 +5163,27 @@ def build_turath_units(work: dict, args: argparse.Namespace) -> list[dict]:
                           if int(mm.group(1)) - 1 == own), None)
                 if m:
                     text = text[m.start():]
-            body = _turath_page(text, headings, level, drop)
+            body = _turath_page(text, headings, level, drop, surah_hint, is_tafsir,
+                                replace, seed)
+            seen = re.findall(r"\*\*\[\[\d{3}[^#\]]*#\d+\|(\d+):(\d+)\]\]\*\*", body)
+            if seen:
+                seed = (int(seen[-1][0]), int(seen[-1][1]))
             where = loc(j)
             out.append({
                 "vol": where["vol"], "page": where["page"],
                 "page_label": _turath_page_label(where["page"]),
                 "body": body if body.strip() else "*(blank page in the source)*",
             })
+        if is_tafsir and out:
+            # The margin is numbered for the chapter, not for each page: only
+            # the chapter knows how often a verse is mentioned in it.
+            joined = "\n".join(b["body"] for b in out)
+            hint = surah_hint or _surah_hint(joined)
+            if hint:
+                bodies = _rebuild_chapter_markers(
+                    [b["body"] for b in out], hint)
+                for block, body in zip(out, bodies):
+                    block["body"] = body
         return out
 
     chapters: list[dict] = []
@@ -4661,7 +5221,8 @@ def build_turath_units(work: dict, args: argparse.Namespace) -> list[dict]:
                     and level > 1 and (prev_title.startswith("حرف") or prev_title.startswith("باب"))
                     and this_title.startswith(("فصل", "حرف", "باب"))):
                 own = None
-        blocks = page_blocks(start, end, {head}, own)
+        blocks = page_blocks(start, end, {head}, own,
+                             _surah_hint_from_title(head_title))
         if not blocks:
             continue
         title_ar = head_title
@@ -4695,15 +5256,20 @@ def build_turath_units(work: dict, args: argparse.Namespace) -> list[dict]:
     return _turath_volumes(chapters, volumes, work)
 
 
-def _turath_by_volume(book: dict, multi: bool) -> list[dict]:
+def _turath_by_volume(book: dict, multi: bool, tafsir: bool = False,
+                      replace: bool = True) -> list[dict]:
     """No TOC: one chapter per volume, so the work still has linkable content."""
     chapters = []
     for n, vol in enumerate(book["volumes"], start=1):
         blocks = []
+        seed: tuple[int, int] | None = None
         for j, p in enumerate(book["pages"]):
             if p.get("vol") != vol:
                 continue
-            body = _turath_page(p.get("text") or "", [], 1, set())
+            body = _turath_page(p.get("text") or "", [], 1, set(), 0, tafsir, replace, seed)
+            seen = re.findall(r"\*\*\[\[\d{3}[^#\]]*#\d+\|(\d+):(\d+)\]\]\*\*", body)
+            if seen:
+                seed = (int(seen[-1][0]), int(seen[-1][1]))
             page_vol, page_no = _turath_page_location(book["page_map"], book["pages"], j)
             blocks.append({
                 "vol": page_vol or vol, "page": page_no,

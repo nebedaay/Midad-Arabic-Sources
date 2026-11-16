@@ -649,7 +649,9 @@ def cleanup_quran_citations(text: str) -> str:
     return re.sub(r"(﴾)\s*[\]\)–\\\[]+(?=\s|$)", r"\1", text)
 
 
-_QURAN_BARE = re.compile(r"﴿([^﴾\n]+)﴾")
+# A quote already inside invisible boundaries (`~﴿~ … ~﴾~`) is not a bare
+# span: wrapping it would produce `~*﴿…﴾*~` and break the boundary.
+_QURAN_BARE = re.compile(r"(?<!~)﴿([^﴾\n]+?)(?<!~)﴾(?!~)")
 
 
 def wrap_quran_quotes_for_processing(text: str) -> str:

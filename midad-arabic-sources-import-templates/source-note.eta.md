@@ -15,11 +15,21 @@
 <span class="mas-managed">mas-managed</span>
 
 <% for (const b of unit.blocks) { -%>
-# <%= b.number %>
+<% const digits = (value) => String(value).replace(/[٠-٩]/g, (d) => String("٠١٢٣٤٥٦٧٨٩".indexOf(d))); -%>
+<% const num = digits(b.number).trim(); -%>
+<% const single = /^(\d+)$/.exec(num); -%>
+<% const range = /^(\d+)\s*[–—-]\s*(\d+)$/.exec(num); -%>
+<% const anchor = single ? single[1] : (range ? range[1] : ""); -%>
+<% const label = single ? `${unit.id}:${single[1]}` : (range ? `${unit.id}:${range[1]}–${unit.id}:${range[2]}` : ""); -%>
+<% const target = (b.ref || "").match(/\[\[\s*([^\]|]+)/); -%>
+<% const href = target ? target[1].trim() : (anchor ? `${unit.base}#${anchor}` : ""); -%>
+# <%= num %>
 
-## <%= b.ref %>
-
+<% if (href && label) { -%>
+**[[<%= href %>|<%= label %>]]**﻿<%~ b.body %>
+<% } else { -%>
 <%~ b.body %>
+<% } -%>
 
 <% } -%>
 <% if (!unit.blocks || !unit.blocks.length) { -%>

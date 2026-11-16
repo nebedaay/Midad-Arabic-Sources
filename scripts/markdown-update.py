@@ -112,19 +112,20 @@ def normalize_markdown_spacing(text: str) -> str:
 def _update_markdown_body(body: str, *, quran: bool, tafsir: bool) -> str:
     body = unwrap_quran_quotes(body)
     body = wrap_quran_quotes_for_processing(body)
-    tfq = _load("transcription-quran.py")
+    tfq = _load("quran.py")
+    tfs = _load("tafsir.py")
     if tafsir:
         # Split first: the heading pass breaks a page-wide paragraph at each
         # verse, which also lets quote discovery see short passages it would
         # otherwise skip.
-        body, _ = tfq.insert_verse_headings(body)
+        body, _ = tfs.insert_verse_headings(body)
     if quran:
         body, _ = tfq.discover_and_mark_quotes(body, tafsir=tafsir)
         body, _ = tfq.add_missing_refs(body)
         body, _ = tfq.fix_wikilinks(body)
     if tafsir:
         body, _ = tfq.mark_short_fragments(body)
-        body, _ = tfq.insert_verse_headings(body)
+        body, _ = tfs.insert_verse_headings(body)
     body = escape_literal_brackets(body)
     # Add links to bare Arabic/Western TOC entries and force Arabic TOC lines
     # RTL without touching existing TOC links.
@@ -135,7 +136,7 @@ def _update_markdown_body(body: str, *, quran: bool, tafsir: bool) -> str:
     body = unwrap_quran_quotes(body)
     body, _ = tfq.canonicalize_quran_quotes(body)
     if tafsir:
-        body, _ = tfq.keep_first_verse_link(body)
+        body, _ = tfs.keep_first_verse_link(body)
     body = cleanup_quran_citations(body)
     # The source formatter's spacing rules are block-level and idempotent; the
     # raw-only page-number, OCR-heading, poetry, footnote, and TOC conversions

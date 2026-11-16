@@ -126,6 +126,72 @@ function renderTemplate(engine: SourceTemplateEngine, tpl: string, data: Record<
 	return { content, specs };
 }
 
+/** Trailing punctuation that belongs to the sentence, not to the quotation. */
+const QUOTE_TRAIL = /[\s\u00A0،,؛;:.]+$/u;
+
+function splitTrail(inner: string): { text: string; trail: string } {
+	const text = inner.replace(QUOTE_TRAIL, "");
+	return { text, trail: inner.slice(text.length) };
+}
+
+/**
+ * Move a quotation's trailing punctuation outside its boundaries.
+ *
+ * A comma kept inside `~﴿~…،~﴾~` (or `﴿…،﴾`) is set in the Qur'ān face, which
+ * has no glyph for it and draws a dotted circle instead. The comma is the
+ * sentence's, so it goes after the closing boundary.
+ */
+export function punctuationOutsideQuotes(body: string): string {
+	body = body.replace(/~﴿~([\s\S]*?)~﴾~/g, (match, inner: string) => {
+		const { text, trail } = splitTrail(inner);
+		return trail ? `~﴿~${text}~﴾~${trail}` : match;
+	});
+	body = body.replace(/﴿([\s\S]*?)﴾/g, (match, inner: string) => {
+		const { text, trail } = splitTrail(inner);
+		return trail ? `﴿${text}﴾${trail}` : match;
+	});
+	return body;
+}
+
+/** A tafsīr body's inline verse marker, `**[[stem#V|S:V]]**`. */
+const BODY_MARKER = /\*\*\[\[\d{3}[^#\]]*#\d+\|[^\]]+\]\]\*\*/g;
+
+/**
+ * One marginal marker per line — the layout guarantee, enforced on the way to
+ * the template.
+ *
+ * A model body can carry more than one marker on a line (the source stated a
+ * range, and a quotation inside the same line resolved to one of its verses);
+ * every marker is absolutely positioned in the same gutter cell, so they would
+ * draw on top of one another. The first marker on a line is kept and the rest
+ * are dropped. The first line loses all of them: every tafsīr template writes
+ * the block's own marker at the start of the body, which is that line.
+ */
+export function oneMarkerPerLine(body: string): string {
+	const lines = body.split("\n");
+	return lines
+		// The first line loses its markers: the template writes the block's own
+		// marker at the start of the body, which is that line. Later lines keep
+		// every marker they have — two on one line are stacked in the gutter by
+		// the stylesheet, not one hidden behind the other.
+		.map((line, index) => (index === 0 ? line.replace(BODY_MARKER, "") : line))
+		.join("\n");
+}
+
+/** The unit handed to a template, with its block bodies normalized. */
+function templateUnit(unit: JsonObject): JsonObject {
+	const blocks = unit.blocks;
+	if (!Array.isArray(blocks)) return unit;
+	return {
+		...unit,
+		blocks: blocks.map((block: JsonObject) =>
+			typeof block.body === "string"
+				? { ...block, body: oneMarkerPerLine(punctuationOutsideQuotes(block.body)) }
+				: block
+		),
+	};
+}
+
 export function renderUnit(engine: SourceTemplateEngine, templates: TemplateSet, model: SourceModel, unit: JsonObject): RenderOutput {
 	const tpl = unit.kind === "hadith" ? templates.hadith
 		: unit.kind === "quran" ? templates.quran
@@ -138,7 +204,7 @@ export function renderUnit(engine: SourceTemplateEngine, templates: TemplateSet,
 		: templates.source;
 	return renderTemplate(engine, tpl, {
 		work: model.work,
-		unit,
+		unit: templateUnit(unit),
 		units: model.units,
 		layout: model.work.layout,
 		generated: model.generated,

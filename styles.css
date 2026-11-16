@@ -3257,3 +3257,138 @@ body .callout[data-callout="quran-warsh"] .el-p,
 body .callout[data-callout="quran-warsh"] .cm-line {
     font-family: var(--quran-warsh-font) !important;
 }
+
+/* --- A corpus tafsīr numbers its verses like a Qur'ān page -----------------
+   A tafsīr imported from a corpus writes `# 12` for each verse and then the
+   inline marker for the canonical reference. That heading is the page's own
+   verse number, so it gets the same gold emblem and the same right-hand band
+   as a Qur'ān page. The class is added by the plugin to a *numeric* heading
+   only, so a transcribed tafsīr's own `# title` keeps its heading style. */
+
+body .tafsir .mas-verse-number {
+    position: absolute !important;
+    right: 0 !important;
+    left: auto !important;
+    top: auto !important;
+    width: max(var(--quran-marker-size), var(--quran-emblem-size)) !important;
+    height: max(var(--quran-marker-size), var(--quran-emblem-size)) !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: var(--latin-font), serif !important;
+    font-size: var(--quran-number-size) !important;
+    font-weight: normal !important;
+    line-height: 1 !important;
+    color: #008800;
+    direction: rtl;
+    text-align: center;
+    z-index: 10;
+    /* Reading view: the same nudge a Qur'ān page uses in this view. */
+    transform: translateY(-0.2em) !important;
+}
+
+/* The editor's line box differs, so the emblem uses the editor nudge. */
+body .markdown-source-view.mod-cm6 .cm-line.mas-verse-number {
+    transform: translateY(-0.4em) !important;
+}
+
+body .tafsir .mas-verse-number::before {
+    content: "۝";
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: var(--quran-emblem-font);
+    font-size: var(--quran-emblem-size);
+    line-height: 1;
+    z-index: -1;
+    background: linear-gradient(to bottom, --mas-bright(var(--mas-gold)), --mas-dark(var(--mas-gold)));
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+}
+
+/* The emblem's band is reserved only in a tafsīr that has verse numbers: a
+   transcribed print edition may number nothing at all, and then the text keeps
+   the full width. */
+body .tafsir:has(h1.mas-verse-number) p,
+body .tafsir:has(h1.mas-verse-number) .el-p,
+body .tafsir:has(h1.mas-verse-number) li,
+body .tafsir:has(.cm-line.mas-verse-number) .cm-line:not(.HyperMD-header-1) {
+    padding-right: var(--quran-gutter) !important;
+}
+
+/* The blank line between the number and the commentary is collapsed in the
+   editor, as on a Qur'ān page, so the emblem sits on the verse's first line. */
+body .tafsir .cm-line.mas-verse-number + .cm-line {
+    height: 0;
+    min-height: 0;
+    line-height: 0;
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+}
+
+/* In the editor the number lives in a `.cm-header-1` span: the line's own flex
+   cannot centre it (the editor controls the line box), so the span fills the
+   emblem box and centres itself — exactly the rule a Qur'ān page uses. Without
+   this the number sits at the top of the emblem in Live Preview. */
+body .markdown-source-view.mod-cm6 .cm-line.mas-verse-number .cm-header-1 {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 0;
+    padding: 0;
+    font-family: var(--latin-font), serif !important;
+    font-size: var(--quran-number-size) !important;
+    font-weight: normal !important;
+    color: #008800;
+    line-height: 1;
+    text-decoration: none;
+    transform: translateY(var(--quran-number-shift));
+    z-index: 1;
+}
+
+/* The literal `#` is shown on the active line; hide it so it cannot shift the
+   number, as on a Qur'ān page. */
+body .tafsir .cm-line.mas-verse-number .cm-formatting-header,
+body .tafsir .cm-line.mas-verse-number .cm-formatting {
+    display: none;
+}
+
+/* --- Generated indexes are read left-to-right ------------------------------
+   A work hub and a category MOC list notes and counts. When every title is
+   Arabic, the block's own direction is RTL, so `- [[…|المجلد 1]] — 7 chapters`
+   is laid out right-to-left and prints as `7 — المجلد 1 chapters`. The list is
+   structural, not prose: its order is LTR (bullet, title, em dash, count), and
+   an Arabic title inside a line still reads right-to-left on its own. */
+body .mas-index li,
+body .mas-index li > p,
+body .mas-index li > ul,
+body .mas-index li > ol {
+    direction: ltr;
+    unicode-bidi: isolate;
+    text-align: left;
+}
+
+/* --- Markers stacked on one line -----------------------------------------
+   A line can carry two markers: a range the source states and the verse our
+   matching recognised inside it, or verses introduced together. They share the
+   gutter cell, so each later one is dropped down by a line rather than hidden
+   behind the first. The plugin sets the ordinal on the marker itself. */
+body .mas-verse-marker[data-marker-index="1"] {
+    transform: translateY(1.25em) !important;
+}
+
+body .mas-verse-marker[data-marker-index="2"] {
+    transform: translateY(2.5em) !important;
+}
+
+body .mas-verse-marker[data-marker-index="3"] {
+    transform: translateY(3.75em) !important;
+}
