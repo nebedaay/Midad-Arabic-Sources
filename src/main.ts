@@ -3,6 +3,7 @@ import { webUtils } from "electron";
 import * as fs from "fs";
 import * as http from "http";
 import * as os from "os";
+import * as path from "path";
 import { promisify } from "util";
 import * as zlib from "zlib";
 import { strFromU8, strToU8, unzipSync, zipSync } from "fflate";
@@ -228,7 +229,16 @@ interface MidadArabicSourcesSettings {
 	annotateOnSelection: boolean;
 	manageShowFilter?: string;
 	manageGenreFilter?: string[];
+	/** How often to ask repositories whether a text changed (0 = manual). */
 	sourceUpdateCheckDays?: number;
+	/**
+	 * Auto-update policy for every kind of note — repository source,
+	 * transcription, translation, adopted note. `undefined` asks, `true` updates
+	 * without asking (saving the reader's own text as a version first), `false`
+	 * leaves edited notes alone.
+	 */
+	autoUpdateOnChange?: boolean;
+	/** @deprecated Older name of `autoUpdateOnChange`; still read for migration. */
 	autoUpdateSourceTemplates?: boolean;
 	/** Include rendered notes in a source archive zip (default true). */
 	archiveMarkdown?: boolean;
@@ -245,6 +255,9 @@ interface MidadArabicSourcesSettings {
 	/** Create a Zotero item for every installed work, without being asked. */
 	zoteroAutoCreate?: boolean;
 }
+
+/** What to do about notes whose managed region changed since the baseline. */
+export type ChangeReview = "ask" | "save" | "overwrite" | "skip";
 
 interface RunOptions {
 	useLlm: boolean;
@@ -4107,7 +4120,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		if (this.isSourceCancelled(op)) return [];
 		if (changed.length) {
 			new Notice(`Text changed in ${changed.length} work(s); updating…`);
-			await this.importSources(changed, true, op);
+			await this.importSources(changed, true, op, kind);
 		}
 		return changed;
 		} finally {
@@ -4226,7 +4239,9 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			new Notice("No models were produced — see the pipeline status.");
 			return;
 		}
-		const written = await this.renderWithProgress(models, false, "Rendering notes", op);
+		const written = await this.renderWithProgress(
+			models, false, "Rendering notes", op, kind,
+			kind === "auto" ? this.autoReview() : "ask");
 		if (this.isSourceCancelled(op)) {
 			new Notice("Stopped. Partial notes remain; install again to finish.");
 			return;
@@ -4245,7 +4260,8 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 	 * render goes through here, so nothing large ever runs without a report.
 	 */
 	async renderWithProgress(modelPaths: string[], force: boolean, title: string,
-		operationId?: number, kind: "explicit" | "auto" = "explicit", skipChangeReview = false): Promise<string[]> {
+		operationId?: number, kind: "explicit" | "auto" = "explicit",
+		review: ChangeReview = "ask"): Promise<string[]> {
 		const op = operationId ?? this.beginSourceOperation(kind);
 		if (op === null) return [];
 		const owns = operationId === undefined;
@@ -4279,7 +4295,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 				];
 				if (left > 0) parts.push(`${left} work${left === 1 ? "" : "s"} left`);
 				progress.setMessage(`${title}: ${parts.join(" — ")}`);
-			}, () => this.isSourceCancelled(op), skipChangeReview);
+			}, () => this.isSourceCancelled(op), review);
 		} finally {
 			progress.hide();
 			if (owns) this.endSourceOperation(op);
@@ -4304,6 +4320,64 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 
 	private noteContentHash(text: string): string {
 		return managedHash(text);
+	}
+
+	/**
+	 * What to do when a note's managed region no longer matches the baseline.
+	 *
+	 * Every kind of note is handled the same way: `ask` shows the review dialogue,
+	 * `save` puts the reader's text aside as the default version and then updates,
+	 * and `skip` leaves the note as it is. Auto-updating never overwrites a region
+	 * the reader edited without first making that text a version.
+	 */
+	changePolicy(): "ask" | "save" | "skip" {
+		const value = this.settings.autoUpdateOnChange
+			?? this.settings.autoUpdateSourceTemplates;
+		return value === true ? "save" : value === false ? "skip" : "ask";
+	}
+
+	/** The review an automatic update uses: the setting, in review terms. */
+	autoReview(): ChangeReview {
+		const policy = this.changePolicy();
+		return policy === "skip" ? "skip" : policy === "save" ? "save" : "ask";
+	}
+
+	/**
+	 * Review notes whose managed region changed before an update replaces it.
+	 *
+	 * One gate for every kind of note — repository source, transcription,
+	 * translation, adopted note. `ask` shows the review; `save` stores the
+	 * reader's text as a version (and makes it the default, so the note keeps
+	 * showing it and the fresh render becomes a selectable version); `overwrite`
+	 * is used only where the caller already reviewed or just wrote the note;
+	 * `skip` leaves the whole update alone, which is what "Never" means.
+	 * Returns false when the update must not proceed.
+	 */
+	private async reviewChangedNotes(paths: string[], mode: ChangeReview): Promise<boolean> {
+		if (mode === "overwrite") return true;
+		const changed = await this.findChangedSourceNotes(paths);
+		if (!changed.length) return true;
+		if (mode === "skip") return false;
+		let choice: "cancel" | "skip" | "save" | "overwrite" | "original" = "original";
+		if (mode === "ask") {
+			choice = await new Promise<"cancel" | "skip" | "save" | "overwrite" | "original">((resolve) => {
+				new SourceChangeReviewModal(this.app, changed.map((entry) => entry.path), resolve).open();
+			});
+			if (choice === "cancel" || choice === "skip") return false;
+			if (choice === "overwrite") return true;
+		}
+		const store = new VersionStore(this.app, this.vaultPath());
+		for (const entry of changed) {
+			const existing = await store.entryFor(entry.file);
+			await store.saveVersion(entry.file, false, undefined, {
+				startAt: existing ? undefined : 1,
+				virtualOriginal: !existing,
+				// Keep the reader's text as the version they see; the fresh render
+				// becomes another version they can switch to.
+				makeDefault: choice === "original",
+			});
+		}
+		return true;
 	}
 
 	private async findChangedSourceNotes(paths: string[]): Promise<Array<{ path: string; file: TFile; hash: string }>> {
@@ -4355,7 +4429,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 	}
 
 	async renderModels(modelPaths: string[], force = false, onProgress?: (p: RenderProgress) => void,
-		shouldCancel?: () => boolean, skipChangeReview = false): Promise<string[]> {
+		shouldCancel?: () => boolean, review: ChangeReview = "ask"): Promise<string[]> {
 		const vault = this.vaultPath();
 		const userFolder = this.settings.sourceTemplateFolder.trim() || null;
 		let templates: TemplateSet;
@@ -4403,35 +4477,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			m.work.unit_prefix = isCanonical ? "" : (m.work.dir as string);
 		}
 		const expected = batch.flatMap((model) => expectedNotePaths(model, outRoot, canonicalRoot, canonicalId));
-		const changed = skipChangeReview ? [] : await this.findChangedSourceNotes(expected);
-		if (changed.length) {
-			const choice = await new Promise<"cancel" | "skip" | "save" | "overwrite" | "original">((resolve) => {
-				new SourceChangeReviewModal(this.app, changed.map((entry) => entry.path), resolve).open();
-			});
-			if (choice === "cancel" || choice === "skip") return [];
-			const store = new VersionStore(this.app, this.vaultPath());
-			if (choice === "save") {
-				for (const entry of changed) {
-					const existing = await store.entryFor(entry.file);
-					await store.saveVersion(entry.file, false, undefined, {
-						startAt: existing ? undefined : 1,
-						virtualOriginal: !existing,
-						makeDefault: false,
-					});
-				}
-			} else if (choice === "original") {
-				// Keep the user's changed note as the default version, then capture
-				// the freshly rendered source below as a non-default version.
-				for (const entry of changed) {
-					const existing = await store.entryFor(entry.file);
-					await store.saveVersion(entry.file, false, undefined, {
-						startAt: existing ? undefined : 1,
-						virtualOriginal: !existing,
-						makeDefault: true,
-					});
-				}
-			}
-		}
+		if (!(await this.reviewChangedNotes(expected, review))) return [];
 		const written: string[] = [];
 		const contentPaths: string[] = [];
 		const pubs = await this.loadPublicationMap();
@@ -5161,7 +5207,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			return;
 		}
 		const label = String(work.title ?? work.dir ?? work.id);
-		await this.renderWithProgress([`${this.vaultPath()}/${rel}`], true, `Re-rendering ${label}`, undefined, "explicit", skipChangeReview);
+		await this.renderWithProgress([`${this.vaultPath()}/${rel}`], true, `Re-rendering ${label}`, undefined, "explicit", skipChangeReview ? "overwrite" : "ask");
 		new Notice(`Re-rendered ${label}.`);
 	}
 
@@ -5295,7 +5341,8 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		infoOverride?: ArchivedNoteInfo,
 		metadataOnly = false,
 		inPlace = false,
-		quiet = false
+		quiet = false,
+		review: ChangeReview = "ask"
 	): Promise<void> {
 		const target = file ?? this.app.workspace.getActiveFile();
 		if (!(target instanceof TFile) || target.extension !== "md") {
@@ -5308,6 +5355,10 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			return;
 		}
 		if (info.volume == null && !info.unit && this.noteHasVolumes(info.citekey, info.type)) {
+			// One review for the whole work, then each volume is written over.
+			const volumes = this.transcriptionVolumeFiles(info.citekey, info.type);
+			const paths = volumes.map((volumeFile) => volumeFile.path);
+			if (!(await this.reviewChangedNotes(paths, review))) return;
 			const done = await this.postprocessTranscriptionVolumes(
 				info.citekey, info.type, metadataOnly, inPlace);
 			if (!done) {
@@ -5321,6 +5372,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			new Notice(`${metadataOnly ? "Upgraded" : "Post-processed"} ${done} volume ${done === 1 ? "note" : "notes"} of @${info.citekey}.`);
 			return;
 		}
+		if (!(await this.reviewChangedNotes([target.path], review))) return;
 		const args = [
 			"postprocess-note", target.path,
 			"--citekey", info.citekey,
@@ -5343,8 +5395,11 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		} else if (consolidated?.legacy) {
 			new Notice(`Consolidated ${consolidated.legacy.split("/").pop() ?? consolidated.legacy} into the native parent.`);
 		}
-		if (result?.notes?.length && !metadataOnly && !quiet) {
-			new Notice(`Post-processed ${target.basename}.`);
+		if (result?.notes?.length) {
+			// A review that kept the reader's text as the default version must win
+			// over the fresh render, exactly as it does for a repository source.
+			await this.applySavedVersions([target.path]);
+			if (!metadataOnly && !quiet) new Notice(`Post-processed ${target.basename}.`);
 		}
 	}
 
@@ -5381,7 +5436,8 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		for (const volumeFile of this.transcriptionVolumeFiles(citekey, type)) {
 			const volumeInfo = archivedNoteInfo(volumeFile.path);
 			if (!volumeInfo?.type) continue;
-			await this.postprocessTranscriptionNote(volumeFile, volumeInfo, metadataOnly, inPlace, true);
+			await this.postprocessTranscriptionNote(
+				volumeFile, volumeInfo, metadataOnly, inPlace, true, "overwrite");
 			done += 1;
 			// A re-render is not an edit, so the fresh note becomes the baseline.
 			if (this.app.vault.getAbstractFileByPath(volumeFile.path) instanceof TFile) {
@@ -5541,7 +5597,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 	 * volume notes. The archive contains the OCR/translation JSON, so this
 	 * never calls Gemini.
 	 */
-	async rerenderArchivedNote(file: TAbstractFile, options: { outPath?: string; skipApply?: boolean; skipChangeReview?: boolean; onlyCurrentVolume?: boolean } = {}): Promise<string | null> {
+	async rerenderArchivedNote(file: TAbstractFile, options: { outPath?: string; skipApply?: boolean; skipChangeReview?: boolean; onlyCurrentVolume?: boolean; review?: ChangeReview } = {}): Promise<string | null> {
 		const info = archivedNoteInfo(file.path);
 		if (!info) {
 			new Notice("That note does not belong to an imported source and has no archived transcription.");
@@ -5557,6 +5613,8 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			})
 			.sort((a, b) => (a.info.volume ?? -1) - (b.info.volume ?? -1));
 
+		const review: ChangeReview = options.review
+			?? (options.skipChangeReview ? "overwrite" : "ask");
 		if (!batches.length) {
 			if (options.outPath && file instanceof TFile) {
 				// Rendering Version 0 must never rewrite the live note. A legacy
@@ -5569,13 +5627,14 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			if (info.type) {
 				// Legacy notes predate the archive format; the current local
 				// post-processor can still improve them in place.
-				await this.postprocessTranscriptionNote(file, info);
+				await this.postprocessTranscriptionNote(file, info, false, false, false, review);
 				return null;
 			}
 			new Notice(`No archived batch found for @${info.citekey}.`);
 			return null;
 		}
 
+		if (review === "skip") return null;
 		let chosen = batches;
 		if (info.volume != null) {
 			const exact = batches.filter((entry) => entry.info.volume === info.volume);
@@ -5601,22 +5660,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		}
 
 		const canonicalPath = file.path.replace(/\.Version\d+\.md$/i, ".md");
-		const changed = options.skipChangeReview ? [] : await this.findChangedSourceNotes([canonicalPath]);
-		if (changed.length) {
-			const choice = await new Promise<"cancel" | "skip" | "save" | "overwrite" | "original">((resolve) => {
-				new SourceChangeReviewModal(this.app, changed.map((entry) => entry.path), resolve).open();
-			});
-			if (choice === "cancel" || choice === "skip") return null;
-			const store = new VersionStore(this.app, this.vaultPath());
-			for (const entry of changed) {
-				const existing = await store.entryFor(entry.file);
-				await store.saveVersion(entry.file, false, undefined, {
-					startAt: existing ? undefined : 1,
-					virtualOriginal: !existing,
-					makeDefault: choice === "original",
-				});
-			}
-		}
+		if (!(await this.reviewChangedNotes([canonicalPath], review))) return null;
 		if (options.outPath && chosen.length > 1) chosen = chosen.slice(0, 1);
 		for (const entry of chosen) {
 			if (options.outPath) {
@@ -6199,6 +6243,113 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		return out;
 	}
 
+	/**
+	 * Scripts whose output is a transcription or translation note.
+	 *
+	 * A repository source changes when its template changes; a transcription has
+	 * no template, but it is rendered by these scripts, so a change to them is
+	 * the same event: the renderer moved and the notes are out of date.
+	 */
+	static readonly TRANSCRIPTION_SCRIPTS = [
+		"transcription-postprocess.py",
+		"transcription-format.py",
+		"quran.py",
+		"tafsir.py",
+		"text_postprocess.py",
+		"transcription-translation-move-to-vault.py",
+		"_timestamp.py",
+	];
+
+	/** A single hash over the transcription post-processing scripts. */
+	async pipelineScriptHash(): Promise<string> {
+		const dir = path.dirname(this.resolveScript(this.settings.pipelineScript));
+		const parts: string[] = [];
+		for (const name of MidadArabicSourcesPlugin.TRANSCRIPTION_SCRIPTS) {
+			let body = "";
+			try {
+				body = fs.readFileSync(`${dir}/${name}`, "utf8");
+			} catch { body = ""; }
+			parts.push(`${name}:${hashString(body)}`);
+		}
+		return hashString(parts.join("\n"));
+	}
+
+	/**
+	 * Record the current script hash and return when it last changed.
+	 *
+	 * Stored beside the template hashes, so one index answers "what rendered
+	 * this note, and has it moved?" for every kind of note.
+	 */
+	async recordPipelineHash(): Promise<{ hash: string; at: number }> {
+		const hash = await this.pipelineScriptHash();
+		const store = await this.loadSourceHashes();
+		const { store: next } = recordTemplateHashes(store, { pipeline: hash }, Date.now());
+		await this.saveSourceHashes(next);
+		return { hash, at: templateChangedAt(next, "pipeline") };
+	}
+
+	/** Transcription/translation notes rendered before the current scripts. */
+	async findStaleTranscriptionNotes(pipeline: { hash: string; at: number }): Promise<TFile[]> {
+		const { hash, at } = pipeline;
+		if (!at || !hash) return [];
+		const out: TFile[] = [];
+		const roots = new Set([
+			normalizePath(this.transcriptionsFolder()),
+			normalizePath(this.translationsFolder()),
+		]);
+		for (const file of this.app.vault.getMarkdownFiles()) {
+			if (/\.Version\d+\.md$/i.test(file.path)) continue;
+			const info = archivedNoteInfo(file.path);
+			if (!info?.type) continue;
+			const folder = info.type === "translation" ? this.translationsFolder() : this.transcriptionsFolder();
+			if (!roots.has(normalizePath(folder)) || !normalizePath(file.path).startsWith(normalizePath(`${folder}/`))) continue;
+			// The volume index of a multi-volume work holds no text of its own.
+			if (info.volume == null && !info.unit && this.noteHasVolumes(info.citekey, info.type)) continue;
+			// A note stamped with the current scripts needs nothing. One written after
+			// the change was produced by the new scripts, so it is stamped and left
+			// alone; only notes older than the change are out of date.
+			const stamp = this.hashStore().render(file.path);
+			if (stamp === hash) continue;
+			const mtime = file.stat?.mtime ?? 0;
+			if (mtime >= at) {
+				this.hashStore().setRenders({ [file.path]: hash });
+				continue;
+			}
+			out.push(file);
+		}
+		return out;
+	}
+
+	/**
+	 * Re-process transcriptions and translations produced by older scripts.
+	 *
+	 * The review is the same gate as for a repository source: a note the reader
+	 * edited keeps its text as the default version and the fresh render becomes
+	 * a version beside it, so an automatic pass never overwrites their work.
+	 */
+	async reprocessTranscriptionNotes(files: TFile[], pipeline: { hash: string; at: number },
+		kind: "auto" | "explicit" = "auto"): Promise<number> {
+		if (!files.length) return 0;
+		if (kind === "auto" && this.autoReview() === "skip") return 0;
+		let done = 0;
+		const stamped: Record<string, string> = {};
+		const notice = new Notice(`Updating ${files.length} transcription/translation note(s)…`, 0);
+		try {
+			for (const [index, file] of files.entries()) {
+				notice.setMessage(`Updating transcriptions: ${index + 1}/${files.length} — ${file.basename}`);
+				const info = archivedNoteInfo(file.path);
+				if (!info?.type) continue;
+				await this.rerenderArchivedNote(file, { review: "save" });
+				stamped[file.path] = pipeline.hash;
+				done += 1;
+			}
+		} finally {
+			notice.hide();
+			this.hashStore().setRenders(stamped);
+		}
+		return done;
+	}
+
 	async loadSourceHashes(): Promise<TemplateHashes> {
 		try {
 			const text = await this.app.vault.adapter.read(normalizePath(this.sourceHistoryPath()));
@@ -6330,6 +6481,10 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 	async renderStaleScoped(items: Array<{ work: JsonObject; kinds: Set<string> | null }>,
 		kind: "explicit" | "auto" = "auto", yamlOnly = false): Promise<void> {
 		if (!items.length) return;
+		const review: ChangeReview = yamlOnly
+			? "overwrite"  // the body is untouched, only frontmatter is reconciled
+			: kind === "auto" ? this.autoReview() : "ask";
+		if (review === "skip") return;
 		const op = this.beginSourceOperation(kind);
 		if (op === null) return;
 		const userFolder = this.settings.sourceTemplateFolder.trim() || null;
@@ -6385,6 +6540,8 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 						notice.setMessage(`Updating imported sources: ${nth} — ${label} — ${step}/${steps} notes (${pct}%)`);
 					};
 					const seen = new Map(Object.entries(stats[key]?.units ?? {}));
+					if (!(await this.reviewChangedNotes(
+						expectedNotePaths(model, outRoot, canonicalRoot, canonicalId), review))) continue;
 					const written = yamlOnly
 						? await renderModelToVault(this.app, templates, model, outRoot, false, onStep,
 							it.kinds ?? undefined, seen, () => this.isSourceCancelled(op), true)
@@ -6459,7 +6616,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 	 */
 	async pollTemplateChanges(): Promise<void> {
 		if (this.templateCheckRunning) return;
-		if (this.settings.autoUpdateSourceTemplates !== true) return;
+		if ((this.settings.autoUpdateOnChange ?? this.settings.autoUpdateSourceTemplates) !== true) return;
 		this.templateCheckRunning = true;
 		try {
 			const hashes = await this.sourceTemplateHashes();
@@ -6511,7 +6668,12 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		const { changed: changedKeys, yamlOnly } = await this.recordSourceTemplate();
 		const stale = await this.findStaleSourceWorks();
 		const indexDirty = changedKeys.some((k) => k === "moc" || k === "sources");
-		if (!incomplete.length && !stale.length && !indexDirty) return;
+		// The same question for transcriptions and translations: their renderer
+		// is the post-processing scripts, not an ETA template, but a change there
+		// leaves their notes just as out of date.
+		const pipeline = await this.recordPipelineHash();
+		const staleNotes = await this.findStaleTranscriptionNotes(pipeline);
+		if (!incomplete.length && !stale.length && !indexDirty && !staleNotes.length) return;
 
 		// Repair first, unconditionally: a missing model, or one written by an
 		// older acquisition, cannot be fixed by rendering. This is not a template
@@ -6542,36 +6704,38 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			}
 		}
 
-		// Template-driven re-renders keep their own consent setting.
-		const finish = async (includeTemplates: boolean) => {
-			if (includeTemplates) for (const s of stale) rerender.push({ work: s.work, kinds: s.kinds });
+		// One consent for the whole pass: a template change, a script change and a
+		// stale index are the same event to the reader.
+		const finish = async (includeAuto: boolean) => {
+			if (includeAuto) for (const s of stale) rerender.push({ work: s.work, kinds: s.kinds });
 			if (rerender.length) {
 				await this.renderStaleScoped(rerender, "auto", yamlOnly && incomplete.length === 0);
 			}
-			if (includeTemplates && indexDirty) await this.refreshSourcesIndex();
+			if (includeAuto) await this.reprocessTranscriptionNotes(staleNotes, pipeline, "auto");
+			if (includeAuto && indexDirty) await this.refreshSourcesIndex();
 		};
-		const templateCount = stale.length + (indexDirty ? 1 : 0);
-		if (!templateCount) {
+		const autoCount = stale.length + (indexDirty ? 1 : 0) + staleNotes.length;
+		if (!autoCount) {
 			await finish(false);
 			return;
 		}
-		if (this.settings.autoUpdateSourceTemplates === true) {
+		if ((this.settings.autoUpdateOnChange ?? this.settings.autoUpdateSourceTemplates) === true) {
 			await finish(true);
-		} else if (this.settings.autoUpdateSourceTemplates === false) {
+		} else if ((this.settings.autoUpdateOnChange ?? this.settings.autoUpdateSourceTemplates) === false) {
 			await finish(false);
 		} else {
 			// Hold the guard while the prompt is open, so another pass cannot stack
 			// behind it and ask the same question twice.
 			this.awaitingSourceConsent = true;
-			new SourceTemplateUpdateConsentModal(this.app, templateCount, (choice) => {
+			new SourceTemplateUpdateConsentModal(this.app, autoCount, (choice) => {
 				void (async () => {
 					try {
 						if (choice === "yes") {
-							this.settings.autoUpdateSourceTemplates = true;
+							this.settings.autoUpdateOnChange = true;
 							await this.saveSettings();
 							await finish(true);
 						} else if (choice === "no") {
-							this.settings.autoUpdateSourceTemplates = false;
+							this.settings.autoUpdateOnChange = false;
 							await this.saveSettings();
 							await finish(false);
 						}
@@ -7035,8 +7199,9 @@ class MidadArabicSourcesSettingTab extends PluginSettingTab {
 	 * setting is stored as `boolean | undefined` but shown as a dropdown.
 	 */
 	getControlValue(key: string): unknown {
-		if (key === "autoUpdateSourceTemplates") {
-			const v = this.plugin.settings.autoUpdateSourceTemplates;
+		if (key === "autoUpdateOnChange") {
+			const v = this.plugin.settings.autoUpdateOnChange
+				?? this.plugin.settings.autoUpdateSourceTemplates;
 			return v === true ? "yes" : v === false ? "no" : "ask";
 		}
 		return (this.plugin.settings as unknown as Record<string, unknown>)[key];
@@ -7044,8 +7209,11 @@ class MidadArabicSourcesSettingTab extends PluginSettingTab {
 
 	async setControlValue(key: string, value: unknown): Promise<void> {
 		const settings = this.plugin.settings as unknown as Record<string, unknown>;
-		if (key === "autoUpdateSourceTemplates") {
-			settings[key] = value === "ask" ? undefined : value === "yes";
+		if (key === "autoUpdateOnChange") {
+			// The legacy key is dropped once the new one is set, so the two can
+			// never disagree.
+			settings.autoUpdateOnChange = value === "ask" ? undefined : value === "yes";
+			delete settings.autoUpdateSourceTemplates;
 		} else {
 			settings[key] = value;
 		}
@@ -7327,6 +7495,20 @@ class MidadArabicSourcesSettingTab extends PluginSettingTab {
 						desc: "Include the rendered markdown in a source archive zip, so restoring is a fast unzip. Turn this off to store only the model; restoring then re-renders the notes (saves archive space).",
 						control: { type: "toggle", key: "archiveMarkdown" },
 					},
+					{
+						name: "Auto-update notes when a source, template, or script changes",
+						desc: "Applies to every kind of note: repository sources, transcriptions, translations, and adopted notes. Always re-renders automatically; Ask shows a prompt; Never leaves automatic updates to you. A note whose text you edited is never overwritten silently — Ask offers to save your text as a version, and Always saves it as the default version first.",
+						control: {
+							type: "dropdown",
+							key: "autoUpdateOnChange",
+							options: { ask: "Ask", yes: "Always", no: "Never" },
+						},
+					},
+					{
+						name: "Check repositories for changed texts every … days",
+						desc: "How often to ask each repository whether one of its texts changed (0 = only on the command). Only repository sources have an upstream to ask; transcriptions, translations, and adopted notes follow the plugin's own scripts and archives.",
+						control: { type: "number", key: "sourceUpdateCheckDays", defaultValue: 7, placeholder: "7", min: 0 },
+					},
 				],
 			},
 			{
@@ -7487,17 +7669,7 @@ class MidadArabicSourcesSettingTab extends PluginSettingTab {
 			{
 				type: "page",
 				name: "Source import from repository",
-				desc: "Install, name, maintain, and auto-update imported text sources.",
-				// The auto-update state is the thing people come here to check, so
-				// it shows on the page entry instead of only inside the page.
-				displayValue: () => {
-					const mode = this.plugin.settings.autoUpdateSourceTemplates === true
-						? "always"
-						: this.plugin.settings.autoUpdateSourceTemplates === false ? "never" : "ask";
-					const days = this.plugin.settings.sourceUpdateCheckDays ?? 7;
-					const repos = days > 0 ? `every ${days} d` : "manual";
-					return `Templates: ${mode} · Repositories: ${repos}`;
-				},
+				desc: "Install, name, and maintain imported text sources.",
 				items: [
 					{
 						name: "Importer script",
@@ -7518,20 +7690,6 @@ class MidadArabicSourcesSettingTab extends PluginSettingTab {
 						name: "Sources parent note",
 						desc: "Top-level note every category MOC points up to. The default is the existing Midad Arabic Sources note; other names are kept in the sources folder.",
 						control: { type: "text", key: "sourceMocParent", placeholder: "Midad Arabic Sources" },
-					},
-					{
-						name: "Auto-update notes when templates change",
-						desc: "Re-render imported source notes automatically when an import template changes. A repository text change is caught by the check below; a model written at an older schema is always re-fetched.",
-						control: {
-							type: "dropdown",
-							key: "autoUpdateSourceTemplates",
-							options: { ask: "Ask", yes: "Always", no: "Never" },
-						},
-					},
-					{
-						name: "Check repositories for changed texts every … days",
-						desc: "How often to ask each repository whether an imported text changed (0 = only on the command). A changed text is re-fetched and its notes re-rendered.",
-						control: { type: "number", key: "sourceUpdateCheckDays", defaultValue: 7, placeholder: "7", min: 0 },
 					},
 					{
 						name: "Large source-note warning (MB)",
@@ -9065,9 +9223,9 @@ class SourceTemplateUpdateConsentModal extends Modal {
 
 	onOpen(): void {
 		const { contentEl } = this;
-		this.setTitle("Update imported source notes?");
+		this.setTitle("Update generated notes?");
 		contentEl.createEl("p", {
-			text: `The import templates changed. ${this.count} note(s) were rendered with an older version. Re-render them now? Your own edits and out-of-template properties are preserved.`,
+			text: `The renderer changed — an import template, the transcription/translation scripts, or an index — and ${this.count} note(s) were produced by an older version. Update them now? A note you edited keeps your text as the default version, and the new render is saved as a version you can switch to.`,
 		});
 		new Setting(contentEl)
 			.addButton((b) =>
@@ -9656,9 +9814,11 @@ class SourceChangeReviewModal extends Modal {
 	}
 
 	onOpen(): void {
-		this.titleEl.setText("Unsaved source changes");
+		this.titleEl.setText("These notes were edited since Midad rendered them");
 		const { contentEl } = this;
-		contentEl.createEl("p", { text: "These notes have changes that are not saved as versions. Automatic rendering would replace them." });
+		contentEl.createEl("p", {
+			text: "The text inside their managed region differs from what Midad last wrote, so an update would replace it. Keep that text as a version first:",
+		});
 		const list = contentEl.createEl("ul");
 		for (const path of this.paths) list.createEl("li", { text: path });
 		const buttons = contentEl.createDiv({ cls: "mas-versions-conflict-actions" });
@@ -9666,10 +9826,10 @@ class SourceChangeReviewModal extends Modal {
 			const button = buttons.createEl("button", { text, cls: primary ? "mod-cta" : undefined });
 			button.onclick = () => { this.chosen = true; this.resolve(choice); this.close(); };
 		};
-		add("Save changes as versions", "save", true);
-		add("Keep my changes as Version 1 (Version 0 stays the model)", "original");
-		add("Overwrite with the original", "overwrite");
-		add("Skip re-rendering", "skip");
+		add("Keep my text (default version) and save the update as a version", "original", true);
+		add("Save my text as a version, then show the update", "save");
+		add("Update without saving my text", "overwrite");
+		add("Skip these notes", "skip");
 		add("Cancel", "cancel");
 	}
 

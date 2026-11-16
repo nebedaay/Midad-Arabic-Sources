@@ -53,7 +53,7 @@ The manager lets you:
 - Delete user versions.
 - Render Version 0 as a separate version note.
 
-If the note differs from its saved version, the manager asks whether to save, overwrite, or discard the changes. If a source re-render is requested while the note has unsaved changes, it offers to save the changes as versions, keep them as Version 1 while Version 0 stays the model, overwrite with the original, or skip.
+If the note differs from its saved version, the manager asks whether to save, overwrite, or discard the changes. If a re-render is requested while the note has unsaved changes, one review covers every kind of note: keep the edited text as the default version and store the fresh render as another version, save the edited text as a version and then show the update, update without saving, skip the notes, or cancel. The automatic policy is the same for repository sources, transcriptions, translations and adopted notes — see **Settings → Midad Arabic Sources → General → Auto-update notes when a source, template, or script changes** in [Templates](./templates.md#auto-update-when-a-template-changes).
 
 ## Re-rendering and restoring
 
@@ -63,6 +63,7 @@ If the note differs from its saved version, the manager asks whether to save, ov
 - Restoring an archived source reapplies saved versions automatically.
 - Annotations are stored separately and are restored through the normal annotation lifecycle.
 - A template or render-fingerprint change is reported in the version manager. Historical snapshots are preserved; Version 0 re-renders with the current templates.
+- The managed-region hash is what decides whether a note was edited: the text inside `<span class="mas-managed">…</span>`, never your content outside it and never the YAML. A transcription, a translation and a repository note are measured the same way, and the stamp of the scripts that produced the note lives beside that hash.
 
 ## Removing a source
 

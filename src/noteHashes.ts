@@ -11,6 +11,12 @@ const VERSIONS_REL = ".midad-arabic-sources/source-versions.zip";
 export interface NoteHashRecord {
 	baseline?: string;
 	versions?: Record<string, string>;
+	/**
+	 * The pipeline-script hash this note was produced with. Repository sources
+	 * record a per-template watermark; a transcription has no template, so the
+	 * scripts that post-processed it are stamped here instead.
+	 */
+	render?: string;
 }
 
 interface NoteHashIndex {
@@ -195,6 +201,25 @@ export class NoteHashStore {
 		}
 		if (removed) this.save();
 		return removed;
+	}
+
+	/** The pipeline-script hash a note was last produced with. */
+	render(path: string): string | undefined {
+		return this.record(path)?.render;
+	}
+
+	setRenders(values: Record<string, string>): void {
+		const index = this.load();
+		let changed = false;
+		for (const [path, hash] of Object.entries(values)) {
+			const key = normalizePath(path);
+			const record = index.notes[key] ?? (index.notes[key] = {});
+			if (record.render !== hash) {
+				record.render = hash;
+				changed = true;
+			}
+		}
+		if (changed) this.save();
 	}
 
 	allBaselines(): Record<string, string> {
