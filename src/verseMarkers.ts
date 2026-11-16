@@ -66,18 +66,24 @@ function decorateReadingElement(root: HTMLElement): void {
 		}
 	}
 	// Stack only the markers that actually share a rendered line. Two markers a
-	// paragraph apart keep their own anchors and their own positions.
-	for (const list of placed.values()) {
-		let previousTop: number | null = null;
-		let ordinal = 0;
-		for (const strong of list) {
-			const top = strong.getBoundingClientRect().top;
-			ordinal = previousTop != null && Math.abs(top - previousTop) < 8 ? ordinal + 1 : 0;
-			if (ordinal > 0) strong.dataset.markerIndex = String(ordinal);
-			else delete strong.dataset.markerIndex;
-			previousTop = top;
+	// paragraph apart keep their own anchors and their own positions. The
+	// measurement waits one frame, so the paragraph has its real layout (and
+	// styles); an unlaid-out paragraph would make every marker look coincident.
+	window.requestAnimationFrame(() => {
+		for (const list of placed.values()) {
+			const paragraph = list[0]?.closest("p, li, div.el-p") as HTMLElement | null;
+			if (!paragraph || paragraph.getBoundingClientRect().height <= 0) continue;
+			let previousTop: number | null = null;
+			let ordinal = 0;
+			for (const strong of list) {
+				const top = strong.getBoundingClientRect().top;
+				ordinal = previousTop != null && Math.abs(top - previousTop) < 8 ? ordinal + 1 : 0;
+				if (ordinal > 0) strong.dataset.markerIndex = String(ordinal);
+				else delete strong.dataset.markerIndex;
+				previousTop = top;
+			}
 		}
-	}
+	});
 	for (const link of Array.from(root.querySelectorAll("a.internal-link"))) {
 		const text = (link.textContent ?? "").trim();
 		if (/^\d+:\d+(?:[–-]\d+:\d+)?$/.test(text)) link.addClass(MARKER_CLASS);

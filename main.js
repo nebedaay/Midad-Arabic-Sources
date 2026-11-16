@@ -14817,19 +14817,25 @@ function decorateReadingElement2(root) {
         paragraph.addClass("mas-verse-paragraph");
     }
   }
-  for (const list of placed.values()) {
-    let previousTop = null;
-    let ordinal = 0;
-    for (const strong of list) {
-      const top = strong.getBoundingClientRect().top;
-      ordinal = previousTop != null && Math.abs(top - previousTop) < 8 ? ordinal + 1 : 0;
-      if (ordinal > 0)
-        strong.dataset.markerIndex = String(ordinal);
-      else
-        delete strong.dataset.markerIndex;
-      previousTop = top;
+  window.requestAnimationFrame(() => {
+    var _a3;
+    for (const list of placed.values()) {
+      const paragraph = (_a3 = list[0]) == null ? void 0 : _a3.closest("p, li, div.el-p");
+      if (!paragraph || paragraph.getBoundingClientRect().height <= 0)
+        continue;
+      let previousTop = null;
+      let ordinal = 0;
+      for (const strong of list) {
+        const top = strong.getBoundingClientRect().top;
+        ordinal = previousTop != null && Math.abs(top - previousTop) < 8 ? ordinal + 1 : 0;
+        if (ordinal > 0)
+          strong.dataset.markerIndex = String(ordinal);
+        else
+          delete strong.dataset.markerIndex;
+        previousTop = top;
+      }
     }
-  }
+  });
   for (const link of Array.from(root.querySelectorAll("a.internal-link"))) {
     const text = ((_e = link.textContent) != null ? _e : "").trim();
     if (/^\d+:\d+(?:[–-]\d+:\d+)?$/.test(text))
