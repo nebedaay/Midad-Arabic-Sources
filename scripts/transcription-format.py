@@ -478,8 +478,14 @@ def format_toc_entries(text: str) -> str:
     return "\n".join(out)
 
 
-def process(input_path):
-    """Apply all post-processing fixes to a Gemini batch output file."""
+def process(input_path, gemini=True):
+    """Apply all post-processing fixes to a markdown transcription body.
+
+    `gemini=True` means the input is Gemini's own raw output, so its citation
+    habits are cleaned up. Re-processing an already-rendered note passes
+    `gemini=False`: its citations are Midad's own links (handled by the shared
+    passes), and only simple source citations are touched.
+    """
     path = Path(input_path)
     c = open(path, encoding='utf-8').read()
     print(f"Processing: {path.name} ({len(c)/1e3:.0f} KB, {c.count('#### ')} pages)")
@@ -583,11 +589,12 @@ def process(input_path):
     # with `(` and would otherwise be eaten to its first `]`, leaving `](` debris
     # and losing the citation. The class excludes brackets, so a link cannot be
     # matched at all.
-    c = re.sub(
-        r'(\*' + LQ + r'[^' + LQE + r']+' + LQE + r'\*)'
-        r'\s*[\[\(](?![\u0600-\u06FF\[\()])(?:[^\[\]\(\)\n]*[\d][^\[\]\(\)\n]*)[\]\)]',
-        r'\1', c
-    )
+    if gemini:
+        c = re.sub(
+            r'(\*' + LQ + r'[^' + LQE + r']+' + LQE + r'\*)'
+            r'\s*[\[\(](?![\u0600-\u06FF\[\()])(?:[^\[\]\(\)\n]*[\d][^\[\]\(\)\n]*)[\]\)]',
+            r'\1', c
+        )
     # Fix (*LF...LE*) double-wrapping: strip outer parens, keep inner brackets
     c = re.sub(r'\(\s*(\*' + LQ + r'[^' + LQE + r']+' + LQE + r'\*)\s*\)', r'\1', c)
     # Same for guillemets: « *LF...LE* » Gemini puts quotes inside fancy quotes

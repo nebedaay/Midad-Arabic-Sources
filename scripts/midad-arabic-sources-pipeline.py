@@ -954,7 +954,7 @@ def cmd_postprocess_body(args) -> int:
         tpp = load_module("transcription-postprocess.py")
         with contextlib.redirect_stdout(io.StringIO()):
             tpp.run(raw, out_path=processed, metadata=False,
-                    tafsir=bool(getattr(args, "tafsir", False)))
+                    tafsir=bool(getattr(args, "tafsir", False)), from_gemini=False)
         out_path.write_text(processed.read_text(encoding="utf-8"), encoding="utf-8")
     finally:
         shutil.rmtree(workdir, ignore_errors=True)
@@ -1022,7 +1022,8 @@ def cmd_postprocess_note(args) -> int:
             tpp = load_module("transcription-postprocess.py")
             # The post-processor is chatty; its messages are not pipeline JSON.
             with contextlib.redirect_stdout(io.StringIO()):
-                tpp.run(raw, out_path=processed, metadata=False, tafsir=tafsir)
+                tpp.run(raw, out_path=processed, metadata=False, tafsir=tafsir,
+                        from_gemini=False)
             processed_body = processed.read_text(encoding="utf-8")
         finally:
             shutil.rmtree(workdir, ignore_errors=True)

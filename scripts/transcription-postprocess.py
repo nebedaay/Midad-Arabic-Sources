@@ -159,8 +159,13 @@ def extract_metadata(body: str) -> tuple[str, dict]:
         keep.pop(0)
     return "\n".join(keep), meta
 
-def run(input_path, out_path=None, metadata=False, tafsir=False):
-    """Format and Qur'an-process a raw transcription. Returns the output Path."""
+def run(input_path, out_path=None, metadata=False, tafsir=False, from_gemini=True):
+    """Format and Qur'an-process a transcription body. Returns the output Path.
+
+    `from_gemini=True` for Gemini's raw batch output (its own citations are
+    stripped). `from_gemini=False` for a note that is already rendered: its
+    links are Midad's, and only simple source citations are removed.
+    """
     filepath = Path(input_path)
     if not filepath.exists():
         raise FileNotFoundError(filepath)
@@ -189,7 +194,7 @@ def run(input_path, out_path=None, metadata=False, tafsir=False):
     # Step 1: Formatting
     print("Step 1: Formatting...")
     pp = SourceFileLoader("pp", str(SCRIPTS / "transcription-format.py")).load_module()
-    result = pp.process(str(tmp))
+    result = pp.process(str(tmp), gemini=from_gemini)
     # Exactly one blank line between the frontmatter and the page contents.
     if yaml:
         content = yaml.rstrip("\n") + "\n\n" + result.lstrip("\n")
@@ -237,8 +242,9 @@ def run(input_path, out_path=None, metadata=False, tafsir=False):
     content, refs_added = tfq.add_missing_refs(content)
     print(f"  Refs added: {refs_added}")
 
-    content, refs_stripped = tfq.strip_gemini_refs(content)
-    print(f"  Gemini refs discarded: {refs_stripped}")
+    if from_gemini:
+        content, refs_stripped = tfq.strip_gemini_refs(content)
+        print(f"  Gemini refs discarded: {refs_stripped}")
 
     content, links_fixed = tfq.fix_wikilinks(content)
     print(f"  Links fixed: {links_fixed}")

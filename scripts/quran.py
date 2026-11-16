@@ -2366,10 +2366,10 @@ def parse_gemini_ref(citation: str, surah_lookup: dict = None) -> tuple[int, int
     # (`[النساء 4:105]`). The first number is then the sūra, not the verse.
     first_num_pos = nums[0].start()
     has_surah_name = bool(inner_w[:first_num_pos].strip())
-    has_colon_after_first = (
-        len(values) > 1
-        and ':' in inner_w[nums[0].end():nums[1].start()]
-    )
+    # `sūra:āya` is also written `sūra \ āya` or `sūra / āya` (the Turath
+    # edition of Aḍwāʾ al-bayān uses the backslash), so any of them separates.
+    separator_after_first = inner_w[nums[0].end():nums[1].start()] if len(values) > 1 else ""
+    has_colon_after_first = bool(re.search(r"[:\\/]", separator_after_first))
     # If there are more than two numbers and the first looks like a surah,
     # drop it and treat the remainder as verse numbers.
     start = 1 if (len(values) > 2 and values[0] <= 114) else 0
@@ -2391,14 +2391,14 @@ def parse_gemini_ref(citation: str, surah_lookup: dict = None) -> tuple[int, int
         if not remaining:
             return None
         sep = inner_w[nums[start].end():nums[start + 1].start()]
-        if ':' in sep:
+        if re.search(r"[:\\/]", sep):
             return (v1, remaining[0], remaining[1] if len(remaining) > 1 else None)
         # Bare number list with no surah name ("33، 34") — ambiguous (could be
         # verses 33-34 or surah 33 verse 34); don't guess.
         return None
     
     # Strip punctuation and delimiters to isolate surah name/number
-    surah_clean = re.sub(r'[:\-–—،,]+', ' ', surah_part).strip()
+    surah_clean = re.sub(r'[:\\/\-–—،,]+', ' ', surah_part).strip()
     surah_clean = re.sub(r'^سورة\s+', '', surah_clean).strip()
     
     # Try parsing as a number
