@@ -3392,3 +3392,10 @@ body .mas-verse-marker[data-marker-index="2"] {
 body .mas-verse-marker[data-marker-index="3"] {
     transform: translateY(3.75em) !important;
 }
+
+/* The live preview beside Settings → Qurʾān citations → Preview. */
+body .mas-quran-citation-preview {
+    margin-top: 0.4em;
+    color: var(--text-normal);
+    font-size: var(--font-ui-small);
+}

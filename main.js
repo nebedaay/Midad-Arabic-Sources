@@ -14908,6 +14908,342 @@ function registerQuranQuoteRendering(plugin) {
   });
 }
 
+// src/quran/surahs.ts
+var ROWS = [
+  [1, "\u0627\u0644\u0641\u0627\u062A\u062D\u0629", "Al-Fatihah", "al-F\u0101ti\u1E25a"],
+  [2, "\u0627\u0644\u0628\u0642\u0631\u0629", "Al-Baqarah", "al-Baqara"],
+  [3, "\u0622\u0644 \u0639\u0645\u0631\u0627\u0646", "Al 'Imran", "\u0100l \u02BFImr\u0101n"],
+  [4, "\u0627\u0644\u0646\u0633\u0627\u0621", "An-Nisa", "al-Nis\u0101\u02BE"],
+  [5, "\u0627\u0644\u0645\u0627\u0626\u062F\u0629", "Al-Ma'idah", "al-M\u0101\u02BEida"],
+  [6, "\u0627\u0644\u0623\u0646\u0639\u0627\u0645", "Al-An'am", "al-An\u02BF\u0101m"],
+  [7, "\u0627\u0644\u0623\u0639\u0631\u0627\u0641", "Al-A'raf", "al-A\u02BFr\u0101f"],
+  [8, "\u0627\u0644\u0623\u0646\u0641\u0627\u0644", "Al-Anfal", "al-Anf\u0101l"],
+  [9, "\u0627\u0644\u062A\u0648\u0628\u0629", "At-Tawbah", "al-Tawba"],
+  [10, "\u064A\u0648\u0646\u0633", "Yunus", "Y\u016Bnus"],
+  [11, "\u0647\u0648\u062F", "Hud", "H\u016Bd"],
+  [12, "\u064A\u0648\u0633\u0641", "Yusuf", "Y\u016Bsuf"],
+  [13, "\u0627\u0644\u0631\u0639\u062F", "Ar-Ra'd", "al-Ra\u02BFd"],
+  [14, "\u0625\u0628\u0631\u0627\u0647\u064A\u0645", "Ibrahim", "Ibr\u0101h\u012Bm"],
+  [15, "\u0627\u0644\u062D\u062C\u0631", "Al-Hijr", "al-\u1E24ijr"],
+  [16, "\u0627\u0644\u0646\u062D\u0644", "An-Nahl", "al-Na\u1E25l"],
+  [17, "\u0627\u0644\u0625\u0633\u0631\u0627\u0621", "Al-Isra", "al-Isr\u0101\u02BE"],
+  [18, "\u0627\u0644\u0643\u0647\u0641", "Al-Kahf", "al-Kahf"],
+  [19, "\u0645\u0631\u064A\u0645", "Maryam", "Maryam"],
+  [20, "\u0637\u0647", "Taha", "\u1E6C\u0101 H\u0101"],
+  [21, "\u0627\u0644\u0623\u0646\u0628\u064A\u0627\u0621", "Al-Anbya", "al-Anbiy\u0101\u02BE"],
+  [22, "\u0627\u0644\u062D\u062C", "Al-Hajj", "al-\u1E24ajj"],
+  [23, "\u0627\u0644\u0645\u0624\u0645\u0646\u0648\u0646", "Al-Mu'minun", "al-Mu\u02BEmin\u016Bn"],
+  [24, "\u0627\u0644\u0646\u0648\u0631", "An-Nur", "al-N\u016Br"],
+  [25, "\u0627\u0644\u0641\u0631\u0642\u0627\u0646", "Al-Furqan", "al-Furq\u0101n"],
+  [26, "\u0627\u0644\u0634\u0639\u0631\u0627\u0621", "Ash-Shu'ara", "al-Shu\u02BFar\u0101\u02BE"],
+  [27, "\u0627\u0644\u0646\u0645\u0644", "An-Naml", "al-Naml"],
+  [28, "\u0627\u0644\u0642\u0635\u0635", "Al-Qasas", "al-Qa\u1E63a\u1E63"],
+  [29, "\u0627\u0644\u0639\u0646\u0643\u0628\u0648\u062A", "Al-'Ankabut", "al-\u02BFAnkab\u016Bt"],
+  [30, "\u0627\u0644\u0631\u0648\u0645", "Ar-Rum", "al-R\u016Bm"],
+  [31, "\u0644\u0642\u0645\u0627\u0646", "Luqman", "Luqm\u0101n"],
+  [32, "\u0627\u0644\u0633\u062C\u062F\u0629", "As-Sajdah", "al-Sajda"],
+  [33, "\u0627\u0644\u0623\u062D\u0632\u0627\u0628", "Al-Ahzab", "al-A\u1E25z\u0101b"],
+  [34, "\u0633\u0628\u0623", "Saba", "Saba\u02BE"],
+  [35, "\u0641\u0627\u0637\u0631", "Fatir", "F\u0101\u1E6Dir"],
+  [36, "\u064A\u0633", "Ya-Sin", "Y\u0101 S\u012Bn"],
+  [37, "\u0627\u0644\u0635\u0627\u0641\u0627\u062A", "As-Saffat", "al-\u1E62\u0101ff\u0101t"],
+  [38, "\u0635", "Sad", "\u1E62\u0101d"],
+  [39, "\u0627\u0644\u0632\u0645\u0631", "Az-Zumar", "al-Zumar"],
+  [40, "\u063A\u0627\u0641\u0631", "Ghafir", "Gh\u0101fir"],
+  [41, "\u0641\u0635\u0644\u062A", "Fussilat", "Fu\u1E63\u1E63ilat"],
+  [42, "\u0627\u0644\u0634\u0648\u0631\u0649", "Ash-Shuraa", "al-Sh\u016Br\u0101"],
+  [43, "\u0627\u0644\u0632\u062E\u0631\u0641", "Az-Zukhruf", "al-Zukhruf"],
+  [44, "\u0627\u0644\u062F\u062E\u0627\u0646", "Ad-Dukhan", "al-Dukh\u0101n"],
+  [45, "\u0627\u0644\u062C\u0627\u062B\u064A\u0629", "Al-Jathiyah", "al-J\u0101thiya"],
+  [46, "\u0627\u0644\u0623\u062D\u0642\u0627\u0641", "Al-Ahqaf", "al-A\u1E25q\u0101f"],
+  [47, "\u0645\u062D\u0645\u062F", "Muhammad", "Mu\u1E25ammad"],
+  [48, "\u0627\u0644\u0641\u062A\u062D", "Al-Fath", "al-Fat\u1E25"],
+  [49, "\u0627\u0644\u062D\u062C\u0631\u0627\u062A", "Al-Hujurat", "al-\u1E24ujur\u0101t"],
+  [50, "\u0642", "Qaf", "Q\u0101f"],
+  [51, "\u0627\u0644\u0630\u0627\u0631\u064A\u0627\u062A", "Adh-Dhariyat", "al-Dh\u0101riy\u0101t"],
+  [52, "\u0627\u0644\u0637\u0648\u0631", "At-Tur", "al-\u1E6C\u016Br"],
+  [53, "\u0627\u0644\u0646\u062C\u0645", "An-Najm", "al-Najm"],
+  [54, "\u0627\u0644\u0642\u0645\u0631", "Al-Qamar", "al-Qamar"],
+  [55, "\u0627\u0644\u0631\u062D\u0645\u0646", "Ar-Rahman", "al-Ra\u1E25m\u0101n"],
+  [56, "\u0627\u0644\u0648\u0627\u0642\u0639\u0629", "Al-Waqi'ah", "al-W\u0101qi\u02BFa"],
+  [57, "\u0627\u0644\u062D\u062F\u064A\u062F", "Al-Hadid", "al-\u1E24ad\u012Bd"],
+  [58, "\u0627\u0644\u0645\u062C\u0627\u062F\u0644\u0629", "Al-Mujadila", "al-Muj\u0101dala"],
+  [59, "\u0627\u0644\u062D\u0634\u0631", "Al-Hashr", "al-\u1E24ashr"],
+  [60, "\u0627\u0644\u0645\u0645\u062A\u062D\u0646\u0629", "Al-Mumtahanah", "al-Mumta\u1E25ana"],
+  [61, "\u0627\u0644\u0635\u0641", "As-Saf", "al-\u1E62aff"],
+  [62, "\u0627\u0644\u062C\u0645\u0639\u0629", "Al-Jumu'ah", "al-Jumu\u02BFa"],
+  [63, "\u0627\u0644\u0645\u0646\u0627\u0641\u0642\u0648\u0646", "Al-Munafiqun", "al-Mun\u0101fiq\u016Bn"],
+  [64, "\u0627\u0644\u062A\u063A\u0627\u0628\u0646", "At-Taghabun", "al-Tagh\u0101bun"],
+  [65, "\u0627\u0644\u0637\u0644\u0627\u0642", "At-Talaq", "al-\u1E6Cal\u0101q"],
+  [66, "\u0627\u0644\u062A\u062D\u0631\u064A\u0645", "At-Tahrim", "al-Ta\u1E25r\u012Bm"],
+  [67, "\u0627\u0644\u0645\u0644\u0643", "Al-Mulk", "al-Mulk"],
+  [68, "\u0627\u0644\u0642\u0644\u0645", "Al-Qalam", "al-Qalam"],
+  [69, "\u0627\u0644\u062D\u0627\u0642\u0629", "Al-Haqqah", "al-\u1E24\u0101qqa"],
+  [70, "\u0627\u0644\u0645\u0639\u0627\u0631\u062C", "Al-Ma'arij", "al-Ma\u02BF\u0101rij"],
+  [71, "\u0646\u0648\u062D", "Nuh", "N\u016B\u1E25"],
+  [72, "\u0627\u0644\u062C\u0646", "Al-Jinn", "al-Jinn"],
+  [73, "\u0627\u0644\u0645\u0632\u0645\u0644", "Al-Muzzammil", "al-Muzzammil"],
+  [74, "\u0627\u0644\u0645\u062F\u062B\u0631", "Al-Muddaththir", "al-Muddaththir"],
+  [75, "\u0627\u0644\u0642\u064A\u0627\u0645\u0629", "Al-Qiyamah", "al-Qiy\u0101ma"],
+  [76, "\u0627\u0644\u0625\u0646\u0633\u0627\u0646", "Al-Insan", "al-Ins\u0101n"],
+  [77, "\u0627\u0644\u0645\u0631\u0633\u0644\u0627\u062A", "Al-Mursalat", "al-Mursal\u0101t"],
+  [78, "\u0627\u0644\u0646\u0628\u0623", "An-Naba", "al-Naba\u02BE"],
+  [79, "\u0627\u0644\u0646\u0627\u0632\u0639\u0627\u062A", "An-Nazi'at", "al-N\u0101zi\u02BF\u0101t"],
+  [80, "\u0639\u0628\u0633", "'Abasa", "\u02BFAbasa"],
+  [81, "\u0627\u0644\u062A\u0643\u0648\u064A\u0631", "At-Takwir", "al-Takw\u012Br"],
+  [82, "\u0627\u0644\u0627\u0646\u0641\u0637\u0627\u0631", "Al-Infitar", "al-Infi\u1E6D\u0101r"],
+  [83, "\u0627\u0644\u0645\u0637\u0641\u0641\u064A\u0646", "Al-Mutaffifin", "al-Mu\u1E6Daffif\u012Bn"],
+  [84, "\u0627\u0644\u0627\u0646\u0634\u0642\u0627\u0642", "Al-Inshiqaq", "al-Inshiq\u0101q"],
+  [85, "\u0627\u0644\u0628\u0631\u0648\u062C", "Al-Buruj", "al-Bur\u016Bj"],
+  [86, "\u0627\u0644\u0637\u0627\u0631\u0642", "At-Tariq", "al-\u1E6C\u0101riq"],
+  [87, "\u0627\u0644\u0623\u0639\u0644\u0649", "Al-A'la", "al-A\u02BFl\u0101"],
+  [88, "\u0627\u0644\u063A\u0627\u0634\u064A\u0629", "Al-Ghashiyah", "al-Gh\u0101shiya"],
+  [89, "\u0627\u0644\u0641\u062C\u0631", "Al-Fajr", "al-Fajr"],
+  [90, "\u0627\u0644\u0628\u0644\u062F", "Al-Balad", "al-Balad"],
+  [91, "\u0627\u0644\u0634\u0645\u0633", "Ash-Shams", "al-Shams"],
+  [92, "\u0627\u0644\u0644\u064A\u0644", "Al-Layl", "al-Layl"],
+  [93, "\u0627\u0644\u0636\u062D\u0649", "Ad-Duhaa", "al-\u1E0Cu\u1E25\u0101"],
+  [94, "\u0627\u0644\u0634\u0631\u062D", "Ash-Sharh", "al-Shar\u1E25"],
+  [95, "\u0627\u0644\u062A\u064A\u0646", "At-Tin", "al-T\u012Bn"],
+  [96, "\u0627\u0644\u0639\u0644\u0642", "Al-'Alaq", "al-\u02BFAlaq"],
+  [97, "\u0627\u0644\u0642\u062F\u0631", "Al-Qadr", "al-Qadr"],
+  [98, "\u0627\u0644\u0628\u064A\u0646\u0629", "Al-Bayyinah", "al-Bayyina"],
+  [99, "\u0627\u0644\u0632\u0644\u0632\u0644\u0629", "Az-Zalzalah", "al-Zalzala"],
+  [100, "\u0627\u0644\u0639\u0627\u062F\u064A\u0627\u062A", "Al-'Adiyat", "al-\u02BF\u0100diy\u0101t"],
+  [101, "\u0627\u0644\u0642\u0627\u0631\u0639\u0629", "Al-Qari'ah", "al-Q\u0101ri\u02BFa"],
+  [102, "\u0627\u0644\u062A\u0643\u0627\u062B\u0631", "At-Takathur", "al-Tak\u0101thur"],
+  [103, "\u0627\u0644\u0639\u0635\u0631", "Al-'Asr", "al-\u02BFA\u1E63r"],
+  [104, "\u0627\u0644\u0647\u0645\u0632\u0629", "Al-Humazah", "al-Humaza"],
+  [105, "\u0627\u0644\u0641\u064A\u0644", "Al-Fil", "al-F\u012Bl"],
+  [106, "\u0642\u0631\u064A\u0634", "Quraysh", "Quraysh"],
+  [107, "\u0627\u0644\u0645\u0627\u0639\u0648\u0646", "Al-Ma'un", "al-M\u0101\u02BF\u016Bn"],
+  [108, "\u0627\u0644\u0643\u0648\u062B\u0631", "Al-Kawthar", "al-Kawthar"],
+  [109, "\u0627\u0644\u0643\u0627\u0641\u0631\u0648\u0646", "Al-Kafirun", "al-K\u0101fir\u016Bn"],
+  [110, "\u0627\u0644\u0646\u0635\u0631", "An-Nasr", "al-Na\u1E63r"],
+  [111, "\u0627\u0644\u0645\u0633\u062F", "Al-Masad", "al-Masad"],
+  [112, "\u0627\u0644\u0625\u062E\u0644\u0627\u0635", "Al-Ikhlas", "al-Ikhl\u0101\u1E63"],
+  [113, "\u0627\u0644\u0641\u0644\u0642", "Al-Falaq", "al-Falaq"],
+  [114, "\u0627\u0644\u0646\u0627\u0633", "An-Nas", "al-N\u0101s"]
+];
+var SURAHS = ROWS.map(([number, arabic, common, strict]) => ({ number, arabic, common, strict }));
+var BY_NUMBER = new Map(SURAHS.map((surah2) => [surah2.number, surah2]));
+function surah(n) {
+  var _a2;
+  return (_a2 = BY_NUMBER.get(n)) != null ? _a2 : null;
+}
+function parseSurahNumber(value) {
+  const n = typeof value === "number" ? value : Number(value.replace(/[٠-٩]/g, (d) => String("\u0660\u0661\u0662\u0663\u0664\u0665\u0666\u0667\u0668\u0669".indexOf(d))));
+  if (!Number.isInteger(n) || n < 1 || n > SURAHS.length)
+    return null;
+  return n;
+}
+
+// src/quran/citationFormat.ts
+var DEFAULT_ARABIC_STYLE = {
+  prefix: "",
+  surah: "name",
+  names: "arabic",
+  numerals: "indic",
+  separator: " ",
+  bracket: "paren",
+  rangeDash: "\u2013",
+  showRiwaya: true
+};
+var DEFAULT_LATIN_STYLE = {
+  prefix: "Q",
+  surah: "number",
+  names: "common",
+  numerals: "western",
+  separator: ":",
+  bracket: "paren",
+  rangeDash: "\u2013",
+  showRiwaya: true
+};
+function cloneStyle(style) {
+  return { ...style };
+}
+function resolveStyle(stored, base) {
+  if (!stored)
+    return cloneStyle(base);
+  return {
+    prefix: typeof stored.prefix === "string" ? stored.prefix : base.prefix,
+    surah: stored.surah === "name" || stored.surah === "number" || stored.surah === "none" ? stored.surah : base.surah,
+    names: stored.names === "arabic" || stored.names === "common" || stored.names === "strict" ? stored.names : base.names,
+    numerals: stored.numerals === "indic" || stored.numerals === "western" ? stored.numerals : base.numerals,
+    separator: typeof stored.separator === "string" ? stored.separator : base.separator,
+    bracket: stored.bracket === "paren" || stored.bracket === "square" || stored.bracket === "none" ? stored.bracket : base.bracket,
+    rangeDash: typeof stored.rangeDash === "string" && stored.rangeDash ? stored.rangeDash : base.rangeDash,
+    showRiwaya: typeof stored.showRiwaya === "boolean" ? stored.showRiwaya : base.showRiwaya
+  };
+}
+var INDIC = "\u0660\u0661\u0662\u0663\u0664\u0665\u0666\u0667\u0668\u0669";
+function toIndic(value) {
+  return String(value).replace(/[0-9]/g, (d) => INDIC[Number(d)]);
+}
+var BRACKETS = {
+  paren: ["(", ")"],
+  square: ["[", "]"],
+  none: ["", ""]
+};
+var RIWAYAS = {
+  "": { en: "", ar: "" },
+  W: { en: "Warsh", ar: "\u0648\u0631\u0634" },
+  N: { en: "Q\u0101l\u016Bn", ar: "\u0642\u0627\u0644\u0648\u0646" },
+  D: { en: "al-D\u016Br\u012B", ar: "\u0627\u0644\u062F\u0648\u0631\u064A" },
+  S: { en: "Shu\u02BFbah", ar: "\u0634\u0639\u0628\u0629" },
+  U: { en: "al-S\u016Bs\u012B", ar: "\u0627\u0644\u0633\u0648\u0633\u064A" }
+};
+var SURA_TARGET = /^Q([A-Za-z]{0,2})([0-9]{1,3})$/;
+function parseQuranTarget(target) {
+  var _a2;
+  const base = (_a2 = target.split("/").pop()) != null ? _a2 : target;
+  const hash = base.indexOf("#");
+  if (hash < 0)
+    return null;
+  const name = base.slice(0, hash);
+  const subpath = base.slice(hash + 1).trim();
+  const m = SURA_TARGET.exec(name);
+  if (!m)
+    return null;
+  const number = parseSurahNumber(m[2]);
+  if (number == null)
+    return null;
+  const verses = parseVerseRange(subpath);
+  if (!verses)
+    return null;
+  return { surah: number, riwaya: m[1], start: verses.start, end: verses.end };
+}
+function parseVerseRange(subpath) {
+  const m = /^([0-9]{1,3})(?:\s*[-\u2013\u2014]\s*([0-9]{1,3}))?$/.exec(subpath);
+  if (!m)
+    return null;
+  const start = Number(m[1]);
+  const end = m[2] ? Number(m[2]) : start;
+  if (!Number.isInteger(start) || start < 1)
+    return null;
+  if (!Number.isInteger(end) || end < start)
+    return null;
+  return { start, end };
+}
+function surahName(number, form) {
+  const row = surah(number);
+  if (!row)
+    return String(number);
+  if (form === "arabic")
+    return row.arabic;
+  if (form === "strict")
+    return row.strict;
+  return row.common;
+}
+function numerals(value, style) {
+  const text = String(value);
+  return style.numerals === "indic" ? toIndic(text) : text;
+}
+function formatCitation(verse, style, options = {}) {
+  var _a2, _b2;
+  const riwaya = (_a2 = options.riwaya) != null ? _a2 : verse.riwaya;
+  const arabic = (_b2 = options.arabic) != null ? _b2 : style.names === "arabic";
+  let surahPart = "";
+  if (style.surah === "name")
+    surahPart = surahName(verse.surah, style.names);
+  else if (style.surah === "number")
+    surahPart = numerals(verse.surah, style);
+  const verses = verse.start === verse.end ? numerals(verse.start, style) : `${numerals(verse.start, style)}${style.rangeDash}${numerals(verse.end, style)}`;
+  let body = surahPart ? `${surahPart}${style.separator}${verses}` : verses;
+  const label = RIWAYAS[riwaya];
+  if (riwaya && label && style.showRiwaya) {
+    body = `${body}${arabic ? "\u060C" : ","} ${arabic ? label.ar : label.en}`;
+  }
+  const prefix = style.prefix.trim();
+  if (prefix)
+    body = `${prefix} ${body}`;
+  const [open, close] = BRACKETS[style.bracket];
+  return `${open}${body}${close}`;
+}
+
+// src/quran/citationRender.ts
+var ARABIC = /[\u0600-\u06FF]/;
+var LANGUAGE_KEYS = ["quran-citation-language", "quran-citations"];
+var languageCache = new Map();
+var cacheGeneration = 0;
+function invalidateQuranCitationCache() {
+  cacheGeneration++;
+  languageCache = new Map();
+}
+function asLanguage(value) {
+  if (typeof value !== "string")
+    return null;
+  const text = value.trim().toLowerCase().replace(/^\[\[|\]\]$/g, "");
+  if (!text)
+    return null;
+  if (text === "ar" || text === "arabic" || ARABIC.test(text))
+    return "ar";
+  return "en";
+}
+function documentLanguage(app2, host, sourcePath) {
+  var _a2, _b2;
+  const key = `${cacheGeneration}:${sourcePath}`;
+  const cached = languageCache.get(key);
+  if (cached)
+    return cached;
+  let language = null;
+  const file = app2.vault.getAbstractFileByPath(sourcePath);
+  if (file) {
+    const frontmatter = (_b2 = (_a2 = app2.metadataCache.getFileCache(file)) == null ? void 0 : _a2.frontmatter) != null ? _b2 : {};
+    for (const name of LANGUAGE_KEYS) {
+      language = asLanguage(frontmatter[name]);
+      if (language)
+        break;
+    }
+    if (!language) {
+      const value = frontmatter["language"];
+      const list = Array.isArray(value) ? value : [value];
+      for (const entry of list) {
+        language = asLanguage(entry);
+        if (language)
+          break;
+      }
+    }
+  }
+  const resolved = language != null ? language : host.defaultLanguage();
+  languageCache.set(key, resolved);
+  return resolved;
+}
+function paintCitations(root, style) {
+  var _a2, _b2;
+  const anchors = Array.from(root.querySelectorAll("a.internal-link"));
+  let painted = 0;
+  for (const anchor of anchors) {
+    if (anchor.closest("code, pre"))
+      continue;
+    const target = (_b2 = (_a2 = anchor.getAttribute("data-href")) != null ? _a2 : anchor.getAttribute("href")) != null ? _b2 : "";
+    const verse = parseQuranTarget(target);
+    if (!verse)
+      continue;
+    const text = formatCitation(verse, style);
+    anchor.classList.add("mas-quran-citation");
+    if (anchor.textContent === text)
+      continue;
+    anchor.textContent = text;
+    painted++;
+  }
+  return painted;
+}
+function refreshQuranCitations(app2) {
+  var _a2, _b2;
+  for (const leaf of app2.workspace.getLeavesOfType("markdown")) {
+    const view = leaf.view;
+    (_b2 = (_a2 = view.previewMode) == null ? void 0 : _a2.rerender) == null ? void 0 : _b2.call(_a2, true);
+  }
+}
+function registerQuranCitations(plugin, host) {
+  plugin.registerMarkdownPostProcessor((el, ctx) => {
+    if (!el.querySelector("a.internal-link"))
+      return;
+    paintCitations(el, host.styleFor(documentLanguage(host.app, host, ctx.sourcePath)));
+  });
+}
+
 // src/verseMarkers.ts
 var import_view2 = __toModule(require("@codemirror/view"));
 var import_state2 = __toModule(require("@codemirror/state"));
@@ -24533,6 +24869,9 @@ var DEFAULT_SETTINGS = {
   sourceTemplateFolder: "",
   canonicalQuranRiw\u0101ya: "",
   canonicalQuranFolder: "Midad Arabic Sources/Installed Sources/Quran",
+  quranCitationArabic: { ...DEFAULT_ARABIC_STYLE },
+  quranCitationLatin: { ...DEFAULT_LATIN_STYLE },
+  quranCitationDefaultLanguage: "ar",
   sourceMocParent: "Midad Arabic Sources",
   annotationNoteFolder: "Midad Arabic Sources/Annotation Notes",
   annotationDefaultColor: "yellow",
@@ -24592,6 +24931,11 @@ var _MidadArabicSourcesPlugin = class extends import_obsidian20.Plugin {
     registerQuranQuoteRendering(this);
     registerVerseMarkers(this);
     registerVerseNumberHeadings(this);
+    registerQuranCitations(this, {
+      app: this.app,
+      styleFor: (language) => this.quranCitationStyle(language),
+      defaultLanguage: () => this.settings.quranCitationDefaultLanguage === "en" ? "en" : "ar"
+    });
     try {
       this.annotations = await registerAnnotations({
         app: this.app,
@@ -25146,6 +25490,19 @@ var _MidadArabicSourcesPlugin = class extends import_obsidian20.Plugin {
     }
     return (_a2 = adapter == null ? void 0 : adapter.basePath) != null ? _a2 : "";
   }
+  quranCitationStyle(language) {
+    return language === "ar" ? resolveStyle(this.settings.quranCitationArabic, DEFAULT_ARABIC_STYLE) : resolveStyle(this.settings.quranCitationLatin, DEFAULT_LATIN_STYLE);
+  }
+  async updateQuranCitationStyle(language, patch) {
+    if (language === "ar") {
+      this.settings.quranCitationArabic = { ...this.quranCitationStyle("ar"), ...patch };
+    } else {
+      this.settings.quranCitationLatin = { ...this.quranCitationStyle("en"), ...patch };
+    }
+    invalidateQuranCitationCache();
+    await this.saveSettings();
+    refreshQuranCitations(this.app);
+  }
   quranWorks() {
     var _a2, _b2, _c, _d;
     const canonical = ((_a2 = this.settings.canonicalQuranFolder) == null ? void 0 : _a2.trim()) || `${this.settings.sourceImportRoot}/Quran`;
@@ -25167,9 +25524,9 @@ var _MidadArabicSourcesPlugin = class extends import_obsidian20.Plugin {
     found.sort((a, b) => (a.path === canonical ? -1 : 0) - (b.path === canonical ? -1 : 0));
     return found;
   }
-  quranFile(workPath, surah) {
+  quranFile(workPath, surah2) {
     var _a2;
-    const prefix = `${String(surah).padStart(3, "0")} `;
+    const prefix = `${String(surah2).padStart(3, "0")} `;
     return (_a2 = this.app.vault.getFiles().find((file) => {
       var _a3;
       return ((_a3 = file.parent) == null ? void 0 : _a3.path) === workPath && file.extension === "md" && (file.name.startsWith(prefix) || file.name.includes(` - ${prefix}`));
@@ -27830,13 +28187,6 @@ var _MidadArabicSourcesPlugin = class extends import_obsidian20.Plugin {
     try {
       void this.maybeWarnEngineFallback();
       await this.unmarkPendingDeletion(...keys);
-      if (!this.settings.canonicalQuranRiw\u0101ya.trim()) {
-        const firstQuranText = keys.find((k) => k.startsWith("quran-text:"));
-        if (firstQuranText) {
-          this.settings.canonicalQuranRiw\u0101ya = firstQuranText.slice("quran-text:".length);
-          await this.saveSettings();
-        }
-      }
       const args = ["fetch"];
       if (refresh)
         args.push("--no-cache");
@@ -27861,7 +28211,7 @@ var _MidadArabicSourcesPlugin = class extends import_obsidian20.Plugin {
         new import_obsidian20.Notice("No models were produced \u2014 see the pipeline status.");
         return;
       }
-      const written = await this.renderWithProgress(models, false, "Rendering notes", op, kind, kind === "auto" ? this.autoReview() : "ask");
+      const written = await this.renderWithProgress(models, false, "Rendering notes", op, kind, kind === "auto" ? this.autoReview() === "skip" ? "skip" : "save" : "ask");
       if (this.isSourceCancelled(op)) {
         new import_obsidian20.Notice("Stopped. Partial notes remain; install again to finish.");
         return;
@@ -28493,7 +28843,7 @@ ${lines.join("\n")}`;
     await this.setWorkStatus(keys, "installed");
   }
   resolveCanonicalQuran() {
-    return this.settings.canonicalQuranRiw\u0101ya.trim() || "hafs";
+    return "hafs";
   }
   async loadAllSourceModels() {
     const root = `${this.vaultPath()}/.midad-arabic-sources/source-models`;
@@ -29884,7 +30234,7 @@ ${page.body}`);
     var _a2, _b2, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m, _n, _o;
     if (!items.length)
       return;
-    const review = yamlOnly ? "overwrite" : kind === "auto" ? this.autoReview() : "ask";
+    const review = yamlOnly ? "overwrite" : kind === "auto" ? this.autoReview() === "skip" ? "skip" : "save" : "ask";
     if (review === "skip")
       return;
     const op = this.beginSourceOperation(kind);
@@ -30731,6 +31081,54 @@ var MidadArabicSourcesSettingTab = class extends import_obsidian20.PluginSetting
       this.update();
     });
   }
+  quranCitationSettingRows(language, label) {
+    let preview = null;
+    const read = () => this.plugin.quranCitationStyle(language);
+    const sample = () => {
+      const style = read();
+      const single = formatCitation({ surah: 24, riwaya: "", start: 10, end: 10 }, style);
+      const range = formatCitation({ surah: 2, riwaya: "", start: 255, end: 257 }, style);
+      return `${single}    ${range}`;
+    };
+    const write = (patch) => {
+      void this.plugin.updateQuranCitationStyle(language, patch).then(() => preview == null ? void 0 : preview.setText(sample()));
+    };
+    const text = (name, description, field) => ({
+      name,
+      desc: description,
+      render: (setting) => setting.addText((component) => component.setValue(read()[field]).onChange((value) => write({ [field]: value })))
+    });
+    const choice = (name, description, field, options) => ({
+      name,
+      desc: description,
+      render: (setting) => setting.addDropdown((component) => component.addOptions(options).setValue(String(read()[field])).onChange((value) => write({ [field]: value })))
+    });
+    return [
+      { name: label, desc: "", render: (setting) => {
+        setting.setHeading();
+      } },
+      text("Prefix", "Printed before the reference, e.g. Q or \u0642. Leave empty for none.", "prefix"),
+      choice("S\u016Bra", "Name the s\u016Bra, give its number, or omit it.", "surah", { name: "Name", number: "Number", none: "None" }),
+      choice("S\u016Bra name", "Which form the name takes.", "names", { arabic: "Arabic", common: "Common romanization (An-Nur)", strict: "Strict romanization (al-N\u016Br)" }),
+      choice("Numerals", "Arabic-Indic (\u0662\u0664) or Western (24).", "numerals", { indic: "Arabic-Indic", western: "Western" }),
+      text("Separator", "Between the s\u016Bra and the \u0101ya: a space for a name, a colon for a number.", "separator"),
+      choice("Brackets", "How the whole reference is enclosed.", "bracket", { paren: "( )", square: "[ ]", none: "None" }),
+      text("Range dash", "Between the two ends of a verse range.", "rangeDash"),
+      {
+        name: "Name the riw\u0101ya",
+        desc: "Add the reading's name when the link is not the canonical \u1E24af\u1E63, e.g. (Q 24:10, Warsh).",
+        render: (setting) => setting.addToggle((component) => component.setValue(read().showRiwaya).onChange((value) => write({ showRiwaya: value })))
+      },
+      {
+        name: "Preview",
+        desc: "A single verse and a range in this style.",
+        render: (setting) => {
+          preview = setting.descEl.createDiv({ cls: "mas-quran-citation-preview" });
+          preview.setText(sample());
+        }
+      }
+    ];
+  }
   getSettingDefinitions() {
     this.probeZotero();
     const zoteroOn = () => this.plugin.settings.zoteroExport;
@@ -31101,6 +31499,21 @@ var MidadArabicSourcesSettingTab = class extends import_obsidian20.PluginSetting
       },
       {
         type: "page",
+        name: "Qur\u02BE\u0101n citations",
+        desc: "How a citation link such as [[Q024#10]] is printed, per document language. The link itself never changes, so a format change needs no re-render.",
+        items: [
+          {
+            name: "Default language",
+            desc: "The style used for a note with no language property. A note's own `language` property decides; add `quran-citations: en` (or `ar`) to a note to override it there.",
+            control: { type: "dropdown", key: "quranCitationDefaultLanguage", options: { ar: "Arabic", en: "Latin" } }
+          },
+          ...this.quranCitationSettingRows("ar", "Arabic documents"),
+          ...this.quranCitationSettingRows("en", "Latin documents"),
+          doc("Templates guide", "templates.md", "The render-model variables and the note templates.")
+        ]
+      },
+      {
+        type: "page",
         name: "Documentation",
         desc: "Read the plugin's guides in Obsidian.",
         items: [
@@ -31127,6 +31540,7 @@ var MidadArabicSourcesSettingTab = class extends import_obsidian20.PluginSetting
       "Transliteration",
       "Transcription and translation",
       "Source import from repository",
+      "Qur\u02BE\u0101n citations",
       "Annotations",
       "Zotero",
       "Documentation"
@@ -31311,12 +31725,12 @@ function parseQuranReference(text) {
   const match = /^(\d{1,3})\s*[:：]\s*(\d{1,3})(?:\s*[-\u2013\u2014]\s*(\d{1,3}))?$/.exec(westernDigits(cleaned));
   if (!match)
     return null;
-  const surah = Number(match[1]);
+  const surah2 = Number(match[1]);
   const start = Number(match[2]);
   const end = match[3] ? Number(match[3]) : start;
-  if (surah < 1 || surah > 114 || start < 1 || end < start)
+  if (surah2 < 1 || surah2 > 114 || start < 1 || end < start)
     return null;
-  return { surah, start, end, arabic: hasArabicDigits(cleaned) };
+  return { surah: surah2, start, end, arabic: hasArabicDigits(cleaned) };
 }
 var EASTERN_DIGITS = "\u0660\u0661\u0662\u0663\u0664\u0665\u0666\u0667\u0668\u0669";
 var EXTENDED_DIGITS = "\u06F0\u06F1\u06F2\u06F3\u06F4\u06F5\u06F6\u06F7\u06F8\u06F9";
@@ -31483,19 +31897,19 @@ var InsertQuranRefModal = class extends import_obsidian20.Modal {
       new import_obsidian20.Notice("Enter a s\u016Bra:\u0101ya reference, such as 2:2 or 2:255-256.");
       return;
     }
-    const { surah, start: verseStart, end: verseEnd } = parsed;
-    const file = this.plugin.quranFile(work.path, surah);
+    const { surah: surah2, start: verseStart, end: verseEnd } = parsed;
+    const file = this.plugin.quranFile(work.path, surah2);
     if (!file) {
-      new import_obsidian20.Notice(`S\u016Bra ${surah} was not found in ${work.path}.`);
+      new import_obsidian20.Notice(`S\u016Bra ${surah2} was not found in ${work.path}.`);
       return;
     }
     const total = Number((_c = (_b2 = (_a2 = this.app.metadataCache.getFileCache(file)) == null ? void 0 : _a2.frontmatter) == null ? void 0 : _b2.total_verses) != null ? _c : 0);
     if (total && verseEnd > total) {
-      new import_obsidian20.Notice(`S\u016Bra ${surah} has ${total} verses; ${verseEnd} is out of range.`);
+      new import_obsidian20.Notice(`S\u016Bra ${surah2} has ${total} verses; ${verseEnd} is out of range.`);
       return;
     }
     const arabic = parsed.arabic || /[\u0600-\u06FF]/.test(template.prefix) || /[\u0600-\u06FF]/.test(template.suffix);
-    const surahLabel = arabic ? toArabicDigits(String(surah)) : String(surah);
+    const surahLabel = arabic ? toArabicDigits(String(surah2)) : String(surah2);
     const startLabel = arabic ? toArabicDigits(String(verseStart)) : String(verseStart);
     const endLabel = arabic ? toArabicDigits(String(verseEnd)) : String(verseEnd);
     const range = verseStart === verseEnd ? startLabel : `${startLabel}\u2013${endLabel}`;

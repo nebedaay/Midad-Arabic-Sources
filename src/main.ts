@@ -58,6 +58,14 @@ import { BUNDLED_ASSETS } from "./assets.generated";
 import { localDate, localTimestamp } from "./time";
 import { formatPoetrySelection } from "./poetry";
 import { registerQuranQuoteRendering } from "./quranQuote";
+import {
+	CitationStyle,
+	DEFAULT_ARABIC_STYLE,
+	DEFAULT_LATIN_STYLE,
+	formatCitation,
+	resolveStyle,
+} from "./quran/citationFormat";
+import { invalidateQuranCitationCache, refreshQuranCitations, registerQuranCitations } from "./quran/citationRender";
 import { registerVerseMarkers } from "./verseMarkers";
 import { registerVerseNumberHeadings } from "./verseNumbers";
 import { ManageVersionsModal, NoteVersionEntry, VersionStore } from "./sourceVersions";
@@ -214,6 +222,7 @@ interface MidadArabicSourcesSettings {
 	sourceImportScript: string;
 	sourceImportRoot: string;
 	sourceTemplateFolder: string;
+	/** @deprecated Ḥafṣ is always canonical; a stored value is ignored. */
 	canonicalQuranRiwāya: string;
 	canonicalQuranFolder: string;
 	/** Prefix remembered by "Insert linked Qur'an reference". */
@@ -221,6 +230,15 @@ interface MidadArabicSourcesSettings {
 	/** Prefix/suffix remembered per riwāya for "Insert linked Qur'an reference". */
 	quranRefTemplates?: Record<string, { prefix: string; suffix: string }>;
 	quranRefLastRiwaya?: string;
+	/**
+	 * How a Qur'ān citation link is printed, per document language. A link is
+	 * stored once (`[[Q024#10]]`) and rendered from these at display time, so
+	 * changing a setting never rewrites a note.
+	 */
+	quranCitationArabic?: Partial<CitationStyle>;
+	quranCitationLatin?: Partial<CitationStyle>;
+	/** Language assumed for a note that declares none. */
+	quranCitationDefaultLanguage?: "ar" | "en";
 	sourceMocParent: string;
 	// Annotations
 	annotationNoteFolder: string;
@@ -682,6 +700,9 @@ const DEFAULT_SETTINGS: MidadArabicSourcesSettings = {
 	sourceTemplateFolder: "",
 	canonicalQuranRiwāya: "",
 	canonicalQuranFolder: "Midad Arabic Sources/Installed Sources/Quran",
+	quranCitationArabic: { ...DEFAULT_ARABIC_STYLE },
+	quranCitationLatin: { ...DEFAULT_LATIN_STYLE },
+	quranCitationDefaultLanguage: "ar",
 	sourceMocParent: "Midad Arabic Sources",
 	annotationNoteFolder: "Midad Arabic Sources/Annotation Notes",
 	annotationDefaultColor: "yellow",
@@ -759,6 +780,11 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		registerQuranQuoteRendering(this);
 		registerVerseMarkers(this);
 		registerVerseNumberHeadings(this);
+		registerQuranCitations(this, {
+			app: this.app,
+			styleFor: (language) => this.quranCitationStyle(language),
+			defaultLanguage: () => this.settings.quranCitationDefaultLanguage === "en" ? "en" : "ar",
+		});
 		try {
 			this.annotations = await registerAnnotations({
 				app: this.app,
@@ -1257,6 +1283,25 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			if (typeof adapter?.getBasePath === "function") return adapter.getBasePath();
 		} catch { /* ignore */ }
 		return adapter?.basePath ?? "";
+	}
+
+	/** How a citation reads in a note of this language. */
+	quranCitationStyle(language: "ar" | "en"): CitationStyle {
+		return language === "ar"
+			? resolveStyle(this.settings.quranCitationArabic, DEFAULT_ARABIC_STYLE)
+			: resolveStyle(this.settings.quranCitationLatin, DEFAULT_LATIN_STYLE);
+	}
+
+	/** Store a citation-style change, then repaint the open Reading views. */
+	async updateQuranCitationStyle(language: "ar" | "en", patch: Partial<CitationStyle>): Promise<void> {
+		if (language === "ar") {
+			this.settings.quranCitationArabic = { ...this.quranCitationStyle("ar"), ...patch };
+		} else {
+			this.settings.quranCitationLatin = { ...this.quranCitationStyle("en"), ...patch };
+		}
+		invalidateQuranCitationCache();
+		await this.saveSettings();
+		refreshQuranCitations(this.app);
 	}
 
 	/** The installed Qur'ān works: canonical first, then each riwāya. */
@@ -4256,15 +4301,6 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		void this.maybeWarnEngineFallback();
 		// (Re)installing clears any half-finished removal flag for these keys.
 		await this.unmarkPendingDeletion(...keys);
-		// The first riwāya ever installed becomes the canonical one, permanently.
-		// Later installs never take over; the user can change it in settings.
-		if (!this.settings.canonicalQuranRiwāya.trim()) {
-			const firstQuranText = keys.find((k) => k.startsWith("quran-text:"));
-			if (firstQuranText) {
-				this.settings.canonicalQuranRiwāya = firstQuranText.slice("quran-text:".length);
-				await this.saveSettings();
-			}
-		}
 		const args = ["fetch"];
 		if (refresh) args.push("--no-cache");
 		args.push("--canonical", this.resolveCanonicalQuran());
@@ -4294,7 +4330,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		}
 		const written = await this.renderWithProgress(
 			models, false, "Rendering notes", op, kind,
-			kind === "auto" ? this.autoReview() : "ask");
+			kind === "auto" ? (this.autoReview() === "skip" ? "skip" : "save") : "ask");
 		if (this.isSourceCancelled(op)) {
 			new Notice("Stopped. Partial notes remain; install again to finish.");
 			return;
@@ -5053,9 +5089,18 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		await this.setWorkStatus(keys, "installed");
 	}
 
-	/** The canonical Qur'ān-text work: designated once at first install, then persisted. */
+	/**
+	 * The canonical Qur'ān text: always Ḥafṣ.
+	 *
+	 * Ḥafṣ is not a preference. The overwhelming majority of published Arabic
+	 * sources quote it, and a bare `2:189` means that reading; the citation
+	 * linking in the importer, and every `Q###` note name, are built on the
+	 * assumption. Warsh and the other riwāyāt are installed alongside it and cite
+	 * it, never replace it. (The old first-install designation is retired; a
+	 * stored `canonicalQuranRiwāya` is ignored.)
+	 */
 	resolveCanonicalQuran(): string {
-		return this.settings.canonicalQuranRiwāya.trim() || "hafs";
+		return "hafs";
 	}
 
 	async loadAllSourceModels(): Promise<SourceModel[]> {
@@ -6691,7 +6736,9 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		if (!items.length) return;
 		const review: ChangeReview = yamlOnly
 			? "overwrite"  // the body is untouched, only frontmatter is reconciled
-			: kind === "auto" ? this.autoReview() : "ask";
+			: kind === "auto"
+				? (this.autoReview() === "skip" ? "skip" : "save")
+				: "ask";
 		if (review === "skip") return;
 		const op = this.beginSourceOperation(kind);
 		if (op === null) return;
@@ -7683,6 +7730,67 @@ class MidadArabicSourcesSettingTab extends PluginSettingTab {
 	 * The settings, grouped into one section per function. Declarative, so the
 	 * sections appear in Obsidian's settings search (1.13+).
 	 */
+	/**
+	 * One language's citation-format controls, with a live preview.
+	 *
+	 * These write through `updateQuranCitationStyle`, which saves and repaints the
+	 * open Reading views — the point of the design being that nothing is baked
+	 * into the notes, so a change here is immediate and needs no re-render.
+	 */
+	quranCitationSettingRows(language: "ar" | "en", label: string): SettingDefinitionItem[] {
+		let preview: HTMLElement | null = null;
+		const read = () => this.plugin.quranCitationStyle(language);
+		const sample = (): string => {
+			const style = read();
+			const single = formatCitation({ surah: 24, riwaya: "", start: 10, end: 10 }, style);
+			const range = formatCitation({ surah: 2, riwaya: "", start: 255, end: 257 }, style);
+			return `${single}    ${range}`;
+		};
+		const write = (patch: { [K in keyof CitationStyle]?: unknown }): void => {
+			void this.plugin.updateQuranCitationStyle(language, patch as Partial<CitationStyle>).then(() => preview?.setText(sample()));
+		};
+		const text = (name: string, description: string, field: "prefix" | "separator" | "rangeDash") => ({
+			name,
+			desc: description,
+			render: (setting: Setting) => setting.addText((component) => component
+				.setValue(read()[field])
+				.onChange((value) => write({ [field]: value }))),
+		});
+		const choice = (name: string, description: string, field: keyof CitationStyle, options: Record<string, string>) => ({
+			name,
+			desc: description,
+			render: (setting: Setting) => setting.addDropdown((component) => component
+				.addOptions(options)
+				.setValue(String(read()[field]))
+				.onChange((value) => write({ [field]: value }))),
+		});
+		return [
+			{ name: label, desc: "", render: (setting: Setting) => { setting.setHeading(); } },
+			text("Prefix", "Printed before the reference, e.g. Q or ق. Leave empty for none.", "prefix"),
+			choice("Sūra", "Name the sūra, give its number, or omit it.", "surah", { name: "Name", number: "Number", none: "None" }),
+			choice("Sūra name", "Which form the name takes.", "names", { arabic: "Arabic", common: "Common romanization (An-Nur)", strict: "Strict romanization (al-Nūr)" }),
+			choice("Numerals", "Arabic-Indic (٢٤) or Western (24).", "numerals", { indic: "Arabic-Indic", western: "Western" }),
+			text("Separator", "Between the sūra and the āya: a space for a name, a colon for a number.", "separator"),
+			choice("Brackets", "How the whole reference is enclosed.", "bracket", { paren: "( )", square: "[ ]", none: "None" }),
+			text("Range dash", "Between the two ends of a verse range.", "rangeDash"),
+			{
+				name: "Name the riwāya",
+				desc: "Add the reading's name when the link is not the canonical Ḥafṣ, e.g. (Q 24:10, Warsh).",
+				render: (setting: Setting) => setting.addToggle((component) => component
+					.setValue(read().showRiwaya)
+					.onChange((value) => write({ showRiwaya: value }))),
+			},
+			{
+				name: "Preview",
+				desc: "A single verse and a range in this style.",
+				render: (setting: Setting) => {
+					preview = setting.descEl.createDiv({ cls: "mas-quran-citation-preview" });
+					preview.setText(sample());
+				},
+			},
+		];
+	}
+
 	getSettingDefinitions(): SettingDefinitionItem[] {
 		this.probeZotero();
 		const zoteroOn = () => this.plugin.settings.zoteroExport;
@@ -8051,6 +8159,21 @@ class MidadArabicSourcesSettingTab extends PluginSettingTab {
 			},
 			{
 				type: "page",
+				name: "Qurʾān citations",
+				desc: "How a citation link such as [[Q024#10]] is printed, per document language. The link itself never changes, so a format change needs no re-render.",
+				items: [
+					{
+						name: "Default language",
+						desc: "The style used for a note with no language property. A note's own `language` property decides; add `quran-citations: en` (or `ar`) to a note to override it there.",
+						control: { type: "dropdown", key: "quranCitationDefaultLanguage", options: { ar: "Arabic", en: "Latin" } },
+					},
+					...this.quranCitationSettingRows("ar", "Arabic documents"),
+					...this.quranCitationSettingRows("en", "Latin documents"),
+					doc("Templates guide", "templates.md", "The render-model variables and the note templates."),
+				],
+			},
+			{
+				type: "page",
 				name: "Documentation",
 				desc: "Read the plugin's guides in Obsidian.",
 				items: [
@@ -8073,6 +8196,7 @@ class MidadArabicSourcesSettingTab extends PluginSettingTab {
 			"Transliteration",
 			"Transcription and translation",
 			"Source import from repository",
+			"Qurʾān citations",
 			"Annotations",
 			"Zotero",
 			"Documentation",
