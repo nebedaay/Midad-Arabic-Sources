@@ -519,6 +519,8 @@ interface SourceStat {
 	scriptsTried?: number;
 	/** The model mtime a re-render was last attempted for (epoch ms). */
 	modelTried?: number;
+	/** When a render last failed; suppresses retries until something changes. */
+	failedAt?: number;
 	/** The *render* version this work was last rendered with (see below). */
 	render?: number;
 	/** Note path → hash of the content last rendered there (see `contentHash`). */
@@ -4567,7 +4569,11 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 	/** Append a line to the render log, so a stall can be located after the fact. */
 	async logRender(line: string): Promise<void> {
 		try {
-			const path = normalizePath(".midad-arabic-sources/logs/render.log");
+			const folder = normalizePath(".midad-arabic-sources/logs");
+			if (!(await this.app.vault.adapter.exists(folder))) {
+				await this.app.vault.adapter.mkdir(folder);
+			}
+			const path = normalizePath(`${folder}/render.log`);
 			await this.app.vault.adapter.append(path, `${new Date().toISOString()} ${line}\n`);
 		} catch { /* logging must never break a render */ }
 	}
@@ -4661,6 +4667,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 				contentPaths.push(...w);
 				await this.applySavedVersions(w);
 				await this.stampUpdated(w);
+				if (stats[this.workKey(model.work)]?.failedAt) delete stats[this.workKey(model.work)].failedAt;
 				void this.logRender(`work rendered ${this.workKey(model.work)}: ${w.length} note(s)`);
 				// A full render brings every template the work uses up to date.
 				const key = this.workKey(model.work);
@@ -4678,6 +4685,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 					render: requiredRenderVersion(String(model.work.collection ?? "")),
 				};
 			} catch (e) {
+				stats[this.workKey(model.work)] = { ...(stats[this.workKey(model.work)] ?? {}), failedAt: Date.now() };
 				void this.logRender(`work failed ${this.workKey(model.work)}: ${e instanceof Error ? e.message : String(e)}`);
 				// A user's Stop is not a failure: leave the work uninstalled and stop.
 				if (shouldCancel?.()) break;
@@ -6746,6 +6754,15 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 				out.push({ work, kinds: null, refetch: true });
 				continue;
 			}
+			const failedAt = Number(stat?.failedAt ?? 0);
+			if (failedAt > 0) {
+				const modelMtime = (await this.app.vault.adapter
+					.stat(normalizePath(`.midad-arabic-sources/source-models/${work.collection}/${work.id}.json`))
+					.catch((): null => null))?.mtime ?? 0;
+				const newest = Math.max(modelMtime, templateChangedAt(store, "pipeline"),
+					...Object.values(store.templates).map((entry) => entry.at ?? 0));
+				if (failedAt > newest) continue; // still failing, nothing changed since
+			}
 			const kinds = new Set<string>();
 			for (const key of this.templateKeysFor(String(work.collection ?? ""))) {
 				if (key === "hub") continue;
@@ -6881,6 +6898,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 						const kind = SOURCE_TEMPLATE_KIND[tkey];
 						if (it.kinds === null || (kind && it.kinds.has(kind))) rendered[tkey] = now;
 					}
+					if (stats[key]?.failedAt) delete stats[key].failedAt;
 					stats[key] = {
 						...stats[key],
 						rendered,
@@ -6891,6 +6909,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 					};
 				} catch (e) {
 					if (this.isSourceCancelled(op)) break;
+					stats[key] = { ...stats[key], failedAt: Date.now() };
 					void this.logRender(`work failed ${String(it.work.key ?? it.work.id)}: ${e instanceof Error ? e.message : String(e)}`);
 					console.error("[midad-arabic-sources] scoped render", it.work.key, e);
 				}

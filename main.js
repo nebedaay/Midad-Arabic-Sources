@@ -28404,14 +28404,18 @@ var _MidadArabicSourcesPlugin = class extends import_obsidian20.Plugin {
   }
   async logRender(line) {
     try {
-      const path3 = (0, import_obsidian20.normalizePath)(".midad-arabic-sources/logs/render.log");
+      const folder = (0, import_obsidian20.normalizePath)(".midad-arabic-sources/logs");
+      if (!await this.app.vault.adapter.exists(folder)) {
+        await this.app.vault.adapter.mkdir(folder);
+      }
+      const path3 = (0, import_obsidian20.normalizePath)(`${folder}/render.log`);
       await this.app.vault.adapter.append(path3, `${new Date().toISOString()} ${line}
 `);
     } catch (e) {
     }
   }
   async renderModels(modelPaths, force = false, onProgress, shouldCancel, review = "ask") {
-    var _a2, _b2, _c, _d, _e, _f, _g, _h;
+    var _a2, _b2, _c, _d, _e, _f, _g, _h, _i, _j;
     const vault = this.vaultPath();
     const userFolder = this.settings.sourceTemplateFolder.trim() || null;
     let templates;
@@ -28486,11 +28490,13 @@ var _MidadArabicSourcesPlugin = class extends import_obsidian20.Plugin {
         contentPaths.push(...w);
         await this.applySavedVersions(w);
         await this.stampUpdated(w);
+        if ((_d = stats[this.workKey(model.work)]) == null ? void 0 : _d.failedAt)
+          delete stats[this.workKey(model.work)].failedAt;
         void this.logRender(`work rendered ${this.workKey(model.work)}: ${w.length} note(s)`);
         const key = this.workKey(model.work);
         const now = Date.now();
-        const rendered = { ...(_e = (_d = stats[key]) == null ? void 0 : _d.rendered) != null ? _e : {} };
-        for (const tkey of this.templateKeysFor(String((_f = model.work.collection) != null ? _f : "")))
+        const rendered = { ...(_f = (_e = stats[key]) == null ? void 0 : _e.rendered) != null ? _f : {} };
+        for (const tkey of this.templateKeysFor(String((_g = model.work.collection) != null ? _g : "")))
           rendered[tkey] = now;
         rendered["pipeline"] = now;
         stats[key] = {
@@ -28498,10 +28504,11 @@ var _MidadArabicSourcesPlugin = class extends import_obsidian20.Plugin {
           rendered,
           units: Object.fromEntries(seen),
           notes: expectedNotePaths(model, outRoot, canonicalRoot, canonicalId).length,
-          schema: Number((_g = model.schema) != null ? _g : 0),
-          render: requiredRenderVersion(String((_h = model.work.collection) != null ? _h : ""))
+          schema: Number((_h = model.schema) != null ? _h : 0),
+          render: requiredRenderVersion(String((_i = model.work.collection) != null ? _i : ""))
         };
       } catch (e) {
+        stats[this.workKey(model.work)] = { ...(_j = stats[this.workKey(model.work)]) != null ? _j : {}, failedAt: Date.now() };
         void this.logRender(`work failed ${this.workKey(model.work)}: ${e instanceof Error ? e.message : String(e)}`);
         if (shouldCancel == null ? void 0 : shouldCancel())
           break;
@@ -30213,7 +30220,7 @@ ${page.body}`);
     return count;
   }
   async findStaleSourceWorks() {
-    var _a2, _b2, _c, _d, _e;
+    var _a2, _b2, _c, _d, _e, _f, _g, _h;
     const store = await this.loadSourceHashes();
     const manifest = await this.loadSourceManifest();
     const pending2 = await this.loadPendingDeletions();
@@ -30247,8 +30254,18 @@ ${page.body}`);
         out.push({ work, kinds: null, refetch: true });
         continue;
       }
+      const failedAt = Number((_b2 = stat == null ? void 0 : stat.failedAt) != null ? _b2 : 0);
+      if (failedAt > 0) {
+        const modelMtime = (_d = (_c = await this.app.vault.adapter.stat((0, import_obsidian20.normalizePath)(`.midad-arabic-sources/source-models/${work.collection}/${work.id}.json`)).catch(() => null)) == null ? void 0 : _c.mtime) != null ? _d : 0;
+        const newest = Math.max(modelMtime, templateChangedAt(store, "pipeline"), ...Object.values(store.templates).map((entry) => {
+          var _a3;
+          return (_a3 = entry.at) != null ? _a3 : 0;
+        }));
+        if (failedAt > newest)
+          continue;
+      }
       const kinds = new Set();
-      for (const key of this.templateKeysFor(String((_b2 = work.collection) != null ? _b2 : ""))) {
+      for (const key of this.templateKeysFor(String((_e = work.collection) != null ? _e : ""))) {
         if (key === "hub")
           continue;
         if (!stale(key))
@@ -30257,14 +30274,14 @@ ${page.body}`);
         if (kind)
           kinds.add(kind);
       }
-      if (((_c = stat == null ? void 0 : stat.render) != null ? _c : 0) < requiredRenderVersion(String((_d = work.collection) != null ? _d : ""))) {
+      if (((_f = stat == null ? void 0 : stat.render) != null ? _f : 0) < requiredRenderVersion(String((_g = work.collection) != null ? _g : ""))) {
         out.push({ work, kinds: null });
         continue;
       }
       const modelRel = (0, import_obsidian20.normalizePath)(`.midad-arabic-sources/source-models/${work.collection}/${work.id}.json`);
       const modelStat = await this.app.vault.adapter.stat(modelRel).catch(() => null);
       const renderedAt = hasRendered ? Math.max(0, ...Object.values(rendered != null ? rendered : {})) : legacyMs;
-      if (renderedAt > 0 && modelStat && modelStat.mtime > 0 && modelStat.mtime > renderedAt && ((_e = stat == null ? void 0 : stat.modelTried) != null ? _e : 0) < modelStat.mtime) {
+      if (renderedAt > 0 && modelStat && modelStat.mtime > 0 && modelStat.mtime > renderedAt && ((_h = stat == null ? void 0 : stat.modelTried) != null ? _h : 0) < modelStat.mtime) {
         out.push({ work, kinds: null, modelAt: modelStat.mtime });
         continue;
       }
@@ -30275,7 +30292,7 @@ ${page.body}`);
     return out;
   }
   async renderStaleScoped(items, kind = "auto", yamlOnly = false) {
-    var _a2, _b2, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m, _n, _o, _p, _q;
+    var _a2, _b2, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m, _n, _o, _p, _q, _r;
     if (!items.length)
       return;
     const review = yamlOnly ? "overwrite" : kind === "auto" ? this.autoReview() === "skip" ? "skip" : "save" : "ask";
@@ -30357,18 +30374,21 @@ ${page.body}`);
             if (it.kinds === null || kind2 && it.kinds.has(kind2))
               rendered[tkey] = now;
           }
+          if ((_o = stats[key]) == null ? void 0 : _o.failedAt)
+            delete stats[key].failedAt;
           stats[key] = {
             ...stats[key],
             rendered,
             units: Object.fromEntries(seen),
             notes: expectedNotePaths(model, outRoot, canonicalRoot, canonicalId).length,
-            schema: Number((_o = model.schema) != null ? _o : 0),
-            render: requiredRenderVersion(String((_p = model.work.collection) != null ? _p : ""))
+            schema: Number((_p = model.schema) != null ? _p : 0),
+            render: requiredRenderVersion(String((_q = model.work.collection) != null ? _q : ""))
           };
         } catch (e) {
           if (this.isSourceCancelled(op))
             break;
-          void this.logRender(`work failed ${String((_q = it.work.key) != null ? _q : it.work.id)}: ${e instanceof Error ? e.message : String(e)}`);
+          stats[key] = { ...stats[key], failedAt: Date.now() };
+          void this.logRender(`work failed ${String((_r = it.work.key) != null ? _r : it.work.id)}: ${e instanceof Error ? e.message : String(e)}`);
           console.error("[midad-arabic-sources] scoped render", it.work.key, e);
         }
       }
