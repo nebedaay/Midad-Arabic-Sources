@@ -28396,6 +28396,14 @@ var _MidadArabicSourcesPlugin = class extends import_obsidian20.Plugin {
     }
     await this.saveNoteBaselines(notes);
   }
+  async logRender(line) {
+    try {
+      const path3 = (0, import_obsidian20.normalizePath)(".midad-arabic-sources/logs/render.log");
+      await this.app.vault.adapter.append(path3, `${new Date().toISOString()} ${line}
+`);
+    } catch (e) {
+    }
+  }
   async renderModels(modelPaths, force = false, onProgress, shouldCancel, review = "ask") {
     var _a2, _b2, _c, _d, _e, _f, _g, _h;
     const vault = this.vaultPath();
@@ -28460,8 +28468,11 @@ var _MidadArabicSourcesPlugin = class extends import_obsidian20.Plugin {
       const work = String(model.work.title || model.work.dir || model.work.id);
       const emit = (step, steps) => onProgress == null ? void 0 : onProgress({ index: i, total: batch.length, work, step, steps });
       emit(0, 0);
-      if (!await this.reviewChangedNotes(expectedNotePaths(model, outRoot, canonicalRoot, canonicalId), review))
+      void this.logRender(`work start ${this.workKey(model.work)} (${i + 1}/${batch.length})`);
+      if (!await this.reviewChangedNotes(expectedNotePaths(model, outRoot, canonicalRoot, canonicalId), review)) {
+        void this.logRender(`work skipped ${this.workKey(model.work)}`);
         continue;
+      }
       try {
         const seen = new Map(Object.entries((_c = (_b2 = stats[this.workKey(model.work)]) == null ? void 0 : _b2.units) != null ? _c : {}));
         const w = await renderModelToVault(this.app, templates, model, outRoot, force, emit, void 0, seen, shouldCancel);
@@ -28469,6 +28480,7 @@ var _MidadArabicSourcesPlugin = class extends import_obsidian20.Plugin {
         contentPaths.push(...w);
         await this.applySavedVersions(w);
         await this.stampUpdated(w);
+        void this.logRender(`work rendered ${this.workKey(model.work)}: ${w.length} note(s)`);
         const key = this.workKey(model.work);
         const now = Date.now();
         const rendered = { ...(_e = (_d = stats[key]) == null ? void 0 : _d.rendered) != null ? _e : {} };
@@ -28484,6 +28496,7 @@ var _MidadArabicSourcesPlugin = class extends import_obsidian20.Plugin {
           render: requiredRenderVersion(String((_h = model.work.collection) != null ? _h : ""))
         };
       } catch (e) {
+        void this.logRender(`work failed ${this.workKey(model.work)}: ${e instanceof Error ? e.message : String(e)}`);
         if (shouldCancel == null ? void 0 : shouldCancel())
           break;
         console.error("[midad-arabic-sources] render failed", this.workKey(model.work), e);

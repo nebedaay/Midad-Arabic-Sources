@@ -4554,6 +4554,14 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		await this.saveNoteBaselines(notes);
 	}
 
+	/** Append a line to the render log, so a stall can be located after the fact. */
+	async logRender(line: string): Promise<void> {
+		try {
+			const path = normalizePath(".midad-arabic-sources/logs/render.log");
+			await this.app.vault.adapter.append(path, `${new Date().toISOString()} ${line}\n`);
+		} catch { /* logging must never break a render */ }
+	}
+
 	async renderModels(modelPaths: string[], force = false, onProgress?: (p: RenderProgress) => void,
 		shouldCancel?: () => boolean, review: ChangeReview = "ask"): Promise<string[]> {
 		const vault = this.vaultPath();
@@ -4629,8 +4637,12 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			const emit = (step: number, steps: number) =>
 				onProgress?.({ index: i, total: batch.length, work, step, steps });
 			emit(0, 0);
+			void this.logRender(`work start ${this.workKey(model.work)} (${i + 1}/${batch.length})`);
 			if (!(await this.reviewChangedNotes(
-				expectedNotePaths(model, outRoot, canonicalRoot, canonicalId), review))) continue;
+				expectedNotePaths(model, outRoot, canonicalRoot, canonicalId), review))) {
+				void this.logRender(`work skipped ${this.workKey(model.work)}`);
+				continue;
+			}
 			try {
 				const seen = new Map(Object.entries(stats[this.workKey(model.work)]?.units ?? {}));
 				const w = await renderModelToVault(this.app, templates, model, outRoot, force, emit,
@@ -4639,6 +4651,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 				contentPaths.push(...w);
 				await this.applySavedVersions(w);
 				await this.stampUpdated(w);
+				void this.logRender(`work rendered ${this.workKey(model.work)}: ${w.length} note(s)`);
 				// A full render brings every template the work uses up to date.
 				const key = this.workKey(model.work);
 				const now = Date.now();
@@ -4655,6 +4668,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 					render: requiredRenderVersion(String(model.work.collection ?? "")),
 				};
 			} catch (e) {
+				void this.logRender(`work failed ${this.workKey(model.work)}: ${e instanceof Error ? e.message : String(e)}`);
 				// A user's Stop is not a failure: leave the work uninstalled and stop.
 				if (shouldCancel?.()) break;
 				// One unusable model must not abort the whole batch: a template/model
