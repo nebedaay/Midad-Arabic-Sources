@@ -9597,8 +9597,9 @@ def repair_damaged_links(content: str) -> tuple[str, int]:
 
     content = re.sub(r"(?<!\\])\\]\\s*[\u2013\u2014-]\\s*(\\[\\[\\d{3}[^\\]]*\\]\\])\\)",
                      half, content)
-    # \`([[\u2026]])])\` / \`([[\u2026]])]\` \u2192 \`([[\u2026]])\`: debris after a whole link.
-    content, n = re.subn(r"(\\[\\[\\d{3}[^\\]]*\\]\\])\\]\\)", r"\\1)", content)
+    # \`([[\u2026]])])\` / \`([[\u2026]]) ])\` \u2192 \`([[\u2026]])\`: debris after a whole link, with
+    # or without the space a link insertion leaves.
+    content, n = re.subn(r"(\\(\\[\\[\\d{3}[^\\]]*\\]\\]\\))\\s*\\]\\)", r"\\1", content)
     repaired += n
     content, n = re.subn(r"(\\[\\[\\d{3}[^\\]]*\\]\\])\\]", r"\\1", content)
     repaired += n
@@ -11701,6 +11702,15 @@ def run(input_path, out_path=None, metadata=False, tafsir=False, from_gemini=Tru
     # updated note byte-identical, which is what keeps the "changed since the
     # last render" review from firing on notes nobody touched.
     content = re.sub(r'([\\]\\)])[ \\t]{2,}', r'\\1 ', content)
+    # Two cosmetic leftovers used to need a *second* run to be fixed: a stray
+    # bracket after a link, and a styled span missing one of its stars. Tidying
+    # them here makes the update path settle in one pass, so the next update of
+    # the same note is byte-identical and no "changed since the last render"
+    # review is raised for a note nobody touched.
+    content, _ = tfq.repair_damaged_links(content)
+    content = re.sub(r'(?<!\\*)(\\ufd3f[^\\ufd3e\\n]+\\ufd3e\\{\\.quran-quote\\})',
+                     r'*\\1', content)
+    content = re.sub(r'\\*{2,}(\\ufd3f)', r'*\\1', content)
     content = normalize_page_separators(content)
     content = tfq.strip_orphan_quote_classes(content)
     content, raw_citations = tfq.strip_raw_quran_citations(content)

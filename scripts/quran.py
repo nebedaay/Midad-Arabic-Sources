@@ -2584,8 +2584,9 @@ def repair_damaged_links(content: str) -> tuple[str, int]:
 
     content = re.sub(r"(?<!\])\]\s*[–—-]\s*(\[\[\d{3}[^\]]*\]\])\)",
                      half, content)
-    # `([[…]])])` / `([[…]])]` → `([[…]])`: debris after a whole link.
-    content, n = re.subn(r"(\[\[\d{3}[^\]]*\]\])\]\)", r"\1)", content)
+    # `([[…]])])` / `([[…]]) ])` → `([[…]])`: debris after a whole link, with
+    # or without the space a link insertion leaves.
+    content, n = re.subn(r"(\(\[\[\d{3}[^\]]*\]\]\))\s*\]\)", r"\1", content)
     repaired += n
     content, n = re.subn(r"(\[\[\d{3}[^\]]*\]\])\]", r"\1", content)
     repaired += n
