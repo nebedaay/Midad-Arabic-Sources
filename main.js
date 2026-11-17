@@ -24752,6 +24752,18 @@ function archivedNoteInfo(path3) {
     return { citekey: literature[1], type: null, volume: null, unit: null };
   return null;
 }
+function withTimeout(promise, ms, label) {
+  return new Promise((resolve, reject) => {
+    const timer = window.setTimeout(() => reject(new Error(`${label} timed out after ${Math.round(ms / 6e4)} min`)), ms);
+    promise.then((value) => {
+      window.clearTimeout(timer);
+      resolve(value);
+    }, (error) => {
+      window.clearTimeout(timer);
+      reject(error);
+    });
+  });
+}
 function archivedBatchInfo(name) {
   const stem = name.replace(/\.zip$/i, "");
   const m = stem.match(/^(.+?) - (transcription|translation)(?: - (?:vol|v)\.\s*(\d+))? files$/i);
@@ -28470,7 +28482,11 @@ var _MidadArabicSourcesPlugin = class extends import_obsidian20.Plugin {
       model.work.up = up;
       model.work.user_topics = this.userTopicsForWork(model.work);
       const work = String(model.work.title || model.work.dir || model.work.id);
-      const emit = (step, steps) => onProgress == null ? void 0 : onProgress({ index: i, total: batch.length, work, step, steps });
+      const emit = (step, steps) => {
+        onProgress == null ? void 0 : onProgress({ index: i, total: batch.length, work, step, steps });
+        if (step > 0 && step % 25 === 0)
+          void this.logRender(`work progress ${this.workKey(model.work)}: ${step}/${steps}`);
+      };
       emit(0, 0);
       void this.logRender(`work start ${this.workKey(model.work)} (${i + 1}/${batch.length})`);
       if (!await this.reviewChangedNotes(expectedNotePaths(model, outRoot, canonicalRoot, canonicalId), review)) {
@@ -28479,10 +28495,11 @@ var _MidadArabicSourcesPlugin = class extends import_obsidian20.Plugin {
       }
       try {
         const seen = new Map(Object.entries((_c = (_b2 = stats[this.workKey(model.work)]) == null ? void 0 : _b2.units) != null ? _c : {}));
-        const w = await renderModelToVault(this.app, templates, model, outRoot, force, emit, void 0, seen, shouldCancel);
+        const w = await withTimeout(renderModelToVault(this.app, templates, model, outRoot, force, emit, void 0, seen, shouldCancel), 10 * 6e4, `rendering ${this.workKey(model.work)}`);
         written.push(...w);
         contentPaths.push(...w);
         await this.applySavedVersions(w);
+        void this.logRender(`work fetching saved versions ${this.workKey(model.work)}`);
         await this.stampUpdated(w);
         if ((_d = stats[this.workKey(model.work)]) == null ? void 0 : _d.failedAt)
           delete stats[this.workKey(model.work)].failedAt;
@@ -30349,7 +30366,7 @@ ${page.body}`);
           const seen = new Map(Object.entries((_f = (_e = stats[key]) == null ? void 0 : _e.units) != null ? _f : {}));
           if (!await this.reviewChangedNotes(expectedNotePaths(model, outRoot, canonicalRoot, canonicalId), review))
             continue;
-          const written = yamlOnly ? await renderModelToVault(this.app, templates, model, outRoot, false, onStep, (_g = it.kinds) != null ? _g : void 0, seen, () => this.isSourceCancelled(op), true) : await renderModelToVault(this.app, templates, model, outRoot, false, onStep, (_h = it.kinds) != null ? _h : void 0, seen, () => this.isSourceCancelled(op));
+          const written = yamlOnly ? await withTimeout(renderModelToVault(this.app, templates, model, outRoot, false, onStep, (_g = it.kinds) != null ? _g : void 0, seen, () => this.isSourceCancelled(op), true), 10 * 6e4, `rendering ${key}`) : await withTimeout(renderModelToVault(this.app, templates, model, outRoot, false, onStep, (_h = it.kinds) != null ? _h : void 0, seen, () => this.isSourceCancelled(op)), 10 * 6e4, `rendering ${key}`);
           contentPaths.push(...written);
           await this.stampUpdated(written);
           const now = Date.now();

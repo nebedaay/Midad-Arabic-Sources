@@ -375,6 +375,17 @@ function archivedNoteInfo(path: string): ArchivedNoteInfo | null {
 	return null;
 }
 
+/** Reject if `promise` has not settled within `ms` — a hung write must not freeze a pass. */
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+	return new Promise<T>((resolve, reject) => {
+		const timer = window.setTimeout(() => reject(new Error(`${label} timed out after ${Math.round(ms / 60000)} min`)), ms);
+		promise.then(
+			(value) => { window.clearTimeout(timer); resolve(value); },
+			(error) => { window.clearTimeout(timer); reject(error); },
+		);
+	});
+}
+
 function archivedBatchInfo(name: string): ArchivedBatchInfo | null {
 	const stem = name.replace(/\.zip$/i, "");
 	const m = stem.match(/^(.+?) - (transcription|translation)(?: - (?:vol|v)\.\s*(\d+))? files$/i);
@@ -4650,8 +4661,10 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			model.work.up = up;
 			model.work.user_topics = this.userTopicsForWork(model.work);
 			const work = String(model.work.title || model.work.dir || model.work.id);
-			const emit = (step: number, steps: number) =>
+			const emit = (step: number, steps: number) => {
 				onProgress?.({ index: i, total: batch.length, work, step, steps });
+				if (step > 0 && step % 25 === 0) void this.logRender(`work progress ${this.workKey(model.work)}: ${step}/${steps}`);
+			};
 			emit(0, 0);
 			void this.logRender(`work start ${this.workKey(model.work)} (${i + 1}/${batch.length})`);
 			if (!(await this.reviewChangedNotes(
@@ -4661,11 +4674,14 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			}
 			try {
 				const seen = new Map(Object.entries(stats[this.workKey(model.work)]?.units ?? {}));
-				const w = await renderModelToVault(this.app, templates, model, outRoot, force, emit,
-					undefined, seen, shouldCancel);
+				const w = await withTimeout(
+					renderModelToVault(this.app, templates, model, outRoot, force, emit,
+						undefined, seen, shouldCancel),
+					10 * 60_000, `rendering ${this.workKey(model.work)}`);
 				written.push(...w);
 				contentPaths.push(...w);
 				await this.applySavedVersions(w);
+				void this.logRender(`work fetching saved versions ${this.workKey(model.work)}`);
 				await this.stampUpdated(w);
 				if (stats[this.workKey(model.work)]?.failedAt) delete stats[this.workKey(model.work)].failedAt;
 				void this.logRender(`work rendered ${this.workKey(model.work)}: ${w.length} note(s)`);
@@ -6875,10 +6891,12 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 					if (!(await this.reviewChangedNotes(
 						expectedNotePaths(model, outRoot, canonicalRoot, canonicalId), review))) continue;
 					const written = yamlOnly
-						? await renderModelToVault(this.app, templates, model, outRoot, false, onStep,
-							it.kinds ?? undefined, seen, () => this.isSourceCancelled(op), true)
-						: await renderModelToVault(this.app, templates, model, outRoot, false, onStep,
-							it.kinds ?? undefined, seen, () => this.isSourceCancelled(op));
+						? await withTimeout(renderModelToVault(this.app, templates, model, outRoot, false, onStep,
+							it.kinds ?? undefined, seen, () => this.isSourceCancelled(op), true),
+							10 * 60_000, `rendering ${key}`)
+						: await withTimeout(renderModelToVault(this.app, templates, model, outRoot, false, onStep,
+							it.kinds ?? undefined, seen, () => this.isSourceCancelled(op)),
+							10 * 60_000, `rendering ${key}`);
 					contentPaths.push(...written);
 					await this.stampUpdated(written);
 					// Record which templates this render brought up to date. A scoped
