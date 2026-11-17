@@ -30188,6 +30188,24 @@ ${page.body}`);
       void this.maintainSources();
     }, 3e3);
   }
+  async countOutdatedSourceWorks() {
+    var _a2, _b2, _c;
+    const store = await this.loadSourceHashes();
+    const at = templateChangedAt(store, "pipeline");
+    if (!at)
+      return 0;
+    const stats = await this.loadSourceStats();
+    const manifest = await this.loadSourceManifest();
+    let count = 0;
+    for (const work of manifest) {
+      if (this.workStatus(work) !== "installed")
+        continue;
+      const rendered = (_b2 = (_a2 = stats[this.workKey(work)]) == null ? void 0 : _a2.rendered) != null ? _b2 : {};
+      if (((_c = rendered["pipeline"]) != null ? _c : 0) < at)
+        count += 1;
+    }
+    return count;
+  }
   async findStaleSourceWorks() {
     var _a2, _b2, _c, _d;
     const store = await this.loadSourceHashes();
@@ -30473,7 +30491,7 @@ ${page.body}`);
     const autoCount = stale.length + (indexDirty ? 1 : 0) + staleNotes.length + staleAdopted.length;
     const summarise = async () => {
       try {
-        const stillStale = (await this.findStaleSourceWorks()).filter((entry) => entry.refetch).length;
+        const stillStale = await this.countOutdatedSourceWorks();
         const stillNotes = (await this.findStaleTranscriptionNotes(pipeline)).length + (await this.findStaleAdoptedNotes(pipeline)).length;
         const left = stillStale + stillNotes;
         if (left) {

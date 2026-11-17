@@ -6677,6 +6677,22 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		}, 3000);
 	}
 
+	/** Installed works whose notes predate the current content scripts. */
+	async countOutdatedSourceWorks(): Promise<number> {
+		const store = await this.loadSourceHashes();
+		const at = templateChangedAt(store, "pipeline");
+		if (!at) return 0;
+		const stats = await this.loadSourceStats();
+		const manifest = await this.loadSourceManifest();
+		let count = 0;
+		for (const work of manifest) {
+			if (this.workStatus(work) !== "installed") continue;
+			const rendered = stats[this.workKey(work)]?.rendered ?? {};
+			if ((rendered["pipeline"] ?? 0) < at) count += 1;
+		}
+		return count;
+	}
+
 	/**
 	 * The installed works whose notes predate a change to one of the templates
 	 * that renders them, each with the *unit kinds* affected. Attribution is per
@@ -7031,7 +7047,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		// idle check from a stalled update, which is worse than a short notice.
 		const summarise = async (): Promise<void> => {
 			try {
-				const stillStale = (await this.findStaleSourceWorks()).filter((entry) => entry.refetch).length;
+				const stillStale = await this.countOutdatedSourceWorks();
 				const stillNotes = (await this.findStaleTranscriptionNotes(pipeline)).length
 					+ (await this.findStaleAdoptedNotes(pipeline)).length;
 				const left = stillStale + stillNotes;
