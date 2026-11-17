@@ -20,7 +20,7 @@ export interface NoteHashRecord {
 }
 
 interface NoteHashIndex {
-	schema: 1;
+	schema: 2;
 	notes: Record<string, NoteHashRecord>;
 }
 
@@ -78,13 +78,50 @@ export class NoteHashStore {
 
 	private load(): NoteHashIndex {
 		if (this.index) return this.index;
+		let loaded: NoteHashIndex | null = null;
 		try {
 			const raw = JSON.parse(fs.readFileSync(this.filePath(), "utf8")) as NoteHashIndex;
-			this.index = { schema: 1, notes: raw.notes ?? {} };
+			loaded = { schema: 2, notes: raw.notes ?? {} };
 		} catch {
-			this.index = this.migrate();
+			loaded = this.migrate();
 		}
+		this.index = this.upgradeBaselines(loaded, loaded.schema === 2);
 		return this.index;
+	}
+
+	/**
+	 * Re-baseline notes whose stored hash could not track their text.
+	 *
+	 * Before schema 2, a transcription's "managed region" was only its bare
+	 * marker span, so the hash was a constant and never matched the rendered
+	 * body — every re-render reported an unsaved edit. Such a baseline carried
+	 * no information about the reader's edits, so it is replaced with the body
+	 * hash; notes with a real managed region (repository notes) keep theirs.
+	 */
+	private upgradeBaselines(index: NoteHashIndex, current: boolean): NoteHashIndex {
+		if (current) return index;
+		let changed = false;
+		for (const [path, record] of Object.entries(index.notes)) {
+			if (!record.baseline) continue;
+			let text: string;
+			try {
+				text = fs.readFileSync(`${this.vaultPath}/${path}`, "utf8");
+			} catch {
+				continue;
+			}
+			const prior = splitNote(text);
+			const region = findManagedRegion(prior.body);
+			if (!region) continue;
+			const inner = prior.body.slice(region.start, region.end)
+				.replace(/<[^>]*>/g, "")
+				.replace(/\/?mas-managed/g, "")
+				.trim();
+			if (inner) continue; // a real region: its hash is meaningful
+			record.baseline = managedHash(text);
+			changed = true;
+		}
+		if (changed) this.save();
+		return index;
 	}
 
 	private migrate(): NoteHashIndex {
@@ -117,7 +154,7 @@ export class NoteHashStore {
 				}
 			}
 		} catch { /* no legacy version store */ }
-		const index: NoteHashIndex = { schema: 1, notes };
+		const index: NoteHashIndex = { schema: 2, notes };
 		this.index = index;
 		this.save();
 		return index;

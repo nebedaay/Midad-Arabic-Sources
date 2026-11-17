@@ -2029,7 +2029,7 @@ _LEGACY_VERSE_LINK = (
 )
 _VERSE_HEADING = re.compile(r"^#####[ \t]+" + _LEGACY_VERSE_LINK + r"[ \t]*$")
 _VERSE_MARKER = re.compile(
-    r"\*{0,2}(?:" + _VERSE_LINK + r"|" + _LEGACY_VERSE_LINK + r")\*{0,2}")
+    r"\*{0,2}(?:" + _VERSE_LINK + r"|" + _LEGACY_VERSE_LINK + r")\*{0,2}\ufeff?")
 _EMPTY_VERSE_HEADING = re.compile(r"^#####[ \t]*(?:\\?\[\])*[ \t]*$")
 # `S:V` (optionally a range) is a marker's display, not a citation to rewrite.
 _MARKER_DISPLAY = re.compile(r"^\d+:\d+(?:[\u2013\u2014-]\d+:\d+)?$")
@@ -2045,7 +2045,11 @@ def _verse_marker(stem: str, surah: int, start: int, end: int | None) -> str:
     one link, and the plugin can style that link's text directly.
     """
     display = f"{surah}:{start}" if not end or end == start else f"{surah}:{start}\u2013{surah}:{end}"
-    return f"**[[{stem}#{start}|{display}]]**"
+    # The U+FEFF matters: an emphasis whose closing `**` is followed directly by
+    # an Arabic letter does not close in the editor's parser, so the marker and
+    # the text after it are shown as literal bold. A zero-width separator is
+    # neither a letter nor visible, so the bold closes without adding a space.
+    return f"**[[{stem}#{start}|{display}]]**\ufeff"
 
 
 def mark_short_fragments(content: str) -> tuple[str, int]:

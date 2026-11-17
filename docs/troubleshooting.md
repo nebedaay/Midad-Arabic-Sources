@@ -42,11 +42,11 @@ A Gemini batch has no per-page progress; the panel updates only when a page or s
 
 ### A job stopped, or Obsidian reloaded mid-run
 
-The job’s state file survives under `.midad-arabic-sources/jobs/`. **Show pipeline status** offers to resume it; the plugin refuses if the recorded process is still alive. To recover a finished batch without resubmitting, use **Reprocess from archive…**.
+The job’s state file survives under `.midad-arabic-sources/jobs/`. **Show pipeline status** offers to resume it; the plugin refuses if the recorded process is still alive. To recover a finished batch without resubmitting, use **Reprocess from saved batch…**.
 
 ### Post-processing changed but the note did not
 
-Re-run **Reprocess from archive…** on the batch to regenerate the note from the archived OCR, without paying for Gemini again.
+Re-run **Reprocess from saved batch…** on the batch to regenerate the note from the saved OCR, without paying for Gemini again.
 
 ## Document import
 

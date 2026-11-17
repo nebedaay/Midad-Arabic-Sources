@@ -21,7 +21,7 @@ For each PDF the pipeline:
 3. **Collects** the raw OCR output and re-OCRs any page the model flagged as a hallucination.
 4. **Post-processes** locally.
 
-The intermediates live under `.midad-arabic-sources/work/` and are removed once the vault note is written; the batch archive under `.midad-arabic-sources/archive/` is kept, and it is what **Reprocess from archive…** re-runs without resubmitting.
+The intermediates live under `.midad-arabic-sources/work/` and are removed once the vault note is written; the batch archive under `.midad-arabic-sources/archive/` is kept, and it is what **Reprocess from saved batch…** re-runs without resubmitting.
 
 Arabic metadata is kept in `title-ar`, `shorttitle-ar`, `authors-ar`, and `editors-ar`; an Arabic work carries `title-ar` even when the cover did not supply it, with an empty value the user can fill later. The **Include Arabic aliases** setting (on by default) adds the Arabic-script alias when an Arabic title and author are known; each note gets at most one romanized and one Arabic alias. A `topics:` entry (for example `Tafsīr`) is also added to the note's `midad-up` as `[[Midad topic - Tafsīr|Tafsīr]]`.
 
@@ -86,15 +86,15 @@ The editor holds only the **text-specific** part. The pipeline appends it to a s
 
 - **Transcribe this item’s PDF file(s)** — the full pipeline above.
 - **Transcribe a PDF…** — choose any PDF on disk, with no Zotero item, then verify the guessed title and author.
-- **Re-render this source** — re-run post-processing for the active transcription/translation from its archived JSON. On a volume note it re-renders that volume only; on the work’s parent note (the volume index) it re-renders every volume. If there is no archive, it falls back to in-place post-processing.
+- **Re-render this source** — re-run post-processing for the active transcription/translation from its saved batch. On a volume note it asks whether to re-render that volume or every volume of the work; the parent note re-renders every volume; on the work’s parent note (the volume index) it re-renders every volume. If there is no saved batch, it falls back to in-place post-processing.
 - **Post-process this transcription/translation** — run the current local post-processing scripts over the open note, without an archive or Gemini.
 - **Update Markdown formatting in this note** — run the Markdown-only layer over an already-rendered note; it preserves existing TOC links, links, callouts, and code fences while applying safe formatting standards.
-- **Commit edits to archived transcription/translation** — save the current note’s page bodies as corrections for its archived batch; a later re-render from the archive reapplies them.
+- **Commit edits to the transcription/translation batch** — save the current note’s page bodies as corrections for its saved batch; a later re-render from that batch reapplies them.
 - **Re-render transcriptions of this item’s attachments** — from a literature note, re-render all of its transcription/translation notes, using archives where present and in-place post-processing when no archive exists.
-- **Check transcription pipeline** — list the archived batches on disk.
+- **Check transcription pipeline** — list the saved batches on disk.
 - **Show pipeline status** — reveal the live status panel while a job runs, resume a job that was interrupted, or open the last log when nothing is running.
 - **Open last pipeline log** — open the most recent job log.
-- **Reprocess from archive…** — pick an archived batch and re-run post-processing only (no Gemini resubmission). Use this after a change to the post-processing scripts, or to recover an interrupted job.
+- **Reprocess from saved batch…** — pick a saved batch and re-run post-processing only (no Gemini resubmission). Use this after a change to the post-processing scripts, or to recover an interrupted job.
 
 ## Progress and logs
 

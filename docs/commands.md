@@ -30,7 +30,7 @@ See [Transcription](./transcription.md) and [Translation](./translation.md).
 - **Transcribe this item’s PDF file(s)** — burst, OCR, and post-process.
 - **Transcribe a PDF…** — choose any PDF on disk, without a Zotero item, and verify Gemini’s title/author guess afterwards.
 - **Translate this item’s transcription(s)** — translate an existing transcription.
-- **Reprocess from archive…** — re-run post-processing from an archived batch, without resubmitting.
+- **Reprocess from saved batch…** — re-run post-processing from the saved Gemini batch, without resubmitting.
 - **Post-process this transcription/translation** — run the current local post-processing scripts over the open note, without an archive or Gemini. Also rebuilds the native YAML, volume parent, and literature-note list.
 - **Post-process all transcriptions and translations** — run that same post-processor over every recognised note, with a confirmation and per-note backup.
 - **Escape literal brackets in transcriptions and translations** — apply the shared bracket pass alone, without re-running every other formatting step; useful for a large batch.
@@ -46,7 +46,7 @@ See [Transcription](./transcription.md) and [Translation](./translation.md).
 - **Commit edits to archived transcription/translation** — save the current note’s page bodies beside its archive, so a later re-render from that archive keeps your corrections (poetry, page numbers, and body text).
 - **Assign topic and post-process this transcription…** — write a topic onto the parent transcription note and re-process it. A topic containing “tafsīr” switches quote discovery to commentary mode, where short fragments are checked against the verse under discussion.
 - **Re-render transcriptions of this item’s attachments** — run the same re-render for every transcription/translation attached to the open literature note, using archives where present and in-place post-processing when no archive exists.
-- **Check transcription pipeline** — list archived batches.
+- **Check transcription pipeline** — list the saved batches.
 - **Show pipeline status** — reveal the status panel, resume an interrupted job, or open the last log.
 - **Open last pipeline log** — open the newest job log.
 
@@ -59,7 +59,7 @@ See [Document import](./document-import.md) and [Templates](./templates.md).
 - **Copy import templates to vault** — copy the editable ETA templates into your vault.
 - **Re-render imported sources** — regenerate every note from its cached model.
 - **Post-process cached source models** — apply the safe shared content migration (currently literal-bracket escaping) to cached models without re-downloading, then re-render the affected works.
-- **Re-render this source** — regenerate an imported work, or re-run a transcription/translation from its archived JSON (also on the note’s right-click menu). On a volume note it re-renders that volume and leaves the others alone; on the work’s parent note — the volume index — every volume is re-rendered, and a volume with no archive is post-processed in place. No dialog asks which, and the automatic update pass never prompts about a work’s other batches. A transcription with no archive is post-processed in place with the current local scripts.
+- **Re-render this source** — regenerate an imported work, or re-run a transcription/translation from its saved batch (also on the note’s right-click menu). On a volume note it re-renders that volume and leaves the others alone; on the work’s parent note — the volume index — every volume is re-rendered, and a volume with no saved batch is post-processed in place. Re-rendering a single volume asks whether to do that volume or every one of the work’s volumes; an automatic pass never asks. A transcription with no saved batch is post-processed in place with the current local scripts.
 - **Apply template changes to imported sources** — apply a detected template change on demand.
 - **Re-download imported sources (rebuild models)** — re-fetch the source JSON and rebuild every model.
 - **Migrate imported sources to the current naming scheme** — rename installed works to `Author - Title (repository)`, updating notes, models, MOCs, and annotation paths.

@@ -295,7 +295,7 @@ interface PipelineNote {
 	volume?: number | null;
 }
 
-/** One archived batch, as the reprocess dialogue reports it. */
+/** One saved batch, as the reprocess dialogue reports it. */
 interface ArchiveZip {
 	name: string;
 	path: string;
@@ -858,7 +858,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 
 		this.addCommand({
 			id: "reprocess-from-archive",
-			name: "Reprocess from archive…",
+			name: "Reprocess from saved batch…",
 			callback: async () => { await this.openReprocess(); },
 		});
 
@@ -883,7 +883,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		});
 		this.addCommand({
 			id: "commit-archived-corrections",
-			name: "Commit edits to archived transcription/translation",
+			name: "Commit edits to the transcription/translation batch",
 			callback: async () => { await this.commitArchivedCorrections(); },
 		});
 		this.addCommand({
@@ -5665,7 +5665,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 	async rerenderArchivedNote(file: TAbstractFile, options: { outPath?: string; skipApply?: boolean; skipChangeReview?: boolean; review?: ChangeReview } = {}): Promise<string | null> {
 		const info = archivedNoteInfo(file.path);
 		if (!info) {
-			new Notice("That note does not belong to an imported source and has no archived transcription.");
+			new Notice("That note does not belong to an imported source and has no saved transcription batch.");
 			return null;
 		}
 
@@ -5695,22 +5695,34 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 				await this.postprocessTranscriptionNote(file, info, false, false, false, review);
 				return null;
 			}
-			new Notice(`No archived batch found for @${info.citekey}.`);
+			new Notice(`No saved batch found for @${info.citekey}.`);
 			return null;
 		}
 
 		if (review === "skip") return null;
-		// A volume note re-renders its own volume; the parent note is the index
-		// that re-renders all of them. Nothing asks which — the note you invoked
-		// it on is the answer, and the other volumes are left as they are.
+		// A asked-for re-render of a volume offers the choice — one volume or the
+		// whole work — because that is the moment the reader knows what they mean.
+		// An automatic pass never asks: it re-renders the note that is out of date
+		// and leaves its siblings alone. The parent note is the index that
+		// re-renders every volume.
 		let chosen = batches;
 		if (info.volume != null) {
 			const exact = batches.filter((entry) => entry.info.volume === info.volume);
 			if (!exact.length) {
-				new Notice(`No archived ${info.type ?? "transcription"} batch found for @${info.citekey}, vol. ${info.volume}.`);
+				new Notice(`No saved ${info.type ?? "transcription"} batch found for @${info.citekey}, vol. ${info.volume}.`);
 				return null;
 			}
-			chosen = exact;
+			const siblings = batches.some((entry) => entry.info.volume !== info.volume);
+			if (review === "ask" && siblings && !options.outPath) {
+				const scope = await new Promise<"one" | "all" | null>((resolve) => {
+					new ReRenderBatchScopeModal(
+						this.app, info.citekey, info.volume, batches.length, resolve).open();
+				});
+				if (!scope) return null;
+				chosen = scope === "one" ? exact : batches;
+			} else {
+				chosen = exact;
+			}
 		}
 
 		const canonicalPath = file.path.replace(/\.Version\d+\.md$/i, ".md");
@@ -5764,7 +5776,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			}
 			await this.updateNoteBaselines([...touched]);
 			const also = extra ? ` and post-processed ${extra} volume ${extra === 1 ? "note" : "notes"}` : "";
-			new Notice(`Re-rendered ${chosen.length} archived batch(es) for @${info.citekey}${also}.`);
+			new Notice(`Re-rendered ${chosen.length} saved batch(es) for @${info.citekey}${also}.`);
 		}
 		return null;
 	}
@@ -6101,7 +6113,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		if (!archive) {
 			new Notice(matching.length
 				? "Open the specific volume note whose archive you want to update."
-				: "No archived batch was found for this note.");
+				: "No saved batch was found for this note.");
 			return;
 		}
 		const text = await this.app.vault.read(file);
@@ -9313,7 +9325,7 @@ class ReprocessModal extends Modal {
 
 	onOpen(): void {
 		const { contentEl } = this;
-		this.setTitle("Reprocess from archive");
+		this.setTitle("Reprocess from saved batch");
 		if (!this.zips.length) {
 			contentEl.createEl("p", { text: "No archived batches found in .midad-arabic-sources/archive." });
 			return;
@@ -9971,6 +9983,46 @@ class SourceChangeReviewModal extends Modal {
 	onClose(): void {
 		this.contentEl.empty();
 		if (!this.chosen) this.resolve("cancel");
+	}
+}
+
+class ReRenderBatchScopeModal extends Modal {
+	private readonly citekey: string;
+	private readonly volume: number;
+	private readonly count: number;
+	private readonly onChoose: (choice: "one" | "all" | null) => void;
+	private chosen = false;
+
+	constructor(app: App, citekey: string, volume: number, count: number,
+		onChoose: (choice: "one" | "all" | null) => void) {
+		super(app);
+		this.citekey = citekey;
+		this.volume = volume;
+		this.count = count;
+		this.onChoose = onChoose;
+	}
+
+	onOpen(): void {
+		this.setTitle("Re-render one volume or the whole work?");
+		this.contentEl.createEl("p", {
+			text: `@${this.citekey} has ${this.count} saved batches. Re-render only volume ${this.volume}, or every one of them?`,
+		});
+		new Setting(this.contentEl)
+			.addButton((b) => b
+				.setButtonText(`Only vol. ${this.volume}`)
+				.setCta()
+				.onClick(() => { this.chosen = true; this.onChoose("one"); this.close(); }))
+			.addButton((b) => b
+				.setButtonText(`All ${this.count}`)
+				.onClick(() => { this.chosen = true; this.onChoose("all"); this.close(); }))
+			.addButton((b) => b
+				.setButtonText("Cancel")
+				.onClick(() => { this.chosen = true; this.onChoose(null); this.close(); }));
+	}
+
+	onClose(): void {
+		this.contentEl.empty();
+		if (!this.chosen) this.onChoose(null);
 	}
 }
 
