@@ -1258,6 +1258,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		}
 		this.statusPanels = [];
 		if (this.transcriptionMocTimer !== null) window.clearTimeout(this.transcriptionMocTimer);
+		if (this.quranRefreshTimer !== null) window.clearTimeout(this.quranRefreshTimer);
 		for (const timer of this.topicSyncTimers.values()) window.clearTimeout(timer);
 		this.topicSyncTimers.clear();
 		for (const timer of this.versionNameTimers.values()) window.clearTimeout(timer);
@@ -1301,8 +1302,18 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		}
 		invalidateQuranCitationCache();
 		await this.saveSettings();
-		refreshQuranCitations(this.app);
+		// Typing in the prefix field is a change per keystroke; repainting every
+		// open Reading view each time would re-render a multi-megabyte volume for
+		// nothing, so the repaint waits for the typing to settle.
+		if (this.quranRefreshTimer !== null) window.clearTimeout(this.quranRefreshTimer);
+		this.quranRefreshTimer = window.setTimeout(() => {
+			this.quranRefreshTimer = null;
+			refreshQuranCitations(this.app);
+		}, 500);
 	}
+
+	/** Pending debounced repaint after a citation-setting change. */
+	quranRefreshTimer: number | null = null;
 
 	/** The installed Qur'ān works: canonical first, then each riwāya. */
 	quranWorks(): Array<{ path: string; label: string; key: string }> {
@@ -1322,7 +1333,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 				path,
 				key: path === canonical ? "canonical" : path,
 				label: path === canonical
-					? `${this.settings.canonicalQuranRiwāya?.trim() || "Ḥafṣ"} (canonical)`
+					? "Ḥafṣ (canonical)"
 					: (path.split("/").pop() ?? path),
 			}));
 		found.sort((a, b) => (a.path === canonical ? -1 : 0) - (b.path === canonical ? -1 : 0));
@@ -4591,8 +4602,10 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			// to the canonical Qur'ān notes instead of its own.
 			m.work.unit_prefix = isCanonical ? "" : (m.work.dir as string);
 		}
-		const expected = batch.flatMap((model) => expectedNotePaths(model, outRoot, canonicalRoot, canonicalId));
-		if (!(await this.reviewChangedNotes(expected, review))) return [];
+		// The edit review is per work, inside the render loop. Doing it up front
+		// meant reading every expected note of every work in the batch — tens of
+		// thousands of files when a dictionary is involved — before the first
+		// work started, which looked exactly like a hang on the first work.
 		const written: string[] = [];
 		const contentPaths: string[] = [];
 		const pubs = await this.loadPublicationMap();
@@ -4616,6 +4629,8 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			const emit = (step: number, steps: number) =>
 				onProgress?.({ index: i, total: batch.length, work, step, steps });
 			emit(0, 0);
+			if (!(await this.reviewChangedNotes(
+				expectedNotePaths(model, outRoot, canonicalRoot, canonicalId), review))) continue;
 			try {
 				const seen = new Map(Object.entries(stats[this.workKey(model.work)]?.units ?? {}));
 				const w = await renderModelToVault(this.app, templates, model, outRoot, force, emit,
@@ -7287,16 +7302,6 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			this.settings.canonicalQuranFolder = (data?.canonicalQuranFolder || `${this.settings.sourceImportRoot}/Quran`).trim();
 		}
 		await this.ensureLlmSettings();
-		// Pre-designation installs: Ḥafṣ was the first riwāya, so adopt it once and
-		// persist it, after which the designation is purely the setting.
-		if (!this.settings.canonicalQuranRiwāya.trim()) {
-			try {
-				if (await this.app.vault.adapter.exists(normalizePath(".midad-arabic-sources/source-models/quran-text/hafs.json"))) {
-					this.settings.canonicalQuranRiwāya = "hafs";
-					await this.saveSettings();
-				}
-			} catch { /* ignore */ }
-		}
 	}
 
 	async saveSettings() {

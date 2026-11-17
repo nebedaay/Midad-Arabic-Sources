@@ -24912,6 +24912,7 @@ var _MidadArabicSourcesPlugin = class extends import_obsidian20.Plugin {
     this.liveNotices = new Set();
     this.topicSyncTimers = new Map();
     this.versionNameTimers = new Map();
+    this.quranRefreshTimer = null;
     this.pythonPromise = null;
     this.serverPythonPromise = null;
     this.promptDefaults = null;
@@ -25462,6 +25463,8 @@ var _MidadArabicSourcesPlugin = class extends import_obsidian20.Plugin {
     this.statusPanels = [];
     if (this.transcriptionMocTimer !== null)
       window.clearTimeout(this.transcriptionMocTimer);
+    if (this.quranRefreshTimer !== null)
+      window.clearTimeout(this.quranRefreshTimer);
     for (const timer of this.topicSyncTimers.values())
       window.clearTimeout(timer);
     this.topicSyncTimers.clear();
@@ -25501,7 +25504,12 @@ var _MidadArabicSourcesPlugin = class extends import_obsidian20.Plugin {
     }
     invalidateQuranCitationCache();
     await this.saveSettings();
-    refreshQuranCitations(this.app);
+    if (this.quranRefreshTimer !== null)
+      window.clearTimeout(this.quranRefreshTimer);
+    this.quranRefreshTimer = window.setTimeout(() => {
+      this.quranRefreshTimer = null;
+      refreshQuranCitations(this.app);
+    }, 500);
   }
   quranWorks() {
     var _a2, _b2, _c, _d;
@@ -25514,11 +25522,11 @@ var _MidadArabicSourcesPlugin = class extends import_obsidian20.Plugin {
       counts.set(path3, ((_d = counts.get(path3)) != null ? _d : 0) + 1);
     }
     const found = [...counts.entries()].filter(([, count]) => count >= 100).map(([path3]) => {
-      var _a3, _b3;
+      var _a3;
       return {
         path: path3,
         key: path3 === canonical ? "canonical" : path3,
-        label: path3 === canonical ? `${((_a3 = this.settings.canonicalQuranRiw\u0101ya) == null ? void 0 : _a3.trim()) || "\u1E24af\u1E63"} (canonical)` : (_b3 = path3.split("/").pop()) != null ? _b3 : path3
+        label: path3 === canonical ? "\u1E24af\u1E63 (canonical)" : (_a3 = path3.split("/").pop()) != null ? _a3 : path3
       };
     });
     found.sort((a, b) => (a.path === canonical ? -1 : 0) - (b.path === canonical ? -1 : 0));
@@ -28431,9 +28439,6 @@ var _MidadArabicSourcesPlugin = class extends import_obsidian20.Plugin {
       }
       m.work.unit_prefix = isCanonical ? "" : m.work.dir;
     }
-    const expected = batch.flatMap((model) => expectedNotePaths(model, outRoot, canonicalRoot, canonicalId));
-    if (!await this.reviewChangedNotes(expected, review))
-      return [];
     const written = [];
     const contentPaths = [];
     const pubs = await this.loadPublicationMap();
@@ -28455,6 +28460,8 @@ var _MidadArabicSourcesPlugin = class extends import_obsidian20.Plugin {
       const work = String(model.work.title || model.work.dir || model.work.id);
       const emit = (step, steps) => onProgress == null ? void 0 : onProgress({ index: i, total: batch.length, work, step, steps });
       emit(0, 0);
+      if (!await this.reviewChangedNotes(expectedNotePaths(model, outRoot, canonicalRoot, canonicalId), review))
+        continue;
       try {
         const seen = new Map(Object.entries((_c = (_b2 = stats[this.workKey(model.work)]) == null ? void 0 : _b2.units) != null ? _c : {}));
         const w = await renderModelToVault(this.app, templates, model, outRoot, force, emit, void 0, seen, shouldCancel);
@@ -30721,15 +30728,6 @@ ${tail}` : "") + "\n\nIf it mentions a missing module, set the Python path under
       this.settings.canonicalQuranFolder = ((data == null ? void 0 : data.canonicalQuranFolder) || `${this.settings.sourceImportRoot}/Quran`).trim();
     }
     await this.ensureLlmSettings();
-    if (!this.settings.canonicalQuranRiw\u0101ya.trim()) {
-      try {
-        if (await this.app.vault.adapter.exists((0, import_obsidian20.normalizePath)(".midad-arabic-sources/source-models/quran-text/hafs.json"))) {
-          this.settings.canonicalQuranRiw\u0101ya = "hafs";
-          await this.saveSettings();
-        }
-      } catch (e) {
-      }
-    }
   }
   async saveSettings() {
     await this.saveData(this.settings);

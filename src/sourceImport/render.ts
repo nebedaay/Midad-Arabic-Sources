@@ -1,4 +1,5 @@
 import { App, TFile, normalizePath } from "obsidian";
+
 import { makeEngine, SourceTemplateEngine } from "./engine";
 import { YamlFieldSpec } from "./yaml";
 import { joinNote, mergeFrontmatter, mergeNote, normalizeManagedMarkerSpacing, splitNote, substantiveContentDiffers, unwrapQuranQuotes } from "./merge";
