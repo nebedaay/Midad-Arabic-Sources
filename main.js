@@ -15486,11 +15486,11 @@ var _NoteHashStore = class {
     let loaded = null;
     try {
       const raw = JSON.parse(fs2.readFileSync(this.filePath(), "utf8"));
-      loaded = { schema: 2, notes: (_a2 = raw.notes) != null ? _a2 : {} };
+      loaded = { schema: 3, notes: (_a2 = raw.notes) != null ? _a2 : {} };
     } catch (e) {
       loaded = this.migrate();
     }
-    this.index = this.upgradeBaselines(loaded, loaded.schema === 2);
+    this.index = this.upgradeBaselines(loaded, loaded.schema === 3);
     return this.index;
   }
   upgradeBaselines(index, current) {
@@ -15498,22 +15498,16 @@ var _NoteHashStore = class {
       return index;
     let changed = false;
     for (const [path3, record] of Object.entries(index.notes)) {
-      if (!record.baseline)
-        continue;
       let text;
       try {
         text = fs2.readFileSync(`${this.vaultPath}/${path3}`, "utf8");
       } catch (e) {
         continue;
       }
-      const prior = splitNote(text);
-      const region = findManagedRegion(prior.body);
-      if (!region)
+      const next = managedHash(text);
+      if (record.baseline === next)
         continue;
-      const inner = prior.body.slice(region.start, region.end).replace(/<[^>]*>/g, "").replace(/\/?mas-managed/g, "").trim();
-      if (inner)
-        continue;
-      record.baseline = managedHash(text);
+      record.baseline = next;
       changed = true;
     }
     if (changed)
@@ -15551,7 +15545,7 @@ var _NoteHashStore = class {
       }
     } catch (e) {
     }
-    const index = { schema: 2, notes };
+    const index = { schema: 3, notes };
     this.index = index;
     this.save();
     return index;

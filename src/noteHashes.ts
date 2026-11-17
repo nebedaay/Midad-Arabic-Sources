@@ -20,7 +20,7 @@ export interface NoteHashRecord {
 }
 
 interface NoteHashIndex {
-	schema: 2;
+	schema: 3;
 	notes: Record<string, NoteHashRecord>;
 }
 
@@ -81,11 +81,11 @@ export class NoteHashStore {
 		let loaded: NoteHashIndex | null = null;
 		try {
 			const raw = JSON.parse(fs.readFileSync(this.filePath(), "utf8")) as NoteHashIndex;
-			loaded = { schema: 2, notes: raw.notes ?? {} };
+			loaded = { schema: 3, notes: raw.notes ?? {} };
 		} catch {
 			loaded = this.migrate();
 		}
-		this.index = this.upgradeBaselines(loaded, loaded.schema === 2);
+		this.index = this.upgradeBaselines(loaded, loaded.schema === 3);
 		return this.index;
 	}
 
@@ -100,24 +100,22 @@ export class NoteHashStore {
 	 */
 	private upgradeBaselines(index: NoteHashIndex, current: boolean): NoteHashIndex {
 		if (current) return index;
+		// Schema 3 re-baselines every managed note from what is on disk. The
+		// earlier hash could not track some notes (a transcription's region was
+		// only its marker), so every pass reported its own output as the reader's
+		// edit — which also produced hundreds of spurious version snapshots.
+		// Snapshots and backups already hold anything the reader wrote.
 		let changed = false;
 		for (const [path, record] of Object.entries(index.notes)) {
-			if (!record.baseline) continue;
 			let text: string;
 			try {
 				text = fs.readFileSync(`${this.vaultPath}/${path}`, "utf8");
 			} catch {
 				continue;
 			}
-			const prior = splitNote(text);
-			const region = findManagedRegion(prior.body);
-			if (!region) continue;
-			const inner = prior.body.slice(region.start, region.end)
-				.replace(/<[^>]*>/g, "")
-				.replace(/\/?mas-managed/g, "")
-				.trim();
-			if (inner) continue; // a real region: its hash is meaningful
-			record.baseline = managedHash(text);
+			const next = managedHash(text);
+			if (record.baseline === next) continue;
+			record.baseline = next;
 			changed = true;
 		}
 		if (changed) this.save();
@@ -154,7 +152,7 @@ export class NoteHashStore {
 				}
 			}
 		} catch { /* no legacy version store */ }
-		const index: NoteHashIndex = { schema: 2, notes };
+		const index: NoteHashIndex = { schema: 3, notes };
 		this.index = index;
 		this.save();
 		return index;
