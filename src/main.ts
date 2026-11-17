@@ -2379,17 +2379,23 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 	 * measurement survives both. A removed work keeps its last size, as the user
 	 * asked; an installed work is re-measured only after its hub changes.
 	 */
+	/** In-memory copy of `source-stats.json`; it is several megabytes. */
+	private sourceStatsCache: Record<string, SourceStat> | null = null;
+
 	async loadSourceStats(): Promise<Record<string, SourceStat>> {
+		if (this.sourceStatsCache) return this.sourceStatsCache;
 		try {
 			const text = await this.app.vault.adapter.read(normalizePath(".midad-arabic-sources/source-stats.json"));
 			const parsed = JSON.parse(text) as { works?: Record<string, SourceStat> };
-			return parsed?.works && typeof parsed.works === "object" ? parsed.works : {};
+			this.sourceStatsCache = parsed?.works && typeof parsed.works === "object" ? parsed.works : {};
 		} catch {
-			return {};
+			this.sourceStatsCache = {};
 		}
+		return this.sourceStatsCache;
 	}
 
 	async saveSourceStats(works: Record<string, SourceStat>): Promise<void> {
+		this.sourceStatsCache = works;
 		try {
 			await this.app.vault.adapter.write(
 				normalizePath(".midad-arabic-sources/source-stats.json"),
@@ -4545,13 +4551,15 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 	}
 
 	private async updateNoteBaselines(paths: string[]): Promise<void> {
-		const notes = await this.loadNoteBaselines();
+		// `NoteHashStore` keeps the index in memory and writes it once, so a
+		// multi-megabyte note-hashes file is not rewritten per work.
+		const updated: Record<string, string> = {};
 		for (const path of [...new Set(paths.map((value) => normalizePath(value)))]) {
 			const file = this.app.vault.getAbstractFileByPath(path);
 			if (!(file instanceof TFile)) continue;
-			notes[path] = this.noteContentHash(await this.app.vault.read(file));
+			updated[path] = this.noteContentHash(await this.app.vault.read(file));
 		}
-		await this.saveNoteBaselines(notes);
+		if (Object.keys(updated).length) this.hashStore().setBaselines(updated);
 	}
 
 	/** Append a line to the render log, so a stall can be located after the fact. */

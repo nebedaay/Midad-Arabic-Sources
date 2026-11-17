@@ -24917,6 +24917,7 @@ var _MidadArabicSourcesPlugin = class extends import_obsidian20.Plugin {
     this.serverPythonPromise = null;
     this.promptDefaults = null;
     this.sourceCatalogRefreshing = false;
+    this.sourceStatsCache = null;
     this.sourceTemplateCheckTimer = null;
     this.templateCheckRunning = false;
     this.maintenanceInFlight = false;
@@ -26486,15 +26487,19 @@ var _MidadArabicSourcesPlugin = class extends import_obsidian20.Plugin {
     }
   }
   async loadSourceStats() {
+    if (this.sourceStatsCache)
+      return this.sourceStatsCache;
     try {
       const text = await this.app.vault.adapter.read((0, import_obsidian20.normalizePath)(".midad-arabic-sources/source-stats.json"));
       const parsed = JSON.parse(text);
-      return (parsed == null ? void 0 : parsed.works) && typeof parsed.works === "object" ? parsed.works : {};
+      this.sourceStatsCache = (parsed == null ? void 0 : parsed.works) && typeof parsed.works === "object" ? parsed.works : {};
     } catch (e) {
-      return {};
+      this.sourceStatsCache = {};
     }
+    return this.sourceStatsCache;
   }
   async saveSourceStats(works) {
+    this.sourceStatsCache = works;
     try {
       await this.app.vault.adapter.write((0, import_obsidian20.normalizePath)(".midad-arabic-sources/source-stats.json"), JSON.stringify({ works }, null, 1));
     } catch (e) {
@@ -28387,14 +28392,15 @@ var _MidadArabicSourcesPlugin = class extends import_obsidian20.Plugin {
     new import_obsidian20.Notice(added ? `Cached ${added} managed-region baseline(s).` : "All managed notes already have baselines.");
   }
   async updateNoteBaselines(paths) {
-    const notes = await this.loadNoteBaselines();
+    const updated = {};
     for (const path3 of [...new Set(paths.map((value) => (0, import_obsidian20.normalizePath)(value)))]) {
       const file = this.app.vault.getAbstractFileByPath(path3);
       if (!(file instanceof import_obsidian20.TFile))
         continue;
-      notes[path3] = this.noteContentHash(await this.app.vault.read(file));
+      updated[path3] = this.noteContentHash(await this.app.vault.read(file));
     }
-    await this.saveNoteBaselines(notes);
+    if (Object.keys(updated).length)
+      this.hashStore().setBaselines(updated);
   }
   async logRender(line) {
     try {
