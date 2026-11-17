@@ -987,16 +987,8 @@ def cmd_postprocess_note(args) -> int:
 
     mv = load_module("transcription-translation-move-to-vault.py")
     related = mv._existing_list(note, "related")
-    parent = mv.dest_path(citekey, doc_type, None, standalone)
-    mode_source = parent if parent.exists() else note
-    tafsir = bool(getattr(args, "tafsir", False))
-    if mode_source.exists():
-        mode = mv._existing_scalar(mode_source, "midad-transcription-mode").strip().lower()
-        topics = mv._existing_list(mode_source, "topics")
-        tafsir = tafsir or mode == "tafsir" or any(
-            "tafsir" in topic.lower().replace("ī", "i").replace("ā", "a")
-            for topic in topics
-        )
+    tafsir = bool(getattr(args, "tafsir", False)) or mv.tafsir_mode(
+        citekey, doc_type, volume, unit, standalone)
 
     title = authors = None
     if standalone:

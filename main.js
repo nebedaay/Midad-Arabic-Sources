@@ -5890,16 +5890,8 @@ def cmd_postprocess_note(args) -> int:
 
     mv = load_module("transcription-translation-move-to-vault.py")
     related = mv._existing_list(note, "related")
-    parent = mv.dest_path(citekey, doc_type, None, standalone)
-    mode_source = parent if parent.exists() else note
-    tafsir = bool(getattr(args, "tafsir", False))
-    if mode_source.exists():
-        mode = mv._existing_scalar(mode_source, "midad-transcription-mode").strip().lower()
-        topics = mv._existing_list(mode_source, "topics")
-        tafsir = tafsir or mode == "tafsir" or any(
-            "tafsir" in topic.lower().replace("\u012B", "i").replace("\u0101", "a")
-            for topic in topics
-        )
+    tafsir = bool(getattr(args, "tafsir", False)) or mv.tafsir_mode(
+        citekey, doc_type, volume, unit, standalone)
 
     title = authors = None
     if standalone:
@@ -10125,20 +10117,7 @@ def main():
             # in-place path: without this the margin markers and the continuity
             # rules are lost, so a re-rendered tafs\u012Br volume silently loses
             # every verse heading. The mode lives on the parent note.
-            tafsir = False
-            try:
-                parent = mv.dest_path(citekey, "transcription", None, standalone)
-                mode_source = parent if parent.exists() else mv.dest_path(
-                    citekey, "transcription", volume, unit=unit)
-                if mode_source.exists():
-                    mode = mv._existing_scalar(mode_source, "midad-transcription-mode").strip().lower()
-                    topics = mv._existing_list(mode_source, "topics")
-                    tafsir = mode == "tafsir" or any(
-                        "tafsir" in topic.lower().replace("\u012B", "i").replace("\u0101", "a")
-                        for topic in topics
-                    )
-            except Exception:
-                tafsir = False
+            tafsir = mv.tafsir_mode(citekey, "transcription", volume, unit, standalone)
             tpp.run(raw_path, out_path=processed, metadata=True, tafsir=tafsir)
             corrections = load_corrections(src)
             update = load("markdown-update.py").update_markdown if corrections else None
@@ -12935,6 +12914,44 @@ def dest_path(citekey: str, doc_type: str, volume: int = None,
             return legacy
         return dest_dir / f"{prefix}{citekey} - {doc_type} - {unit.strip()}.md"
     return dest_dir / f"{prefix}{citekey} - {doc_type}.md"
+
+
+def tafsir_mode(citekey: str, doc_type: str, volume: int = None,
+                unit: str | None = None, standalone: bool = False) -> bool:
+    """Whether a transcription/translation is a tafs\u012Br, inherited from its work.
+
+    The mode belongs to the **work**: a multi-volume tafs\u012Br puts
+    \`topics: [Tafs\u012Br]\` (or \`midad-transcription-mode: tafsir\`) on its parent
+    note, and every volume inherits it. The parent is looked up by name in both
+    the \`@\` and \`mas-\` forms \u2014 a volume can exist while the literature note that
+    decides \`standalone\` no longer does \u2014 and the volume's own properties are
+    consulted only when no parent exists.
+    """
+    candidates: list[Path] = []
+    for sa in (False, True):
+        try:
+            candidates.append(dest_path(citekey, doc_type, None, sa))
+        except Exception:
+            pass
+    if volume:
+        try:
+            candidates.append(dest_path(citekey, doc_type, volume, standalone, unit=unit))
+        except Exception:
+            pass
+    for path in candidates:
+        try:
+            if not path.exists():
+                continue
+            mode = _existing_scalar(path, "midad-transcription-mode").strip().lower()
+            topics = _existing_list(path, "topics")
+            if mode == "tafsir" or any(
+                "tafsir" in str(topic).lower().replace("\u012B", "i").replace("\u0101", "a")
+                for topic in topics
+            ):
+                return True
+        except Exception:
+            continue
+    return False
 
 
 def ensure_parent(citekey: str, doc_type: str, related: list[str], volume: int,
@@ -24553,6 +24570,7 @@ var _MidadArabicSourcesPlugin = class extends import_obsidian20.Plugin {
     this.repositoryMocNames = [];
     this.repositoryMocLabels = {};
     this.transcriptionMocTimer = null;
+    this.liveNotices = new Set();
     this.topicSyncTimers = new Map();
     this.versionNameTimers = new Map();
     this.pythonPromise = null;
@@ -25084,6 +25102,20 @@ var _MidadArabicSourcesPlugin = class extends import_obsidian20.Plugin {
   }
   onunload() {
     var _a2, _b2;
+    for (const notice of this.liveNotices) {
+      try {
+        notice.hide();
+      } catch (e) {
+      }
+    }
+    this.liveNotices.clear();
+    for (const panel of this.statusPanels) {
+      try {
+        panel.destroy();
+      } catch (e) {
+      }
+    }
+    this.statusPanels = [];
     if (this.transcriptionMocTimer !== null)
       window.clearTimeout(this.transcriptionMocTimer);
     for (const timer of this.topicSyncTimers.values())
@@ -25621,6 +25653,21 @@ var _MidadArabicSourcesPlugin = class extends import_obsidian20.Plugin {
       (_a2 = this.activeSourceProc) == null ? void 0 : _a2.kill("SIGTERM");
     } catch (e) {
     }
+    for (const notice of this.liveNotices) {
+      try {
+        notice.hide();
+      } catch (e) {
+      }
+    }
+    this.liveNotices.clear();
+    for (const panel of this.statusPanels) {
+      try {
+        panel.finish(false);
+        panel.destroy();
+      } catch (e) {
+      }
+    }
+    this.statusPanels = [];
     new import_obsidian20.Notice("Stopping source operation\u2026");
   }
   async runWithProgress(title, args, scriptRel) {
@@ -27832,6 +27879,7 @@ var _MidadArabicSourcesPlugin = class extends import_obsidian20.Plugin {
       return [];
     const owns = operationId === void 0;
     const progress = new import_obsidian20.Notice(`${title}\u2026`, 0);
+    this.liveNotices.add(progress);
     const stop = progress.messageEl.createEl("button", { text: "Stop" });
     stop.addEventListener("click", () => {
       stop.disabled = true;
@@ -27863,6 +27911,7 @@ var _MidadArabicSourcesPlugin = class extends import_obsidian20.Plugin {
       }, () => this.isSourceCancelled(op), review);
     } finally {
       progress.hide();
+      this.liveNotices.delete(progress);
       if (owns)
         this.endSourceOperation(op);
     }
@@ -29770,7 +29819,7 @@ ${page.body}`);
     }, 3e3);
   }
   async findStaleSourceWorks() {
-    var _a2, _b2, _c;
+    var _a2, _b2, _c, _d;
     const store = await this.loadSourceHashes();
     const manifest = await this.loadSourceManifest();
     const pending2 = await this.loadPendingDeletions();
@@ -29798,11 +29847,14 @@ ${page.body}`);
       };
       const scriptsAt = templateChangedAt(store, "pipeline");
       if (scriptsAt > 0 && renderedMs("pipeline") < scriptsAt) {
+        const tried = Number((_a2 = stat == null ? void 0 : stat.scriptsTried) != null ? _a2 : 0);
+        if (tried >= scriptsAt)
+          continue;
         out.push({ work, kinds: null, refetch: true });
         continue;
       }
       const kinds = new Set();
-      for (const key of this.templateKeysFor(String((_a2 = work.collection) != null ? _a2 : ""))) {
+      for (const key of this.templateKeysFor(String((_b2 = work.collection) != null ? _b2 : ""))) {
         if (key === "hub")
           continue;
         if (!stale(key))
@@ -29811,7 +29863,7 @@ ${page.body}`);
         if (kind)
           kinds.add(kind);
       }
-      if (((_b2 = stat == null ? void 0 : stat.render) != null ? _b2 : 0) < requiredRenderVersion(String((_c = work.collection) != null ? _c : ""))) {
+      if (((_c = stat == null ? void 0 : stat.render) != null ? _c : 0) < requiredRenderVersion(String((_d = work.collection) != null ? _d : ""))) {
         out.push({ work, kinds: null });
         continue;
       }
@@ -29853,6 +29905,7 @@ ${page.body}`);
     const stats = await this.loadSourceStats();
     const pubs = await this.loadPublicationMap();
     const notice = new import_obsidian20.Notice("Updating imported sources\u2026", 0);
+    this.liveNotices.add(notice);
     const stop = notice.messageEl.createEl("button", { text: "Stop" });
     stop.addEventListener("click", () => {
       stop.disabled = true;
@@ -29925,6 +29978,7 @@ ${page.body}`);
       }
     } finally {
       notice.hide();
+      this.liveNotices.delete(notice);
       await this.updateNoteBaselines(contentPaths);
       await this.saveSourceStats(stats);
       void this.reportLargeSourceNotes(false);
@@ -30017,17 +30071,24 @@ ${page.body}`);
     }
     const finish = async (includeAuto) => {
       if (includeAuto) {
+        const stats = await this.loadSourceStats();
+        let touched = false;
         for (const s of stale) {
           if (s.refetch) {
+            const key = this.workKey(s.work);
+            stats[key] = { ...stats[key], scriptsTried: Date.now() };
+            touched = true;
             try {
               await this.reinstallSource(s.work, "auto");
             } catch (e) {
-              console.error("[midad-arabic-sources] rebuild", this.workKey(s.work), e);
+              console.error("[midad-arabic-sources] rebuild", key, e);
             }
             continue;
           }
           rerender.push({ work: s.work, kinds: s.kinds });
         }
+        if (touched)
+          await this.saveSourceStats(stats);
       }
       if (rerender.length) {
         await this.renderStaleScoped(rerender, "auto", yamlOnly && incomplete.length === 0);

@@ -710,6 +710,44 @@ def dest_path(citekey: str, doc_type: str, volume: int = None,
     return dest_dir / f"{prefix}{citekey} - {doc_type}.md"
 
 
+def tafsir_mode(citekey: str, doc_type: str, volume: int = None,
+                unit: str | None = None, standalone: bool = False) -> bool:
+    """Whether a transcription/translation is a tafsīr, inherited from its work.
+
+    The mode belongs to the **work**: a multi-volume tafsīr puts
+    `topics: [Tafsīr]` (or `midad-transcription-mode: tafsir`) on its parent
+    note, and every volume inherits it. The parent is looked up by name in both
+    the `@` and `mas-` forms — a volume can exist while the literature note that
+    decides `standalone` no longer does — and the volume's own properties are
+    consulted only when no parent exists.
+    """
+    candidates: list[Path] = []
+    for sa in (False, True):
+        try:
+            candidates.append(dest_path(citekey, doc_type, None, sa))
+        except Exception:
+            pass
+    if volume:
+        try:
+            candidates.append(dest_path(citekey, doc_type, volume, standalone, unit=unit))
+        except Exception:
+            pass
+    for path in candidates:
+        try:
+            if not path.exists():
+                continue
+            mode = _existing_scalar(path, "midad-transcription-mode").strip().lower()
+            topics = _existing_list(path, "topics")
+            if mode == "tafsir" or any(
+                "tafsir" in str(topic).lower().replace("ī", "i").replace("ā", "a")
+                for topic in topics
+            ):
+                return True
+        except Exception:
+            continue
+    return False
+
+
 def ensure_parent(citekey: str, doc_type: str, related: list[str], volume: int,
                   standalone: bool = False, title_ar: str = "",
                   authors_ar: list[str] | None = None):

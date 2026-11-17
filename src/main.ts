@@ -497,6 +497,8 @@ interface SourceStat {
 	notes?: number;
 	/** The model schema at the last render, so a stale model is still noticed. */
 	schema?: number;
+	/** When a script-driven rebuild was last attempted (epoch ms). */
+	scriptsTried?: number;
 	/** The *render* version this work was last rendered with (see below). */
 	render?: number;
 	/** Note path → hash of the content last rendered there (see `contentHash`). */
@@ -739,6 +741,9 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 	repositoryMocLabels: Record<string, string> = {};
 	/** Debounced refresh after a transcription/translation note changes. */
 	transcriptionMocTimer: number | null = null;
+
+	/** Notices for long-running operations, hidden together when one is stopped. */
+	liveNotices = new Set<Notice>();
 	/** Debounced midad-up repair after a note's topics property changes. */
 	topicSyncTimers = new Map<string, number>();
 	/** Debounced sync of a version note's user-facing name to its manifest label. */
@@ -1218,6 +1223,14 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 	}
 
 	onunload(): void {
+		for (const notice of this.liveNotices) {
+			try { notice.hide(); } catch { /* already gone */ }
+		}
+		this.liveNotices.clear();
+		for (const panel of this.statusPanels) {
+			try { panel.destroy(); } catch { /* already gone */ }
+		}
+		this.statusPanels = [];
 		if (this.transcriptionMocTimer !== null) window.clearTimeout(this.transcriptionMocTimer);
 		for (const timer of this.topicSyncTimers.values()) window.clearTimeout(timer);
 		this.topicSyncTimers.clear();
@@ -1818,6 +1831,17 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		this.sourceOperationActive = false;
 		this.sourceOperationKind = null;
 		try { this.activeSourceProc?.kill("SIGTERM"); } catch { /* already gone */ }
+		// A killed script may leave a child alive for a moment, so its promise can
+		// still be pending; the progress notice and the status panel must not sit
+		// there forever saying "updating 1/11".
+		for (const notice of this.liveNotices) {
+			try { notice.hide(); } catch { /* already gone */ }
+		}
+		this.liveNotices.clear();
+		for (const panel of this.statusPanels) {
+			try { panel.finish(false); panel.destroy(); } catch { /* already gone */ }
+		}
+		this.statusPanels = [];
 		new Notice("Stopping source operation…");
 	}
 
@@ -4295,6 +4319,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		if (op === null) return [];
 		const owns = operationId === undefined;
 		const progress = new Notice(`${title}…`, 0);
+		this.liveNotices.add(progress);
 		const stop = progress.messageEl.createEl("button", { text: "Stop" });
 		stop.addEventListener("click", () => {
 			stop.disabled = true;
@@ -4327,6 +4352,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			}, () => this.isSourceCancelled(op), review);
 		} finally {
 			progress.hide();
+			this.liveNotices.delete(progress);
 			if (owns) this.endSourceOperation(op);
 		}
 	}
@@ -6615,6 +6641,8 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			// is re-fetched from its cache and re-rendered, not merely re-rendered.
 			const scriptsAt = templateChangedAt(store, "pipeline");
 			if (scriptsAt > 0 && renderedMs("pipeline") < scriptsAt) {
+				const tried = Number(stat?.scriptsTried ?? 0);
+				if (tried >= scriptsAt) continue; // attempted for this change already
 				out.push({ work, kinds: null, refetch: true });
 				continue;
 			}
@@ -6682,6 +6710,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		const stats = await this.loadSourceStats();
 		const pubs = await this.loadPublicationMap();
 		const notice = new Notice("Updating imported sources…", 0);
+		this.liveNotices.add(notice);
 		const stop = notice.messageEl.createEl("button", { text: "Stop" });
 		stop.addEventListener("click", () => {
 			stop.disabled = true;
@@ -6761,6 +6790,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			}
 		} finally {
 			notice.hide();
+			this.liveNotices.delete(notice);
 			// Every render must leave the baseline matching what it wrote, or the
 			// next pass reports its own output as a user edit.
 			await this.updateNoteBaselines(contentPaths);
@@ -6893,17 +6923,23 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			if (includeAuto) {
 				// A work whose *scripts* moved is rebuilt from its cached source, not
 				// just re-rendered: the model body itself came from those scripts.
+				const stats = await this.loadSourceStats();
+				let touched = false;
 				for (const s of stale) {
 					if (s.refetch) {
+						const key = this.workKey(s.work);
+						stats[key] = { ...stats[key], scriptsTried: Date.now() };
+						touched = true;
 						try {
 							await this.reinstallSource(s.work, "auto");
 						} catch (e) {
-							console.error("[midad-arabic-sources] rebuild", this.workKey(s.work), e);
+							console.error("[midad-arabic-sources] rebuild", key, e);
 						}
 						continue;
 					}
 					rerender.push({ work: s.work, kinds: s.kinds });
 				}
+				if (touched) await this.saveSourceStats(stats);
 			}
 			if (rerender.length) {
 				await this.renderStaleScoped(rerender, "auto", yamlOnly && incomplete.length === 0);
