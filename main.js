@@ -30471,14 +30471,32 @@ ${page.body}`);
         await this.refreshSourcesIndex();
     };
     const autoCount = stale.length + (indexDirty ? 1 : 0) + staleNotes.length + staleAdopted.length;
+    const summarise = async () => {
+      try {
+        const stillStale = (await this.findStaleSourceWorks()).filter((entry) => entry.refetch).length;
+        const stillNotes = (await this.findStaleTranscriptionNotes(pipeline)).length + (await this.findStaleAdoptedNotes(pipeline)).length;
+        const left = stillStale + stillNotes;
+        if (left) {
+          new import_obsidian20.Notice(`${left} generated note group(s) are still out of date \u2014 re-render them from Manage text sources.`, 9e3);
+        } else if (autoCount === 0) {
+          new import_obsidian20.Notice("Imported sources are up to date.", 4e3);
+        } else {
+          new import_obsidian20.Notice(`Imported sources updated (${autoCount}).`, 5e3);
+        }
+      } catch (e) {
+      }
+    };
     if (!autoCount) {
       await finish(false);
+      await summarise();
       return;
     }
     if (((_b2 = this.settings.autoUpdateOnChange) != null ? _b2 : this.settings.autoUpdateSourceTemplates) === true) {
       await finish(true);
+      await summarise();
     } else if (((_c = this.settings.autoUpdateOnChange) != null ? _c : this.settings.autoUpdateSourceTemplates) === false) {
       await finish(false);
+      await summarise();
     } else {
       this.awaitingSourceConsent = true;
       new SourceTemplateUpdateConsentModal(this.app, autoCount, (choice) => {
@@ -30488,10 +30506,14 @@ ${page.body}`);
               this.settings.autoUpdateOnChange = true;
               await this.saveSettings();
               await finish(true);
+              await summarise();
             } else if (choice === "no") {
               this.settings.autoUpdateOnChange = false;
               await this.saveSettings();
               await finish(false);
+              await summarise();
+            } else {
+              await summarise();
             }
           } finally {
             this.awaitingSourceConsent = false;

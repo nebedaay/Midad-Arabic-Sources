@@ -7027,14 +7027,34 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			if (includeAuto && indexDirty) await this.refreshSourcesIndex();
 		};
 		const autoCount = stale.length + (indexDirty ? 1 : 0) + staleNotes.length + staleAdopted.length;
+		// Say what the pass did. A silent pass leaves the reader unable to tell an
+		// idle check from a stalled update, which is worse than a short notice.
+		const summarise = async (): Promise<void> => {
+			try {
+				const stillStale = (await this.findStaleSourceWorks()).filter((entry) => entry.refetch).length;
+				const stillNotes = (await this.findStaleTranscriptionNotes(pipeline)).length
+					+ (await this.findStaleAdoptedNotes(pipeline)).length;
+				const left = stillStale + stillNotes;
+				if (left) {
+					new Notice(`${left} generated note group(s) are still out of date — re-render them from Manage text sources.`, 9000);
+				} else if (autoCount === 0) {
+					new Notice("Imported sources are up to date.", 4000);
+				} else {
+					new Notice(`Imported sources updated (${autoCount}).`, 5000);
+				}
+			} catch { /* a summary must never fail the pass */ }
+		};
 		if (!autoCount) {
 			await finish(false);
+			await summarise();
 			return;
 		}
 		if ((this.settings.autoUpdateOnChange ?? this.settings.autoUpdateSourceTemplates) === true) {
 			await finish(true);
+			await summarise();
 		} else if ((this.settings.autoUpdateOnChange ?? this.settings.autoUpdateSourceTemplates) === false) {
 			await finish(false);
+			await summarise();
 		} else {
 			// Hold the guard while the prompt is open, so another pass cannot stack
 			// behind it and ask the same question twice.
@@ -7046,10 +7066,15 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 							this.settings.autoUpdateOnChange = true;
 							await this.saveSettings();
 							await finish(true);
+							await summarise();
 						} else if (choice === "no") {
 							this.settings.autoUpdateOnChange = false;
 							await this.saveSettings();
 							await finish(false);
+							await summarise();
+						} else {
+							// Dismissed: nothing was updated, and the reader asked nothing.
+							await summarise();
 						}
 					} finally {
 						this.awaitingSourceConsent = false;
