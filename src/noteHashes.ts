@@ -24,11 +24,29 @@ interface NoteHashIndex {
 	notes: Record<string, NoteHashRecord>;
 }
 
-/** Hash only the managed region, falling back to the body for unmanaged notes. */
+/**
+ * Hash the part of a note that Midad owns.
+ *
+ * A repository note wraps its generated body in the managed span, so the hash
+ * covers that span. A transcription carries only the bare marker pair at the
+ * top of the body (`<span class="mas-managed">mas-managed</span>`) — the
+ * pipeline owns the whole body there — so a region that holds nothing but the
+ * marker is ignored and the body is hashed instead. Hashing the marker alone
+ * gave every transcription the same constant hash, which never matched the
+ * baseline recorded from the rendered body and made every re-render look like
+ * an edit.
+ */
 export function managedHash(text: string): string {
 	const prior = splitNote(text);
 	const region = findManagedRegion(prior.body);
-	return hashString(region ? prior.body.slice(region.start, region.end) : prior.body);
+	if (region) {
+		const inner = prior.body.slice(region.start, region.end)
+			.replace(/<[^>]*>/g, "")
+			.replace(/\/?mas-managed/g, "")
+			.trim();
+		if (inner) return hashString(prior.body.slice(region.start, region.end));
+	}
+	return hashString(prior.body);
 }
 
 /**

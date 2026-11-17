@@ -292,7 +292,25 @@ def main():
             # romanized bibliography.
             standalone = mv.find_zotero(citekey) is None
             tpp = load("transcription-postprocess.py")
-            tpp.run(raw_path, out_path=processed, metadata=True)
+            # A tafsīr is reprocessed in commentary mode, exactly like the
+            # in-place path: without this the margin markers and the continuity
+            # rules are lost, so a re-rendered tafsīr volume silently loses
+            # every verse heading. The mode lives on the parent note.
+            tafsir = False
+            try:
+                parent = mv.dest_path(citekey, "transcription", None, standalone)
+                mode_source = parent if parent.exists() else mv.dest_path(
+                    citekey, "transcription", volume, unit=unit)
+                if mode_source.exists():
+                    mode = mv._existing_scalar(mode_source, "midad-transcription-mode").strip().lower()
+                    topics = mv._existing_list(mode_source, "topics")
+                    tafsir = mode == "tafsir" or any(
+                        "tafsir" in topic.lower().replace("ī", "i").replace("ā", "a")
+                        for topic in topics
+                    )
+            except Exception:
+                tafsir = False
+            tpp.run(raw_path, out_path=processed, metadata=True, tafsir=tafsir)
             corrections = load_corrections(src)
             update = load("markdown-update.py").update_markdown if corrections else None
             processed.write_text(
