@@ -30213,7 +30213,7 @@ ${page.body}`);
     return count;
   }
   async findStaleSourceWorks() {
-    var _a2, _b2, _c, _d;
+    var _a2, _b2, _c, _d, _e;
     const store = await this.loadSourceHashes();
     const manifest = await this.loadSourceManifest();
     const pending2 = await this.loadPendingDeletions();
@@ -30264,8 +30264,8 @@ ${page.body}`);
       const modelRel = (0, import_obsidian20.normalizePath)(`.midad-arabic-sources/source-models/${work.collection}/${work.id}.json`);
       const modelStat = await this.app.vault.adapter.stat(modelRel).catch(() => null);
       const renderedAt = hasRendered ? Math.max(0, ...Object.values(rendered != null ? rendered : {})) : legacyMs;
-      if (renderedAt > 0 && modelStat && modelStat.mtime > 0 && modelStat.mtime > renderedAt) {
-        out.push({ work, kinds: null });
+      if (renderedAt > 0 && modelStat && modelStat.mtime > 0 && modelStat.mtime > renderedAt && ((_e = stat == null ? void 0 : stat.modelTried) != null ? _e : 0) < modelStat.mtime) {
+        out.push({ work, kinds: null, modelAt: modelStat.mtime });
         continue;
       }
       if (!kinds.size && !stale("hub"))
@@ -30275,7 +30275,7 @@ ${page.body}`);
     return out;
   }
   async renderStaleScoped(items, kind = "auto", yamlOnly = false) {
-    var _a2, _b2, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m, _n, _o;
+    var _a2, _b2, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m, _n, _o, _p, _q;
     if (!items.length)
       return;
     const review = yamlOnly ? "overwrite" : kind === "auto" ? this.autoReview() === "skip" ? "skip" : "save" : "ask";
@@ -30314,6 +30314,7 @@ ${page.body}`);
           break;
         const label = String((_b2 = (_a2 = it.work.title) != null ? _a2 : it.work.dir) != null ? _b2 : it.work.id);
         const nth = `${++done}/${items.length}`;
+        void this.logRender(`scoped start ${String((_c = it.work.key) != null ? _c : it.work.id)} (${nth})`);
         notice.setMessage(`Updating imported sources: ${nth} \u2014 ${label}`);
         const key = this.workKey(it.work);
         const legacy = this.hubUpdatedMs(it.work);
@@ -30322,7 +30323,7 @@ ${page.body}`);
           if (!await this.app.vault.adapter.exists(rel))
             continue;
           const model = JSON.parse(await this.app.vault.adapter.read(rel));
-          const pub = (_c = pubs[key]) != null ? _c : {};
+          const pub = (_d = pubs[key]) != null ? _d : {};
           model.work.publication = { ...pub, mas_note: this.masNote(pub) };
           model.work.canonical_root = canonicalRoot;
           model.work.canonical = model.work.collection === "quran-text" && String(model.work.id) === canonicalId;
@@ -30334,22 +30335,22 @@ ${page.body}`);
             const pct = steps ? Math.floor(step / steps * 100) : 0;
             notice.setMessage(`Updating imported sources: ${nth} \u2014 ${label} \u2014 ${step}/${steps} notes (${pct}%)`);
           };
-          const seen = new Map(Object.entries((_e = (_d = stats[key]) == null ? void 0 : _d.units) != null ? _e : {}));
+          const seen = new Map(Object.entries((_f = (_e = stats[key]) == null ? void 0 : _e.units) != null ? _f : {}));
           if (!await this.reviewChangedNotes(expectedNotePaths(model, outRoot, canonicalRoot, canonicalId), review))
             continue;
-          const written = yamlOnly ? await renderModelToVault(this.app, templates, model, outRoot, false, onStep, (_f = it.kinds) != null ? _f : void 0, seen, () => this.isSourceCancelled(op), true) : await renderModelToVault(this.app, templates, model, outRoot, false, onStep, (_g = it.kinds) != null ? _g : void 0, seen, () => this.isSourceCancelled(op));
+          const written = yamlOnly ? await renderModelToVault(this.app, templates, model, outRoot, false, onStep, (_g = it.kinds) != null ? _g : void 0, seen, () => this.isSourceCancelled(op), true) : await renderModelToVault(this.app, templates, model, outRoot, false, onStep, (_h = it.kinds) != null ? _h : void 0, seen, () => this.isSourceCancelled(op));
           contentPaths.push(...written);
           await this.stampUpdated(written);
           const now = Date.now();
-          const rendered = { ...(_i = (_h = stats[key]) == null ? void 0 : _h.rendered) != null ? _i : {} };
-          if (!((_j = stats[key]) == null ? void 0 : _j.rendered)) {
-            for (const tkey of this.templateKeysFor(String((_k = it.work.collection) != null ? _k : "")))
+          const rendered = { ...(_j = (_i = stats[key]) == null ? void 0 : _i.rendered) != null ? _j : {} };
+          if (!((_k = stats[key]) == null ? void 0 : _k.rendered)) {
+            for (const tkey of this.templateKeysFor(String((_l = it.work.collection) != null ? _l : "")))
               rendered[tkey] = legacy;
           }
           rendered["hub"] = now;
           if (yamlOnly)
-            rendered["pipeline"] = (_l = rendered["pipeline"]) != null ? _l : legacy;
-          for (const tkey of this.templateKeysFor(String((_m = it.work.collection) != null ? _m : ""))) {
+            rendered["pipeline"] = (_m = rendered["pipeline"]) != null ? _m : legacy;
+          for (const tkey of this.templateKeysFor(String((_n = it.work.collection) != null ? _n : ""))) {
             if (tkey === "hub")
               continue;
             const kind2 = SOURCE_TEMPLATE_KIND[tkey];
@@ -30361,12 +30362,13 @@ ${page.body}`);
             rendered,
             units: Object.fromEntries(seen),
             notes: expectedNotePaths(model, outRoot, canonicalRoot, canonicalId).length,
-            schema: Number((_n = model.schema) != null ? _n : 0),
-            render: requiredRenderVersion(String((_o = model.work.collection) != null ? _o : ""))
+            schema: Number((_o = model.schema) != null ? _o : 0),
+            render: requiredRenderVersion(String((_p = model.work.collection) != null ? _p : ""))
           };
         } catch (e) {
           if (this.isSourceCancelled(op))
             break;
+          void this.logRender(`work failed ${String((_q = it.work.key) != null ? _q : it.work.id)}: ${e instanceof Error ? e.message : String(e)}`);
           console.error("[midad-arabic-sources] scoped render", it.work.key, e);
         }
       }
@@ -30468,6 +30470,11 @@ ${page.body}`);
         const stats = await this.loadSourceStats();
         let touched = false;
         for (const s of stale) {
+          if (s.modelAt) {
+            const key = this.workKey(s.work);
+            stats[key] = { ...stats[key], modelTried: s.modelAt };
+            touched = true;
+          }
           if (s.refetch) {
             const key = this.workKey(s.work);
             stats[key] = { ...stats[key], scriptsTried: Date.now() };

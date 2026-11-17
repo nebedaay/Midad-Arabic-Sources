@@ -517,6 +517,8 @@ interface SourceStat {
 	schema?: number;
 	/** When a script-driven rebuild was last attempted (epoch ms). */
 	scriptsTried?: number;
+	/** The model mtime a re-render was last attempted for (epoch ms). */
+	modelTried?: number;
 	/** The *render* version this work was last rendered with (see below). */
 	render?: number;
 	/** Note path → hash of the content last rendered there (see `contentHash`). */
@@ -6709,12 +6711,12 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 	 * template re-renders only the roots. A scoped render always rewrites the hub
 	 * too, because its `updated` is the work's staleness watermark.
 	 */
-	async findStaleSourceWorks(): Promise<Array<{ work: JsonObject; kinds: Set<string> | null; refetch?: boolean }>> {
+	async findStaleSourceWorks(): Promise<Array<{ work: JsonObject; kinds: Set<string> | null; refetch?: boolean; modelAt?: number }>> {
 		const store = await this.loadSourceHashes();
 		const manifest = await this.loadSourceManifest();
 		const pending = await this.loadPendingDeletions();
 		const stats = await this.loadSourceStats();
-		const out: Array<{ work: JsonObject; kinds: Set<string> | null; refetch?: boolean }> = [];
+		const out: Array<{ work: JsonObject; kinds: Set<string> | null; refetch?: boolean; modelAt?: number }> = [];
 		for (const work of manifest) {
 			if (this.workStatus(work) !== "installed") continue;
 			if (pending.has(this.workKey(work))) continue;
@@ -6769,8 +6771,11 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			// neither a render watermark nor a dated hub note would otherwise be older
 			// than *any* model file and be re-rendered on every pass, which is the
 			// opposite of the careful scoping this check exists for.
-			if (renderedAt > 0 && modelStat && modelStat.mtime > 0 && modelStat.mtime > renderedAt) {
-				out.push({ work, kinds: null });
+			if (renderedAt > 0 && modelStat && modelStat.mtime > 0 && modelStat.mtime > renderedAt
+				&& (stat?.modelTried ?? 0) < modelStat.mtime) {
+				// Attempt once per model build: a render that keeps failing must not
+				// put the work back in the queue on every pass.
+				out.push({ work, kinds: null, modelAt: modelStat.mtime });
 				continue;
 			}
 			if (!kinds.size && !stale("hub")) continue; // nothing stale
@@ -6824,6 +6829,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 				if (this.isSourceCancelled(op)) break;
 				const label = String(it.work.title ?? it.work.dir ?? it.work.id);
 				const nth = `${++done}/${items.length}`;
+				void this.logRender(`scoped start ${String(it.work.key ?? it.work.id)} (${nth})`);
 				notice.setMessage(`Updating imported sources: ${nth} — ${label}`);
 				const key = this.workKey(it.work);
 				const legacy = this.hubUpdatedMs(it.work); // read before the render bumps it
@@ -6885,6 +6891,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 					};
 				} catch (e) {
 					if (this.isSourceCancelled(op)) break;
+					void this.logRender(`work failed ${String(it.work.key ?? it.work.id)}: ${e instanceof Error ? e.message : String(e)}`);
 					console.error("[midad-arabic-sources] scoped render", it.work.key, e);
 				}
 			}
@@ -7026,6 +7033,11 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 				const stats = await this.loadSourceStats();
 				let touched = false;
 				for (const s of stale) {
+					if (s.modelAt) {
+						const key = this.workKey(s.work);
+						stats[key] = { ...stats[key], modelTried: s.modelAt };
+						touched = true;
+					}
 					if (s.refetch) {
 						const key = this.workKey(s.work);
 						stats[key] = { ...stats[key], scriptsTried: Date.now() };
