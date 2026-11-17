@@ -11622,8 +11622,13 @@ def run(input_path, out_path=None, metadata=False, tafsir=False, from_gemini=Tru
     content, cross_guillemets = tfq.fix_cross_page_guillemets(content)
     print(f"  Cross-page quoted continuations: {cross_guillemets}")
 
-    content, discovered = tfq.discover_and_mark_quotes(content, tafsir=tafsir)
-    print(f"  Discovered: {len(discovered)}")
+    if from_gemini:
+        # Gemini writes quotations in its own shapes; only its output needs the
+        # discovery pass. An already-rendered note has been through it, and
+        # running it again on our own output is not idempotent \u2014 it would keep
+        # finding new "quotes" inside parentheses on every update.
+        content, discovered = tfq.discover_and_mark_quotes(content, tafsir=tafsir)
+        print(f"  Discovered: {len(discovered)}")
 
     # Add links before discarding the source citations: a verified adjacent
     # citation is a cheap first search hint.
@@ -11641,8 +11646,11 @@ def run(input_path, out_path=None, metadata=False, tafsir=False, from_gemini=Tru
     print(f"  Open-fragment links: {open_links}")
 
     if tafsir:
-        content, short_fragments = tfq.mark_short_fragments(content)
-        print(f"  Short verse fragments: {short_fragments}")
+        if from_gemini:
+            # The short-fragment pass links bare parentheticals; on a rendered
+            # note it would keep turning ordinary glosses into quotations.
+            content, short_fragments = tfq.mark_short_fragments(content)
+            print(f"  Short verse fragments: {short_fragments}")
         content, repeated = tfs.keep_first_verse_link(content)
         print(f"  Repeated verse links removed: {repeated}")
 
@@ -11687,6 +11695,12 @@ def run(input_path, out_path=None, metadata=False, tafsir=False, from_gemini=Tru
     # Enforce one blank line between all blocks (fixes "text\\n---" setext
     # headings) and collapse any excess.
     content = pp.normalize_spacing(content)
+    # A citation link is inserted with a space on each side; the surrounding
+    # text usually supplies one too, leaving a double space that the *next*
+    # update would collapse. Collapsing it here makes an update of an already
+    # updated note byte-identical, which is what keeps the "changed since the
+    # last render" review from firing on notes nobody touched.
+    content = re.sub(r'([\\]\\)])[ \\t]{2,}', r'\\1 ', content)
     content = normalize_page_separators(content)
     content = tfq.strip_orphan_quote_classes(content)
     content, raw_citations = tfq.strip_raw_quran_citations(content)
