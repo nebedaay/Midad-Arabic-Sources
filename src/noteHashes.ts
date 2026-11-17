@@ -78,14 +78,17 @@ export class NoteHashStore {
 
 	private load(): NoteHashIndex {
 		if (this.index) return this.index;
-		let loaded: NoteHashIndex | null = null;
 		try {
-			const raw = JSON.parse(fs.readFileSync(this.filePath(), "utf8")) as NoteHashIndex;
-			loaded = { schema: 3, notes: raw.notes ?? {} };
+			const raw = JSON.parse(fs.readFileSync(this.filePath(), "utf8")) as NoteHashIndex & { schema?: number };
+			const current = raw.schema === 3;
+			const loaded: NoteHashIndex = { schema: 3, notes: raw.notes ?? {} };
+			// Assign before upgrading: the upgrade saves, and save() reads the
+			// index — assigning afterwards made that re-enter load() forever.
+			this.index = loaded;
+			if (!current) this.upgradeBaselines(loaded);
 		} catch {
-			loaded = this.migrate();
+			this.index = this.migrate();
 		}
-		this.index = this.upgradeBaselines(loaded, loaded.schema === 3);
 		return this.index;
 	}
 
@@ -98,8 +101,7 @@ export class NoteHashStore {
 	 * no information about the reader's edits, so it is replaced with the body
 	 * hash; notes with a real managed region (repository notes) keep theirs.
 	 */
-	private upgradeBaselines(index: NoteHashIndex, current: boolean): NoteHashIndex {
-		if (current) return index;
+	private upgradeBaselines(index: NoteHashIndex): void {
 		// Schema 3 re-baselines every managed note from what is on disk. The
 		// earlier hash could not track some notes (a transcription's region was
 		// only its marker), so every pass reported its own output as the reader's
@@ -119,7 +121,6 @@ export class NoteHashStore {
 			changed = true;
 		}
 		if (changed) this.save();
-		return index;
 	}
 
 	private migrate(): NoteHashIndex {
@@ -159,7 +160,7 @@ export class NoteHashStore {
 	}
 
 	private save(): void {
-		const index = this.load();
+		const index = this.index ?? this.load();
 		const file = this.filePath();
 		const dir = file.slice(0, file.lastIndexOf("/"));
 		fs.mkdirSync(dir, { recursive: true });

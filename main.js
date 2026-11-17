@@ -15483,19 +15483,19 @@ var _NoteHashStore = class {
     var _a2;
     if (this.index)
       return this.index;
-    let loaded = null;
     try {
       const raw = JSON.parse(fs2.readFileSync(this.filePath(), "utf8"));
-      loaded = { schema: 3, notes: (_a2 = raw.notes) != null ? _a2 : {} };
+      const current = raw.schema === 3;
+      const loaded = { schema: 3, notes: (_a2 = raw.notes) != null ? _a2 : {} };
+      this.index = loaded;
+      if (!current)
+        this.upgradeBaselines(loaded);
     } catch (e) {
-      loaded = this.migrate();
+      this.index = this.migrate();
     }
-    this.index = this.upgradeBaselines(loaded, loaded.schema === 3);
     return this.index;
   }
-  upgradeBaselines(index, current) {
-    if (current)
-      return index;
+  upgradeBaselines(index) {
     let changed = false;
     for (const [path3, record] of Object.entries(index.notes)) {
       let text;
@@ -15512,7 +15512,6 @@ var _NoteHashStore = class {
     }
     if (changed)
       this.save();
-    return index;
   }
   migrate() {
     var _a2, _b2, _c, _d, _e, _f, _g;
@@ -15551,7 +15550,8 @@ var _NoteHashStore = class {
     return index;
   }
   save() {
-    const index = this.load();
+    var _a2;
+    const index = (_a2 = this.index) != null ? _a2 : this.load();
     const file = this.filePath();
     const dir = file.slice(0, file.lastIndexOf("/"));
     fs2.mkdirSync(dir, { recursive: true });
