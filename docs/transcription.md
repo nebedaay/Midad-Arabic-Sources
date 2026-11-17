@@ -86,7 +86,7 @@ The editor holds only the **text-specific** part. The pipeline appends it to a s
 
 - **Transcribe this item’s PDF file(s)** — the full pipeline above.
 - **Transcribe a PDF…** — choose any PDF on disk, with no Zotero item, then verify the guessed title and author.
-- **Re-render this source** — re-run post-processing for the active transcription/translation from its archived JSON. On a volume note, choose only that volume or all volumes. If there is no archive, it falls back to in-place post-processing.
+- **Re-render this source** — re-run post-processing for the active transcription/translation from its archived JSON. On a volume note it re-renders that volume only; on the work’s parent note (the volume index) it re-renders every volume. If there is no archive, it falls back to in-place post-processing.
 - **Post-process this transcription/translation** — run the current local post-processing scripts over the open note, without an archive or Gemini.
 - **Update Markdown formatting in this note** — run the Markdown-only layer over an already-rendered note; it preserves existing TOC links, links, callouts, and code fences while applying safe formatting standards.
 - **Commit edits to archived transcription/translation** — save the current note’s page bodies as corrections for its archived batch; a later re-render from the archive reapplies them.

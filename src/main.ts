@@ -5662,7 +5662,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 	 * volume notes. The archive contains the OCR/translation JSON, so this
 	 * never calls Gemini.
 	 */
-	async rerenderArchivedNote(file: TAbstractFile, options: { outPath?: string; skipApply?: boolean; skipChangeReview?: boolean; onlyCurrentVolume?: boolean; review?: ChangeReview } = {}): Promise<string | null> {
+	async rerenderArchivedNote(file: TAbstractFile, options: { outPath?: string; skipApply?: boolean; skipChangeReview?: boolean; review?: ChangeReview } = {}): Promise<string | null> {
 		const info = archivedNoteInfo(file.path);
 		if (!info) {
 			new Notice("That note does not belong to an imported source and has no archived transcription.");
@@ -5700,6 +5700,9 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		}
 
 		if (review === "skip") return null;
+		// A volume note re-renders its own volume; the parent note is the index
+		// that re-renders all of them. Nothing asks which — the note you invoked
+		// it on is the answer, and the other volumes are left as they are.
 		let chosen = batches;
 		if (info.volume != null) {
 			const exact = batches.filter((entry) => entry.info.volume === info.volume);
@@ -5707,21 +5710,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 				new Notice(`No archived ${info.type ?? "transcription"} batch found for @${info.citekey}, vol. ${info.volume}.`);
 				return null;
 			}
-			if (!options.onlyCurrentVolume && !options.outPath && batches.some((entry) => entry.info.volume !== info.volume)) {
-				const scope = await new Promise<"one" | "all" | null>((resolve) => {
-					new ReRenderBatchScopeModal(
-						this.app,
-						info.citekey,
-						info.volume,
-						batches.length,
-						resolve
-					).open();
-				});
-				if (!scope) return null;
-				chosen = scope === "one" ? exact : batches;
-			} else {
-				chosen = exact;
-			}
+			chosen = exact;
 		}
 
 		const canonicalPath = file.path.replace(/\.Version\d+\.md$/i, ".md");
@@ -6062,7 +6051,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 				return false;
 			}
 		} else {
-			rendered = await this.rerenderArchivedNote(file, { outPath, skipApply: true, skipChangeReview: true, onlyCurrentVolume: true });
+			rendered = await this.rerenderArchivedNote(file, { outPath, skipApply: true, skipChangeReview: true });
 		}
 		if (!rendered) {
 			new Notice("Could not render version 0 for this note.");
@@ -9307,59 +9296,6 @@ class SourceRootMoveModal extends Modal {
 		if (!this.settled) {
 			this.settled = true;
 			this.onChoose(false);
-		}
-	}
-}
-
-class ReRenderBatchScopeModal extends Modal {
-	citekey: string;
-	volume: number;
-	count: number;
-	onChoose: (scope: "one" | "all" | null) => void;
-	settled = false;
-
-	constructor(
-		app: App,
-		citekey: string,
-		volume: number,
-		count: number,
-		onChoose: (scope: "one" | "all" | null) => void
-	) {
-		super(app);
-		this.citekey = citekey;
-		this.volume = volume;
-		this.count = count;
-		this.onChoose = onChoose;
-	}
-
-	choose(scope: "one" | "all" | null): void {
-		if (this.settled) return;
-		this.settled = true;
-		this.onChoose(scope);
-		this.close();
-	}
-
-	onOpen(): void {
-		const { contentEl } = this;
-		this.setTitle(`Re-render @${this.citekey}`);
-		contentEl.createEl("p", {
-			text: `This work has ${this.count} archived batch(es). Re-render only volume ${this.volume}, or every archived batch?`,
-		});
-		new Setting(contentEl)
-			.addButton((b) => b.setButtonText("Cancel").onClick(() => this.choose(null)))
-			.addButton((b) =>
-				b.setButtonText(`Only vol. ${this.volume}`).onClick(() => this.choose("one"))
-			)
-			.addButton((b) =>
-				b.setButtonText(`All ${this.count} archived batches`).setCta().onClick(() => this.choose("all"))
-			);
-	}
-
-	onClose(): void {
-		this.contentEl.empty();
-		if (!this.settled) {
-			this.settled = true;
-			this.onChoose(null);
 		}
 	}
 }
