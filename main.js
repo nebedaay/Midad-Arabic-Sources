@@ -32248,6 +32248,7 @@ var ReprocessModal = class extends import_obsidian20.Modal {
 var SourceTemplateUpdateConsentModal = class extends import_obsidian20.Modal {
   constructor(app2, count, onChoose) {
     super(app2);
+    this.chosen = false;
     this.count = count;
     this.onChoose = onChoose;
   }
@@ -32258,18 +32259,23 @@ var SourceTemplateUpdateConsentModal = class extends import_obsidian20.Modal {
       text: `The renderer changed \u2014 an import template, the transcription/translation scripts, or an index \u2014 and ${this.count} note(s) were produced by an older version. Update them now? A note you edited keeps your text as the default version, and the new render is saved as a version you can switch to.`
     });
     new import_obsidian20.Setting(contentEl).addButton((b) => b.setButtonText("Yes, update").setCta().onClick(() => {
+      this.chosen = true;
       this.close();
       this.onChoose("yes");
     })).addButton((b) => b.setButtonText("Not now").onClick(() => {
+      this.chosen = true;
       this.close();
       this.onChoose("skip");
     })).addButton((b) => b.setButtonText("Never").onClick(() => {
+      this.chosen = true;
       this.close();
       this.onChoose("no");
     }));
   }
   onClose() {
     this.contentEl.empty();
+    if (!this.chosen)
+      this.onChoose("skip");
   }
 };
 var ReconcileSourcesModal = class extends import_obsidian20.Modal {

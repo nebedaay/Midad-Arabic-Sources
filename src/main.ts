@@ -9397,6 +9397,8 @@ class ReprocessModal extends Modal {
 class SourceTemplateUpdateConsentModal extends Modal {
 	count: number;
 	onChoose: (choice: "yes" | "no" | "skip") => void;
+	/** Whether a button was pressed; a dismissed dialog counts as "not now". */
+	private chosen = false;
 
 	constructor(app: App, count: number, onChoose: (choice: "yes" | "no" | "skip") => void) {
 		super(app);
@@ -9413,18 +9415,21 @@ class SourceTemplateUpdateConsentModal extends Modal {
 		new Setting(contentEl)
 			.addButton((b) =>
 				b.setButtonText("Yes, update").setCta().onClick(() => {
+					this.chosen = true;
 					this.close();
 					this.onChoose("yes");
 				})
 			)
 			.addButton((b) =>
 				b.setButtonText("Not now").onClick(() => {
+					this.chosen = true;
 					this.close();
 					this.onChoose("skip");
 				})
 			)
 			.addButton((b) =>
 				b.setButtonText("Never").onClick(() => {
+					this.chosen = true;
 					this.close();
 					this.onChoose("no");
 				})
@@ -9433,6 +9438,10 @@ class SourceTemplateUpdateConsentModal extends Modal {
 
 	onClose(): void {
 		this.contentEl.empty();
+		// A dialog dismissed with Escape or a click outside must settle, or the
+		// update pass waiting on it never finishes and its progress notice stays
+		// on screen forever.
+		if (!this.chosen) this.onChoose("skip");
 	}
 }
 
