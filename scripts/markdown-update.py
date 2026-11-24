@@ -174,6 +174,7 @@ def _update_markdown_body(body: str, *, quran: bool, tafsir: bool,
         # paragraph — and therefore a definition — only once demoted.
         body, _notes = normalize_translation_footnotes(body)
         body, _moved = reassociate_footnotes(body)
+        body, _bare = _load("quran.py").strip_bare_basmala(body)
         if tafsir:
             body, _runs = _load("quran_render.py").dedupe_run_links(body)
     body, _runs = collapse_ornate_runs(body)

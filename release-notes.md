@@ -30,8 +30,11 @@ Citations that open and read correctly, saved versions that answer at once, and 
 
 - Two links to the same verse in a row are one citation, including the old aliased form beside the new one.
 - A quotation that opens with the basmala is the opening of the sūra being read, not a citation of al-Fātiḥa: the page's `سورة …` heading decides, and without one the following quotation does (`﴿ٱلَّذِىٓ أَنزَلَ عَلَىٰ عَبْدِهِ ٱلْكِتَٰبَ﴾` is al-Kahf). The marginal marker is realigned with the citation.
+- A basmala is a verse only in al-Fātiḥa, so no basmala is cited anywhere else — but the author's brackets stay where the author meant them: one that heads its own line is the sūra's opening as the muṣḥaf writes it, and only one quoted *inside* a sentence is plain prose. In al-Fātiḥa it is 1:1, and a span that opens with it and runs on is the range 1:1–(the verse it reaches); an author who cites it *as* 1:1 elsewhere (`﴿بسم الله الرحمن الرحيم﴾ (الفاتحة : ١)`) keeps both the marks and the citation.
 - A short quotation whose words are the next words of the verse just cited is cited in that verse — a commentary glosses word by word.
 - A quotation span never reaches across a paragraph break or a page heading. An unbalanced ornate mark used to make one span from a heading to the next paragraph, and the verse-number stripping inside a span ate the page number and the line break with it, gluing `#### p. 235` to the text that followed.
+
+- A transcription's citations are the OCR model's, not the author's: they may only settle what our own search leaves open, so a fabricated reference cannot steer a link, and a citation that disagrees with the words no longer leaves the quotation uncited — the model's bracket goes and our verified citation takes its place. A repository's citation is the source's and stands as it is.
 
 ### Fixes
 

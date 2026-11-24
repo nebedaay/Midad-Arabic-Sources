@@ -1008,6 +1008,12 @@ def write_note(body: str, citekey: str, doc_type: str, related: list[str] = None
         # the model mislaid can only be one page late: put it back on the page
         # whose own text refers to it.
         body, _moved = reassociate_footnotes(body)
+        # A basmala on its own is prose in a translation too, unless the page is
+        # al-Fātiḥa's.
+        try:
+            body, _bare = _quran_refs().strip_bare_basmala(body)
+        except Exception as error:  # noqa: BLE001
+            print(f"  Basmala un-marking skipped ({error})")
         if tafsir:
             # A translated tafsīr glosses a verse word by word; one citation per
             # run, exactly as the Arabic commentary does.

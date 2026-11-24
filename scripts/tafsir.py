@@ -587,7 +587,11 @@ def process_quran(content: str, *, mode: str = "default", surah: int = 0,
 
     # Add links before discarding the source's citations: a verified adjacent
     # citation is a cheap first search hint.
-    content, n = quran.add_missing_refs(content, hint_surah=surah, hint_verse=ayah)
+    # A transcription's citations are the OCR model's, not the author's, so they
+    # only break a tie in the search; a repository's are the source's own.
+    content, n = quran.add_missing_refs(
+        content, hint_surah=surah, hint_verse=ayah,
+        trust_citations=not (raw_ocr or discover))
     stats["refs_added"] = n
     # A quotation whose words also stand in the sūra the page names is cited
     # there: the heading is what the page is discussing.
@@ -628,6 +632,12 @@ def process_quran(content: str, *, mode: str = "default", surah: int = 0,
             # note it would keep turning ordinary glosses into quotations.
             content, n = quran.mark_short_fragments(content)
             stats["short_fragments"] = n
+    # A basmala standing alone is the sūra's opening formula, not a verse — the
+    # muṣḥaf numbers it only in al-Fātiḥa. It is un-marked here, before the
+    # false-quote pass, which would keep it for verifying as 1:1.
+    content, n = quran.strip_bare_basmala(content)
+    stats["bare_basmala"] = n
+
     # Un-mark before collapsing repeats: a quote whose citation is dropped as a
     # repeat is still a quotation, and must keep its ornate parentheses. The
     # strip asks "did this span resolve to a verse", which is a different

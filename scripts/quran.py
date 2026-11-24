@@ -1655,7 +1655,10 @@ def discover_and_mark_quotes(content: str, tafsir: bool = False) -> tuple[str, l
         adj_start = paren_start + offset
         adj_end = paren_end + offset
         
-        hint = citation_hint(text_clean, new_content, adj_start, adj_end)
+        # Discovery only ever runs over unreviewed OCR, so its citations may
+        # only break a tie as well.
+        hint = citation_hint(text_clean, new_content, adj_start, adj_end,
+                             tie_break=True)
         hint_range = (hint[1], hint[2]) if hint and hint[2] else None
         if hint:
             results = [(hint[0], hint[1], load_verse(hint[0], hint[1]) or "", 1.0)]
@@ -1881,6 +1884,145 @@ def link_open_fragments(content: str, tafsir: bool = False) -> tuple[str, int]:
 _BASMALA_NORM = normalize_arabic("بسم الله الرحمن الرحيم")
 
 
+#: The class an older render left on a quotation, removed with the marks.
+_QURAN_CLASS = "{.quran-quote}"
+
+
+def _latin_key(value: str) -> str:
+    """A Latin transliteration reduced to bare letters (`Sūrat al-Fātiḥa` →
+    `sratalfatiha`), with the diacritics folded rather than deleted — deleting
+    them breaks the word (`fātiḥa` would become `ftia`)."""
+    decomposed = unicodedata.normalize("NFKD", value.lower())
+    return re.sub(r"[^a-z]", "",
+                  "".join(char for char in decomposed if not unicodedata.combining(char)))
+
+
+def _names_fatiha(label: str) -> bool:
+    """Does this heading name Sūrat al-Fātiḥa?"""
+    if "\u0641\u0627\u062a\u062d" in label:
+        return True
+    return "fatiha" in _latin_key(label)
+
+
+def _page_surah(content: str, at: int, headings) -> int:
+    """The sūra the page at `at` is in, Arabic heading first, then English.
+
+    A translation names its sūra in English (`### Sūrat al-Kahf`), which the
+    Arabic heading scan cannot read; only al-Fātiḥa matters here, so only that
+    name is looked for.
+    """
+    number = 0
+    for position, value in headings:
+        if position < at:
+            number = value
+        else:
+            break
+    if number:
+        return number
+    for match in re.finditer(r"(?m)^#{1,6}[ \t]*(.+)$", content[:at]):
+        if _names_fatiha(match.group(1)):
+            return 1
+    return 0
+
+
+def _ornate_pairs(text: str):
+    """(start, end) of every ornate pair, each mark paired with the next of the
+    other kind — right in either write order."""
+    LF, LE = "\ufd3f", "\ufd3e"
+    pairs = []
+    index = 0
+    while index < len(text):
+        opening, closing = text.find(LF, index), text.find(LE, index)
+        if opening < 0 and closing < 0:
+            break
+        if closing < 0 or (0 <= opening < closing):
+            start, other = opening, LE
+        else:
+            start, other = closing, LF
+        end = text.find(other, start + 1)
+        if end < 0:
+            break
+        pairs.append((start, end))
+        index = end + 1
+    return pairs
+
+
+def _heads_a_line(content: str, start: int) -> bool:
+    """Does the span begin its own line, with nothing but markup before it?"""
+    line_start = content.rfind("\n", 0, start) + 1
+    return not content[line_start:start].strip(" \t*~")
+
+
+
+#: A citation to 1:1 that the author wrote beside a basmala.
+_FATIHA_CITATION = re.compile(r"\[\[Q001#1\b")
+
+
+def _cited_beside(content: str, start: int, end: int) -> bool:
+    """Did the author cite this basmala as al-Fātiḥa 1:1?
+
+    The citation sits beside the span (`﴿…﴾ (الفاتحة : ١)`), or — in a passage
+    that writes the phrase twice — elsewhere in the same paragraph, and a book
+    that cites it is quoting 1:1 rather than opening a sūra with the formula.
+    """
+    para_start = content.rfind("\n\n", 0, start) + 2
+    para_end = content.find("\n\n", end)
+    if para_end < 0:
+        para_end = len(content)
+    return bool(_FATIHA_CITATION.search(content[para_start:para_end]))
+
+
+def strip_bare_basmala(content: str) -> tuple[str, int]:
+    """Un-mark a basmala that stands alone: it is prose, not a quotation.
+
+    `﴿بِسْمِ ٱللَّهِ ٱلرَّحْمَٰنِ ٱلرَّحِيمِ﴾` on its own is the formula a sūra
+    opens with, not a verse — the muṣḥaf numbers it only in al-Fātiḥa, where it
+    is 1:1. So the marks and the class go and the words stay as text, except on
+    an al-Fātiḥa page, where the span really is a quotation — or where the
+    author cites it as one, which is what `﴿بسم الله الرحمن الرحيم﴾ (الفاتحة : ١)`
+    does in a book that is not al-Fātiḥa's.
+
+    Only a basmala *inside a sentence* is prose: one that heads its own line is
+    the sūra's opening as the muṣḥaf writes it, and the brackets are the
+    author's way of saying so.
+    """
+    changed = 0
+    headings = surah_headings(content)
+    for start, end in reversed(_ornate_pairs(content)):
+        body = content[start + 1:end]
+        if normalize_arabic(body) != _BASMALA_NORM:
+            continue
+        if _page_surah(content, start, headings) == 1:
+            continue
+        if _cited_beside(content, start, end):
+            continue
+        if _heads_a_line(content, start):
+            # A sūra's basmala is written on its own line before the first
+            # verse; an author who sets it in ornate brackets there is quoting
+            # the muṣḥaf's own opening, so the marks stay.
+            continue
+        # `~﴿~` and `~﴾~` are the invisible page-edge form, so the inner tilde
+        # sits between the mark and the words rather than outside the pair.
+        body = body.strip()
+        if body.startswith("~"):
+            body = body[1:].lstrip()
+        if body.endswith("~"):
+            body = body[:-1].rstrip()
+        left, right = start, end + 1
+        if content.startswith(_QURAN_CLASS, right):
+            right += len(_QURAN_CLASS)
+        # The marks carry their markup with them: an emphasis star, and the
+        # tilde of the invisible page-edge pair (`~﴿~ … ~﴾~`) — left behind, the
+        # two tildes would print the words struck through.
+        while left > 0 and content[left - 1] in "*~":
+            left -= 1
+        while right < len(content) and content[right] in "*~":
+            right += 1
+        content = content[:left] + body + content[right:]
+        changed += 1
+    return content, changed
+
+
 def _split_basmala(text_clean: str) -> tuple[str, bool]:
     """(the words after an opening basmala, whether there was one)."""
     if not normalize_arabic(text_clean).startswith(_BASMALA_NORM):
@@ -2043,6 +2185,11 @@ def realign_local_surah_links(content: str) -> tuple[str, int]:
         if not _matches_cited_verses(local, verse, search):
             return match.group(0)
         end = verse
+        if local == 1 and had_basmala:
+            # In al-Fātiḥa the basmala *is* 1:1, so a span that opens with it and
+            # runs on is the range 1:1–(the verse it reaches).
+            end = max(verse, 1)
+            verse = 1
         span = find_verse_range(search, local, verse)
         if span:
             end = max(span)
@@ -2059,7 +2206,8 @@ def realign_local_surah_links(content: str) -> tuple[str, int]:
 
 
 def add_missing_refs(content: str, hint_surah: int = 0,
-                     hint_verse: int = 0) -> tuple[str, int]:
+                     hint_verse: int = 0,
+                     trust_citations: bool = True) -> tuple[str, int]:
     """Add wikilinks to *LF...LE{quran-quote}* quotes that lack them.
 
     `hint_surah`/`hint_verse` are the passage the body comments on (one block
@@ -2071,6 +2219,9 @@ def add_missing_refs(content: str, hint_surah: int = 0,
     discuss another. Without them the focus drifts
     with the recency weighting, which is what a text with no stated passage
     (a scanned page) has to fall back on.
+
+    `trust_citations` is False for a transcription: its citations are the
+    OCR model's, so `citation_hint` only breaks a tie (`tie_break`).
 
     Returns (new_content, added_count)."""
     LF = '\ufd3f'; LE = '\ufd3e'
@@ -2184,7 +2335,8 @@ def add_missing_refs(content: str, hint_surah: int = 0,
         text = full_match[full_match.index(LF)+1:full_match.index(LE)]
         text_clean = re.sub(r'\s*\.\s*', ' ', text).strip()
         text_clean = re.sub(r'\s*[-–—]?\s*ال?[اآ]?ية\s*$', '', text_clean).strip()
-        hint = citation_hint(text_clean, new_content, m.start(), m.end())
+        hint = citation_hint(text_clean, new_content, m.start(), m.end(),
+                             tie_break=not trust_citations)
         if hint:
             hint_s, hint_v, hint_end = hint
             wikilink = build_wikilink(hint_s, hint_v, end_verse=hint_end)
@@ -2192,9 +2344,16 @@ def add_missing_refs(content: str, hint_surah: int = 0,
             commit(hint_s, hint_v, _end_offset(hint_s, hint_v, normalize_arabic(text_clean)))
             added += 1
             continue
-        if normalize_arabic(text_clean) in BLACKLISTED_PHRASES:
+        if (normalize_arabic(text_clean) in BLACKLISTED_PHRASES
+                and _page_surah(new_content, m.start(), headings) != 1):
+            # A formulaic phrase is not a quotation — except the basmala on an
+            # al-Fātiḥa page, where the muṣḥaf numbers it as 1:1.
             parts.append(keep); continue
-        if re.match(r'\s*[\[\(][^\]\)]*\d', after):
+        if trust_citations and re.match(r'\s*[\[\(][^\]\)]*\d', after):
+            # The source's own citation stands where ours would go. In a
+            # transcription there is no source citation — only the model's — and
+            # a wrong one must not stop the quotation from being cited: it is
+            # dropped below, and our link is the citation.
             parts.append(keep); continue
 
         norm = normalize_arabic(text_clean)
@@ -4018,13 +4177,34 @@ def _verse_marker(stem: str, surah: int, start: int, end: int | None) -> str:
     return f"[[{stem}#{start}|{alias}]]"
 
 
-def citation_hint(text: str, content: str, start: int, end: int) -> tuple[int, int, int | None] | None:
+def _hint_may_decide(text: str) -> bool:
+    """Can our own search settle this quotation, or is a tie the only truth?
+
+    A transcription's citation is the model's, not the author's, so it may only
+    settle what the words leave open: they occur in more than one sūra, or the
+    search finds nothing at all (an awkward fragment, which is exactly where a
+    verified citation is the one piece of evidence there is).
+    """
+    found = find_verse_in_text(text)
+    suras = {row[0] for row in found}
+    return not suras or len(suras) > 1
+
+
+def citation_hint(text: str, content: str, start: int, end: int,
+                  tie_break: bool = False) -> tuple[int, int, int | None] | None:
     """A verified citation adjacent to a quote, used as a first search hint.
 
     The source citation is never trusted on its own: the quoted text must be
     found in the named verse (or range). If verification fails, callers fall
     back to ordinary text matching.
+
+    `tie_break` is for a transcription, whose citations are the model's: there
+    the citation may only decide what our own search leaves open, so a
+    fabricated reference cannot steer a link. A repository's citation is the
+    author's and is used as it stands.
     """
+    if tie_break and not _hint_may_decide(text):
+        return None
     lookup = _build_surah_lookup()
     candidates: list[str] = []
     after = content[end:end + 100]

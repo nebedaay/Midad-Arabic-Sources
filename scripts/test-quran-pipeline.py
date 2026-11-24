@@ -1183,6 +1183,67 @@ check("headings: a span never reaches across a page heading",
 check("headings: a heading alone is not split",
       post.split_page_headings("#### p. 12")[0] == "#### p. 12")
 
+# ── A basmala on its own is prose, not a quotation ──────────────────────────
+# It is the formula a sūra opens with, and the muṣḥaf numbers it only in
+# al-Fātiḥa, where it is 1:1. So it is un-marked everywhere else — and cited
+# there.
+BASMALA = "بِسْمِ ٱللَّهِ ٱلرَّحْمَٰنِ ٱلرَّحِيمِ"
+KAHF = "### سورة الكهف\n\nقال: *" + LF + BASMALA + LE + "{.quran-quote}* ثم قال."
+_kahf, _kh = quran.strip_bare_basmala(KAHF)
+check("basmala: one inside a sentence is prose on another sūra's page",
+      _kh == 1 and LE + "{.quran-quote}" not in _kahf and BASMALA in _kahf, _kahf)
+# On a line of its own it is the sūra's opening as the muṣḥaf writes it, so the
+# author's brackets stay even though it is not a verse there.
+OPENING = "### سورة الكهف\n\n*" + LF + BASMALA + LE + "{.quran-quote}*\n\nالحمد لله."
+check("basmala: a sūra-opening one keeps its marks",
+      quran.strip_bare_basmala(OPENING)[1] == 0)
+FATIHA = "### سورة الفاتحة\n\n*" + LF + BASMALA + LE + "{.quran-quote}*\n\nالحمد لله."
+check("basmala: it is a quotation in al-Fātiḥa", quran.strip_bare_basmala(FATIHA)[1] == 0)
+ENGLISH = "### Sūrat al-Fātiḥa\n\n*" + LE + BASMALA + LF + "{.quran-quote}*\n\nPraise."
+check("basmala: an English al-Fātiḥa heading counts", quran.strip_bare_basmala(ENGLISH)[1] == 0)
+check("basmala: un-marking settles", quran.strip_bare_basmala(_kahf)[1] == 0)
+# The invisible page-edge pair puts its tilde between the mark and the words;
+# left behind, the two tildes would print the phrase struck through.
+EDGE = "### سورة التوبة\n\nقال: ~" + LF + "~" + BASMALA + "~" + LE + "~، ثم.\n"
+_edged, _eh = quran.strip_bare_basmala(EDGE)
+check("basmala: the invisible pair goes with the marks",
+      _eh == 1 and "~" not in _edged and "، ثم" in _edged, _edged)
+# An author may quote the basmala *as* 1:1 in a book that is not al-Fātiḥa's:
+# `﴿بسم الله الرحمن الرحيم﴾ (الفاتحة : ١)`. The citation beside it keeps it.
+CITED = ("### سورة مريم\n\nقال مفتتحا بـ " + LF + BASMALA + LE
+         + " ([[Q001#1|الفاتحة : ١]]) ثم قال.\n")
+check("basmala: a citation beside it keeps the marks", quran.strip_bare_basmala(CITED)[1] == 0)
+check("basmala: a citation for an earlier verse does not",
+      quran.strip_bare_basmala("### سورة مريم\n\n﴿إِنَّ ٱللَّهَ﴾ [[Q001#1]]\n\nقال: "
+                               + LF + BASMALA + LE + " ثم قال.")[1] == 1)
+
+# In al-Fātiḥa the basmala *is* 1:1, so a span that runs on is the range 1:1–2
+# and is cited: the formula is not blacklisted there.
+FATIHA_SPAN = "### سورة الفاتحة\n\n" + LF + BASMALA + " ٱلْحَمْدُ لِلَّهِ رَبِّ ٱلْعَٰلَمِينَ" + LE + "\n"
+_ranged, _stats = tafsir.process_quran(FATIHA_SPAN, mode="tafsir")
+check("basmala: in al-Fātiḥa the whole span is cited from 1:1",
+      "[[Q001#1|2]]" in _ranged, _ranged)
+
+# ── A transcription's citations are the model's, not the author's ────────────
+# They may only settle what our own search leaves open, and a wrong one must not
+# stop the quotation from being cited at all. A repository's citation stands.
+TIE = "ٱللَّهُ لَآ إِلَٰهَ إِلَّا هُوَ ٱلْحَىُّ ٱلْقَيُّومُ"      # 2:255 and 3:2
+ONE = "يَخْرُجُ مِن بَيْنِ ٱلصُّلْبِ وَٱلتَّرَآئِبِ"          # 86:7 alone
+check("citations: a phrase in two sūras leaves a tie to break", quran._hint_may_decide(TIE))
+check("citations: a phrase in one sūra leaves none", not quran._hint_may_decide(ONE))
+
+CITED_WRONGLY = ("### سورة الكهف\n\n*" + LF
+                 + "ٱلْحَمْدُ لِلَّهِ ٱلَّذِىٓ أَنزَلَ عَلَىٰ عَبْدِهِ ٱلْكِتَٰبَ" + LE
+                 + "{.quran-quote}* (البقرة: ٢٥٥)\n")
+_kept, _kn = quran.add_missing_refs(CITED_WRONGLY)
+_tied, _tn = quran.add_missing_refs(CITED_WRONGLY, trust_citations=False)
+check("citations: in a repository the source's citation stands alone", _kn == 0, _kept)
+check("citations: in a transcription a wrong one still gets our link",
+      _tn == 1 and "[[Q018#1]]" in _tied, _tied)
+_cited, _stats = tafsir.process_quran(CITED_WRONGLY, mode="tafsir", raw_ocr=True)
+check("citations: the model's bracket is replaced, not kept beside ours",
+      "[[Q018#1]]" in _cited and "البقرة" not in _cited, _cited)
+
 # ── Still to implement ──────────────────────────────────────────────────────
 #
 # The one rule from 2026-11-19 that is not in place: a fully vocalised paragraph
