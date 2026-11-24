@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Submit a translation batch job to Gemini.
-Splits a markdown transcription into 2-page chunks and sends them
+Splits a markdown transcription into page chunks and sends them
 with the translation prompt via Gemini Batch API.
 
 Usage: python3 scripts/translate-batch-submit.py <transcription.md>
@@ -22,7 +22,11 @@ VAULT = Path(os.environ.get("OBSIDIAN_VAULT", os.path.expanduser("~/Documents/Ob
 API_KEY = os.environ.get("GEMINI_API_KEY", os.environ.get("GOOGLE_API_KEY", ""))
 API_KEY = API_KEY.replace("\u2011", "-")
 
-PAGES_PER_BATCH = 2
+#: One page per request, as transcription is one page per request. Two pages in
+#: one context lets the model attach one page's apparatus to the other: its
+#: footnotes were several times written at the end of the *next* page's section,
+#: where the page structure then carried them. One page cannot be misattributed.
+PAGES_PER_BATCH = 1
 
 # Single source of truth for the model. The Gemini Batch API runs the model
 # given to batches.create(); the per-request "model" field is ignored, so both
@@ -55,21 +59,32 @@ def read_prompt(path: str | None) -> str | None:
             print(f"WARNING: could not read prompt file {path}: {e}; using the built-in prompt.")
     return None
 
+#: A page heading: `#### p. 40` (the number may follow a narrow no-break space).
+PAGE_HEADING = re.compile(r'^#{4}\s*p\.?\s*\d+\s*$', re.MULTILINE)
+
+
 def split_pages(content: str) -> list[str]:
-    """Split markdown into page chunks at #### headers, preserving order."""
-    # Find all #### headers
-    pattern = re.compile(r'^(#{2,4}\s+.+)$', re.MULTILINE)
-    splits = list(pattern.finditer(content))
-    
+    """Split markdown into **page** chunks, preserving order.
+
+    Only the page heading splits. A page's own headings — `## Lesson Thirty-Two`,
+    `### Sūrat Maryam` — are content, and splitting at those cut a page into
+    pieces that then travelled as separate requests with no page heading at all.
+    """
+    splits = list(PAGE_HEADING.finditer(content))
+
     if not splits:
         return [content]
-    
+
     pages = []
+    # Anything before the first page heading is kept as its own chunk rather
+    # than dropped.
+    if content[:splits[0].start()].strip():
+        pages.append(content[:splits[0].start()].strip())
     for i, m in enumerate(splits):
         start = m.start()
         end = splits[i + 1].start() if i + 1 < len(splits) else len(content)
         pages.append(content[start:end].strip())
-    
+
     return pages
 
 def main():

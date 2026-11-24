@@ -17,7 +17,8 @@ if str(SCRIPTS) not in sys.path:
 # Page separators are owned by the shared postprocessor; import the pass
 # directly so a missing definition fails loudly instead of silently skipping
 # the normalisation.
-from text_postprocess import normalize_page_separators, wrap_quran_quotes_for_processing
+from text_postprocess import (demote_long_poetry, normalize_page_separators,
+                              unwrap_quran_quotes)
 
 # Metadata lines the standalone-PDF prompt asks Gemini to put above the first
 # page. They are not part of the transcription, so remove them before
@@ -159,12 +160,16 @@ def extract_metadata(body: str) -> tuple[str, dict]:
         keep.pop(0)
     return "\n".join(keep), meta
 
-def run(input_path, out_path=None, metadata=False, tafsir=False, from_gemini=True):
+def run(input_path, out_path=None, metadata=False, tafsir=False, raw_ocr=True,
+        discover=False):
     """Format and Qur'an-process a transcription body. Returns the output Path.
 
-    `from_gemini=True` for Gemini's raw batch output (its own citations are
-    stripped). `from_gemini=False` for a note that is already rendered: its
-    links are Midad's, and only simple source citations are removed.
+    `raw_ocr=True` when the text is unprocessed OCR rather than a rendered note
+    (its own citations are
+    stripped). `raw_ocr=False` for a note that is already rendered: its links
+    are Midad's, and only simple source citations are removed. `discover` looks
+    for quotations again, which raw OCR needs and a rendered note does not
+    unless the reader asks.
     """
     filepath = Path(input_path)
     if not filepath.exists():
@@ -194,7 +199,10 @@ def run(input_path, out_path=None, metadata=False, tafsir=False, from_gemini=Tru
     # Step 1: Formatting
     print("Step 1: Formatting...")
     pp = SourceFileLoader("pp", str(SCRIPTS / "transcription-format.py")).load_module()
-    result = pp.process(str(tmp), gemini=from_gemini)
+    # Keep the `*﴿…﴾{.quran-quote}*` scaffold: the Qur'ān passes in step 2 look
+    # for a span in that form, and the formatter used to unwrap it here, which
+    # left every marked quotation invisible to every linking pass.
+    result = pp.process(str(tmp), gemini=raw_ocr, unwrap=False)
     # Exactly one blank line between the frontmatter and the page contents.
     if yaml:
         content = yaml.rstrip("\n") + "\n\n" + result.lstrip("\n")
@@ -223,81 +231,55 @@ def run(input_path, out_path=None, metadata=False, tafsir=False, from_gemini=Tru
     tfs = SourceFileLoader("tfs", str(SCRIPTS / "tafsir.py")).load_module()
     LF = '\ufd3f'; LE = '\ufd3e'
 
-    content, damaged = tfq.repair_damaged_links(content)
-    print(f"  Damaged citations repaired: {damaged}")
+    # A line too long for a hemistich is not poetry: demote the callout to a
+    # block quote first, so the Qur'ān passes below see prose and may cite it.
+    content, demoted = demote_long_poetry(content)
+    print(f"  Poetry callouts demoted to block quotes: {demoted}")
 
-    # Style any `﴿…﴾` span the formatter left bare. Every linking pass below
-    # looks for the styled form, so an unwrapped span is a quotation that would
-    # never be cited at all.
-    content = wrap_quran_quotes_for_processing(content)
+    # What is left really is verse, and a verse is never cited: parked for the
+    # whole Qur'ān section and restored below.
+    content, poetry_blocks = tfq.mask_poetry(content)
 
-    content, cross_guillemets = tfq.fix_cross_page_guillemets(content)
-    print(f"  Cross-page quoted continuations: {cross_guillemets}")
-
-    if from_gemini:
-        # Gemini writes quotations in its own shapes; only its output needs the
-        # discovery pass. An already-rendered note has been through it, and
-        # running it again on our own output is not idempotent — it would keep
-        # finding new "quotes" inside parentheses on every update.
-        content, discovered = tfq.discover_and_mark_quotes(content, tafsir=tafsir)
-        print(f"  Discovered: {len(discovered)}")
-
-    # Add links before discarding the source citations: a verified adjacent
-    # citation is a cheap first search hint.
-    content, refs_added = tfq.add_missing_refs(content)
-    print(f"  Refs added: {refs_added}")
-
-    if from_gemini:
-        content, refs_stripped = tfq.strip_gemini_refs(content)
-        print(f"  Gemini refs discarded: {refs_stripped}")
-
-    content, links_fixed = tfq.fix_wikilinks(content)
-    print(f"  Links fixed: {links_fixed}")
-
-    content, open_links = tfq.link_open_fragments(content, tafsir=tafsir)
-    print(f"  Open-fragment links: {open_links}")
-
-    if tafsir:
-        if from_gemini:
-            # The short-fragment pass links bare parentheticals; on a rendered
-            # note it would keep turning ordinary glosses into quotations.
-            content, short_fragments = tfq.mark_short_fragments(content)
-            print(f"  Short verse fragments: {short_fragments}")
-        content, repeated = tfs.keep_first_verse_link(content)
-        print(f"  Repeated verse links removed: {repeated}")
-
-    content, stripped = tfq.strip_false_quran(content)
-    print(f"  False Qur'an stripped: {stripped}")
-    
-    content = content.replace('\uFD3F\uFD3F', '\uFD3F')
-    content = content.replace('\uFD3E\uFD3E', '\uFD3E')
-    
-    # Update tashkīl
-    updated = 0
-    pattern = re.compile(
-        r'(\*' + LF + r')([^' + LE + LF + r'\n]+)(' + LE + r'\{\.quran-quote\}\*\s*'
-        r'\(\[\[(\d{3})\s+[^#\]]+#(\d+)\|[^\]]+\]\]\))'
+    # One sequence for every genre. Everything between here and the render is
+    # the shared Qur'ān pipeline; this function's only job is to hand it the
+    # inputs that are properties of *this* source — whether it is a commentary,
+    # which delimiters its own text uses for quotations, and whether the text is
+    # unreviewed OCR. A repository importer supplies the same inputs and runs
+    # the same stages.
+    delims = tfq.detect_quote_delims(content)
+    if delims:
+        print(f"  Quote delimiters: {', '.join(delims)}")
+    content, stats = tfs.process_quran(
+        content,
+        mode="tafsir" if tafsir else "default",
+        delims=delims,
+        discover=discover,
+        raw_ocr=raw_ocr,
     )
-    for m in reversed(list(pattern.finditer(content))):
-        prefix = m.group(1)
-        old_text = m.group(2).strip()
-        suffix = m.group(3)
-        surah = int(m.group(4))
-        verse_num = int(m.group(5))
-        fragment = tfq.get_tashkil_fragment(old_text, surah, verse_num)
-        if fragment and fragment != old_text:
-            content = content[:m.start()] + prefix + fragment + suffix + content[m.end():]
-            updated += 1
-    print(f"  Tashkīl updates: {updated}")
-    
-    markers = len(re.findall(r'\{\.quran-quote\}', content))
-    print(f"  Total markers: {markers}")
-
+    print(f"  Damaged citations repaired: {stats['damaged_links']}")
+    print(f"  Cross-page quoted continuations: {stats['cross_page_guillemets']}")
+    print(f"  Discovered: {stats.get('discovered', 0)}")
+    print(f"  Refs added: {stats['refs_added']}")
+    print(f"  Gemini refs discarded: {stats.get('gemini_refs', 0)}")
+    print(f"  Links fixed: {stats['links_fixed']}")
+    print(f"  Open-fragment links: {stats['open_fragments']}")
     if tafsir:
-        # A tafsīr moves through the muṣḥaf in order, across sūras as its volume
-        # does, so the margin follows the passage rather than paragraph order.
-        content, verse_headings = tfs.insert_verse_headings(content, linear=True)
-        print(f"  Verse headings: {verse_headings}")
+        print(f"  Short verse fragments: {stats.get('short_fragments', 0)}")
+    print(f"  False Qur'an stripped: {stats['false_quran']}")
+    if tafsir:
+        print(f"  Repeated verse links removed: {stats['repeated_links']}")
+    print(f"  Tashkīl updates: {stats['tashkil']}")
+    print(f"  Total markers: {len(re.findall(r'\{\.quran-quote\}', content))}")
+    if stats["unbalanced_parens"]:
+        print(f"  Unpaired ornate parens repaired: {stats['unbalanced_parens']}")
+    if tafsir:
+        print(f"  Verse headings: {stats['markers']}")
+        print(f"  Inline verse links dropped: {stats['inline_links']}, "
+              f"duplicate markers: {stats['duplicate_markers']}")
+    print(f"  Raw Qur'an citations removed: {stats['raw_citations']}")
+    print(f"  Redundant raw citations removed: {stats['redundant_citations']}")
+    print(f"  Qur'an link displays normalised: {stats['displays']}")
+    print(f"  Repeated same-verse links removed: {stats['repeated_links']}")
 
     # Final repair of page headings, in case the Qur'an/tashkīl steps touched
     # one (e.g. "#### p * 310", or a heading glued onto a preceding line).
@@ -323,19 +305,30 @@ def run(input_path, out_path=None, metadata=False, tafsir=False, from_gemini=Tru
                      r'*\1', content)
     content = re.sub(r'\*{2,}(\ufd3f)', r'*\1', content)
     content = normalize_page_separators(content)
+    # The shared sequence is finished. What remains is the settling pass that
+    # makes a second render byte-identical: the repairs just above can expose
+    # debris the citation tidies could not see the first time, so they run once
+    # more and report a single total rather than a second stage list.
     content = tfq.strip_orphan_quote_classes(content)
-    content, raw_citations = tfq.strip_raw_quran_citations(content)
-    print(f"  Raw Qur'an citations removed: {raw_citations}")
-    content, redundant_citations = tfq.strip_redundant_raw_citations(content)
-    print(f"  Redundant raw citations removed: {redundant_citations}")
-    content, display_fixed = tfq.normalize_quran_link_display(content)
-    print(f"  Qur'an link displays normalised: {display_fixed}")
+    settled = 0
+    content, n = tfq.strip_raw_quran_citations(content)
+    settled += n
+    content, n = tfq.strip_redundant_raw_citations(content)
+    settled += n
+    content, n = tfq.normalize_quran_link_display(content)
+    settled += n
     if tafsir:
-        content, repeated_links = tfs.keep_first_verse_link(content)
+        content, n = tfs.keep_first_verse_link(content)
     else:
-        content, repeated_links = tfq.dedupe_same_verse_links(content)
-    print(f"  Repeated same-verse links removed: {repeated_links}")
+        content, n = tfq.dedupe_same_verse_links(content)
+    settled += n
+    print(f"  Settled in one pass: {settled}")
 
+    # The processing form (`*﴿…﴾{.quran-quote}*`) is a scaffold the linking
+    # passes read. The note keeps only the ornate parentheses, with `~` where
+    # a boundary must not print — no custom-class Markdown, no italics.
+    content = unwrap_quran_quotes(content)
+    content = tfq.unmask_poetry(content, poetry_blocks)
     # Escape source citations last, after every citation/link pass has run.
     content = pp.escape_literal_brackets(content)
     
@@ -359,7 +352,8 @@ def main():
         print("Usage: python3 transcription-postprocess.py <raw.md> [out.md] [--metadata]")
         sys.exit(1)
     out = sys.argv[2] if len(sys.argv) > 2 and not sys.argv[2].startswith("--") else None
-    run(sys.argv[1], out, metadata="--metadata" in sys.argv, tafsir="--tafsir" in sys.argv)
+    run(sys.argv[1], out, metadata="--metadata" in sys.argv, tafsir="--tafsir" in sys.argv,
+        discover="--discover" in sys.argv)
 
 
 if __name__ == "__main__":

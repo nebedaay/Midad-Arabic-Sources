@@ -45,8 +45,17 @@ function nextClose(text: string, from: number): { at: number; len: number } | nu
  * page), and a closer with no opener styles from the chunk start (it began on
  * the previous page). That is what lets a quote cross a page break: each half
  * is styled on its own, with the visible parens only where they belong.
+ *
+ * In a left-to-right chunk the pair is written the other way round — `﴾…﴿` —
+ * because the marks are mirrored there. Read by their Arabic meaning, the first
+ * `﴾` styles all the prose before it and the `﴿` styles all the prose after,
+ * gilding everything *except* the quotation. The chunk's own first mark says
+ * which way it writes them, and swapping the two characters is enough: the
+ * swap is one character for one character, so every offset still points at the
+ * same place in the original text.
  */
-function findSpans(text: string): Span[] {
+export function findSpans(raw: string, ltr = false): Span[] {
+	const text = ltr && firstOrnate(raw) === CLOSE ? swapOrnate(raw) : raw;
 	const spans: Span[] = [];
 	let cursor = 0;
 	while (cursor < text.length) {
@@ -78,6 +87,50 @@ function findSpans(text: string): Span[] {
 	return spans;
 }
 
+/** `text` with the two ornate parens exchanged, position for position. */
+function swapOrnate(text: string): string {
+	return text.replace(/[\ufd3f\ufd3e]/g, (char) => (char === OPEN ? CLOSE : OPEN));
+}
+
+/** The first *visible* ornate paren in `text`, or "" if there is none. */
+function firstOrnate(text: string): string {
+	const open = text.indexOf(OPEN);
+	const close = text.indexOf(CLOSE);
+	if (open < 0) return close < 0 ? "" : CLOSE;
+	if (close < 0) return OPEN;
+	return open < close ? OPEN : CLOSE;
+}
+
+/** Does this chunk read left to right? Decided by its first strong character,
+ *  with links and their aliases removed first: a line that begins with a verse
+ *  link (`[[Q022#5|:]]لِكَيْلَا…`) is Arabic, and its `Q022` must not make the
+ *  chunk look Latin. The computed `direction` is not usable here — a `mas-quran`
+ *  callout is deliberately laid out LTR so a theme's border stays on the left,
+ *  and its Arabic paragraphs would then be read as reversed. */
+export function isLtrText(text: string): boolean {
+	return textDirection(text) === "ltr";
+}
+
+/**
+ * The base direction a line should be laid out with, or `null` when it holds no
+ * strong character at all.
+ *
+ * The *first* strong character decides, which is what a bidirectional layout
+ * does: an English paragraph that happens to quote two Arabic words is still an
+ * English paragraph, and asking whether a line "contains Arabic" turned such a
+ * paragraph right-to-left. Links are stripped first, because a citation's sūra
+ * name (`Q024`) is Latin whatever the sentence is written in — that is what kept
+ * an Arabic line led by a verse link from being laid out left-to-right.
+ */
+export function textDirection(text: string): "ltr" | "rtl" | null {
+	const stripped = text.replace(/\[\[[^\]]*\]\]/g, " ").replace(/[*_~`]/g, "");
+	for (const char of stripped) {
+		if (/[A-Za-z]/.test(char)) return "ltr";
+		if (/[\u0600-\u06FF]/.test(char)) return "rtl";
+	}
+	return null;
+}
+
 /** `text` with the invisible markers removed. */
 function withoutMarks(text: string): string {
 	return text.split(MARK_OPEN).join("").split(MARK_CLOSE).join("");
@@ -89,13 +142,18 @@ function decorateReadingElement(root: HTMLElement): void {
 	while (walker.nextNode()) {
 		const node = walker.currentNode as Text;
 		const value = node.nodeValue ?? "";
-		if (value.includes(OPEN) || value.includes(MARK_OPEN)) nodes.push(node);
+		// A *closing* half contains no opener: `… بَهِيجٍ﴾` is the second page of
+		// a quotation whose `﴿` is on the first, and it is still a quotation.
+		// Collecting only nodes with an opener left every such half plain while
+		// its partner was gilded.
+		if (value.includes(OPEN) || value.includes(CLOSE)
+			|| value.includes(MARK_OPEN) || value.includes(MARK_CLOSE)) nodes.push(node);
 	}
 	for (const node of nodes) {
 		const parent = node.parentElement;
 		if (!parent || parent.closest(`code, pre, a, .${QUOTE_CLASS}, .quran-quote`)) continue;
 		const text = node.nodeValue ?? "";
-		const spans = findSpans(text);
+		const spans = findSpans(text, isLtrText(parent.textContent ?? text));
 		if (!spans.length) continue;
 		const fragment = createFragment();
 		let cursor = 0;
@@ -125,7 +183,7 @@ function buildQuoteDecorations(view: EditorView): DecorationSet {
 		let line = view.state.doc.lineAt(range.from);
 		while (line.from <= range.to) {
 			const text = line.text;
-			const spans = findSpans(text);
+			const spans = findSpans(text, isLtrText(text));
 			for (const span of spans) {
 				if (span.end > span.start) {
 					placed.push({

@@ -71,7 +71,7 @@ function workKeyFromText(file: TFile, text: string): string {
 	return match ? workKeyFromKey(`id:${match[1].trim()}`) : `path:${file.path}`;
 }
 
-function workArchivePath(vaultPath: string, workKey: string): string {
+export function workArchivePath(vaultPath: string, workKey: string): string {
 	const name = `${safeFileSegment(workKey, "work", 80)}-${hashString(workKey)}.zip`;
 	return `${vaultPath}/${ARCHIVE_DIR}/${name}`;
 }
@@ -258,6 +258,12 @@ export class VersionStore {
 	private readonly hashes: NoteHashStore;
 	private manifest: VersionManifest | null = null;
 	private files: Record<string, Uint8Array> = {};
+	/** The manifest-only view of every work, built once and invalidated on write. */
+	private index: VersionManifest | null = null;
+	/** The index is shared between the store instances one operation creates. */
+	private static readonly indexes = new Map<string, VersionManifest>();
+	/** The works whose archives are in memory. */
+	private readonly loaded = new Set<string>();
 
 	constructor(app: App, vaultPath: string) {
 		this.app = app;
@@ -269,96 +275,198 @@ export class VersionStore {
 		return `${this.vaultPath}/${ARCHIVE_DIR}`;
 	}
 
-	private load(): VersionManifest {
-		if (this.manifest) return this.manifest;
-		const dir = this.archiveDir();
+	/** Where a work's archive lives; the name is a pure function of the key. */
+	private archiveFor(workKey: string): string {
+		return workArchivePath(this.vaultPath, workKey);
+	}
+
+	/**
+	 * The manifest of **every** work, read without decompressing one snapshot.
+	 *
+	 * There is one archive per work — 701 of them, 260 MB uncompressed, in one
+	 * vault — and managing a note touches one. The old `load()` unzipped all of
+	 * them into memory to answer `entryFor`, which is why the dialog would sit
+	 * for a minute before it answered a click. This view needs `manifest.json`
+	 * only, and `filter` reads just that file out of each zip.
+	 */
+	private manifestIndex(): VersionManifest {
+		if (this.index) return this.index;
+		const cached = VersionStore.indexes.get(this.vaultPath);
+		if (cached) {
+			this.index = cached;
+			return cached;
+		}
+		const notes: Record<string, NoteVersionEntry> = {};
 		let found = false;
 		try {
-			for (const name of fs.readdirSync(dir)) {
+			for (const name of fs.readdirSync(this.archiveDir())) {
 				if (!name.endsWith(".zip")) continue;
-				try {
-					const files = unzipSync(new Uint8Array(fs.readFileSync(`${dir}/${name}`)));
-					const text = files["manifest.json"];
-					if (!text) continue;
-					const archive = JSON.parse(strFromU8(text)) as VersionManifest;
-					for (const [key, entry] of Object.entries(archive.notes ?? {})) {
-						entry.workKey ??= workKeyFromKey(key);
-						for (const version of entry.versions) delete (version as unknown as { hash?: string }).hash;
-						this.manifest ??= { schema: 1, notes: {} };
-						this.manifest.notes[key] = entry;
-					}
-					for (const [name2, bytes] of Object.entries(files)) {
-						if (name2 !== "manifest.json") this.files[name2] = bytes;
-					}
-					found = true;
-				} catch { /* ignore an unreadable archive */ }
+				found = true;
+				const archive = this.readManifest(`${this.archiveDir()}/${name}`);
+				for (const [key, entry] of Object.entries(archive?.notes ?? {})) {
+					entry.workKey ??= workKeyFromKey(key);
+					notes[key] = entry;
+				}
 			}
 		} catch { /* no archive directory yet */ }
 		if (!found) {
+			// The pre-split store was one zip for the whole vault: read it, write
+			// it out per work, and retire it.
 			try {
-				const raw = fs.readFileSync(`${this.vaultPath}/${LEGACY_STORE_REL}`);
-				this.files = unzipSync(new Uint8Array(raw));
-				const text = this.files["manifest.json"];
-				this.manifest = text ? JSON.parse(strFromU8(text)) as VersionManifest : { ...EMPTY, notes: {} };
-				delete this.files["manifest.json"];
-				for (const [key, entry] of Object.entries(this.manifest.notes)) {
+				const files = unzipSync(new Uint8Array(fs.readFileSync(`${this.vaultPath}/${LEGACY_STORE_REL}`)));
+				const text = files["manifest.json"];
+				const archive: VersionManifest = text
+					? JSON.parse(strFromU8(text)) as VersionManifest
+					: { schema: 1, notes: {} };
+				for (const [name, bytes] of Object.entries(files)) {
+					if (name !== "manifest.json") this.files[name] = bytes;
+				}
+				for (const [key, entry] of Object.entries(archive.notes ?? {})) {
 					entry.workKey ??= workKeyFromKey(key);
 					for (const version of entry.versions) delete (version as unknown as { hash?: string }).hash;
+					notes[key] = entry;
 				}
-				this.save();
+				this.manifest = { schema: 1, notes };
+				this.saveAll();
 				const backup = `${this.vaultPath}/.midad-arabic-sources/backups/source-versions-migrated.zip`;
 				fs.mkdirSync(backup.slice(0, backup.lastIndexOf("/")), { recursive: true });
 				try { fs.renameSync(`${this.vaultPath}/${LEGACY_STORE_REL}`, backup); } catch { /* already moved */ }
-			} catch {
-				this.manifest = { schema: 1, notes: {} };
-				this.files = {};
-			}
+			} catch { /* no legacy store */ }
 		}
+		this.index = { schema: 1, notes };
+		VersionStore.indexes.set(this.vaultPath, this.index);
+		return this.index;
+	}
+
+	/** One archive's manifest, with no snapshot decompressed. */
+	private readManifest(path: string): VersionManifest | null {
+		try {
+			const files = unzipSync(new Uint8Array(fs.readFileSync(path)), {
+				filter: (file) => file.name === "manifest.json",
+			});
+			const text = files["manifest.json"];
+			if (!text) return null;
+			const archive = JSON.parse(strFromU8(text)) as VersionManifest;
+			for (const [key, entry] of Object.entries(archive.notes ?? {})) {
+				entry.workKey ??= workKeyFromKey(key);
+				for (const version of entry.versions) delete (version as unknown as { hash?: string }).hash;
+			}
+			return archive;
+		} catch {
+			return null;
+		}
+	}
+
+	/** The work a note entry belongs to. */
+	private workOf(entry: NoteVersionEntry): string {
+		return entry.workKey ?? workKeyFromKey(entry.key);
+	}
+
+	/**
+	 * Read **one** work's archive into memory: its manifest entries and its
+	 * snapshot bytes, and nothing else.
+	 *
+	 * It never overwrites an entry or a snapshot already in memory, so calling
+	 * it after a mutation cannot undo that mutation — which means callers do not
+	 * have to be careful about ordering.
+	 */
+	private ensureWork(workKey: string): void {
+		if (!workKey || this.loaded.has(workKey)) return;
+		this.loaded.add(workKey);
+		const archive = this.readManifest(this.archiveFor(workKey));
+		this.manifest ??= { schema: 1, notes: {} };
+		for (const [key, entry] of Object.entries(archive?.notes ?? {})) {
+			entry.workKey ??= workKey;
+			if (!this.manifest.notes[key]) this.manifest.notes[key] = entry;
+		}
+		let files: Record<string, Uint8Array> = {};
+		try {
+			files = unzipSync(new Uint8Array(fs.readFileSync(this.archiveFor(workKey))));
+		} catch { /* the work has no archive yet */ }
+		for (const [name, bytes] of Object.entries(files)) {
+			if (name !== "manifest.json" && !this.files[name]) this.files[name] = bytes;
+		}
+	}
+
+	/** The in-memory manifest for the work an entry belongs to, loaded on demand. */
+	private manifestFor(entry: NoteVersionEntry): VersionManifest {
+		this.ensureWork(this.workOf(entry));
 		this.manifest ??= { schema: 1, notes: {} };
 		return this.manifest;
 	}
 
-	private save(): void {
-		const manifest = this.load();
+	/** The in-memory manifest for the work a note belongs to, loaded on demand. */
+	private manifestForText(file: TFile, text: string): VersionManifest {
+		this.ensureWork(workKeyFromText(file, text));
+		this.manifest ??= { schema: 1, notes: {} };
+		return this.manifest;
+	}
+
+	/**
+	 * Write **one** work's archive, and leave every other work alone.
+	 *
+	 * The old `save()` re-zipped all 701 archives at level 6 and swept the
+	 * directory of anything it had not written — so selecting a version row in
+	 * the dialog re-compressed 260 MB. Only the work that changed is written
+	 * now, which is one small zip per click.
+	 */
+	private saveWork(workKey: string): void {
+		if (!workKey) return;
+		this.ensureWork(workKey);
+		const manifest = this.manifest ?? { schema: 1, notes: {} };
+		const group: VersionManifest = { schema: 1, notes: {} };
+		for (const [key, entry] of Object.entries(manifest.notes)) {
+			const owner = entry.workKey ?? workKeyFromKey(key);
+			entry.workKey = owner;
+			if (owner === workKey) group.notes[key] = entry;
+		}
 		const dir = this.archiveDir();
 		fs.mkdirSync(dir, { recursive: true });
-		const groups = new Map<string, VersionManifest>();
-		for (const [key, entry] of Object.entries(manifest.notes)) {
-			const workKey = entry.workKey ?? workKeyFromKey(key);
-			entry.workKey = workKey;
-			let group = groups.get(workKey);
-			if (!group) {
-				group = { schema: 1, notes: {} };
-				groups.set(workKey, group);
+		const entries: Record<string, Uint8Array> = {
+			"manifest.json": strToU8(JSON.stringify(group, null, 1) + "\n"),
+		};
+		for (const entry of Object.values(group.notes)) {
+			for (const version of entry.versions) {
+				const bytes = this.files[version.file];
+				if (bytes) entries[version.file] = bytes;
 			}
-			group.notes[key] = entry;
 		}
-		const expected = new Set<string>();
-		for (const [workKey, group] of groups) {
-			const archive = workArchivePath(this.vaultPath, workKey);
-			expected.add(archive.slice(archive.lastIndexOf("/") + 1));
-			const entries: Record<string, Uint8Array> = {
-				"manifest.json": strToU8(JSON.stringify(group, null, 1) + "\n"),
-			};
-			for (const entry of Object.values(group.notes)) {
-				for (const version of entry.versions) {
-					const bytes = this.files[version.file];
-					if (bytes) entries[version.file] = bytes;
-				}
-			}
-			fs.writeFileSync(archive, Buffer.from(zipSync(entries, { level: 6 })));
+		fs.writeFileSync(this.archiveFor(workKey), Buffer.from(zipSync(entries, { level: 6 })));
+		this.index = null;
+		VersionStore.indexes.delete(this.vaultPath);
+	}
+
+	/** Write the archive of the work an entry belongs to. */
+	private saveEntry(entry: NoteVersionEntry): void {
+		this.saveWork(this.workOf(entry));
+	}
+
+	/** Write every work. Only the one-time legacy migration needs this. */
+	private saveAll(): void {
+		const works = new Set<string>();
+		for (const [key, entry] of Object.entries(this.manifest?.notes ?? {})) {
+			works.add(entry.workKey ?? workKeyFromKey(key));
 		}
-		try {
-			for (const name of fs.readdirSync(dir)) {
-				if (name.endsWith(".zip") && !expected.has(name)) fs.unlinkSync(`${dir}/${name}`);
-			}
-		} catch { /* ignore cleanup errors */ }
+		for (const workKey of works) this.saveWork(workKey);
 	}
 
 	async entryFor(file: TFile): Promise<NoteVersionEntry | null> {
-		const manifest = this.load();
-		const key = noteKeyFromText(file, await this.app.vault.read(file));
-		return manifest.notes[key] ?? null;
+		return this.entryForText(file, await this.app.vault.read(file));
+	}
+
+	/** The entry for a note whose text the caller already has — no second read. */
+	entryForText(file: TFile, text: string): NoteVersionEntry | null {
+		const workKey = workKeyFromText(file, text);
+		this.ensureWork(workKey);
+		const key = noteKeyFromText(file, text);
+		const found = this.manifest?.notes[key];
+		if (found) return found;
+		// Nothing in this work's archive. The note may still be recorded under
+		// another work (its `midad-id` changed), so the manifest index is the
+		// last resort — but only when there is no archive for this work to have
+		// read, so an ordinary unversioned note costs one failed open, not 701.
+		if (fs.existsSync(this.archiveFor(workKey))) return null;
+		return this.manifestIndex().notes[key] ?? null;
 	}
 
 	async virtualEntry(file: TFile): Promise<NoteVersionEntry> {
@@ -401,7 +509,7 @@ export class VersionStore {
 				});
 			}
 		}
-		this.save();
+		this.saveEntry(entry);
 		return entry;
 	}
 
@@ -411,8 +519,8 @@ export class VersionStore {
 
 	/** Archive the current adopted-note body as its explicit Version 0. */
 	async saveAdoptedOriginal(file: TFile): Promise<NoteVersionEntry | null> {
-		const manifest = this.load();
 		const text = await this.app.vault.read(file);
+		const manifest = this.manifestForText(file, text);
 		const cleanText = sanitizeFrontmatter(text);
 		const key = noteKeyFromText(file, text);
 		let entry = manifest.notes[key];
@@ -443,7 +551,7 @@ export class VersionStore {
 		this.files[version.file] = strToU8(cleanText);
 		this.hashes.setVersionHash(entry.path, "v0", hash);
 		this.hashes.setBaseline(entry.path, hash);
-		this.save();
+		this.saveEntry(entry);
 		await this.app.fileManager.processFrontMatter(file, (fm: Record<string, unknown>) => {
 			fm["midad-version-name"] = "Version 0";
 		});
@@ -461,7 +569,7 @@ export class VersionStore {
 		const defaultLink = `[[${entry.path.replace(/\.md$/, "")}|Default version]]`;
 		await this.writeLive(versionZeroNotePath(entry), addUpLink(withVersion, defaultLink));
 		entry.virtualSelected = true;
-		this.save();
+		this.saveEntry(entry);
 	}
 
 	async saveVersion(file: TFile, overwrite: boolean, renderHash?: string, options: {
@@ -471,8 +579,8 @@ export class VersionStore {
 		virtualOriginal?: boolean;
 		makeDefault?: boolean;
 	} = {}): Promise<NoteVersionEntry> {
-		const manifest = this.load();
 		const text = await this.app.vault.read(file);
+		const manifest = this.manifestForText(file, text);
 		const cleanText = sanitizeFrontmatter(text);
 		const key = noteKeyFromText(file, text);
 		const hash = normalizedHash(cleanText);
@@ -547,7 +655,7 @@ export class VersionStore {
 		}
 		this.files[version.file] = strToU8(cleanText);
 		this.hashes.setVersionHash(entry.path, version.id, hash);
-		this.save();
+		this.saveEntry(entry);
 		if (!options.activeVersionId && entry.defaultId === version.id) {
 			await this.app.fileManager.processFrontMatter(file, (fm: Record<string, unknown>) => {
 				fm["midad-version-name"] = version.label;
@@ -567,7 +675,7 @@ export class VersionStore {
 	}
 
 	async setDefault(entry: NoteVersionEntry, id: string): Promise<void> {
-		const manifest = this.load();
+		const manifest = this.manifestFor(entry);
 		if (!manifest.notes[entry.key]) manifest.notes[entry.key] = entry;
 		entry.defaultId = id;
 		const version = entry.versions.find((v) => v.id === id);
@@ -575,14 +683,14 @@ export class VersionStore {
 			version.selected = true;
 			version.archived = false;
 		}
-		this.save();
+		this.saveEntry(entry);
 	}
 
 	async setVirtualSelected(entry: NoteVersionEntry, selected: boolean, file?: TFile): Promise<void> {
-		const manifest = this.load();
+		const manifest = this.manifestFor(entry);
 		if (!manifest.notes[entry.key]) manifest.notes[entry.key] = entry;
 		entry.virtualSelected = selected;
-		this.save();
+		this.saveEntry(entry);
 		if (!selected && file) await this.deleteVersionNote(versionZeroNotePath(entry), "v0");
 	}
 
@@ -604,7 +712,7 @@ export class VersionStore {
 		}
 		const oldLabel = version.label;
 		version.label = value;
-		this.save();
+		this.saveEntry(entry);
 
 		const targetPath = version.id === entry.defaultId ? entry.path : versionNotePath(entry, version);
 		const targetLink = versionLink(entry, version);
@@ -638,7 +746,7 @@ export class VersionStore {
 		}
 		version.selected = selected;
 		version.archived = !selected;
-		this.save();
+		this.saveEntry(entry);
 	}
 
 	async deleteVersion(entry: NoteVersionEntry, id: string, file?: TFile): Promise<void> {
@@ -657,20 +765,32 @@ export class VersionStore {
 		this.hashes.deleteVersionHash(entry.path, id);
 		if (file && id !== entry.defaultId) await this.deleteVersionNote(versionNotePath(entry, version), id);
 		entry.versions = entry.versions.filter((v) => v.id !== id);
-		this.save();
+		this.saveEntry(entry);
 	}
 
 	async versionText(entry: NoteVersionEntry, id: string): Promise<string | null> {
 		const version = entry.versions.find((v) => v.id === id);
 		if (!version) return null;
+		this.ensureWork(this.workOf(entry));
 		const content = this.files[version.file];
 		return content ? strFromU8(content) : null;
 	}
 
-	/** Match content against saved snapshots; tolerates older raw-hash records. */
+	/**
+	 * Match content against saved snapshots.
+	 *
+	 * The hash store is authoritative: a recorded hash that differs from `hash`
+	 * is a real mismatch, so the snapshot does not have to be decompressed to
+	 * find that out. Only a version with no record is read and hashed, which is
+	 * the one case where the bytes are the evidence.
+	 */
 	async matchesSavedVersion(entry: NoteVersionEntry, hash: string): Promise<boolean> {
 		for (const version of entry.versions) {
-			if (this.hashes.versionHash(entry.path, version.id) === hash) return true;
+			const recorded = this.hashes.versionHash(entry.path, version.id);
+			if (recorded) {
+				if (recorded === hash) return true;
+				continue;
+			}
 			const text = await this.versionText(entry, version.id);
 			if (text && normalizedHash(text) === hash) return true;
 		}
@@ -698,8 +818,9 @@ export class VersionStore {
 			await this.deleteVersionNote(versionNotePath(entry, version), version.id);
 		}
 		this.hashes.deleteNote(entry.path);
-		delete this.load().notes[entry.key];
-		this.save();
+		this.ensureWork(this.workOf(entry));
+		if (this.manifest) delete this.manifest.notes[entry.key];
+		this.saveEntry(entry);
 	}
 
 	async syncVersionName(file: TFile): Promise<boolean> {
@@ -708,22 +829,28 @@ export class VersionStore {
 		const nameMatch = /^midad-version-name:[ \t]*["']?([^"'\n]+)["']?[ \t]*$/m.exec(text);
 		if (!versionMatch || !nameMatch) return false;
 		const key = noteKeyFromText(file, text);
-		const entry = this.load().notes[key];
+		const entry = this.manifestForText(file, text).notes[key];
 		const version = entry?.versions.find((v) => v.id === versionMatch[1].trim());
 		const label = nameMatch[1].trim();
 		if (!version || !label || version.label === label) return false;
 		version.label = label;
-		this.save();
+		this.saveEntry(entry);
 		return true;
 	}
 
+	/** Every work's entries, from the manifest-only index, with any loaded
+	 *  entry taking precedence over the index's copy. */
 	async allEntries(): Promise<NoteVersionEntry[]> {
-		return Object.values(this.load().notes);
+		const merged = new Map(Object.entries(this.manifestIndex().notes));
+		for (const [key, entry] of Object.entries(this.manifest?.notes ?? {})) merged.set(key, entry);
+		return [...merged.values()];
 	}
 
 	async entriesForPaths(paths: string[]): Promise<NoteVersionEntry[]> {
 		const wanted = new Set(paths.map((path) => normalizePath(path)));
-		return Object.values(this.load().notes).filter((entry) => wanted.has(normalizePath(entry.path)));
+		const merged = new Map(Object.entries(this.manifestIndex().notes));
+		for (const [key, entry] of Object.entries(this.manifest?.notes ?? {})) merged.set(key, entry);
+		return [...merged.values()].filter((entry) => wanted.has(normalizePath(entry.path)));
 	}
 
 	async apply(file: TFile, entry: NoteVersionEntry): Promise<number> {
@@ -827,6 +954,7 @@ export class ManageVersionsModal extends Modal {
 	private outsideContent = "";
 	private activeVersionId: string | undefined;
 	private selectionDirty = false;
+	private statusEl: HTMLElement | null = null;
 
 	constructor(options: VersionModalOptions) {
 		super(options.app);
@@ -853,14 +981,16 @@ export class ManageVersionsModal extends Modal {
 	}
 
 	private async refresh(): Promise<void> {
-		this.entry = await this.options.store.entryFor(this.options.file);
+		// One read of the note, reused for the entry and the hash. `entryFor`
+		// used to read it a second time just to compute the key.
+		const liveText = await this.options.app.vault.read(this.options.file);
+		this.entry = this.options.store.entryForText(this.options.file, liveText);
 		const sourceBacked = this.options.isSourceBacked ? await this.options.isSourceBacked() : false;
 		if (!this.entry && sourceBacked) {
 			this.entry = await this.options.store.virtualEntry(this.options.file);
 		} else if (this.entry && sourceBacked) {
 			this.entry = await this.options.store.ensureVirtualOriginal(this.options.file, this.entry);
 		}
-		const liveText = await this.options.app.vault.read(this.options.file);
 		if (!this.activeVersionId && /\.Version\d+\.md$/i.test(this.options.file.path)) {
 			const versionMatch = /^midad-version:[ \t]*["']?([^"'\n]+)["']?[ \t]*$/m.exec(liveText);
 			if (versionMatch) this.activeVersionId = versionMatch[1].trim();
@@ -879,6 +1009,25 @@ export class ManageVersionsModal extends Modal {
 			this.fingerprintLoaded = true;
 			this.renderChanged = !!this.entry?.renderHash && this.entry.renderHash !== this.renderFingerprint;
 			this.render();
+		}
+	}
+
+	/**
+	 * Run a slow step behind a visible status line, with the list inert.
+	 *
+	 * The line is written and a frame is awaited before the work starts, so the
+	 * browser paints it: a step that blocks the thread for twenty seconds would
+	 * otherwise show nothing at all.
+	 */
+	private async working<T>(message: string, run: () => Promise<T>): Promise<T> {
+		this.contentEl.addClass("is-working");
+		this.statusEl?.setText(message);
+		await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
+		try {
+			return await run();
+		} finally {
+			this.contentEl.removeClass("is-working");
+			this.statusEl?.setText("");
 		}
 	}
 
@@ -908,6 +1057,9 @@ export class ManageVersionsModal extends Modal {
 			cls: "mas-versions-desc",
 			text: `Saved versions for ${this.entry?.title || this.options.file.basename}. The default version supplies the main note.`,
 		});
+		// Rewriting a large note takes seconds; without this the dialog looks
+		// dead and the reader clicks again, queueing the same work twice.
+		this.statusEl = contentEl.createEl("p", { cls: "mas-versions-progress" });
 		if (this.activeVersionId) {
 			contentEl.createEl("p", {
 				cls: "mas-versions-help",
@@ -1143,7 +1295,7 @@ export class ManageVersionsModal extends Modal {
 
 	private async renderVirtualZeroAsVersion(): Promise<void> {
 		if (!this.options.renderVersionZero) return;
-		await this.options.renderVersionZero();
+		await this.working("Rendering Version 0…", () => this.options.renderVersionZero!());
 		await this.refresh();
 		this.options.onChanged?.();
 	}
@@ -1177,7 +1329,8 @@ export class ManageVersionsModal extends Modal {
 		}
 		if (this.entry?.virtualOriginal && this.entry.defaultId === "v0" && this.options.renderOriginal) {
 			const renderOriginal = async () => {
-				await this.options.renderOriginal();
+				await this.working("Applying the default version and re-rendering…",
+					() => this.options.renderOriginal!());
 				this.close();
 			};
 			if (this.hasUnsavedChanges()) {
@@ -1229,7 +1382,8 @@ export class ManageVersionsModal extends Modal {
 			}).open();
 			return;
 		}
-		const written = await this.options.store.apply(this.options.file, this.entry);
+		const written = await this.working("Applying the default version…",
+			() => this.options.store.apply(this.options.file, this.entry!));
 		this.selectionDirty = false;
 		if (!written) new Notice("No changes to apply.");
 		this.close();

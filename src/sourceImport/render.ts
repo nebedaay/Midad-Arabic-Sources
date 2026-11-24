@@ -155,7 +155,7 @@ export function punctuationOutsideQuotes(body: string): string {
 }
 
 /** A tafsīr body's inline verse marker, `**[[stem#V|S:V]]**`. */
-const BODY_MARKER = /\*\*\[\[\d{3}[^#\]]*#\d+\|[^\]]+\]\]\*\*/g;
+const BODY_MARKER = /\*\*\[\[(?:Q[A-Z]{0,2})?\d{3}[^#\]]*#\d+\|[^\]]+\]\]\*\*/g;
 
 /**
  * One marginal marker per line — the layout guarantee, enforced on the way to
@@ -271,10 +271,12 @@ export function expectedNotePaths(
 	const dir = model.work.dir as string;
 	const isQuranText = model.work.collection === "quran-text";
 	const isCanonical = isQuranText && String(model.work.id) === canonicalId;
-	// Dictionary *root* notes keep unprefixed names (the vault already names them
-	// `HW …`); a dictionary's letter-index notes are prefixed like any other unit.
+	// A sūra note is always unprefixed — `Q024.md` for Ḥafṣ, `QW024.md` for a
+	// riwāya — because a citation addresses it as `[[Q024#10]]` and Obsidian
+	// resolves a link by the bare file name. Dictionary *root* notes are
+	// unprefixed for the same reason (the vault already names them `HW …`).
 	const unprefixed = (unit: JsonObject) =>
-		isCanonical || (model.work.collection === "dictionary" && unit.kind === "dict");
+		isQuranText || (model.work.collection === "dictionary" && unit.kind === "dict");
 	const paths = [`${outRoot}/${dir}.md`];
 	const singleUnit = model.units.length === 1 ? model.units[0] : undefined;
 	if (singleUnit && !isQuranText) return paths;
@@ -330,6 +332,22 @@ export function buildMocSections(works: Array<JsonObject>): MocSection[] {
 			works: (map.get(name) ?? []).slice().sort((a, b) => String(a.title).localeCompare(String(b.title))),
 		}));
 }
+
+/**
+ * Hand the event loop back to Obsidian.
+ *
+ * Every written note makes Obsidian re-parse its metadata and update the link
+ * graph, and other plugins (an indexer over 27,000 notes, for one) react to the
+ * same event. A tight `await` loop never yields a macrotask, so that work queues
+ * behind the render and the window stops responding. A zero-delay timer costs
+ * nothing per note and lets the queue drain between batches.
+ */
+function yieldToObsidian(): Promise<void> {
+	return new Promise((resolve) => window.setTimeout(resolve, 0));
+}
+
+/** Notes written between yields. Small enough to keep the UI live. */
+const RENDER_BATCH = 25;
 
 export async function writeNote(app: App, path: string, content: string): Promise<void> {
 	const p = normalizePath(path);
@@ -445,13 +463,14 @@ export async function renderModelToVault(
 
 	// One source of truth for each unit's note name: the same `note_stem` is used
 	// for the file AND for every link to it (the hub lists `unit.note_stem`), so a
-	// link can never name a note that was not written. Only the canonical riwāya
-	// has unprefixed sūra notes, and they live in `canonical_root`. Every unit's
-	// stem is set even for a scoped render, because the hub links to all of them.
+	// link can never name a note that was not written. A sūra note is always
+	// unprefixed (`Q024`, `QW024`) because a citation addresses it by that name —
+	// the canonical ones live in `canonical_root`. Every unit's stem is set even
+	// for a scoped render, because the hub links to all of them.
 	for (const unit of model.units) {
 		const dictRoot = model.work.collection === "dictionary" && unit.kind === "dict";
 		const base = safeFileSegment(String(unit.base), "section", 100);
-		unit.note_stem = (isCanonical || dictRoot) ? base : `${dir} - ${base}`;
+		unit.note_stem = (isQuranText || dictRoot) ? base : `${dir} - ${base}`;
 		unit.note_folder = isCanonical && canonicalRoot ? canonicalRoot : folder;
 		// A book volume note lists its chapters; give each the same authoritative
 		// stem the chapter note itself is written under.
@@ -474,7 +493,7 @@ export async function renderModelToVault(
 			const dictRoot = model.work.collection === "dictionary" && unit.kind === "dict";
 			const path = isCanonical && canonicalRoot
 				? `${canonicalRoot}/${base}.md`
-				: (isCanonical || dictRoot)
+				: (isQuranText || dictRoot)
 					? `${outRoot}/${dir}/${base}.md`
 					: `${outRoot}/${dir}/${dir} - ${base}.md`;
 			if (normalizePath(path) !== wanted) continue;
@@ -491,8 +510,13 @@ export async function renderModelToVault(
 	} else {
 		if (!(isCanonical && canonicalRoot)) await ensureFolder(app, folder);
 		if (isCanonical && canonicalRoot) await ensureFolder(app, canonicalRoot);
+		let sinceYield = 0;
 		for (const unit of todo) {
 			if (shouldCancel?.()) throw new Error("Source render cancelled");
+			if (++sinceYield >= RENDER_BATCH) {
+				sinceYield = 0;
+				await yieldToObsidian();
+			}
 			const path = `${unit.note_folder}/${unit.note_stem}.md`;
 			if (yamlOnly) {
 				const yaml = renderUnitYaml(engine, templates, model, unit);
@@ -521,10 +545,12 @@ export async function renderModelToVault(
 			seen?.set(path, hash);
 			written.push(path);
 			// Remove the opposite naming variant so switching canonical is clean.
+			// A riwāya's sūra notes are now unprefixed too, so its "alternative"
+			// name is the note just written — never delete that.
 			if (isQuranText) {
 				const altBase = safeFileSegment(String(unit.base), "section", 100);
 				const alt = isCanonical ? `${folder}/${dir} - ${altBase}.md` : `${folder}/${altBase}.md`;
-				await deleteNote(app, alt);
+				if (normalizePath(alt) !== normalizePath(path)) await deleteNote(app, alt);
 			}
 			tick();
 		}

@@ -1,6 +1,45 @@
 Install/update via BRAT.
 
+### 0.3.0
+
+Citations that open and read correctly, saved versions that answer at once, and a translation pipeline that keeps every footnote on its own page.
+
+### Citations
+
+- A citation is a two-line cartouche: a sūra **name** above its numbers (`الفاتحة` / `٤`, `Q An-Nur` / `10`), or — when the style prints the sūra as a number — the prefix above the whole locator (`Q` / `2:24`), with the separator between them honoured. A number is the first half of the reference, not a label, so it is never split across the two lines.
+- The format follows the note without a language property: an explicit `quran-citation-language`, then `language`, then the genre Midad itself wrote (`tafsir-en` / `tafsir`, an `[[Arabic translations]]` entry), then the folder. A paragraph that is clearly in the other language overrides its note, so a bilingual volume cites each paragraph in its own language.
+- A paragraph's direction comes from its **first strong character**, not from whether it contains Arabic: an English paragraph that quotes two Arabic words is still English.
+- A Latin cartouche is sized as 60% of the note's own text size, so it sits inside an English line instead of opening up its leading.
+- A citation opens on the press, as it should: the editor no longer takes the press for itself, which is what used to reveal `[[…]]` instead of opening the sūra. Ordinary links are left to Obsidian.
+
+### Saved versions
+
+- The version store reads and writes **one work's archive at a time**. Opening the manager unzips that note's archive and nothing else; a change rewrites that one archive. It used to unzip all 701 archives (260 MB) on open and re-compress every one of them on every click — the reason the dialog took a minute to answer and twenty seconds to apply.
+- Version matching trusts the recorded hash and only decompresses a snapshot that has none, the note is read once per refresh, and the manifest index is cached.
+- A progress line says what is running and makes the list inert while it does, so a slow re-render no longer looks like a dead click.
+
+### Translation
+
+- **One page per request.** Two pages in one context let the model attach one page's footnotes to the next page's section; it cannot do that now. The split is at the page heading alone — a `## Lesson` or `### Sūrat …` is content, not a boundary — and a response that comes back without its heading has it restored.
+- **Footnotes.** One `>[!footnotes]` per page, always. Every label the model writes becomes it and then goes: `Footnotes:`, `> Footnotes:`, `**Arabic Footnotes**`, `#### arabic-footnotes`, and a literal `<arabic-footnotes> … </arabic-footnotes>` wrapper. A rule that introduces number-led paragraphs — `---`, `***`, `___`, a bare `<br>` — is the section's edge, not a page break. Definitions written as bare paragraphs (`¹ …`, `<sup>1</sup> …`, `^(1)^ – …`, `[^1]: …`, `[^talhah-bio]: …`, `1 - …`) become `> - 1 – …` items, named markdown footnotes are numbered in order, and their anchors become `<sup>N</sup>` references.
+- A block the model put one page late is moved back to the page whose text refers to its numbers — one page, never two, because two pages were all it ever saw.
+- A verse is cited **once per run** in a translated tafsīr: the first and last quotation of a verse in a paragraph keep the link, the glosses between them lose it. The margin's `|:` marker is not a citation and is untouched.
+- Backticks the model uses for emphasis become ‘…’, and the footnote rule hangs from the correct edge (`arabic-footnotes` right, `footnotes` left).
+
+### The Qur'ān work
+
+- Two links to the same verse in a row are one citation, including the old aliased form beside the new one.
+- A quotation that opens with the basmala is the opening of the sūra being read, not a citation of al-Fātiḥa: the page's `سورة …` heading decides, and without one the following quotation does (`﴿ٱلَّذِىٓ أَنزَلَ عَلَىٰ عَبْدِهِ ٱلْكِتَٰبَ﴾` is al-Kahf). The marginal marker is realigned with the citation.
+- A short quotation whose words are the next words of the verse just cited is cited in that verse — a commentary glosses word by word.
+- A quotation span never reaches across a paragraph break or a page heading. An unbalanced ornate mark used to make one span from a heading to the next paragraph, and the verse-number stripping inside a span ate the page number and the line break with it, gluing `#### p. 235` to the text that followed.
+
+### Fixes
+
+- `#### p. 235﴾then…` (text glued to a page number) and `#### p * 135` are repaired instead of printed.
+- A citation's trailing space goes with it when the link is removed, so a gloss is not left with a gap before its punctuation.
+
 ### 0.2.12
+
 
 One Qur'ān engine for every text, a margin that numbers the whole chapter, and citations that are corrected from the words they quote.
 

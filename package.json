@@ -1,6 +1,6 @@
 {
   "name": "midad-arabic-sources",
-  "version": "0.2.12",
+  "version": "0.3.0",
   "description": "Import classical Arabic sources (tafsīrs, Qur'ān translations, ḥadīth, riwāyāt) into the vault, transliterate Arabic, and export references to Zotero.",
   "main": "main.js",
   "scripts": {
@@ -19,7 +19,8 @@
     "rlnotes": "node release-notes.mjs && git add release-notes.md",
     "release": "version=$(node -p \"require('./manifest.json').version\") && git commit -m \"$version\" && git tag \"$version\" && git push && git push --tags",
     "test:annotations": "node scripts/test-annotations.mjs",
-    "test:quran": "node scripts/test-quran.mjs"
+    "test:quran": "node scripts/test-quran.mjs",
+    "test:versions": "node scripts/test-versions.mjs"
   },
   "author": "Joseph Hill <jbhill@ualberta.ca>",
   "license": "GPL-3.0-or-later",

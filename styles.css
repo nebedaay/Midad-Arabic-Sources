@@ -127,10 +127,12 @@
        `--quran-number-shift` is a separate, smaller nudge for the number alone
        inside the emblem (in `em` of the number size). */
     --quran-ar-marker-shift: -.2rem;
-    /* Right gutter: the marker box plus a 10px gap to the text. */
-    /* 4.5 × 0.75rem marker box + a 10px gap, written as plain addition so
-       every engine resolves it. */
-    --quran-gutter: calc(3.375rem + 5px);
+    /* Right gutter: the marker box plus a gap to the text. Written entirely in
+       `rem`, because every quantity here is proportional to the type: a `px`
+       term stays put while the rest scales, so the gap between the marker and
+       the text changed with the font size. 3.375rem is the marker box
+       (4.5 × 0.75), 0.3125rem the gap. */
+    --quran-gutter: 3.6875rem;
     --quran-en-marker-shift: -.9rem;
     --quran-number-shift: 0em;
     /* English translation: the left gutter clears the marker, and the Arabic
@@ -242,6 +244,26 @@ body.sw-yaml-formatting .metadata-property[data-property-key="related"] .multi-s
     }
     border: 0;
 }
+
+/* Their fills, so each can be set from the plugin's Appearance settings or from
+   Style Settings instead of editing this file. The defaults reproduce the 10%
+   tint Obsidian paints from `--callout-color`, so nothing changes until a
+   setting is moved. */
+.callout:is([data-callout*="quran"]) {
+    background-color: var(--mas-quran-callout-bg, rgba(150, 150, 100, 0.1)) !important;
+}
+
+.callout:is([data-callout*="poetry"]) {
+    background-color: var(--mas-poetry-callout-bg, rgba(150, 150, 100, 0.1)) !important;
+}
+
+/* The Qur'ān callout's own fill, so it can be set from Style Settings (the
+   block at the end of this file) instead of editing CSS. Obsidian paints a
+   callout with 10% of `--callout-color`; the default below reproduces exactly
+   that, so nothing changes until the setting is used. */
+.callout:is([data-callout*="quran"]) {
+    background-color: var(--mas-quran-callout-bg, rgba(150, 150, 100, 0.1)) !important;
+}
 .callout[data-callout*="poetry"] {
     padding: 0rem 0rem;
     ul, li {
@@ -291,7 +313,7 @@ body.sw-yaml-formatting .metadata-property[data-property-key="related"] .multi-s
    still gilded by the shared rule further down). Testing the span itself with
    `:dir(rtl)` avoids enlarging an English quote merely because an RTL ancestor
    (or the line) is RTL. */
-body .callout:is([data-callout="quran"], [data-callout="quran-warsh"]),
+body .callout:is([data-callout="quran"], [data-callout="mas-quran"], [data-callout="quran-warsh"], [data-callout="mas-quran-warsh"]),
 body .quran-quote:dir(rtl),
 body .mas-quran-quote:dir(rtl),
 body [class*="quran-quote"]:dir(rtl) {
@@ -343,11 +365,20 @@ body .callout[data-callout*="footnotes" i] {
         var(--background-modifier-border) 0%,
         var(--background-modifier-border) 100%);
     background-size: 25% 1px;
-    background-position: top right;
+    background-position: top left;
     background-repeat: no-repeat;
     background-origin: border-box;
     background-clip: border-box;
     padding-top: 0.55em;
+}
+
+/* Which edge the rule hangs from is the direction the callout reads in, and the
+   callout's own name says it: the Arabic pipeline writes `arabic-footnotes`
+   (RTL, rule at the right), the English one `footnotes` (LTR, rule at the left).
+   `:dir()` was tried and is not usable here — Obsidian gives the callout box its
+   own `direction`, so an Arabic callout reported `ltr` and got the wrong edge. */
+body .callout[data-callout*="arabic-footnotes" i] {
+    background-position: top right;
 }
 
 body .callout[data-callout="mas-dictionary-definition"] {
@@ -442,6 +473,26 @@ body .markdown-preview-view.mas-prose h2,
 body .markdown-source-view.mod-cm6.mas-prose .cm-line.HyperMD-header-2 {
     font-size: 1.17em;
     line-height: normal;
+}
+
+/* Arabic poetry is verse, not a list: Reading view was drawing the default
+   bullets that Live Preview does not. Reading view does not draw the marker
+   with `list-style` — it inserts a `.list-bullet` span — so clearing the list
+   style alone left the bullet on every line after the first. */
+body .markdown-preview-view .callout[data-callout="arabic-poetry"] ul,
+body .markdown-preview-view .callout[data-callout="arabic-poetry"] ol,
+body .markdown-preview-view .callout[data-callout="arabic-poetry"] li {
+    list-style: none !important;
+    margin-inline-start: 0 !important;
+    padding-inline-start: 0 !important;
+}
+
+body .markdown-preview-view .callout[data-callout="arabic-poetry"] .list-bullet,
+body .markdown-preview-view .callout[data-callout="arabic-poetry"] .list-bullet::before,
+body .markdown-preview-view .callout[data-callout="arabic-poetry"] .list-bullet::after,
+body .markdown-preview-view .callout[data-callout="arabic-poetry"] li::marker {
+    display: none !important;
+    content: none !important;
 }
 
 /* Lane's verses become `arabic-poetry` callouts, and they are Arabic: the prose
@@ -710,7 +761,7 @@ body .quran-en h1 {
    margin: Obsidian's core declares `.markdown-source-view.mod-cm6
    .cm-content > * { margin: 0 !important }`. */
 body .quran-ar .cm-line:not(.HyperMD-header-1), body .quran-ar p,
-body .callout:is([data-callout="quran"], [data-callout="quran-warsh"]) .el-p, body .callout:is([data-callout="quran"], [data-callout="quran-warsh"]) .cm-line {
+body .callout:is([data-callout="quran"], [data-callout="mas-quran"], [data-callout="quran-warsh"], [data-callout="mas-quran-warsh"]) .el-p, body .callout:is([data-callout="quran"], [data-callout="mas-quran"], [data-callout="quran-warsh"], [data-callout="mas-quran-warsh"]) .cm-line {
     padding-right: var(--quran-gutter); /* marker box + gap */
     padding-block: 0.12em;
     text-align: justify;
@@ -725,9 +776,9 @@ body .callout:is([data-callout="quran"], [data-callout="quran-warsh"]) .el-p, bo
    fill is the same gold. */
 body .quran-ar .cm-line:not(.HyperMD-header-1), body .quran-ar p,
 body .quran-en .cm-line:not(.HyperMD-header-1), body .quran-en p,
-body .callout:is([data-callout="quran"], [data-callout="quran-warsh"]) .el-p, body .callout:is([data-callout="quran"], [data-callout="quran-warsh"]) .cm-line,
-body .quran-warsh .callout[data-callout="quran"] .el-p,
-body .quran-warsh .callout[data-callout="quran"] .cm-line,
+body .callout:is([data-callout="quran"], [data-callout="mas-quran"], [data-callout="quran-warsh"], [data-callout="mas-quran-warsh"]) .el-p, body .callout:is([data-callout="quran"], [data-callout="mas-quran"], [data-callout="quran-warsh"], [data-callout="mas-quran-warsh"]) .cm-line,
+body .quran-warsh .callout:is([data-callout="quran"], [data-callout="mas-quran"]) .el-p,
+body .quran-warsh .callout:is([data-callout="quran"], [data-callout="mas-quran"]) .cm-line,
 body .quran-warsh .cm-line:not(.HyperMD-header-1), body .quran-warsh p,
 body .quran-quote, body [class*="quran-quote"],
 body .markdown-preview-view .quran-quote, body .markdown-rendered .quran-quote,
@@ -743,7 +794,7 @@ body .markdown-source-view.mod-cm6 .quran-quote {
 /* The Arabic face belongs to Arabic verse text and to any Qur'ān quote; an
    English translation in a quran-en note keeps the normal text face. */
 body .quran-ar .cm-line:not(.HyperMD-header-1), body .quran-ar p,
-body .callout:is([data-callout="quran"], [data-callout="quran-warsh"]) .el-p, body .callout:is([data-callout="quran"], [data-callout="quran-warsh"]) .cm-line,
+body .callout:is([data-callout="quran"], [data-callout="mas-quran"], [data-callout="quran-warsh"], [data-callout="mas-quran-warsh"]) .el-p, body .callout:is([data-callout="quran"], [data-callout="mas-quran"], [data-callout="quran-warsh"], [data-callout="mas-quran-warsh"]) .cm-line,
 body .quran-quote, body [class*="quran-quote"], body .mas-quran-quote,
 body .markdown-preview-view .quran-quote, body .markdown-rendered .quran-quote,
 body .markdown-source-view.mod-cm6 .quran-quote,
@@ -762,9 +813,24 @@ body .markdown-source-view.mod-cm6 .mas-quran-quote {
 /* Taller line spacing only for RTL/Arabic Qur'ān text and quotes; an English
    quote in an LTR note keeps the normal text leading. */
 body .quran-ar .cm-line:not(.HyperMD-header-1), body .quran-ar p,
-body .callout:is([data-callout="quran"], [data-callout="quran-warsh"]) .el-p, body .callout:is([data-callout="quran"], [data-callout="quran-warsh"]) .cm-line,
+body .callout:is([data-callout="quran"], [data-callout="mas-quran"], [data-callout="quran-warsh"], [data-callout="mas-quran-warsh"]) .el-p, body .callout:is([data-callout="quran"], [data-callout="mas-quran"], [data-callout="quran-warsh"], [data-callout="mas-quran-warsh"]) .cm-line,
 body .quran-quote:dir(rtl), body [class*="quran-quote"]:dir(rtl) {
     line-height: var(--quran-line-height);
+}
+
+/* On a Qur'ān page the whole paragraph is gilded with `background-clip: text`,
+   so the paragraph's own paint area is what limits a tail. Vertical padding on
+   the block extends that area without touching the leading, and it is the block
+   equivalent of the inline pad above. A callout needs none of this: its own
+   padding is ample, and adding a block pad there only widened the gap between
+   verses. */
+body .quran-ar p,
+body .quran-warsh p,
+body .quran-ar .el-p,
+body .quran-warsh .el-p,
+body .quran-ar li,
+body .quran-warsh li {
+    padding-bottom: 0.14em !important;
 }
 
 /* --- ENGLISH TRANSLATION TEXT -------------------------------------------- */
@@ -806,6 +872,25 @@ body .quran-en h1 + p {
     font-style: normal;
 }
 
+/* An inline quotation has no paragraph box: `background-clip: text` paints
+   the gradient inside the element's own box, and that box is shorter than the
+   deepest tail — `ain.fina` in DigitalKhatt reaches 0.573em below the baseline,
+   and every listed face is in the same position, so no face avoids it.
+
+   `line-height` and `padding` cannot reach that box (500% was tried and still
+   clipped). A **border** can: the vertical border of an inline element extends
+   the box the background is painted into, and — unlike line-height — it adds
+   no height to the line, so the leading is untouched and the tail is painted.
+   The border is transparent, so it is only paint area, never ink. */
+body .quran-quote, body [class*="quran-quote"], body .mas-quran-quote,
+body .markdown-preview-view .quran-quote, body .markdown-rendered .quran-quote,
+body .markdown-source-view.mod-cm6 .quran-quote,
+body .markdown-preview-view .mas-quran-quote,
+body .markdown-rendered .mas-quran-quote,
+body .markdown-source-view.mod-cm6 .mas-quran-quote {
+    border-bottom: 0.45em solid transparent;
+    border-top: 0.12em solid transparent;
+}
 /* ── Managed-region marker ───────────────────────────────────────────────
    The generated region is bounded by <span class="mas-managed">. Keep it faint
    so it never competes with the text, in Qur'an notes and any other genre (the
@@ -2259,6 +2344,23 @@ body .callout[data-callout^="mas-annotation-comment"] {
     color: var(--text-muted);
 }
 
+/* The step that rewrites a large note takes seconds. Without a visible line —
+   and without making the list inert — the dialog looks dead, and the reader
+   clicks again, which queues the same work twice. */
+.mas-versions-modal .mas-versions-progress {
+    min-height: 1.25em;
+    margin: 0 0 0.5rem;
+    color: var(--text-accent);
+    font-size: var(--font-ui-smaller);
+}
+
+.mas-versions-modal.is-working .mas-versions-list,
+.mas-versions-modal.is-working .mas-versions-actions,
+.mas-versions-modal.is-working .mas-versions-apply {
+    pointer-events: none;
+    opacity: 0.55;
+}
+
 .mas-versions-help {
     margin: 0 0 0.85rem;
     color: var(--text-muted);
@@ -2472,7 +2574,7 @@ body .markdown-source-view.mod-cm6.tafsir .cm-line.HyperMD-header-5 {
 /* A paragraph that carries a marker must stay RTL even when the marker (an
    LTR link) is its first inline element. The plugin also sets `dir="rtl"` on
    the paragraph, which is what the note's Arabic sizing rules key on. */
-body .tafsir p:has(strong.mas-verse-marker),
+body .tafsir p:has(.mas-verse-marker),
 body .tafsir .cm-line:has(.mas-verse-marker) {
     direction: rtl;
 }
@@ -2496,7 +2598,7 @@ body .mas-verse-marker .cm-underline {
 
 /* A `[!quran]` callout is a Qur'ān page in miniature: the same face, size,
    leading, and the same numbered marker with its emblem. */
-body .callout:is([data-callout="quran"], [data-callout="quran-warsh"]) {
+body .callout:is([data-callout="quran"], [data-callout="mas-quran"], [data-callout="quran-warsh"], [data-callout="mas-quran-warsh"]) {
     position: relative;
     /* The callout box itself stays LTR so a theme's callout border (usually
        `border-inline-start`) keeps to the left; only the text inside is RTL. */
@@ -2507,11 +2609,11 @@ body .callout:is([data-callout="quran"], [data-callout="quran-warsh"]) {
     line-height: var(--quran-line-height);
 }
 
-body .callout:is([data-callout="quran"], [data-callout="quran-warsh"]) .callout-content,
-body .callout:is([data-callout="quran"], [data-callout="quran-warsh"]) p,
-body .callout:is([data-callout="quran"], [data-callout="quran-warsh"]) li,
-body .callout:is([data-callout="quran"], [data-callout="quran-warsh"]) .el-p,
-body .callout:is([data-callout="quran"], [data-callout="quran-warsh"]) .cm-line {
+body .callout:is([data-callout="quran"], [data-callout="mas-quran"], [data-callout="quran-warsh"], [data-callout="mas-quran-warsh"]) .callout-content,
+body .callout:is([data-callout="quran"], [data-callout="mas-quran"], [data-callout="quran-warsh"], [data-callout="mas-quran-warsh"]) p,
+body .callout:is([data-callout="quran"], [data-callout="mas-quran"], [data-callout="quran-warsh"], [data-callout="mas-quran-warsh"]) li,
+body .callout:is([data-callout="quran"], [data-callout="mas-quran"], [data-callout="quran-warsh"], [data-callout="mas-quran-warsh"]) .el-p,
+body .callout:is([data-callout="quran"], [data-callout="mas-quran"], [data-callout="quran-warsh"], [data-callout="mas-quran-warsh"]) .cm-line {
     font-family: var(--quran-font) !important;
     font-size: var(--quran-font-size) !important;
     line-height: var(--quran-line-height) !important;
@@ -2521,16 +2623,16 @@ body .callout:is([data-callout="quran"], [data-callout="quran-warsh"]) .cm-line 
 /* The marker keeps its full size and its corner position; only the space
    between it and the callout's right edge is reduced. The text still clears
    the marker on its own line. */
-body .callout:is([data-callout="quran"], [data-callout="quran-warsh"]) {
+body .callout:is([data-callout="quran"], [data-callout="mas-quran"], [data-callout="quran-warsh"], [data-callout="mas-quran-warsh"]) {
     padding-right: 0.25em !important;
 }
 
-body .callout:is([data-callout="quran"], [data-callout="quran-warsh"]) > .callout-content {
+body .callout:is([data-callout="quran"], [data-callout="mas-quran"], [data-callout="quran-warsh"], [data-callout="mas-quran-warsh"]) > .callout-content {
     padding-right: 0.5em;
 }
 
 /* The verse number becomes the same emblem-marked marker as on a Qur'ān page. */
-body .callout:is([data-callout="quran"], [data-callout="quran-warsh"]) h1 {
+body .callout:is([data-callout="quran"], [data-callout="mas-quran"], [data-callout="quran-warsh"], [data-callout="mas-quran-warsh"]) h1 {
     position: absolute !important;
     top: 0.6rem !important;
     right: 0 !important;
@@ -2541,6 +2643,11 @@ body .callout:is([data-callout="quran"], [data-callout="quran-warsh"]) h1 {
     height: max(var(--quran-marker-size), var(--quran-emblem-size)) !important;
     margin: 0 !important;
     padding: 0 !important;
+    /* A theme that paints H1 (a daily note fills it yellow, for instance)
+       paints this one too, because nothing here declared a background. The
+       marker is a marker wherever it appears, so it declares its own. */
+    background: none !important;
+    border-radius: 0 !important;
     font-size: var(--quran-number-size) !important;
     font-weight: normal !important;
     line-height: 1 !important;
@@ -2548,7 +2655,7 @@ body .callout:is([data-callout="quran"], [data-callout="quran-warsh"]) h1 {
     direction: rtl;
 }
 
-body .callout:is([data-callout="quran"], [data-callout="quran-warsh"]) h1::before {
+body .callout:is([data-callout="quran"], [data-callout="mas-quran"], [data-callout="quran-warsh"], [data-callout="mas-quran-warsh"]) h1::before {
     content: "۝";
     position: absolute;
     inset: 0;
@@ -2594,9 +2701,9 @@ body .quran-warsh {
 body .quran-warsh .cm-line:not(.HyperMD-header-1),
 body .quran-warsh p,
 body .quran-warsh li,
-body .quran-warsh .callout[data-callout="quran"] p,
-body .quran-warsh .callout[data-callout="quran"] .el-p,
-body .quran-warsh .callout[data-callout="quran"] .cm-line {
+body .quran-warsh .callout:is([data-callout="quran"], [data-callout="mas-quran"]) p,
+body .quran-warsh .callout:is([data-callout="quran"], [data-callout="mas-quran"]) .el-p,
+body .quran-warsh .callout:is([data-callout="quran"], [data-callout="mas-quran"]) .cm-line {
     font-family: var(--quran-warsh-font) !important;
 }
 
@@ -2605,11 +2712,11 @@ body .quran-warsh .callout[data-callout="quran"] .cm-line {
 
 /* A `[!quran-warsh]` callout is a Warsh page in miniature: the same styling as
    `[!quran]`, with the Warsh face. */
-body .callout[data-callout="quran-warsh"] p,
-body .callout[data-callout="quran-warsh"] li,
-body .callout[data-callout="quran-warsh"] .el-p,
-body .callout[data-callout="quran-warsh"] .cm-line,
-body .callout[data-callout="quran-warsh"] h1 {
+body .callout:is([data-callout="quran-warsh"], [data-callout="mas-quran-warsh"]) p,
+body .callout:is([data-callout="quran-warsh"], [data-callout="mas-quran-warsh"]) li,
+body .callout:is([data-callout="quran-warsh"], [data-callout="mas-quran-warsh"]) .el-p,
+body .callout:is([data-callout="quran-warsh"], [data-callout="mas-quran-warsh"]) .cm-line,
+body .callout:is([data-callout="quran-warsh"], [data-callout="mas-quran-warsh"]) h1 {
     font-family: var(--quran-warsh-font) !important;
 }
 
@@ -2622,7 +2729,7 @@ body .callout[data-callout="quran-warsh"] h1 {
    out of the spacing and clickable (the click is handled by the plugin, as for
    the verse marker). */
 body .quran-warsh .cm-line.HyperMD-header-2,
-body .callout[data-callout="quran-warsh"] .cm-line.HyperMD-header-2 {
+body .callout:is([data-callout="quran-warsh"], [data-callout="mas-quran-warsh"]) .cm-line.HyperMD-header-2 {
     position: absolute !important;
     height: auto !important;
     line-height: 1.15 !important;
@@ -2633,8 +2740,8 @@ body .callout[data-callout="quran-warsh"] .cm-line.HyperMD-header-2 {
 
 body .quran-warsh h2,
 body .quran-warsh .cm-line.HyperMD-header-2,
-body .callout[data-callout="quran-warsh"] h2,
-body .callout[data-callout="quran-warsh"] .cm-line.HyperMD-header-2 {
+body .callout:is([data-callout="quran-warsh"], [data-callout="mas-quran-warsh"]) h2,
+body .callout:is([data-callout="quran-warsh"], [data-callout="mas-quran-warsh"]) .cm-line.HyperMD-header-2 {
     position: absolute !important;
     right: 0 !important;
     top: auto !important;
@@ -2662,8 +2769,8 @@ body .callout[data-callout="quran-warsh"] .cm-line.HyperMD-header-2 {
 body .quran-warsh h2 .internal-link,
 body .quran-warsh .cm-line.HyperMD-header-2 .internal-link,
 body .quran-warsh .cm-line.HyperMD-header-2 .cm-hmd-internal-link,
-body .callout[data-callout="quran-warsh"] h2 .internal-link,
-body .callout[data-callout="quran-warsh"] .cm-line.HyperMD-header-2 .cm-hmd-internal-link {
+body .callout:is([data-callout="quran-warsh"], [data-callout="mas-quran-warsh"]) h2 .internal-link,
+body .callout:is([data-callout="quran-warsh"], [data-callout="mas-quran-warsh"]) .cm-line.HyperMD-header-2 .cm-hmd-internal-link {
     font-family: var(--latin-font), serif !important;
     font-size: inherit !important;
     font-weight: normal !important;
@@ -2683,7 +2790,7 @@ body .quran-warsh .cm-line.HyperMD-header-2 .cm-hmd-internal-link:hover {
    page, or either Qur'ān callout. */
 body .quran-ar h1,
 body .quran-warsh h1,
-body .callout:is([data-callout="quran"], [data-callout="quran-warsh"]) h1 {
+body .callout:is([data-callout="quran"], [data-callout="mas-quran"], [data-callout="quran-warsh"], [data-callout="mas-quran-warsh"]) h1 {
     font-size: var(--quran-number-size) !important;
     line-height: 1 !important;
     font-weight: normal !important;
@@ -2691,8 +2798,8 @@ body .callout:is([data-callout="quran"], [data-callout="quran-warsh"]) h1 {
 
 /* In a callout the marker is pinned to the callout's top-right corner, so the
    Ḥafṣ line is placed from that same corner instead of from its flow position. */
-body .callout[data-callout="quran-warsh"] h2,
-body .callout[data-callout="quran-warsh"] .cm-line.HyperMD-header-2 {
+body .callout:is([data-callout="quran-warsh"], [data-callout="mas-quran-warsh"]) h2,
+body .callout:is([data-callout="quran-warsh"], [data-callout="mas-quran-warsh"]) .cm-line.HyperMD-header-2 {
     top: calc(max(var(--quran-marker-size), var(--quran-emblem-size)) + 0.15rem) !important;
     transform: none !important;
 }
@@ -2721,9 +2828,9 @@ body .quran-ar .cm-line:not(.HyperMD-header-1),
 body .quran-ar p,
 body .quran-warsh .cm-line:not(.HyperMD-header-1),
 body .quran-warsh p,
-body .callout:is([data-callout="quran"], [data-callout="quran-warsh"]) .markdown-embed-content p,
-body .callout:is([data-callout="quran"], [data-callout="quran-warsh"]) .el-p,
-body .callout:is([data-callout="quran"], [data-callout="quran-warsh"]) .cm-line:not(.HyperMD-header-1):not(.HyperMD-header-2) {
+body .callout:is([data-callout="quran"], [data-callout="mas-quran"], [data-callout="quran-warsh"], [data-callout="mas-quran-warsh"]) .markdown-embed-content p,
+body .callout:is([data-callout="quran"], [data-callout="mas-quran"], [data-callout="quran-warsh"], [data-callout="mas-quran-warsh"]) .el-p,
+body .callout:is([data-callout="quran"], [data-callout="mas-quran"], [data-callout="quran-warsh"], [data-callout="mas-quran-warsh"]) .cm-line:not(.HyperMD-header-1):not(.HyperMD-header-2) {
     padding-right: var(--quran-gutter) !important;
 }
 
@@ -2732,7 +2839,7 @@ body .quran-ar .cm-content,
 body .quran-warsh .cm-content,
 body .markdown-preview-view.quran-ar .markdown-preview-sizer,
 body .markdown-preview-view.quran-warsh .markdown-preview-sizer,
-body .callout:is([data-callout="quran"], [data-callout="quran-warsh"]) .markdown-embed-content {
+body .callout:is([data-callout="quran"], [data-callout="mas-quran"], [data-callout="quran-warsh"], [data-callout="mas-quran-warsh"]) .markdown-embed-content {
     padding-right: 0 !important;
 }
 
@@ -2813,7 +2920,7 @@ body .quran-warsh h1 {
    Arabic/Qur'ānic face. Only the emblem behind it is special. */
 body .quran-ar h1,
 body .quran-warsh h1,
-body .callout:is([data-callout="quran"], [data-callout="quran-warsh"]) h1,
+body .callout:is([data-callout="quran"], [data-callout="mas-quran"], [data-callout="quran-warsh"], [data-callout="mas-quran-warsh"]) h1,
 body .quran-ar .cm-line.HyperMD-header-1 .cm-header-1,
 body .quran-warsh .cm-line.HyperMD-header-1 .cm-header-1 {
     font-family: var(--latin-font), serif !important;
@@ -2858,20 +2965,31 @@ body .quran-warsh p {
 /* Reading view: the verse marker and the paragraph that carries it. The class
    approach replaces the inline styles the plugin used to set, so the theme can
    still see and override them where appropriate. */
-body .markdown-preview-view strong.mas-verse-marker {
+/* One rule for the margin's link in both modes: Reading view paints an <a>,
+   Live Preview draws a widget <span>; both carry `mas-verse-marker`, and both
+   sit in their paragraph's right band. */
+body :is(.markdown-preview-view, .markdown-source-view):not(.quran-en) .mas-verse-marker {
     position: absolute !important;
-    left: calc(100% + 7px) !important;
+    /* The tafsīr geometry that was already tuned: the marker owns a fixed-width
+       band on the *left* of an RTL line, and the text reserves it. Anchoring the
+       right edge (as the rewrite did) both overlapped the text and let a long
+       locator grow towards it. */
+    left: 0 !important;
     right: auto !important;
     top: auto !important;
+    transform: none !important;
     margin: 0 !important;
     padding: 0 !important;
-    width: auto !important;
+    width: 2.5rem !important;
+    text-align: left !important;
     font-family: var(--latin-font), serif !important;
     font-size: 12px !important;
     font-weight: normal !important;
     line-height: 1.1 !important;
     color: var(--link-color) !important;
-    white-space: nowrap !important;
+    /* A long locator wraps inside its band instead of running into the text. */
+    white-space: normal !important;
+    overflow-wrap: anywhere;
     direction: ltr !important;
     text-align: left !important;
     z-index: 2;
@@ -2892,10 +3010,11 @@ body .markdown-preview-view .mas-verse-paragraph {
 
 
 
+
 /* A Qur'ān callout mirrors the sūra page: the riwāya reference sits in the same
    left gutter, and the verse text keeps clear of it. */
-body .callout:is([data-callout="quran"], [data-callout="quran-warsh"]) h2,
-body .callout:is([data-callout="quran"], [data-callout="quran-warsh"]) .cm-line.HyperMD-header-2 {
+body .callout:is([data-callout="quran"], [data-callout="mas-quran"], [data-callout="quran-warsh"], [data-callout="mas-quran-warsh"]) h2,
+body .callout:is([data-callout="quran"], [data-callout="mas-quran"], [data-callout="quran-warsh"], [data-callout="mas-quran-warsh"]) .cm-line.HyperMD-header-2 {
     position: absolute !important;
     left: 5px !important;
     right: auto !important;
@@ -2918,11 +3037,22 @@ body .callout:is([data-callout="quran"], [data-callout="quran-warsh"]) .cm-line.
     z-index: 3;
 }
 
-body .callout:is([data-callout="quran"], [data-callout="quran-warsh"]) .markdown-embed-content p,
-body .callout:is([data-callout="quran"], [data-callout="quran-warsh"]) .el-p,
-body .callout:is([data-callout="quran"], [data-callout="quran-warsh"]) .cm-line:not(.HyperMD-header-1):not(.HyperMD-header-2) {
+/* Inside a callout the embedded sūra's text clears the marker by the gutter,
+   less the empty part of the marker box (the emblem is narrower than its box).
+   That trim is a *proportion* of the box, so it is written in rem: as a fixed
+   px it grew or shrank relative to the box whenever the font size changed,
+   which is why the text drifted away from the marker at large sizes and
+   overlapped it at small ones. The editor's own scroller is a fixed px band, so
+   only the `.cm-line` case keeps a px compensation. */
+body .callout:is([data-callout="quran"], [data-callout="mas-quran"], [data-callout="quran-warsh"], [data-callout="mas-quran-warsh"]) .markdown-embed-content p,
+body .callout:is([data-callout="quran"], [data-callout="mas-quran"], [data-callout="quran-warsh"], [data-callout="mas-quran-warsh"]) .el-p {
     padding-left: 1.5rem !important;
-    padding-right: calc(var(--quran-gutter) - 30px) !important;
+    padding-right: calc(var(--quran-gutter) - 1.875rem) !important;
+}
+
+body .callout:is([data-callout="quran"], [data-callout="mas-quran"], [data-callout="quran-warsh"], [data-callout="mas-quran-warsh"]) .cm-line:not(.HyperMD-header-1):not(.HyperMD-header-2) {
+    padding-left: 1.5rem !important;
+    padding-right: calc(var(--quran-gutter) - 1.875rem - 30px) !important;
 }
 
 /* Placeholders in the Qur'ān reference dialogues are hints, not values: a
@@ -2934,16 +3064,30 @@ body .callout:is([data-callout="quran"], [data-callout="quran-warsh"]) .cm-line:
 
 /* Keep the embedded sūra inside the callout: the left-gutter padding and the
    absolutely positioned marker/reference must not create horizontal overflow. */
-body .callout:is([data-callout="quran"], [data-callout="quran-warsh"]) .markdown-embed-content,
-body .callout:is([data-callout="quran"], [data-callout="quran-warsh"]) .markdown-embed-content > *,
-body .callout:is([data-callout="quran"], [data-callout="quran-warsh"]) p,
-body .callout:is([data-callout="quran"], [data-callout="quran-warsh"]) .el-p {
+body .callout:is([data-callout="quran"], [data-callout="mas-quran"], [data-callout="quran-warsh"], [data-callout="mas-quran-warsh"]) .markdown-embed-content,
+body .callout:is([data-callout="quran"], [data-callout="mas-quran"], [data-callout="quran-warsh"], [data-callout="mas-quran-warsh"]) .markdown-embed-content > *,
+body .callout:is([data-callout="quran"], [data-callout="mas-quran"], [data-callout="quran-warsh"], [data-callout="mas-quran-warsh"]) p,
+body .callout:is([data-callout="quran"], [data-callout="mas-quran"], [data-callout="quran-warsh"], [data-callout="mas-quran-warsh"]) .el-p {
     max-width: 100% !important;
     box-sizing: border-box !important;
 }
 
-body .callout:is([data-callout="quran"], [data-callout="quran-warsh"]) .markdown-embed-content {
-    overflow-x: clip;
+
+/* A theme may cap an embed's height and give it `overflow: auto` (Minimal:
+   `max-height: 100%; overflow: auto`), which turns a transcluded verse into a
+   scroll box at some magnifications — the box is only as tall as its parent,
+   and the verse grows past it. Inside a Qur'ān callout the verse is one unit:
+   it grows with the text instead of scrolling.
+
+   Only the height-defining boxes are touched. The inner preview's sizer and
+   sections are *layout* elements — the section is floated and the sizer clears
+   it — so taking their `overflow` away collapses that clearfix and leaves a
+   large gap between two transcluded verses, which is exactly what an earlier
+   version of this rule did. */
+body .callout:is([data-callout="quran"], [data-callout="mas-quran"], [data-callout="quran-warsh"], [data-callout="mas-quran-warsh"]) :is(.callout-content, .markdown-embed, .markdown-embed-content, .markdown-embed-content > .markdown-preview-view),
+body .callout:is([data-callout="quran"], [data-callout="mas-quran"], [data-callout="quran-warsh"], [data-callout="mas-quran-warsh"]) {
+    max-height: none !important;
+    overflow: visible !important;
 }
 
 /* The editor's scroller adds its own 32px on the right. Instead of removing it,
@@ -2972,9 +3116,9 @@ body .markdown-preview-view.quran-warsh h1 {
 /* Inside a callout the embedded sūra adds its own content padding on top of
    the verse gutter, so the marker drifts away from the text. Only the verse
    padding should remain. */
-body .callout:is([data-callout="quran"], [data-callout="quran-warsh"]) .callout-content,
-body .callout:is([data-callout="quran"], [data-callout="quran-warsh"]) .markdown-embed,
-body .callout:is([data-callout="quran"], [data-callout="quran-warsh"]) .markdown-embed-content {
+body .callout:is([data-callout="quran"], [data-callout="mas-quran"], [data-callout="quran-warsh"], [data-callout="mas-quran-warsh"]) .callout-content,
+body .callout:is([data-callout="quran"], [data-callout="mas-quran"], [data-callout="quran-warsh"], [data-callout="mas-quran-warsh"]) .markdown-embed,
+body .callout:is([data-callout="quran"], [data-callout="mas-quran"], [data-callout="quran-warsh"], [data-callout="mas-quran-warsh"]) .markdown-embed-content {
     padding-right: 0 !important;
     margin-right: 0 !important;
 }
@@ -3006,8 +3150,10 @@ body .markdown-preview-view.quran-warsh .el-p,
 body .markdown-preview-view.quran-ar li,
 body .markdown-preview-view.quran-warsh li {
     /* The emblem is narrower than its box; trim the empty part of the box so
-       the text sits close to the glyph rather than to the box edge. */
-    padding-right: calc(var(--quran-gutter) - 30px) !important;
+       the text sits close to the glyph rather than to the box edge. The trim is
+       proportional to the box, so it is rem — a px trim changed size relative
+       to the type whenever the font size changed. */
+    padding-right: calc(var(--quran-gutter) - 1.875rem) !important;
 }
 
 /* The correspondence reference sits slightly higher in the editor than in
@@ -3251,10 +3397,10 @@ body .markdown-preview-view.quran-warsh .quran-quote,
 body .markdown-preview-view.quran-warsh [class*="quran-quote"],
 body .markdown-source-view.mod-cm6.quran-warsh .cm-line:not(.HyperMD-header-1),
 body .markdown-source-view.mod-cm6.quran-warsh .quran-quote,
-body .callout[data-callout="quran-warsh"] p,
-body .callout[data-callout="quran-warsh"] li,
-body .callout[data-callout="quran-warsh"] .el-p,
-body .callout[data-callout="quran-warsh"] .cm-line {
+body .callout:is([data-callout="quran-warsh"], [data-callout="mas-quran-warsh"]) p,
+body .callout:is([data-callout="quran-warsh"], [data-callout="mas-quran-warsh"]) li,
+body .callout:is([data-callout="quran-warsh"], [data-callout="mas-quran-warsh"]) .el-p,
+body .callout:is([data-callout="quran-warsh"], [data-callout="mas-quran-warsh"]) .cm-line {
     font-family: var(--quran-warsh-font) !important;
 }
 
@@ -3398,4 +3544,184 @@ body .mas-quran-citation-preview {
     margin-top: 0.4em;
     color: var(--text-normal);
     font-size: var(--font-ui-small);
+    /* The sample is two cartouches, each two lines: the breaks are in the text. */
+    white-space: pre-line;
 }
+
+/* A Qur'ān citation is a cartouche: a small rounded box holding the sūra above
+   the verse numbers, centred, with no parentheses — the box is the brackets.
+   The text is two lines because the renderer puts a newline between them, which
+   `white-space: pre-line` turns into a break in both views. Reading view paints
+   an <a>, Live Preview a widget <span>; the class is the contract, so neither
+   element name nor `!important` is needed — this is the only rule that styles
+   the box, and it comes after the generic link rules. */
+body .mas-quran-citation,
+body .markdown-preview-view .mas-quran-citation,
+body .markdown-reading-view .mas-quran-citation,
+body .markdown-source-view .mas-quran-citation {
+    display: inline-block;
+    vertical-align: middle;
+    white-space: pre-line;
+    /* The size and leading are the cartouche's own, and they have to win: the
+       RTL sizing rule near the top of this file ends with
+       `body .markdown-preview-view:not(…):not(…):not(…) :dir(rtl)`, whose
+       specificity is far above any selector written here, and a citation in
+       Reading view *is* an RTL element — so it took `--arabic-font-size` and
+       `--arabic-line-height` and printed at full size. Live Preview was spared
+       only because that rule reaches `.cm-line` there, not the widget inside
+       it. `!important` is the same pin the marker uses, for the same reason.
+       One base, both views. */
+    font-size: calc(var(--arabic-font-size) * 0.7) !important;
+    line-height: 100% !important;
+    color: #069d;
+    background: #ddcc9955;
+    border: 2px solid #00669988;
+    border-radius: 0.8em;
+    padding: 0.1em 0.4em;
+    text-align: center;
+    text-decoration: none;
+    cursor: pointer;
+}
+
+/* A Latin cartouche — `Q` over `2:24` — is two short lines of the *English*
+   note's apparatus, not two lines of Arabic. At the Arabic cartouche's size it
+   is taller than the English line box, so it opened up the leading on every
+   line that carried one; in an Arabic note the same box fits inside a 170%
+   line. 60% of the Arabic size, with less vertical padding, sits in the line. */
+body .markdown-preview-view .mas-quran-citation.is-latin,
+body .markdown-reading-view .mas-quran-citation.is-latin,
+body .markdown-source-view .mas-quran-citation.is-latin {
+    /* A share of the note's own text size, not of the Arabic one: the English
+       cartouche stands in English prose, and its two short lines have to fit
+       that line box rather than the Arabic line's. */
+    font-size: calc(var(--font-text-size, 1rem) * 0.6) !important;
+    padding: 0.05em 0.35em;
+}
+
+body .markdown-preview-view .mas-quran-citation:hover,
+body .markdown-source-view .mas-quran-citation:hover {
+    background: #ddcc9988;
+    border-color: #006699cc;
+}
+
+/* ── The gutter, keyed on the note's own class ──────────────────────────────
+   A tafsīr says so in its frontmatter (`cssclasses: tafsir`), a translation in
+   its own (`mas-translation`), so the band is a fact about the file rather than
+   about a class the plugin has to add to an editor while it mounts — which is
+   the part that kept coming and going. Each line reserves it, each callout box
+   reserves it, and the callout's own content reserves nothing more.
+   A tafsīr reads right to left: the band is on the left. A translation reads
+   left to right: the band is on the right. */
+body .markdown-source-view.tafsir .cm-line:not(.HyperMD-header-1),
+body .markdown-source-view.tafsir .cm-line:not(.HyperMD-header-1):has(.mas-verse-marker) {
+    position: relative !important;
+    padding-left: 2.5rem !important;
+}
+
+body .markdown-source-view.tafsir .callout {
+    position: relative !important;
+    padding-left: 2.5rem !important;
+}
+
+body .markdown-source-view.tafsir :is(.cm-callout, .callout),
+body .markdown-source-view.tafsir-en :is(.cm-callout, .callout) {
+    margin-left: 0 !important;
+    margin-right: 0 !important;
+    width: auto !important;
+    max-width: 100% !important;
+}
+
+body .markdown-source-view.tafsir .callout :is(.cm-line, p, li, .el-p) {
+    padding-left: 0 !important;
+    position: static !important;
+}
+
+body .markdown-preview-view.tafsir :is(p, li, .el-p) {
+    position: relative !important;
+    padding-left: 2.5rem !important;
+}
+
+body .markdown-preview-view.tafsir .callout {
+    position: relative !important;
+    padding-left: 2.5rem !important;
+}
+
+body .markdown-preview-view.tafsir .callout :is(p, li, .el-p) {
+    padding-left: 0 !important;
+    position: static !important;
+}
+
+body .markdown-source-view.tafsir-en .cm-line:not(.HyperMD-header-1),
+body .markdown-source-view.tafsir-en .callout {
+    position: relative !important;
+    padding-right: 2.5rem !important;
+}
+
+body .markdown-source-view.tafsir-en .callout :is(.cm-line, p, li, .el-p) {
+    padding-right: 0 !important;
+    position: static !important;
+}
+
+body .markdown-preview-view.tafsir-en :is(p, li, .el-p),
+body .markdown-preview-view.tafsir-en .callout {
+    position: relative !important;
+    padding-right: 2.5rem !important;
+}
+
+body .markdown-preview-view.tafsir-en .callout :is(p, li, .el-p) {
+    padding-right: 0 !important;
+    position: static !important;
+}
+
+/* The link sits in that band, whichever view drew it: at the line's own start
+   in a paragraph, and at the box's edge in a callout. */
+body .markdown-source-view.tafsir .callout .mas-verse-marker,
+body .markdown-preview-view.tafsir .callout .mas-verse-marker {
+    left: 0 !important;
+    right: auto !important;
+    width: 2.5rem !important;
+}
+
+body .markdown-source-view.tafsir-en .callout .mas-verse-marker,
+body .markdown-preview-view.tafsir-en .callout .mas-verse-marker {
+    left: auto !important;
+    right: 0 !important;
+    width: 2.5rem !important;
+}
+
+/*
+
+--------------------------------------------------------------------------
+Style Settings
+--------------------------------------------------------------------------
+Style Settings reads a plugin's own stylesheet, so the controls below appear
+under **Style Settings → Midad Arabic Sources** with nothing else to install.
+The plugin fires `parse-style-settings` on load so the block is picked up even
+when Style Settings scanned before this file was loaded.
+
+`--mas-quran-callout-bg` is the fill of a Qur'ān callout (`[!mas-quran]`, and
+the older `[!quran]`). Its default is the 10% tint Obsidian gives a callout, so
+leaving the setting alone changes nothing.
+*/
+
+/* @settings
+name: Midad Arabic Sources
+id: midad-arabic-sources
+settings:
+    -
+        id: mas-quran-callout-bg
+        title: Qur'ān callout background
+        description: The fill behind a Qur'ān quotation callout. Leave it as it is for Obsidian's default 10% tint of the callout colour.
+        type: variable-color
+        format: rgb
+        opacity: true
+        default: 'rgba(150, 150, 100, 0.1)'
+    -
+        id: mas-poetry-callout-bg
+        title: Poetry callout background
+        description: The fill behind an Arabic poetry callout. Leave it as it is for Obsidian's default 10% tint of the callout colour.
+        type: variable-color
+        format: rgb
+        opacity: true
+        default: 'rgba(150, 150, 100, 0.1)'
+*/

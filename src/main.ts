@@ -12,6 +12,8 @@ import {
 	ButtonComponent,
 	Editor,
 	MarkdownView,
+	ColorComponent,
+	ExtraButtonComponent,
 	Menu,
 	Modal,
 	Notice,
@@ -19,7 +21,9 @@ import {
 	PluginSettingTab,
 	Setting,
 	SettingDefinitionItem,
+	SliderComponent,
 	TAbstractFile,
+	FuzzySuggestModal,
 	TFile,
 	TFolder,
 	TextComponent,
@@ -65,7 +69,8 @@ import {
 	formatCitation,
 	resolveStyle,
 } from "./quran/citationFormat";
-import { invalidateQuranCitationCache, refreshQuranCitations, registerQuranCitations } from "./quran/citationRender";
+import { invalidateQuranCitationCache, refreshQuranCitations, registerQuranCitations, type QuranCitationHost } from "./quran/citationRender";
+import { watchCitationClicks } from "./quran/openCitation";
 import { registerVerseMarkers } from "./verseMarkers";
 import { registerVerseNumberHeadings } from "./verseNumbers";
 import { ManageVersionsModal, NoteVersionEntry, VersionStore } from "./sourceVersions";
@@ -225,11 +230,6 @@ interface MidadArabicSourcesSettings {
 	/** @deprecated Ḥafṣ is always canonical; a stored value is ignored. */
 	canonicalQuranRiwāya: string;
 	canonicalQuranFolder: string;
-	/** Prefix remembered by "Insert linked Qur'an reference". */
-	quranRefPrefix?: string;
-	/** Prefix/suffix remembered per riwāya for "Insert linked Qur'an reference". */
-	quranRefTemplates?: Record<string, { prefix: string; suffix: string }>;
-	quranRefLastRiwaya?: string;
 	/**
 	 * How a Qur'ān citation link is printed, per document language. A link is
 	 * stored once (`[[Q024#10]]`) and rendered from these at display time, so
@@ -239,6 +239,15 @@ interface MidadArabicSourcesSettings {
 	quranCitationLatin?: Partial<CitationStyle>;
 	/** Language assumed for a note that declares none. */
 	quranCitationDefaultLanguage?: "ar" | "en";
+	quranRefLastRiwaya?: string;
+	/** Base colour of a Qur'ān callout's fill. Empty keeps the stylesheet default. */
+	quranCalloutColour?: string;
+	/** Opacity of that fill, in percent (the default reproduces Obsidian's tint). */
+	quranCalloutOpacity?: number;
+	/** Base colour of an Arabic poetry callout's fill. Empty keeps the stylesheet default. */
+	poetryCalloutColour?: string;
+	/** Opacity of that fill, in percent. */
+	poetryCalloutOpacity?: number;
 	sourceMocParent: string;
 	// Annotations
 	annotationNoteFolder: string;
@@ -683,6 +692,26 @@ const PROMPT_KIND_LABEL: Record<PromptKind, string> = {
 	translation: "translation",
 };
 
+/**
+ * `#rrggbb` (what a colour picker returns) to `rgba()` at the given opacity.
+ *
+ * A callout's fill is a tint and the picker has no alpha, so the alpha lives in
+ * its own setting. Anything that is not a hex colour is returned unchanged, so
+ * a value written by hand in another CSS syntax still works.
+ */
+function colourWithAlpha(colour: string, alpha: number): string {
+	const hex = colour.trim();
+	const match = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(hex);
+	if (!match) return hex;
+	const digits = match[1].length === 3
+		? match[1].split("").map((c) => c + c).join("")
+		: match[1];
+	const r = parseInt(digits.slice(0, 2), 16);
+	const g = parseInt(digits.slice(2, 4), 16);
+	const b = parseInt(digits.slice(4, 6), 16);
+	return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
 const DEFAULT_SETTINGS: MidadArabicSourcesSettings = {
 	serverUrl: "http://127.0.0.1:8756",
 	transliterationServerScript: "scripts/transliterate-server.py",
@@ -718,6 +747,10 @@ const DEFAULT_SETTINGS: MidadArabicSourcesSettings = {
 	quranCitationArabic: { ...DEFAULT_ARABIC_STYLE },
 	quranCitationLatin: { ...DEFAULT_LATIN_STYLE },
 	quranCitationDefaultLanguage: "ar",
+	quranCalloutColour: "",
+	quranCalloutOpacity: 10,
+	poetryCalloutColour: "",
+	poetryCalloutOpacity: 10,
 	sourceMocParent: "Midad Arabic Sources",
 	annotationNoteFolder: "Midad Arabic Sources/Annotation Notes",
 	annotationDefaultColor: "yellow",
@@ -792,14 +825,29 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		this.extractBundledAssets();
 		await this.ensureSourceLayout();
 		this.addSettingTab(new MidadArabicSourcesSettingTab(this.app, this));
+		// The stylesheet carries a `@settings` block for the Style Settings
+		// plugin. If that plugin scanned the vault before this stylesheet was
+		// loaded, it does not know about the block yet; the event tells it to
+		// read again. Same approach as ScholarWeft.
+		this.app.workspace.trigger("parse-style-settings");
+		this.applyCalloutFills();
 		registerQuranQuoteRendering(this);
-		registerVerseMarkers(this);
-		registerVerseNumberHeadings(this);
-		registerQuranCitations(this, {
+		// One host, so the margin and the prose citations resolve the note's
+		// language and style through the same object.
+		const citationHost: QuranCitationHost = {
 			app: this.app,
 			styleFor: (language) => this.quranCitationStyle(language),
 			defaultLanguage: () => this.settings.quranCitationDefaultLanguage === "en" ? "en" : "ar",
-		});
+			translationsFolder: () => this.translationsFolder(),
+			transcriptionsFolder: () => this.transcriptionsFolder(),
+		};
+		registerVerseMarkers(this, citationHost);
+		registerVerseNumberHeadings(this);
+		registerQuranCitations(this, citationHost);
+		// Reading view follows a citation itself; what it cannot do is land on
+		// the verse, because a sūra's verse heading is drawn out of flow. The
+		// click is observed (never prevented) and the landing supplied.
+		watchCitationClicks(this, this.app);
 		try {
 			this.annotations = await registerAnnotations({
 				app: this.app,
@@ -909,11 +957,38 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		});
 
 		this.addCommand({
+			id: "report-editor-spacing",
+			name: "Report editor spacing (diagnostic)",
+			callback: () => this.reportEditorSpacing(),
+		});
+
+		this.addCommand({
+			id: "reprocess-batch-file",
+			name: "Reprocess a saved batch file…",
+			callback: () => this.openBatchFileReprocess(),
+		});
+
+		this.addCommand({
 			id: "postprocess-transcription-note",
 			name: "Post-process this transcription/translation",
 			callback: async () => {
 				await this.postprocessTranscriptionNote(this.app.workspace.getActiveFile());
 			},
+		});
+
+		this.addCommand({
+			id: "discover-quotations",
+			name: "Discover and mark quotations in this note",
+			callback: async () => {
+				await this.postprocessTranscriptionNote(
+					this.app.workspace.getActiveFile(), undefined, false, false, false, "ask", true);
+			},
+		});
+
+		this.addCommand({
+			id: "update-all-rendered-notes",
+			name: "Update all notes whose rendering has changed",
+			callback: async () => { await this.maintainSources(true); },
 		});
 
 		this.addCommand({
@@ -1136,6 +1211,11 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 						.setIcon("file-search")
 						.onClick(() => { void this.postprocessTranscriptionNote(file, archived); }));
 					menu.addItem((item) => item
+						.setTitle("Discover and mark quotations")
+						.setIcon("search")
+						.onClick(() => { void this.postprocessTranscriptionNote(
+							file, archived, false, false, false, "ask", true); }));
+					menu.addItem((item) => item
 						.setTitle("Assign topic and post-process…")
 						.setIcon("tag")
 						.onClick(() => { void this.assignTranscriptionTopic(file, archived); }));
@@ -1264,6 +1344,8 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 	}
 
 	onunload(): void {
+		document.body.style.removeProperty("--mas-quran-callout-bg");
+		document.body.style.removeProperty("--mas-poetry-callout-bg");
 		for (const notice of this.liveNotices) {
 			try { notice.hide(); } catch { /* already gone */ }
 		}
@@ -1287,6 +1369,12 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		this.sourceOperationActive = false;
 		this.sourceOperationKind = null;
 		try { this.activeSourceProc?.kill("SIGTERM"); } catch { /* already gone */ }
+		// A reload must not leave a re-render behind: the process outlives the
+		// plugin otherwise, and the next render races it for the same note.
+		for (const proc of this.runningScripts.values()) {
+			try { proc.kill("SIGTERM"); } catch { /* already gone */ }
+		}
+		this.runningScripts.clear();
 		this.statusPanels.forEach((p) => p.destroy());
 		this.statusPanels = [];
 	}
@@ -1327,6 +1415,39 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		}, 500);
 	}
 
+	/**
+	 * Paint the callouts with the fills the user configured, if any.
+	 *
+	 * Each fill is a CSS variable the stylesheet consumes, so the picker sets the
+	 * same thing Style Settings would. With no colour set the property is removed
+	 * entirely, which leaves the stylesheet's default (and lets Style Settings
+	 * own the value instead of competing with an inline style).
+	 */
+	applyCalloutFills(): void {
+		this.applyCalloutFill(
+			"--mas-quran-callout-bg",
+			this.settings.quranCalloutColour,
+			this.settings.quranCalloutOpacity,
+		);
+		this.applyCalloutFill(
+			"--mas-poetry-callout-bg",
+			this.settings.poetryCalloutColour,
+			this.settings.poetryCalloutOpacity,
+		);
+	}
+
+	private applyCalloutFill(variable: string, colour: string | undefined,
+	                         opacity: number | undefined): void {
+		const value = (colour ?? "").trim();
+		const style = document.body.style;
+		if (!value) {
+			style.removeProperty(variable);
+			return;
+		}
+		const alpha = Math.min(100, Math.max(0, opacity ?? 10)) / 100;
+		style.setProperty(variable, colourWithAlpha(value, alpha));
+	}
+
 	/** Pending debounced repaint after a citation-setting change. */
 	quranRefreshTimer: number | null = null;
 
@@ -1336,9 +1457,8 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			|| `${this.settings.sourceImportRoot}/Quran`;
 		const counts = new Map<string, number>();
 		for (const file of this.app.vault.getFiles()) {
-			// Canonical files are `004 An-Nisa.md`; a riwāya's are prefixed with
-			// the work name (`Qurʾān (riwāyat Warsh) … - 004 An-Nisa.md`).
-			if (!/(?:^| - )\d{3} .+\.md$/.test(file.name)) continue;
+			// Every sūra note is `Q024.md` (Ḥafṣ) or `QW024.md` (a riwāya).
+			if (!/^Q[A-Z]{0,2}\d{3}\.md$/.test(file.name)) continue;
 			const path = file.parent?.path ?? "";
 			counts.set(path, (counts.get(path) ?? 0) + 1);
 		}
@@ -1347,23 +1467,20 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			.map(([path]) => ({
 				path,
 				key: path === canonical ? "canonical" : path,
-				label: path === canonical
-					? "Ḥafṣ (canonical)"
-					: (path.split("/").pop() ?? path),
+				label: path === canonical ? "Ḥafṣ (canonical)" : (path.split("/").pop() ?? path),
 			}));
 		found.sort((a, b) => (a.path === canonical ? -1 : 0) - (b.path === canonical ? -1 : 0));
 		return found;
 	}
 
-	/** The `NNN Sura` note for a sūra in one Qur'ān work. */
+	/** The sūra note for a sūra in one Qur'ān work (`Q024`, `QW024`, …). */
 	quranFile(workPath: string, surah: number): TFile | null {
-		const prefix = `${String(surah).padStart(3, "0")} `;
+		const pattern = new RegExp(`^Q[A-Z]{0,2}${String(surah).padStart(3, "0")}\\.md$`);
 		return this.app.vault.getFiles().find((file) => file.parent?.path === workPath
-			&& file.extension === "md"
-			&& (file.name.startsWith(prefix) || file.name.includes(` - ${prefix}`))) ?? null;
+			&& pattern.test(file.name)) ?? null;
 	}
 
-	/** Rewrite the verse references inside arbitrary text as Qur'ān links. */
+	/** Rewrite the verse references inside arbitrary text as bare Qur'ān links. */
 	quranReferencesInSelection(text: string, workPath: string): string {
 		const pattern = new RegExp(QURAN_REFERENCE_IN_TEXT.source, "g");
 		return text.replace(pattern, (match) => {
@@ -1374,19 +1491,20 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			if (!file) return match;
 			const total = Number(this.app.metadataCache.getFileCache(file)?.frontmatter?.total_verses ?? 0);
 			if (total && parsed.end > total) return match;
-			return `[[${file.basename}#${parsed.start}|${match}]]`;
+			if (parsed.start === parsed.end) return `[[${file.basename}#${parsed.start}]]`;
+			return `[[${file.basename}#${parsed.start}]]\u2013[[${file.basename}#${parsed.end}]]`;
 		});
 	}
 
 	/** The callout type for a Qur'ān work: `quran` for canonical, else per riwāya. */
 	riwayaCallout(workPath: string): string {
 		const work = this.quranWorks().find((entry) => entry.path === workPath);
-		if (!work || work.key === "canonical") return "quran";
+		if (!work || work.key === "canonical") return "mas-quran";
 		const label = work.label.toLowerCase();
 		for (const key of ["warsh", "qalun", "duri", "susi"]) {
-			if (label.includes(key)) return `quran-${key}`;
+			if (label.includes(key)) return `mas-quran-${key}`;
 		}
-		return "quran";
+		return "mas-quran";
 	}
 
 	sourcesRoot(): string {
@@ -1768,6 +1886,9 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		}
 	}
 
+	/** The child of each running script, so a re-run or an unload can stop it. */
+	private runningScripts = new Map<string, ReturnType<typeof spawn>>();
+
 	async runScript(scriptRel: string, args: string[], onEvent: (ev: PipelineEvent) => void): Promise<{ code: number; lines: string[] }> {
 		const vault = this.vaultPath();
 		const python = await this.resolvePython();
@@ -1785,6 +1906,9 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 					? "translation"
 					: args[0] === "resume" ? "transcription" : null;
 			const taskKey = task ? this.llmApiKeyForTask(task) : "";
+			// One run of a script at a time: starting it again (a reload, a second
+			// re-render) stops the one already going rather than racing it.
+			const previous = this.runningScripts.get(scriptRel);
 			const proc = spawn(python, [script, ...args], {
 				cwd: vault,
 				env: {
@@ -1803,6 +1927,15 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 					...(taskKey ? { GEMINI_API_KEY: taskKey } : {}),
 				},
 			});
+			if (previous && previous !== proc) {
+				try { previous.kill("SIGTERM"); } catch { /* already gone */ }
+			}
+			this.runningScripts.set(scriptRel, proc);
+			const release = () => {
+				if (this.runningScripts.get(scriptRel) === proc) this.runningScripts.delete(scriptRel);
+			};
+			proc.on("close", release);
+			proc.on("exit", release);
 			// Only the source importer is a cancellable source operation; a
 			// transcription/translation job must not be killed by a source stop.
 			const isSourceScript = scriptRel === this.settings.sourceImportScript
@@ -1938,6 +2071,10 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		let result: PipelineResult | null = null;
 		const { code } = await this.runScript(scriptRel ?? this.settings.pipelineScript, fullArgs, (ev) => {
 			panel.append(ev);
+			if (ev.event === "error") {
+				// The panel is a summary; the console keeps the whole message.
+				console.error(`[midad-arabic-sources] ${title}:`, ev.message, ev);
+			}
 			if (ev.event === "result") result = ev.result;
 		});
 		panel.finish(code === 0);
@@ -2165,6 +2302,29 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 	async openReprocess() {
 		const zips = (await this.pipelineResult(["list-archive"]))?.zips ?? [];
 		new ReprocessModal(this.app, this, zips).open();
+	}
+
+	/**
+	 * Reprocess a batch that was never archived.
+	 *
+	 * A batch's raw output can sit beside the note it produced — the translation
+	 * and transcription folders hold `*.translate-output.jsonl` and
+	 * `*-output.jsonl` — and without an archive zip the "Reprocess from saved
+	 * batch" list cannot see it, so a re-render can only repair the rendered
+	 * note instead of rebuilding it. The reprocessor accepts such a file
+	 * directly (its `resolve()` recognises the name), so it is offered here.
+	 */
+	async openBatchFileReprocess() {
+		const files = this.app.vault.getFiles().filter((file) =>
+			file.path.startsWith("_7 Sources/")
+			&& /(?: files\.zip|(?:translate-)?output\.jsonl)$/i.test(file.name));
+		if (!files.length) {
+			new Notice("No batch files (archives or JSONL output) found under _7 Sources.");
+			return;
+		}
+		new BatchFileModal(this.app, files, async (file) => {
+			await this.runWithProgress("Reprocessing", ["reprocess", "--zip", file.path]);
+		}).open();
 	}
 
 	/** Ask the importer script for its catalogue of available works. */
@@ -4451,7 +4611,14 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 	async stampUpdated(paths: string[]): Promise<void> {
 		const stamp = localTimestamp();
 		const vault = this.vaultPath();
+		let sinceYield = 0;
 		for (const raw of [...new Set(paths.map((value) => value.trim()).filter(Boolean))]) {
+			// Every note is read (and possibly rewritten) here; without a yield the
+			// window stops responding for the length of the work.
+			if (++sinceYield >= 25) {
+				sinceYield = 0;
+				await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
+			}
 			const rel = normalizePath(raw.startsWith("/") ? vaultRelative(vault, raw) : raw);
 			const file = this.app.vault.getAbstractFileByPath(rel);
 			if (!(file instanceof TFile)) continue;
@@ -4682,7 +4849,6 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 				contentPaths.push(...w);
 				await this.applySavedVersions(w);
 				void this.logRender(`work fetching saved versions ${this.workKey(model.work)}`);
-				await this.stampUpdated(w);
 				if (stats[this.workKey(model.work)]?.failedAt) delete stats[this.workKey(model.work)].failedAt;
 				void this.logRender(`work rendered ${this.workKey(model.work)}: ${w.length} note(s)`);
 				// A full render brings every template the work uses up to date.
@@ -4691,7 +4857,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 				const rendered: Record<string, number> = { ...(stats[key]?.rendered ?? {}) };
 				for (const tkey of this.templateKeysFor(String(model.work.collection ?? ""))) rendered[tkey] = now;
 				// The scripts that built the model are part of the renderer too.
-				rendered["pipeline"] = now;
+				rendered[this.pipelineKeyFor(String(model.work.collection ?? ""))] = now;
 				stats[key] = {
 					...stats[key], rendered, units: Object.fromEntries(seen),
 					// The total, not the number just rewritten: this is the baseline the
@@ -5436,7 +5602,8 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			new Notice("Open a transcription or translation note first.");
 			return;
 		}
-		const info = infoOverride ?? archivedNoteInfo(target.path);
+		const info = infoOverride ?? archivedNoteInfo(target.path)
+			?? this.noteInfoFromFolder(target);
 		if (!info?.type) {
 			new Notice("That note is not recognised as a transcription or translation.");
 			return;
@@ -5526,13 +5693,62 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 	 * parent, the pass runs over every volume note instead of refusing, so
 	 * re-rendering the work re-renders all of it.
 	 */
+	/**
+	 * Write out the editor's spacing facts, for a layout report.
+	 *
+	 * The gutter is declared in `styles.css` and depends on classes the plugin
+	 * adds at runtime, so "the band is missing here but present there" cannot be
+	 * diagnosed from the note: it needs the classes and the computed padding of
+	 * the elements that actually rendered. Copied to the clipboard, so the reader
+	 * can paste it without opening the developer tools.
+	 */
+	private reportEditorSpacing(): void {
+		const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+		if (!view) {
+			new Notice("Open a note first.");
+			return;
+		}
+		const root = view.containerEl;
+		const style = (element: Element | null, property: string): string | null =>
+			element instanceof HTMLElement ? getComputedStyle(element)[property as never] as string : null;
+		const editor = root.querySelector(".cm-editor");
+		const content = root.querySelector(".cm-content");
+		const sizer = root.querySelector(".markdown-preview-sizer");
+		const report = {
+			mode: view.getMode(),
+			editorClasses: editor?.className ?? null,
+			contentPaddingLeft: style(content, "paddingLeft"),
+			contentPaddingRight: style(content, "paddingRight"),
+			sizerPaddingLeft: style(sizer, "paddingLeft"),
+			lines: Array.from(root.querySelectorAll(".cm-line")).slice(0, 30).map((line) => ({
+				padding: style(line, "paddingLeft"),
+				position: style(line, "position"),
+				marker: !!line.querySelector(".mas-verse-marker"),
+				callout: !!line.closest(".callout"),
+				text: (line.textContent ?? "").slice(0, 30),
+			})),
+			callouts: Array.from(root.querySelectorAll(".callout")).slice(0, 6).map((element) => ({
+				classes: element.className,
+				marginLeft: style(element, "marginLeft"),
+				paddingLeft: style(element, "paddingLeft"),
+				width: style(element, "width"),
+				parent: element.parentElement?.className ?? null,
+			})),
+		};
+		const text = JSON.stringify(report, null, 1);
+		console.log("[midad] editor spacing\n" + text);
+		void navigator.clipboard.writeText(text);
+		new Notice("Editor spacing report copied to the clipboard.");
+	}
+
 	async postprocessTranscriptionNote(
 		file?: TAbstractFile | null,
 		infoOverride?: ArchivedNoteInfo,
 		metadataOnly = false,
 		inPlace = false,
 		quiet = false,
-		review: ChangeReview = "ask"
+		review: ChangeReview = "ask",
+		discover = false
 	): Promise<void> {
 		const target = file ?? this.app.workspace.getActiveFile();
 		if (!(target instanceof TFile) || target.extension !== "md") {
@@ -5550,7 +5766,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			const paths = volumes.map((volumeFile) => volumeFile.path);
 			if (!(await this.reviewChangedNotes(paths, review))) return;
 			const done = await this.postprocessTranscriptionVolumes(
-				info.citekey, info.type, metadataOnly, inPlace);
+				info.citekey, info.type, metadataOnly, inPlace, discover);
 			if (!done) {
 				new Notice("That is a volume index; open a volume note to post-process it.");
 				return;
@@ -5568,11 +5784,15 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			"--citekey", info.citekey,
 			"--type", info.type,
 		];
+		// A note named by its folder rather than by the archive's `@key - type`
+		// pattern has no volume to rebuild: it is updated where it sits.
+		const inPlaceNote = inPlace || info.volume == null;
 		if (info.volume != null) args.push("--volume", String(info.volume));
 		if (info.unit) args.push("--unit", info.unit);
 		if (target.basename.startsWith("mas-")) args.push("--standalone");
 		if (metadataOnly) args.push("--metadata-only");
-		if (inPlace) args.push("--in-place");
+		if (inPlaceNote) args.push("--in-place");
+		if (discover) args.push("--discover");
 		const result = await this.runWithProgress(
 			metadataOnly ? `Upgrading ${target.basename}` : `Post-processing ${target.basename}`,
 			args,
@@ -5602,6 +5822,25 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		}
 	}
 
+	/**
+	 * A note's type from the folder it lives in.
+	 *
+	 * The archive names a note `@key - transcription|translation - vol. N`, but a
+	 * chapter or article sits in the same folder without that shape. The folder
+	 * is the more reliable statement: anything under the translations folder is a
+	 * translation, and its citekey is the part of the name before the first
+	 * dash-group. Such a note is updated in place, because there is no volume to
+	 * rebuild.
+	 */
+	private noteInfoFromFolder(file: TFile): ArchivedNoteInfo | null {
+		const folder = this.translationsFolder().replace(/\/$/, "");
+		if (!folder || !file.path.startsWith(`${folder}/`)) return null;
+		const stem = file.basename.replace(/^(?:@|mas-)/, "");
+		const citekey = stem.split(/\s+-\s+/)[0]?.trim();
+		if (!citekey) return null;
+		return { citekey, type: "translation", volume: null, unit: null };
+	}
+
 	/** The existing volume notes of a multi-volume transcription/translation. */
 	private transcriptionVolumeFiles(citekey: string, type: string): TFile[] {
 		const folder = type === "translation" ? this.translationsFolder() : this.transcriptionsFolder();
@@ -5628,7 +5867,8 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		citekey: string,
 		type: string,
 		metadataOnly = false,
-		inPlace = false
+		inPlace = false,
+		discover = false
 	): Promise<number> {
 		let done = 0;
 		const written: string[] = [];
@@ -5636,7 +5876,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			const volumeInfo = archivedNoteInfo(volumeFile.path);
 			if (!volumeInfo?.type) continue;
 			await this.postprocessTranscriptionNote(
-				volumeFile, volumeInfo, metadataOnly, inPlace, true, "overwrite");
+				volumeFile, volumeInfo, metadataOnly, inPlace, true, "overwrite", discover);
 			done += 1;
 			// A re-render is not an edit, so the fresh note becomes the baseline.
 			if (this.app.vault.getAbstractFileByPath(volumeFile.path) instanceof TFile) {
@@ -6461,29 +6701,79 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 	/**
 	 * Every script that writes the content of a note.
 	 *
-	 * One list for all kinds: `text-source-import.py` builds a repository work's
-	 * bodies, the transcription scripts build a transcription's, and both import
-	 * `quran.py`/`tafsir.py`. A change to any of them is the same event — the
-	 * renderer moved, so every note they produced is out of date, whatever kind
-	 * it is.
+	 * The scripts a kind of work is actually built by, grouped so a change is
+	 * attributed to the works it can affect. `text-source-import.py` is the
+	 * importer for every repository work, so it appears in all three of those
+	 * groups; `quran.py` (Qur'ān quotes and citation links) is used by every
+	 * genre except the two lexicons, which are reference works with no Qur'ān
+	 * text in them; `tafsir.py` adds the marginal markers and the "cite a verse
+	 * once" rule, which only a commentary uses.
 	 */
-	static readonly CONTENT_SCRIPTS = [
-		"text-source-import.py",
-		"text_postprocess.py",
-		"quran.py",
-		"tafsir.py",
-		"transcription-postprocess.py",
-		"transcription-format.py",
-		"transcription-translation-move-to-vault.py",
-		"midad-arabic-sources-pipeline.py",
-		"_timestamp.py",
-	];
+	static readonly PIPELINE_SCRIPTS: Record<string, string[]> = {
+		dict: [
+			"text-source-import.py",
+			"hanswehr-fodt-align.py",
+			"hanswehr-fodt-json.py",
+			"arabic-bw-transliterate.py",
+		],
+		source: [
+			"text-source-import.py",
+			"text_postprocess.py",
+			"quran.py",
+			"quran_discover.py",
+			"quran_render.py",
+			"_timestamp.py",
+		],
+		tafsir: [
+			"text-source-import.py",
+			"text_postprocess.py",
+			"quran.py",
+			"quran_discover.py",
+			"quran_render.py",
+			"tafsir.py",
+			"_timestamp.py",
+		],
+		// A transcription tafsīr additionally runs `tafsir.py` (markers, cite-once),
+		// so the two are separate features: a marker change must re-process the
+		// commentaries and leave plain transcriptions alone.
+		transcriptionTafsir: [
+			"transcription-postprocess.py",
+			"transcription-format.py",
+			"transcription-translation-move-to-vault.py",
+			"midad-arabic-sources-pipeline.py",
+			"text_postprocess.py",
+			"quran.py",
+			"quran_discover.py",
+			"quran_render.py",
+			"tafsir.py",
+			"_timestamp.py",
+		],
+		transcription: [
+			"transcription-postprocess.py",
+			"transcription-format.py",
+			"transcription-translation-move-to-vault.py",
+			"midad-arabic-sources-pipeline.py",
+			"text_postprocess.py",
+			"quran.py",
+			"quran_discover.py",
+			"quran_render.py",
+			"_timestamp.py",
+		],
+	};
 
-	/** A single hash over every content-producing script. */
-	async pipelineScriptHash(): Promise<string> {
+	/** The pipeline a collection is rendered by. */
+	pipelineKeyFor(collection: string): string {
+		const name = String(collection ?? "");
+		if (name === "dictionary") return "pipeline:dict";
+		if (name === "tafsir" || name === "tafsir-qul") return "pipeline:tafsir";
+		return "pipeline:source";
+	}
+
+	/** One hash over one group of content-producing scripts. */
+	async pipelineScriptHash(group: string): Promise<string> {
 		const dir = path.dirname(this.resolveScript(this.settings.pipelineScript));
 		const parts: string[] = [];
-		for (const name of MidadArabicSourcesPlugin.CONTENT_SCRIPTS) {
+		for (const name of MidadArabicSourcesPlugin.PIPELINE_SCRIPTS[group] ?? []) {
 			let body = "";
 			try {
 				body = fs.readFileSync(`${dir}/${name}`, "utf8");
@@ -6494,29 +6784,52 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 	}
 
 	/**
-	 * Record the current script hash and return when it last changed.
+	 * Record a hash per script group and return when each last changed.
 	 *
-	 * Stored beside the template hashes, so one index answers "what rendered
-	 * this note, and has it moved?" for every kind of note.
+	 * A group first seen gets the legacy single-pipeline timestamp, not now: the
+	 * upgrade itself is not a change, but whatever the old key was already
+	 * reporting still is. After that only a group whose own scripts moved is
+	 * stale — editing `quran.py` no longer schedules the 12,000 dictionary notes.
 	 */
-	async recordPipelineHash(): Promise<{ hash: string; at: number }> {
-		const hash = await this.pipelineScriptHash();
+	async recordPipelineHashes(): Promise<Record<string, { hash: string; at: number }>> {
+		const groups = Object.keys(MidadArabicSourcesPlugin.PIPELINE_SCRIPTS);
+		const hashes: Record<string, string> = {};
+		for (const group of groups) hashes[`pipeline:${group}`] = await this.pipelineScriptHash(group);
 		const store = await this.loadSourceHashes();
-		const known = !!store.templates["pipeline"];
-		const { store: next } = recordTemplateHashes(store, { pipeline: hash }, Date.now());
-		// The first record is a change like any other: the notes on disk were
-		// produced by an older build's scripts, so they are compared against now
-		// once. (A template key keeps `at: 0` because a *new* template has no
-		// older notes to fix; a script does.)
-		if (!known) next.templates["pipeline"] = { hash, at: Date.now() };
+		const legacyAt = templateChangedAt(store, "pipeline");
+		const { store: next } = recordTemplateHashes(store, hashes, Date.now());
+		for (const key of Object.keys(hashes)) {
+			if (store.templates[key]) continue;
+			next.templates[key] = { hash: hashes[key], at: legacyAt || 0 };
+		}
 		await this.saveSourceHashes(next);
-		return { hash, at: templateChangedAt(next, "pipeline") };
+		const out: Record<string, { hash: string; at: number }> = {};
+		for (const key of Object.keys(hashes)) {
+			out[key] = { hash: next.templates[key].hash, at: templateChangedAt(next, key) };
+		}
+		return out;
+	}
+
+	/** Whether a transcription/translation note is a commentary (tafsīr mode). */
+	transcriptionIsTafsir(file: TFile): boolean {
+		const fm = this.app.metadataCache.getFileCache(file)?.frontmatter as Record<string, unknown> | undefined;
+		if (!fm) return false;
+		const has = (value: unknown, needle: string): boolean =>
+			(Array.isArray(value) ? value : [value])
+				.map((entry) => String(entry).toLowerCase())
+				.some((entry) => entry.includes(needle));
+		if (has(fm["midad-transcription-mode"], "tafsir") || has(fm["midad-transcription-mode"], "tafsīr")) return true;
+		if (has(fm["cssclasses"], "tafsir") || has(fm["cssclasses"], "tafsīr")) return true;
+		return has(fm["topics"], "tafsir") || has(fm["topics"], "tafsīr");
 	}
 
 	/** Transcription/translation notes rendered before the current scripts. */
-	async findStaleTranscriptionNotes(pipeline: { hash: string; at: number }): Promise<TFile[]> {
-		const { hash, at } = pipeline;
-		if (!at || !hash) return [];
+	async findStaleTranscriptionNotes(
+		pipelines: Record<string, { hash: string; at: number }>
+	): Promise<TFile[]> {
+		const plain = pipelines["pipeline:transcription"];
+		const tafsir = pipelines["pipeline:transcriptionTafsir"] ?? plain;
+		if (!plain?.at || !plain.hash) return [];
 		const out: TFile[] = [];
 		const roots = new Set([
 			normalizePath(this.transcriptionsFolder()),
@@ -6533,6 +6846,8 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			// A note stamped with the current scripts needs nothing. One written after
 			// the change was produced by the new scripts, so it is stamped and left
 			// alone; only notes older than the change are out of date.
+			const chosen = (this.transcriptionIsTafsir(file) ? tafsir : plain) ?? plain;
+			const { hash, at } = chosen;
 			const stamp = this.hashStore().render(file.path);
 			if (stamp === hash) continue;
 			const mtime = file.stat?.mtime ?? 0;
@@ -6634,7 +6949,8 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 	 * a version beside it, so an automatic pass never overwrites their work.
 	 */
 	async reprocessTranscriptionNotes(files: TFile[], pipeline: { hash: string; at: number },
-		kind: "auto" | "explicit" = "auto"): Promise<number> {
+		kind: "auto" | "explicit" = "auto",
+		hashFor: (file: TFile) => string = () => pipeline.hash): Promise<number> {
 		if (!files.length) return 0;
 		if (kind === "auto" && this.autoReview() === "skip") return 0;
 		let done = 0;
@@ -6646,7 +6962,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 				const info = archivedNoteInfo(file.path);
 				if (!info?.type) continue;
 				await this.rerenderArchivedNote(file, { review: "save" });
-				stamped[file.path] = pipeline.hash;
+				stamped[file.path] = hashFor(file);
 				done += 1;
 			}
 		} finally {
@@ -6714,15 +7030,16 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 	/** Installed works whose notes predate the current content scripts. */
 	async countOutdatedSourceWorks(): Promise<number> {
 		const store = await this.loadSourceHashes();
-		const at = templateChangedAt(store, "pipeline");
-		if (!at) return 0;
 		const stats = await this.loadSourceStats();
 		const manifest = await this.loadSourceManifest();
 		let count = 0;
 		for (const work of manifest) {
 			if (this.workStatus(work) !== "installed") continue;
+			const key = this.pipelineKeyFor(String(work.collection ?? ""));
+			const at = templateChangedAt(store, key);
+			if (!at) continue;
 			const rendered = stats[this.workKey(work)]?.rendered ?? {};
-			if ((rendered["pipeline"] ?? 0) < at) count += 1;
+			if ((rendered[key] ?? 0) < at) count += 1;
 		}
 		return count;
 	}
@@ -6763,8 +7080,9 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 			// A change to a content script rebuilds the work's model as well as its
 			// notes: the acquisition and the renderer are the same code. So the work
 			// is re-fetched from its cache and re-rendered, not merely re-rendered.
-			const scriptsAt = templateChangedAt(store, "pipeline");
-			if (scriptsAt > 0 && renderedMs("pipeline") < scriptsAt) {
+			const pipeKey = this.pipelineKeyFor(String(work.collection ?? ""));
+			const scriptsAt = templateChangedAt(store, pipeKey);
+			if (scriptsAt > 0 && renderedMs(pipeKey) < scriptsAt) {
 				const tried = Number(stat?.scriptsTried ?? 0);
 				if (tried >= scriptsAt) continue; // attempted for this change already
 				out.push({ work, kinds: null, refetch: true });
@@ -6775,7 +7093,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 				const modelMtime = (await this.app.vault.adapter
 					.stat(normalizePath(`.midad-arabic-sources/source-models/${work.collection}/${work.id}.json`))
 					.catch((): null => null))?.mtime ?? 0;
-				const newest = Math.max(modelMtime, templateChangedAt(store, "pipeline"),
+				const newest = Math.max(modelMtime, templateChangedAt(store, pipeKey),
 					...Object.values(store.templates).map((entry) => entry.at ?? 0));
 				if (failedAt > newest) continue; // still failing, nothing changed since
 			}
@@ -6898,7 +7216,6 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 							it.kinds ?? undefined, seen, () => this.isSourceCancelled(op)),
 							10 * 60_000, `rendering ${key}`);
 					contentPaths.push(...written);
-					await this.stampUpdated(written);
 					// Record which templates this render brought up to date. A scoped
 					// render marks only the rendered kinds (plus the hub); a full render
 					// (kinds === null) marks every template the work uses. On the first
@@ -6910,7 +7227,9 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 						for (const tkey of this.templateKeysFor(String(it.work.collection ?? ""))) rendered[tkey] = legacy;
 					}
 					rendered["hub"] = now;
-					if (yamlOnly) rendered["pipeline"] = rendered["pipeline"] ?? legacy;
+					if (yamlOnly) {
+						rendered[this.pipelineKeyFor(String(model.work.collection ?? ""))] ??= legacy;
+					}
 					for (const tkey of this.templateKeysFor(String(it.work.collection ?? ""))) {
 						if (tkey === "hub") continue;
 						const kind = SOURCE_TEMPLATE_KIND[tkey];
@@ -6957,9 +7276,40 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		const stale = await this.findStaleSourceWorks();
 		const indexDirty = changedKeys.some((k) => k === "moc" || k === "sources");
 		if (!stale.length && !indexDirty) return 0;
+		// A template edit can reach the whole corpus (the two dictionaries alone are
+		// 12,000 notes). An automatic render that size makes Obsidian unusable for
+		// minutes, so above the limit it waits for the reader to ask.
+		if (kind === "auto") {
+			const estimate = await this.estimateStaleNotes(stale);
+			if (estimate > MidadArabicSourcesPlugin.AUTO_RENDER_NOTE_LIMIT) {
+				const signature = `${changedKeys.sort().join(",")}:${estimate}`;
+				if (this.refusedAutoRender !== signature) {
+					this.refusedAutoRender = signature;
+					new Notice(
+						`A template change would rewrite about ${estimate} notes, so automatic rendering is paused. `
+						+ "Run “Apply template changes to imported sources” when you are ready.",
+						15000);
+				}
+				return 0;
+			}
+		}
 		await this.renderStaleScoped(stale.map((s) => ({ work: s.work, kinds: s.kinds })), kind, yamlOnly);
 		if (indexDirty) await this.refreshSourcesIndex();
 		return stale.length;
+	}
+
+	/** Above this many notes, an automatic template render waits for the command. */
+	static readonly AUTO_RENDER_NOTE_LIMIT = 2000;
+
+	/** The template signature we last declined to render automatically. */
+	refusedAutoRender: string | null = null;
+
+	/** How many notes the stale works hold, from the last render's measurements. */
+	private async estimateStaleNotes(stale: Array<{ work: JsonObject }>): Promise<number> {
+		const stats = await this.loadSourceStats();
+		let total = 0;
+		for (const item of stale) total += Number(stats[this.workKey(item.work)]?.notes ?? 0) || 0;
+		return total;
 	}
 
 	templateCheckRunning = false;
@@ -6993,7 +7343,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 	/** Set while the update-consent prompt is open, for the same reason. */
 	private awaitingSourceConsent = false;
 
-	async maintainSources(): Promise<void> {
+	async maintainSources(force = false): Promise<void> {
 		// Two passes at once re-fetch and re-render the same works, competing for the
 		// transliteration service and writing the same notes over each other — a reload
 		// while a pass was still running used to start exactly that duplicate. The pass
@@ -7001,13 +7351,13 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		if (this.maintenanceInFlight || this.awaitingSourceConsent) return;
 		this.maintenanceInFlight = true;
 		try {
-			await this.maintainSourcesOnce();
+			await this.maintainSourcesOnce(force);
 		} finally {
 			this.maintenanceInFlight = false;
 		}
 	}
 
-	async maintainSourcesOnce(): Promise<void> {
+	async maintainSourcesOnce(force = false): Promise<void> {
 		// Finish any interrupted removal first, and never restore such a work —
 		// the user already asked for it gone, so it does not prompt.
 		for (const w of await this.findPendingDeletions()) {
@@ -7027,8 +7377,9 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		// The same question for transcriptions and translations: their renderer
 		// is the post-processing scripts, not an ETA template, but a change there
 		// leaves their notes just as out of date.
-		const pipeline = await this.recordPipelineHash();
-		const staleNotes = await this.findStaleTranscriptionNotes(pipeline);
+		const pipelines = await this.recordPipelineHashes();
+		const pipeline = pipelines["pipeline:transcription"] ?? { hash: "", at: 0 };
+		const staleNotes = await this.findStaleTranscriptionNotes(pipelines);
 		const staleAdopted = await this.findStaleAdoptedNotes(pipeline);
 		if (!incomplete.length && !stale.length && !indexDirty && !staleNotes.length && !staleAdopted.length) return;
 
@@ -7065,6 +7416,24 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		// stale index are the same event to the reader.
 		const finish = async (includeAuto: boolean) => {
 			if (includeAuto) {
+				// The same limit as the template command, but this pass also re-processes
+				// transcriptions and adopted notes, so a script edit here can reach every
+				// generated note as well. Above the limit nothing is marked as rendered:
+				// the work stays stale and the explicit commands still offer it.
+				const estimate = (await this.estimateStaleNotes(stale))
+					+ staleNotes.length + staleAdopted.length;
+				if (!force && estimate > MidadArabicSourcesPlugin.AUTO_RENDER_NOTE_LIMIT) {
+					const signature = `maint:${pipeline ? pipeline.at : 0}:${estimate}`;
+					if (this.refusedAutoRender !== signature) {
+						this.refusedAutoRender = signature;
+						new Notice(
+							`A template or script change affects about ${estimate} notes, so automatic updating is paused. `
+							+ "Run “Apply template changes to imported sources” for repository works, or "
+							+ "“Post-process all transcriptions and translations” for the rest, when you are ready.",
+							15000);
+					}
+					return;
+				}
 				// A work whose *scripts* moved is rebuilt from its cached source, not
 				// just re-rendered: the model body itself came from those scripts.
 				const stats = await this.loadSourceStats();
@@ -7094,7 +7463,13 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 				await this.renderStaleScoped(rerender, "auto", yamlOnly && incomplete.length === 0);
 			}
 			if (includeAuto) {
-				await this.reprocessTranscriptionNotes(staleNotes, pipeline, "auto");
+				await this.reprocessTranscriptionNotes(
+					staleNotes,
+					pipeline,
+					"auto",
+					(file) => (this.transcriptionIsTafsir(file)
+						? (pipelines["pipeline:transcriptionTafsir"] ?? pipeline).hash
+						: pipeline.hash));
 				await this.reprocessAdoptedNotes(staleAdopted, pipeline, "auto");
 			}
 			if (includeAuto && indexDirty) await this.refreshSourcesIndex();
@@ -7105,7 +7480,7 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		const summarise = async (): Promise<void> => {
 			try {
 				const stillStale = await this.countOutdatedSourceWorks();
-				const stillNotes = (await this.findStaleTranscriptionNotes(pipeline)).length
+				const stillNotes = (await this.findStaleTranscriptionNotes(pipelines)).length
 					+ (await this.findStaleAdoptedNotes(pipeline)).length;
 				const left = stillStale + stillNotes;
 				if (left) {
@@ -7119,6 +7494,12 @@ export default class MidadArabicSourcesPlugin extends Plugin {
 		};
 		if (!autoCount) {
 			await finish(false);
+			await summarise();
+			return;
+		}
+		if (force) {
+			// An explicit "update everything" is its own consent, and is not limited.
+			await finish(true);
 			await summarise();
 			return;
 		}
@@ -7628,6 +8009,47 @@ class MidadArabicSourcesSettingTab extends PluginSettingTab {
 		if (key === "zoteroAutoCreate" && value === true) void this.plugin.autoSyncZotero();
 	}
 
+	/**
+	 * Colour and opacity for a callout's fill.
+	 *
+	 * Kept here as well as in Style Settings because Style Settings is a separate
+	 * plugin: without it, this row is the only way to set the colour. Both write
+	 * the same CSS variable, and clearing the colour hands the value back to the
+	 * stylesheet (and so to Style Settings) rather than freezing an override.
+	 */
+	renderCalloutFill(setting: Setting, colourKey: "quranCalloutColour" | "poetryCalloutColour",
+	                  opacityKey: "quranCalloutOpacity" | "poetryCalloutOpacity"): void {
+		setting.controlEl.empty();
+		const settings = this.plugin.settings;
+		const picker = new ColorComponent(setting.controlEl)
+			.setValue(settings[colourKey] || "#969664")
+			.onChange(async (value) => {
+				settings[colourKey] = value;
+				this.plugin.applyCalloutFills();
+				await this.plugin.saveSettings();
+			});
+		const opacity = new SliderComponent(setting.controlEl)
+			.setLimits(0, 100, 1)
+			.setValue(settings[opacityKey] ?? 10)
+			.setDynamicTooltip()
+			.onChange(async (value) => {
+				settings[opacityKey] = value;
+				this.plugin.applyCalloutFills();
+				await this.plugin.saveSettings();
+			});
+		new ExtraButtonComponent(setting.controlEl)
+			.setIcon("rotate-ccw")
+			.setTooltip("Use the default tint")
+			.onClick(async () => {
+				settings[colourKey] = "";
+				settings[opacityKey] = 10;
+				picker.setValue("#969664");
+				opacity.setValue(10);
+				this.plugin.applyCalloutFills();
+				await this.plugin.saveSettings();
+			});
+	}
+
 	/** Changing the root moves the plugin folders, after confirmation when needed. */
 	renderSourceRoot(setting: Setting): void {
 		setting.controlEl.empty();
@@ -7859,9 +8281,9 @@ class MidadArabicSourcesSettingTab extends PluginSettingTab {
 		const read = () => this.plugin.quranCitationStyle(language);
 		const sample = (): string => {
 			const style = read();
-			const single = formatCitation({ surah: 24, riwaya: "", start: 10, end: 10 }, style);
-			const range = formatCitation({ surah: 2, riwaya: "", start: 255, end: 257 }, style);
-			return `${single}    ${range}`;
+			const single = formatCitation({ surah: 24, riwaya: "", start: 10, end: 10 }, style, { lines: true });
+			const range = formatCitation({ surah: 2, riwaya: "", start: 255, end: 257 }, style, { lines: true });
+			return `${single}\n\n${range}`;
 		};
 		const write = (patch: { [K in keyof CitationStyle]?: unknown }): void => {
 			void this.plugin.updateQuranCitationStyle(language, patch as Partial<CitationStyle>).then(() => preview?.setText(sample()));
@@ -8276,6 +8698,23 @@ class MidadArabicSourcesSettingTab extends PluginSettingTab {
 			},
 			{
 				type: "page",
+				name: "Appearance",
+				desc: "How the plugin's own styles look. These are also exposed in Style Settings, for those who use it.",
+				items: [
+					{
+						name: "Qur'ān callout background",
+						desc: "The fill behind a Qur'ān quotation callout ([!mas-quran]). The reset button returns it to Obsidian's 10% tint.",
+						render: (setting: Setting) => this.renderCalloutFill(setting, "quranCalloutColour", "quranCalloutOpacity"),
+					},
+					{
+						name: "Poetry callout background",
+						desc: "The fill behind an Arabic poetry callout ([!arabic-poetry]). The reset button returns it to Obsidian's 10% tint.",
+						render: (setting: Setting) => this.renderCalloutFill(setting, "poetryCalloutColour", "poetryCalloutOpacity"),
+					},
+				],
+			},
+			{
+				type: "page",
 				name: "Qurʾān citations",
 				desc: "How a citation link such as [[Q024#10]] is printed, per document language. The link itself never changes, so a format change needs no re-render.",
 				items: [
@@ -8309,6 +8748,7 @@ class MidadArabicSourcesSettingTab extends PluginSettingTab {
 		];
 		const order = [
 			"General",
+			"Appearance",
 			"LLM",
 			"Transliteration",
 			"Transcription and translation",
@@ -8402,6 +8842,10 @@ class StatusPanel {
 			maxHeight: "32vh",
 			overflow: "auto",
 			margin: "0",
+			// Selectable, so a failure can be copied out of the panel rather than
+			// retyped from a screenshot.
+			userSelect: "text",
+			cursor: "text",
 		});
 	}
 
@@ -8535,10 +8979,6 @@ function hasArabicDigits(value: string): boolean {
 	return /[\u0660-\u0669\u06F0-\u06F9]/.test(value);
 }
 
-function toArabicDigits(value: string): string {
-	return value.replace(/[0-9]/g, (digit) => EASTERN_DIGITS[Number(digit)]);
-}
-
 class InsertQuranCalloutModal extends Modal {
 	plugin: MidadArabicSourcesPlugin;
 
@@ -8631,15 +9071,6 @@ class InsertQuranRefModal extends Modal {
 		this.plugin = plugin;
 	}
 
-	private templateFor(key: string): { prefix: string; suffix: string } {
-		const templates = this.plugin.settings.quranRefTemplates ?? {};
-		const saved = templates[key] ?? (key === "canonical" ? undefined : templates.canonical);
-		return {
-			prefix: saved?.prefix ?? this.plugin.settings.quranRefPrefix ?? "Q",
-			suffix: saved?.suffix ?? "",
-		};
-	}
-
 	onOpen(): void {
 		const { contentEl } = this;
 		this.setTitle("Insert linked Qur'an reference");
@@ -8652,11 +9083,7 @@ class InsertQuranRefModal extends Modal {
 		}
 
 		let selected = works.find((work) => work.path === this.plugin.settings.quranRefLastRiwaya) ?? works[0];
-		let template = this.templateFor(selected.key);
 		let reference = "";
-		let parentheses = false;
-		let prefixInput: TextComponent | null = null;
-		let suffixInput: TextComponent | null = null;
 
 		new Setting(contentEl)
 			.setName("Riwāya")
@@ -8664,54 +9091,27 @@ class InsertQuranRefModal extends Modal {
 				for (const work of works) dropdown.addOption(work.path, work.label);
 				dropdown.setValue(selected.path).onChange((value) => {
 					selected = works.find((work) => work.path === value) ?? works[0];
-					template = this.templateFor(selected.key);
-					prefixInput?.setValue(template.prefix);
-					suffixInput?.setValue(template.suffix);
 				});
 			});
 
 		new Setting(contentEl)
 			.setName("Reference")
-			.setDesc("Sūra:āya, e.g. 2:2 or ٢:٢ — Western or Arabic-Indic digits.")
+			.setDesc("Sūra:āya, e.g. 2:2 or ٢:٢, or a range such as 2:255-257.")
 			.addText((text) => {
 				text.setPlaceholder("2:2").onChange((value) => { reference = value; });
 				window.setTimeout(() => text.inputEl.focus(), 0);
 			});
 
 		new Setting(contentEl)
-			.setName("Prefix")
-			.setDesc("Before the reference, e.g. Q or القرآن; leave empty for none.")
-			.addText((text) => {
-				prefixInput = text;
-				text.setValue(template.prefix).onChange((value) => { template.prefix = value; });
-			});
-
-		new Setting(contentEl)
-			.setName("Suffix")
-			.setDesc("After the reference, e.g. (Warsh); leave empty for none.")
-			.addText((text) => {
-				suffixInput = text;
-				text.setValue(template.suffix).onChange((value) => { template.suffix = value; });
-			});
-
-		new Setting(contentEl)
-			.setName("Enclose in parentheses")
-			.addToggle((toggle) => toggle.setValue(parentheses).onChange((value) => { parentheses = value; }));
-
-		new Setting(contentEl)
+			.setDesc("The link is inserted bare — how it reads is decided by Settings → Qurʾān citations, so changing the format never needs a re-render.")
 			.addButton((button) => button.setButtonText("Insert").setCta().onClick(() => {
-				void this.insert(selected, template, reference, parentheses);
+				void this.insert(selected, reference);
 			}))
 			.addButton((button) => button.setButtonText("Cancel").onClick(() => this.close()));
 	}
 
-	/** Resolve the sūra note, build the link, and insert it at the cursor. */
-	private async insert(
-		work: { path: string; label: string; key: string },
-		template: { prefix: string; suffix: string },
-		reference: string,
-		parentheses: boolean,
-	): Promise<void> {
+	/** Resolve the sūra note, build the bare link, and insert it at the cursor. */
+	private async insert(work: { path: string; label: string; key: string }, reference: string): Promise<void> {
 		const parsed = parseQuranReference(reference);
 		if (!parsed) {
 			new Notice("Enter a sūra:āya reference, such as 2:2 or 2:255-256.");
@@ -8728,15 +9128,9 @@ class InsertQuranRefModal extends Modal {
 			new Notice(`Sūra ${surah} has ${total} verses; ${verseEnd} is out of range.`);
 			return;
 		}
-		const arabic = parsed.arabic || /[\u0600-\u06FF]/.test(template.prefix) || /[\u0600-\u06FF]/.test(template.suffix);
-		const surahLabel = arabic ? toArabicDigits(String(surah)) : String(surah);
-		const startLabel = arabic ? toArabicDigits(String(verseStart)) : String(verseStart);
-		const endLabel = arabic ? toArabicDigits(String(verseEnd)) : String(verseEnd);
-		const range = verseStart === verseEnd ? startLabel : `${startLabel}\u2013${endLabel}`;
-		const parts = [template.prefix.trim(), `${surahLabel}:${range}`, template.suffix.trim()].filter(Boolean);
-		const label = parts.join(" ");
-		const link = `[[${file.basename}#${verseStart}|${label}]]`;
-		const text = parentheses ? `(${link})` : link;
+		const text = verseStart === verseEnd
+			? `[[${file.basename}#${verseStart}]]`
+			: `[[${file.basename}#${verseStart}]]\u2013[[${file.basename}#${verseEnd}]]`;
 
 		const view = this.app.workspace.getActiveViewOfType(MarkdownView);
 		const editor = view?.editor;
@@ -8745,9 +9139,6 @@ class InsertQuranRefModal extends Modal {
 			return;
 		}
 		editor.replaceSelection(text);
-		const templates = this.plugin.settings.quranRefTemplates ?? {};
-		templates[work.key] = { prefix: template.prefix, suffix: template.suffix };
-		this.plugin.settings.quranRefTemplates = templates;
 		this.plugin.settings.quranRefLastRiwaya = work.path;
 		await this.plugin.saveSettings();
 		this.close();
@@ -9630,6 +10021,30 @@ class ReprocessModal extends Modal {
 
 	onClose(): void {
 		this.contentEl.empty();
+	}
+}
+
+/** Choose any saved batch: an archive zip or the raw JSONL beside a note. */
+class BatchFileModal extends FuzzySuggestModal<TFile> {
+	constructor(
+		app: App,
+		private readonly files: TFile[],
+		private readonly onChoose: (file: TFile) => void,
+	) {
+		super(app);
+		this.setPlaceholder("Reprocess a batch: archive zip or JSONL output");
+	}
+
+	getItems(): TFile[] {
+		return this.files.sort((a, b) => a.path.localeCompare(b.path));
+	}
+
+	getItemText(file: TFile): string {
+		return file.path;
+	}
+
+	onChooseItem(file: TFile): void {
+		this.onChoose(file);
 	}
 }
 

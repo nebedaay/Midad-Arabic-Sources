@@ -28,40 +28,57 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
-from text_postprocess import cleanup_quran_citations, escape_literal_brackets, normalize_arabic_footnotes, unwrap_quran_quotes
+from text_postprocess import (POETRY_MARK_RE, blockquote_full_paragraphs,
+                              cleanup_quran_citations, escape_literal_brackets,
+                              normalize_arabic_footnotes, poetry_parts,
+                              split_page_headings, demote_prose_headings,
+                              bold_paragraphs_to_headings,
+                              unwrap_quran_quotes)
 
 LQ = '\uFD3F'
 LQE = '\uFD3E'
 NBSP = '\u202f'
 
-# The line marker for poetry. A rare, non-Markdown character avoids the
-# ambiguity between a leading '*' and italics.
-POETRY_MARK_RE = re.compile(r'^(?:§{2,}|\${3,})\s*')
 ARABIC_RE = re.compile(r'[\u0600-\u06FF]')
 
 
-def is_poetry_line(line: str) -> bool:
-    """True for a line Gemini marked as poetry, including malformed markers.
+# A hemistich is short. Gemini's mislabelled paragraphs are not, and 82 rendered
+# characters (diacritics take no space) admits the longest real couplets seen
+# while still rejecting prose.
+MAX_HEMISTICH_RUN = 82
+_TASHKIL = re.compile(r"[\u064B-\u065F\u0670\u06D6-\u06ED]")
 
-    Accepts the current '§§§' marker, the legacy '* h1%%h2' form, a line with
-    a '%%' hemistich separator, and the common failure where Gemini attaches
-    the asterisk directly to the first Arabic word. A closed '*italic*' span is
-    left as prose; a Qur'an quote is never poetry.
+
+def _rendered_length(text: str) -> int:
+    return len(_TASHKIL.sub("", text))
+
+
+def is_poetry_line(line: str) -> bool:
+    """True only for a shape Gemini actually uses for poetry.
+
+    Three signals are accepted. The `§§§` marker and a `%%` hemistich separator
+    are explicit. The legacy couplet is the third: each hemistich glued to its
+    own asterisk — `*hemistich *hemistich` — which Gemini writes despite the
+    instruction to put a space after the asterisk.
+
+    What is NOT poetry is the shape this function used to accept: a lone leading
+    asterisk, which turned an italic paragraph (`*whole verse*`) into a poetry
+    callout. A closed `*…*` span is emphasis, never verse. So the stars are
+    counted, each is required to be glued *before* the word that follows it and
+    never to follow one, the span must not be closed, and the run must be short
+    enough to be two hemistiches.
     """
     s = line.strip()
     if not s:
         return False
+    if LQ in s or LQE in s:
+        return False
     if "%%" in s or POETRY_MARK_RE.match(s):
         return True
-    if s.startswith("*") and not s.startswith("**"):
-        if LQ in s or LQE in s:
-            return False
-        if s.startswith("* ") and " * " in s[2:]:
-            return True
-        if s.count("*") >= 2:
-            return False
-        return bool(ARABIC_RE.search(s))
-    return False
+    # The couplet shapes — `a ** b` and the legacy `*a *b` — are recognised by
+    # the shared `poetry_parts`, so the formatter and the Markdown update read
+    # the same list.
+    return poetry_parts(s) is not None
 
 # Page-block markers added by transcription-process-raw.py (NBSP distinguishes
 # the pipeline's PDF-index heading from the model's printed-page heading).
@@ -122,27 +139,53 @@ def _strip_running_header(block):
     """Remove a page's leading running header (printed number and/or a
     'N سورة …' line) so it is not joined into the first paragraph.
 
+    The model writes its own `#### p. N` heading at the top of the page; the
+    running header sits *below* it, so the scan starts past it. That heading is
+    removed by `reconstruct_page_numbers`, and this function must not depend on
+    it having run first: whether it does or not, the printed number and the
+    'N سورة …' line are stripped before any paragraph joining happens. Otherwise
+    the joiner welds the header to the first paragraph and the running-header
+    pass then deletes the whole welded line — losing a paragraph of the book.
+
     Returns (cleaned_block, printed_number_or_None)."""
     lines = block.split("\n")
-    k = 0
-    while k < len(lines) and lines[k].strip() == "":
-        k += 1
     printed = None
 
-    if k < len(lines):
-        m = BARE_PAGE.match(lines[k])
-        if m:
-            printed = int(m.group(1).translate(AR_DIGITS))
-            lines.pop(k)
+    def _content_index():
+        k = 0
+        while k < len(lines) and (
+            not lines[k].strip() or MODEL_PAGE.match(lines[k].strip())
+        ):
+            k += 1
+        return k
 
-    if k < len(lines):
+    # The two header lines may appear in either order (`٢٢ - سورة الحج` above
+    # `٦`, or the number above the sūra), so take one of each at most.
+    saw_sura = False
+    for _ in range(2):
+        k = _content_index()
+        if k >= len(lines):
+            break
+        m = BARE_PAGE.match(lines[k])
+        if m and (printed is None or saw_sura):
+            # The printed number can sit below the sūra line as well as above
+            # it; when a sūra header was taken, a bare numeral beside it is the
+            # page's number, not the paragraph's first word.
+            if printed is None:
+                printed = int(m.group(1).translate(AR_DIGITS))
+            lines.pop(k)
+            continue
         m = RUNNING_SURA.match(lines[k])
         if m:
             if printed is None and m.group(1):
                 printed = int(m.group(1).translate(AR_DIGITS))
+            saw_sura = True
             lines.pop(k)
+            continue
+        break
 
     # A running header glued to the first paragraph: "٦٠ ٢ سورة البقرة بر …"
+    k = _content_index()
     if k < len(lines):
         m = HEADER_PREFIX.match(lines[k])
         if m and (printed is not None or 'سورة' in lines[k][:40]) and len(lines[k].strip()) > m.end():
@@ -151,6 +194,39 @@ def _strip_running_header(block):
             lines[k] = lines[k][m.end():]
 
     return "\n".join(lines), printed
+
+
+def _extrapolate_page_numbers(values):
+    """Fill pages that carry no number of their own.
+
+    A page whose text gives no clue takes the value its neighbours imply: the
+    number a gap can hold exactly (next - previous - 1 equals the number of
+    blanks), otherwise the previous page + 1. `None` survives only when there is
+    no anchor at all, and such a page is headed `#### p. unknown` rather than
+    silently sharing its predecessor's heading.
+    """
+    filled = list(values)
+    index = 0
+    while index < len(filled):
+        if filled[index] is not None:
+            index += 1
+            continue
+        start = index
+        while index < len(filled) and filled[index] is None:
+            index += 1
+        blanks = index - start
+        previous = filled[start - 1] if start > 0 else None
+        following = filled[index] if index < len(filled) else None
+        if previous is not None and following is not None and following - previous - 1 == blanks:
+            for k in range(blanks):
+                filled[start + k] = previous + 1 + k
+        elif previous is not None:
+            for k in range(blanks):
+                filled[start + k] = previous + 1 + k
+        elif following is not None:
+            for k in range(blanks):
+                filled[start + k] = max(1, following - blanks + k)
+    return filled
 
 
 def reconstruct_page_numbers(text):
@@ -170,20 +246,25 @@ def reconstruct_page_numbers(text):
         info.append((marker, cleaned, idx, int(mp.group(1)) if mp else hdr_num))
 
     numbers = _assign_page_numbers([(i, p) for _, _, i, p in info])
+    # A page with no number of its own — no heading, no running header — still
+    # gets a heading: deduced from its neighbours, or `unknown` if nothing anchors
+    # it. Without this, two PDF pages can end up under one heading.
+    resolved = _extrapolate_page_numbers([numbers.get(idx) for _, _, idx, _ in info])
 
     out = [parts[0]]
     fixed = 0
-    for marker, block, idx, _ in info:
-        n = numbers.get(idx)
+    for position, (marker, block, idx, _) in enumerate(info):
+        n = resolved[position] if position < len(resolved) else numbers.get(idx)
         if MODEL_UNNUM.search(block):
             # cover / unnumbered page: keep its heading as-is
             new = block
         else:
             # Drop every page heading the model emitted (it can repeat them)
             # and put exactly one reconstructed heading at the top.
-            stripped = re.sub(r'^####\s*p\.?\s*\*?\s*\d+\s*$', '', block, flags=re.M)
+            stripped = re.sub(r'^####\s*p\.?\s*\*?\s*\d+[ \t]*$', '', block, flags=re.M)
             stripped = MODEL_UNKNOWN.sub('', stripped)
-            new = "\n\n" + f'#### p. {n}\n\n' + stripped.lstrip('\n')
+            label = n if n is not None else "unknown"
+            new = "\n\n" + f'#### p. {label}\n\n' + stripped.lstrip('\n')
         if new != block:
             fixed += 1
         out.append(marker)
@@ -426,8 +507,8 @@ def remove_pdf_headings(text):
     # The pipeline's own PDF-index markers use a narrow no-break space; strip
     # them so they never leak into the output.
     text = re.sub(r'#+\s*p\.\u202f\d+\s*', '', text)
-    text = re.sub(r'^#### p\.\s*0+\d*\s*$', '', text, flags=re.MULTILINE)
-    text = re.sub(r'^#{3,5}\s*PDF\s*\d*\s*$', '', text, flags=re.MULTILINE)
+    text = re.sub(r'^#### p\.\s*0+\d*[ \t]*$', '', text, flags=re.MULTILINE)
+    text = re.sub(r'^#{3,5}\s*PDF\s*\d*[ \t]*$', '', text, flags=re.MULTILINE)
     text = re.sub(r'^#### p\.(?!\s*\?\s*$).*\?.*$', '', text, flags=re.MULTILINE)
     # Strip any heading containing pg_ or .pdf (Gemini diagnostic headers)
     text = re.sub(r'^#+\s*.*(?:pg_|\.pdf).*$', '', text, flags=re.MULTILINE)
@@ -478,13 +559,20 @@ def format_toc_entries(text: str) -> str:
     return "\n".join(out)
 
 
-def process(input_path, gemini=True):
+def process(input_path, gemini=True, unwrap=True):
     """Apply all post-processing fixes to a markdown transcription body.
 
     `gemini=True` means the input is Gemini's own raw output, so its citation
     habits are cleaned up. Re-processing an already-rendered note passes
     `gemini=False`: its citations are Midad's own links (handled by the shared
     passes), and only simple source citations are touched.
+
+    `unwrap=False` keeps the `*﴿…﴾{.quran-quote}*` scaffold on the spans. That
+    scaffold is what the shared Qur'ān passes look for — `add_missing_refs`
+    cites a span only in that form — so the transcription pipeline must keep it
+    between formatting and linking, and unwrap once at the very end. The
+    standalone formatter (`__main__`) still unwraps, because its output is a
+    finished note.
     """
     path = Path(input_path)
     c = open(path, encoding='utf-8').read()
@@ -639,14 +727,12 @@ def process(input_path, gemini=True):
         s = line.strip()
         is_poetry = is_poetry_line(s)
 
-        # Legacy '* text * text' form: two hemistiches separated by a bare
-        # asterisk. Convert it to the canonical '%%' form before parsing.
-        if s.startswith('* ') and ' * ' in s[2:] and len(s) < 250:
-            inner = s[2:]
-            parts = inner.rsplit(' * ', 1)
-            if len(parts) == 2 and len(parts[0].strip()) > 3 and len(parts[1].strip()) > 3:
-                s = f"§§§ {parts[0].strip()}%%{parts[1].strip()}"
-                is_poetry = True
+        # A couplet written with bare asterisks (`a ** b`, or the legacy
+        # `*a *b`) is rewritten into the canonical `%%` form before parsing.
+        couplet = poetry_parts(s) if is_poetry and "%%" not in s else None
+        if couplet and len(couplet) == 2:
+            s = f"§§§ {couplet[0]}%%{couplet[1]}"
+            is_poetry = True
 
         if is_poetry:
             # Remove the line marker, then any legacy '*' or '-' marker.
@@ -709,7 +795,10 @@ def process(input_path, gemini=True):
             continue
         s = lines[idx].strip()
         if s and not s.startswith('>[!') and not s.startswith('#'):
-            lines[idx] = re.sub(r'\(([\u0660-\u0669])\)', r'<sup>(\1)</sup>', lines[idx])
+            # Already an aside: wrapping it again on every render would nest a
+            # `<sup>` per pass, so the update would never settle.
+            lines[idx] = re.sub(r'(?<!<sup>)\(([\u0660-\u0669])\)(?!</sup>)',
+                                r'<sup>(\1)</sup>', lines[idx])
     
     # Pass 3: Group footnote paragraphs into callouts
     out = []
@@ -790,7 +879,7 @@ def process(input_path, gemini=True):
     print(f"  TOC: {c.count('>[!TOC]')} callouts")
 
     # ── 6. Remove page footers (- N -) ─────────────────────────
-    c = re.sub(r'^[-–—]\s*\d+\s*[-–—]\s*$', '', c, flags=re.MULTILINE)
+    c = re.sub(r'^[-–—]\s*\d+\s*[-–—][ \t]*$', '', c, flags=re.MULTILINE)
 
     # ── 7. Remove running headers ──────────────────────────────
     pages = re.split(r'\n(?=#### )', c)
@@ -848,7 +937,10 @@ def process(input_path, gemini=True):
                         _ns = _lines[_j].strip()
                         if _ns.startswith(('مكية', 'مدنية')) or 'مكية' in _ns or 'مدنية' in _ns:
                             _is_real = True; break
-                    if not _is_real:
+                    # A running header is a few words. Anything long that merely
+                    # begins with a sūra name is a paragraph the joiner welded to
+                    # a header line, and deleting it would delete the book's text.
+                    if not _is_real and len(_s) <= 60:
                         continue
         _out.append(_line)
     c = '\n'.join(_out)
@@ -923,10 +1015,14 @@ def process(input_path, gemini=True):
     
     # ── 9. Spacing normalization ─────────────────────────────
     c = normalize_spacing(c)
+    # A page heading that swallowed its page's first paragraph gets it back.
+    c, _swallowed = split_page_headings(c)
+    c, _bold_heads = bold_paragraphs_to_headings(c)
+    c, _prose_heads = demote_prose_headings(c)
 
     # ── Repair page headings, last, in case any pass touched them ──
-    c = re.sub(r'([^\n])(####\s+p\.?\s*\*?\s*\d+\s*)$', r'\1\n\n\2', c, flags=re.M)
-    c = re.sub(r'^####\s+p\.?\s*\*?\s*(\d+)\s*$', r'#### p. \1', c, flags=re.M)
+    c = re.sub(r'([^\n])(####\s+p\.?\s*\*?\s*\d+[ \t]*)$', r'\1\n\n\2', c, flags=re.M)
+    c = re.sub(r'^####\s+p\.?\s*\*?\s*(\d+)[ \t]*$', r'#### p. \1', c, flags=re.M)
     # A page heading must close at its number. If an earlier pass glued the
     # first body line to it (`#### p. 60*﴿…`), split it before the block pass.
     # Match the complete number and only split when the next character is a
@@ -934,7 +1030,9 @@ def process(input_path, gemini=True):
     c = re.sub(r'^(####\s+p\.\s*\d+(?::\d+)?)(?=[^\d\s])', r'\1\n\n', c, flags=re.M)
     print(f"  Spacing normalized")
 
-    return cleanup_quran_citations(unwrap_quran_quotes(c))
+    if unwrap:
+        c = unwrap_quran_quotes(c)
+    return cleanup_quran_citations(c)
 
 
 if __name__ == '__main__':

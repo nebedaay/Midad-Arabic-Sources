@@ -143,6 +143,29 @@ def _resubmit_untranslated(pages, requests_path: Path, min_ratio: float = 0.5):
     return out
 
 
+def _request_headings(path: Path) -> dict[str, str]:
+    """Each request's page heading, keyed by batch key."""
+    out: dict[str, str] = {}
+    try:
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            try:
+                data = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            try:
+                text = data["request"]["contents"][0]["parts"][0]["text"]
+            except (KeyError, IndexError, TypeError):
+                continue
+            found = PAGE_HEADING_LINE.search(text)
+            if found:
+                out[data.get("key", "")] = found.group(0).strip()
+    except OSError:
+        return {}
+    return out
+
+
 def read_output_jsonl(jsonl_path: Path, fix_untranslated: bool = True) -> str:
     """Concatenate the translated text of every batch in an output JSONL.
 
@@ -172,6 +195,19 @@ def read_output_jsonl(jsonl_path: Path, fix_untranslated: bool = True) -> str:
             pages.append((key, text))
 
     pages.sort(key=lambda x: x[0])
+    # A request is one page, so the response must open with that page's heading.
+    # The model almost always echoes it; when it does not, the page would vanish
+    # from the note, and the request's own heading is the authority.
+    req_path = _requests_path(Path(jsonl_path))
+    if req_path:
+        headings = _request_headings(req_path)
+        restored = []
+        for key, text in pages:
+            heading = headings.get(key, "")
+            if heading and not PAGE_HEADING_LINE.search(text):
+                text = f"{heading}\n\n{text.lstrip()}"
+            restored.append((key, text))
+        pages = restored
     if failed:
         print(f"  {failed} batch(es) with no usable text")
     if fix_untranslated:
@@ -195,6 +231,7 @@ FN_DOT = re.compile(r'^(\d+)[.)]\s+(.*)$')
 FN_BARE = re.compile(r'^(\d+)\s+([A-Z"\'(\u2018\u201c].*)$')
 FN_QUOTED = re.compile(r'^>\s*(?:[-*]\s*)?\d+\s*[\u2013\u2014]\s+\S')
 PAGE_HEADER = re.compile(r'^#{1,6}\s+p\.\s*\d+\s*$')
+PAGE_HEADING_LINE = re.compile(r'^#{4}\s*p\.?\s*\d+\s*$', re.MULTILINE)
 BRACKET = re.compile(r'(?<!\[)\[([^\[\]\n]+)\](?!\])')
 
 

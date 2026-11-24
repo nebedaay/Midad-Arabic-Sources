@@ -276,7 +276,11 @@ def main():
                 out_override.write_text(tbp.build_translation(stem, result), encoding="utf-8")
                 dest = out_override
             else:
-                dest = mv.write_note(result, citekey, "translation", volume=volume, unit=unit)
+                # The same flag a transcription is given, so a translated tafsīr
+                # keeps its note class (and with it the margin's gutter).
+                tafsir = mv.tafsir_mode(citekey, "translation", volume, unit)
+                dest = mv.write_note(result, citekey, "translation", volume=volume,
+                                     unit=unit, tafsir=tafsir)
         else:
             jsonl = base / f"{stem}-output.jsonl"
             if not jsonl.exists():

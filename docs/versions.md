@@ -31,6 +31,8 @@ Versions are stored per work under:
 
 Each archive contains that work's version manifest and snapshot notes. The old global `source-versions.zip` is migrated automatically.
 
+An archive is read and written **one work at a time**. The manager knows a note's work from its `midad-id`, so opening it reads that note's archive only, and changing something rewrites that archive only — every other work's zip is left untouched, byte for byte. The one view that needs all works (the startup check that maps saved versions to notes) reads each archive's `manifest.json` without decompressing a single snapshot. In a vault with hundreds of works and gigabytes of snapshots that is the difference between a dialog that answers at once and one that blocks the interface for a minute.
+
 Baseline and version hashes live in:
 
 ```text

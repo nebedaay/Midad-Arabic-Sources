@@ -954,7 +954,8 @@ def cmd_postprocess_body(args) -> int:
         tpp = load_module("transcription-postprocess.py")
         with contextlib.redirect_stdout(io.StringIO()):
             tpp.run(raw, out_path=processed, metadata=False,
-                    tafsir=bool(getattr(args, "tafsir", False)), from_gemini=False)
+                    tafsir=bool(getattr(args, "tafsir", False)), raw_ocr=False,
+                    discover=bool(getattr(args, "discover", False)))
         out_path.write_text(processed.read_text(encoding="utf-8"), encoding="utf-8")
     finally:
         shutil.rmtree(workdir, ignore_errors=True)
@@ -984,6 +985,10 @@ def cmd_postprocess_note(args) -> int:
         if end != -1:
             body = text[end + 4:]
     body = body.lstrip("\n")
+    # The managed markers are the note's scaffolding, not its text: the passes
+    # below must not see them (a marker inside a paragraph can make that
+    # paragraph look like a quotation), and the body is wrapped again on write.
+    body = re.sub(r'<span class="mas-managed">\s*/?mas-managed\s*</span>\s*', '', body)
 
     mv = load_module("transcription-translation-move-to-vault.py")
     related = mv._existing_list(note, "related")
@@ -1015,7 +1020,8 @@ def cmd_postprocess_note(args) -> int:
             # The post-processor is chatty; its messages are not pipeline JSON.
             with contextlib.redirect_stdout(io.StringIO()):
                 tpp.run(raw, out_path=processed, metadata=False, tafsir=tafsir,
-                        from_gemini=False)
+                        raw_ocr=False,
+                        discover=bool(getattr(args, "discover", False)))
             processed_body = processed.read_text(encoding="utf-8")
         finally:
             shutil.rmtree(workdir, ignore_errors=True)
@@ -1082,6 +1088,8 @@ def main() -> int:
     p.add_argument("note", help="Markdown file holding only the body to post-process.")
     p.add_argument("--out", required=True, help="Where to write the processed body.")
     p.add_argument("--tafsir", action="store_true")
+    p.add_argument("--discover", action="store_true",
+                   help="Look for quotations again (an older note, after the rules improved).")
     p.set_defaults(func=cmd_postprocess_body)
 
     p = sub.add_parser("postprocess-note")
@@ -1096,6 +1104,8 @@ def main() -> int:
                    help="Upgrade metadata at the note's current path instead of moving/writing the canonical default path.")
     p.add_argument("--tafsir", action="store_true",
                    help="Treat quotes as continuous with the verse under discussion.")
+    p.add_argument("--discover", action="store_true",
+                   help="Look for quotations again (an older note, after the rules improved).")
     p.set_defaults(func=cmd_postprocess_note)
 
     p = sub.add_parser("resume"); p.add_argument("--state", required=True); p.set_defaults(func=cmd_resume)

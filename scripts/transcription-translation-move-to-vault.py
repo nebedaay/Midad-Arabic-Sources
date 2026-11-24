@@ -21,6 +21,23 @@ from pathlib import Path
 from datetime import datetime
 
 VAULT = Path(os.environ.get("OBSIDIAN_VAULT", os.path.expanduser("~/Documents/Obsidian Vault")))
+
+#: Loaded on demand: `quran.py` needs the scripts directory on `sys.path`, and a
+#: translation is not otherwise a Qur'ān job.
+_QUERY_MODULE = None
+
+
+def _quran_refs():
+    global _QUERY_MODULE
+    if _QUERY_MODULE is None:
+        import sys
+        from importlib.machinery import SourceFileLoader
+        here = Path(__file__).resolve().parent
+        if str(here) not in sys.path:
+            sys.path.insert(0, str(here))
+        _QUERY_MODULE = SourceFileLoader(
+            "quran_refs", str(here / "quran.py")).load_module()
+    return _QUERY_MODULE
 _LITERATURE_DIR = os.environ.get("MIDAD_LITERATURE_DIR", "").strip()
 BIB = VAULT / _LITERATURE_DIR if _LITERATURE_DIR else None
 
@@ -39,11 +56,19 @@ TYPE_SUFFIX = re.compile(
 
 try:
     from text_postprocess import (
+        backticks_to_quotes,
+        reassociate_footnotes,
         LEGACY_MANAGED_CLOSE,
         LEGACY_MANAGED_OPEN,
         MANAGED_CLOSE,
         MANAGED_OPEN,
+        link_bare_refs,
+        bold_paragraphs_to_headings,
+        collapse_ornate_runs,
+        demote_prose_headings,
+        split_page_headings,
         normalize_managed_marker_spacing,
+        normalize_translation_footnotes,
         unwrap_quran_quotes,
         wrap_managed_body,
     )
@@ -54,8 +79,24 @@ except Exception:  # direct use without the shared module
     LEGACY_MANAGED_CLOSE = "%%/mas-managed%%"
     def normalize_managed_marker_spacing(text):
         return text
+    def backticks_to_quotes(text):
+        return text, 0
+    def reassociate_footnotes(text):
+        return text, 0
     def unwrap_quran_quotes(text):
         return text
+    def link_bare_refs(text):
+        return text, 0
+    def normalize_translation_footnotes(text):
+        return text, 0
+    def bold_paragraphs_to_headings(text):
+        return text, 0
+    def demote_prose_headings(text):
+        return text, 0
+    def split_page_headings(text):
+        return text, 0
+    def collapse_ornate_runs(text):
+        return text, 0
     def wrap_managed_body(body):
         return f"{MANAGED_OPEN}\n\n{body.strip()}\n\n{MANAGED_CLOSE}"
 
@@ -92,7 +133,10 @@ def _managed_body(existing: Path | None, generated: str) -> str:
     if not span:
         return wrapped
     start, stop = span
-    return normalize_managed_marker_spacing(f"{body[:start]}{wrapped}{body[stop:]}")
+    prefix = body[:start]
+    prefix = re.sub(r"(?m)^[\ufd3f\ufd3e]{3,}[ \t]*\n?\s*", "", prefix)
+    prefix = re.sub(r'<span class="mas-managed">\s*/?mas-managed\s*</span>\s*', "", prefix)
+    return normalize_managed_marker_spacing(f"{prefix}{wrapped}{body[stop:]}")
 
 
 def _literature_notes():
@@ -672,9 +716,11 @@ title: "{_yaml_quote(title)}"
     else:
         yaml += "topics: []\n"
 
-    classes = [c for c in (cssclasses or []) if c and c != "tafsir"]
+    # One gutter class, on the side the note reads: a tafsīr in Arabic keeps the
+    # band on the left, a translated tafsīr on the right.
+    classes = [c for c in (cssclasses or []) if c and c not in ("tafsir", "tafsir-en")]
     if tafsir:
-        classes.insert(0, "tafsir")
+        classes.insert(0, "tafsir-en" if doc_type == "translation" else "tafsir")
     if classes:
         yaml += "cssclasses:\n"
         for value in classes:
@@ -714,12 +760,13 @@ def tafsir_mode(citekey: str, doc_type: str, volume: int = None,
                 unit: str | None = None, standalone: bool = False) -> bool:
     """Whether a transcription/translation is a tafsīr, inherited from its work.
 
-    The mode belongs to the **work**: a multi-volume tafsīr puts
-    `topics: [Tafsīr]` (or `midad-transcription-mode: tafsir`) on its parent
-    note, and every volume inherits it. The parent is looked up by name in both
-    the `@` and `mas-` forms — a volume can exist while the literature note that
-    decides `standalone` no longer does — and the volume's own properties are
-    consulted only when no parent exists.
+    Topics are **additive**: the parent and the volume are both consulted, and
+    either one saying "tafsīr" makes it so. A parent marked tafsīr carries to
+    every volume; a volume marked tafsīr is a tafsīr even inside a collection
+    that is not, which is why the parent of a mixed collection should carry no
+    topic. The parent is looked up by name in both the `@` and `mas-` forms — a
+    volume can exist while the literature note that decides `standalone` no
+    longer does.
     """
     candidates: list[Path] = []
     for sa in (False, True):
@@ -892,17 +939,82 @@ def write_note(body: str, citekey: str, doc_type: str, related: list[str] = None
     editors = _existing_list(dest, "editors") or editors
     editors_ar = _existing_list(dest, "editors-ar") or editors_ar
     is_arabic = bool(ARABIC_SCRIPT.search(body)) if doc_type == "transcription" else bool(title_ar or authors_ar)
+    # The note's class names its language to the stylesheet, which is where the
+    # margin's gutter is declared: a tafsīr reads right to left and keeps its
+    # link on the left, an English tafsīr reads left to right and keeps it on
+    # the right. Whether the work *is* a tafsīr is already known here — it is
+    # the same flag that decides the marker links — so it is used rather than
+    # guessed from the text.
+    classes = _existing_list(dest, "cssclasses")
+    band_class = None
+    if tafsir:
+        band_class = "tafsir-en" if doc_type == "translation" else "tafsir"
+    # Exactly one gutter class, on the side the note reads: a translated tafsīr
+    # must not keep the Arabic `tafsir` class as well, or both bands apply.
+    classes = [name for name in classes if name not in ("tafsir", "tafsir-en")]
+    if band_class:
+        classes = classes + [band_class]
     yaml = build_yaml(citekey, doc_type, related, volume=volume, standalone=standalone,
                       title=title, shorttitle=cover_shorttitle,
                       authors=authors, editors=editors, topics=_existing_topics(dest),
                       title_ar=title_ar, authors_ar=authors_ar,
                       shorttitle_ar=shorttitle_ar, editors_ar=editors_ar,
                       unit=unit, up=_existing_list(dest, "up"), arabic=is_arabic,
-                      cssclasses=_existing_list(dest, "cssclasses"),
+                      cssclasses=classes,
                       tafsir=tafsir)
     existing_created = _existing_scalar(dest, "created")
     if existing_created:
         yaml = re.sub(r"^created:.*$", f"created: {existing_created}", yaml, count=1, flags=re.M)
+    if doc_type == "translation":
+        # A translation carries its source's verse references as text — `(001:4)`
+        # after the quotation — since the model had no link syntax. They are the
+        # source's own apparatus, so they become citations here, on the
+        # translation path, and nowhere else: in an Arabic note a bracketed
+        # `2:30` may be a time.
+        # The model learned the vault's old sūra names and writes them itself —
+        # `([[004 An-Nisa#29|al-Nisāʾ: 29]])` — which is an unresolved link. The
+        # citation is brought to the canonical form first, so the reference the
+        # bare-ref pass sees is already one the plugin can paint.
+        try:
+            body, _legacy = _quran_refs().normalize_quran_link_display(body)
+        except Exception as error:  # noqa: BLE001
+            print(f"  Link normalisation skipped ({error})")
+        body, _refs = link_bare_refs(body)
+        # A translation also cites by *name* — `(al-Baqarah: 255)` — which is
+        # recognisable without a quotation to compare it against, because the
+        # vault's sūra aliases carry every spelling of the name.
+        try:
+            body, _named = _quran_refs().link_named_refs(body)
+        except Exception as error:  # noqa: BLE001
+            print(f"  Named citations skipped ({error})")
+        # Gemini marks emphasis with backticks, which Markdown sets in code
+        # type; the vault quotes with ‘…’, so the marks are converted here.
+        body, _ticks = backticks_to_quotes(body)
+    # Heading shape is the one thing every genre decides the same way, and this
+    # is the funnel both paths pass through: a page heading that swallowed its
+    # page, a short bold line that is really a section title, and a passage that
+    # was set as a heading all get their own paragraph here — for a translation
+    # as much as for a transcription in any language.
+    body, _ = collapse_ornate_runs(body)
+    body, _ = split_page_headings(body)
+    body, _ = bold_paragraphs_to_headings(body)
+    body, _ = demote_prose_headings(body)
+    if doc_type == "translation":
+        # After the heading passes: the model sometimes sets a footnote
+        # definition as a heading (`## 1 - This is the first hemistich…`), and it
+        # is a paragraph — and therefore a definition — only once demoted.
+        body, _n = normalize_translation_footnotes(body)
+        # The translation is requested two pages at a time, so a footnote block
+        # the model mislaid can only be one page late: put it back on the page
+        # whose own text refers to it.
+        body, _moved = reassociate_footnotes(body)
+        if tafsir:
+            # A translated tafsīr glosses a verse word by word; one citation per
+            # run, exactly as the Arabic commentary does.
+            try:
+                body, _runs = _quran_refs().dedupe_run_links(body)
+            except Exception as error:  # noqa: BLE001
+                print(f"  Run de-duplication skipped ({error})")
     body = unwrap_quran_quotes(body)
     text = normalize_managed_marker_spacing(yaml + "\n" + _managed_body(dest, body))
     dest.write_text(text, encoding="utf-8")

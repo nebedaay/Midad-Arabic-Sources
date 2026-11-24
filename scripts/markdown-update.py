@@ -23,17 +23,25 @@ if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
 from text_postprocess import (
+    format_poetry_couplets,
     MANAGED_CLOSE,
     MANAGED_OPEN,
     LEGACY_MANAGED_CLOSE,
     LEGACY_MANAGED_OPEN,
     escape_literal_brackets,
     normalize_arabic_footnotes,
+    link_bare_refs,
     normalize_managed_marker_spacing,
     normalize_page_separators,
+    backticks_to_quotes,
+    reassociate_footnotes,
+    normalize_translation_footnotes,
+    split_page_headings,
+    demote_prose_headings,
+    bold_paragraphs_to_headings,
+    collapse_ornate_runs,
     cleanup_quran_citations,
     unwrap_quran_quotes,
-    wrap_quran_quotes_for_processing,
 )
 
 
@@ -109,9 +117,20 @@ def normalize_markdown_spacing(text: str) -> str:
     while len(out) > 1 and out[-1] == "" and out[-2] == "":
         out.pop()
     return "\n".join(out)
-def _update_markdown_body(body: str, *, quran: bool, tafsir: bool) -> str:
+def _update_markdown_body(body: str, *, quran: bool, tafsir: bool,
+                          translation: bool = False) -> str:
+    if translation:
+        # A translation is not an Arabic note: its own verse references become
+        # citations, and its footnotes are the ordinary kind (Gemini sometimes
+        # emits `arabic-footnotes` as well, and that callout is set RTL).
+        body, _legacy = _load("quran.py").normalize_quran_link_display(body)
+        body, _refs = link_bare_refs(body)
+        try:
+            body, _named = _load("quran.py").link_named_refs(body)
+        except Exception:  # noqa: BLE001
+            pass
+        body, _ticks = backticks_to_quotes(body)
     body = unwrap_quran_quotes(body)
-    body = wrap_quran_quotes_for_processing(body)
     tfq = _load("quran.py")
     tfs = _load("tafsir.py")
     if tafsir:
@@ -132,6 +151,9 @@ def _update_markdown_body(body: str, *, quran: bool, tafsir: bool) -> str:
     fmt = _load("transcription-format.py")
     body = fmt.format_toc_entries(body)
     body = normalize_arabic_footnotes(body)
+    # Gemini's `a ** b` couplets: the formatter recognises them for a fresh
+    # transcription, and this brings a note transcribed before that into line.
+    body, _couplets = format_poetry_couplets(body)
     body = cleanup_quran_citations(body)
     body = unwrap_quran_quotes(body)
     body, _ = tfq.canonicalize_quran_quotes(body)
@@ -143,10 +165,23 @@ def _update_markdown_body(body: str, *, quran: bool, tafsir: bool) -> str:
     # deliberately do not run here.
     body = normalize_markdown_spacing(body)
     body = normalize_page_separators(body)
+    # A page heading that swallowed the first paragraph of its page.
+    body, _heads = split_page_headings(body)
+    body, _bold = bold_paragraphs_to_headings(body)
+    body, _prose = demote_prose_headings(body)
+    if translation:
+        # After the heading passes: a definition the model set as a heading is a
+        # paragraph — and therefore a definition — only once demoted.
+        body, _notes = normalize_translation_footnotes(body)
+        body, _moved = reassociate_footnotes(body)
+        if tafsir:
+            body, _runs = _load("quran_render.py").dedupe_run_links(body)
+    body, _runs = collapse_ornate_runs(body)
     return body
 
 
-def update_markdown(text: str, *, quran: bool = True, tafsir: bool = False) -> str:
+def update_markdown(text: str, *, quran: bool = True, tafsir: bool = False,
+                   translation: bool = False) -> str:
     """Apply the guarded Markdown-update layer, preserving managed markers."""
     body, fences = _protect_fences(text)
     body = normalize_managed_marker_spacing(body)
@@ -168,10 +203,12 @@ def update_markdown(text: str, *, quran: bool = True, tafsir: bool = False) -> s
         before = body[:start]
         inner = body[start + len(open_mark):end - len(close_mark)].strip("\n")
         after = body[end:]
-        inner = _update_markdown_body(inner, quran=quran, tafsir=tafsir)
+        inner = _update_markdown_body(inner, quran=quran, tafsir=tafsir,
+                                      translation=translation)
         body = f"{before}{open_mark}\n\n{inner}\n\n{close_mark}{after}"
     else:
-        body = _update_markdown_body(body, quran=quran, tafsir=tafsir)
+        body = _update_markdown_body(body, quran=quran, tafsir=tafsir,
+                                     translation=translation)
     body = normalize_managed_marker_spacing(body)
     body = _restore_fences(body, fences)
     return body
@@ -184,6 +221,21 @@ def _looks_like_tafsir(yaml_text: str) -> bool:
     if re.search(r"midad-transcription-mode:\s*[\"']?tafsir", text):
         return True
     return "midad topic - tafs" in text
+
+
+def _is_translation(note: Path, yaml: str) -> bool:
+    """Is this note a translation?
+
+    The folder decides first — anything under the translations folder is one —
+    then the frontmatter: `document-type: "[[translation]]"`, or the
+    `[[Translations]]` topic that the templates write for the same files.
+    """
+    if "/Translations/" in note.as_posix():
+        return True
+    text = yaml.lower()
+    if re.search(r"document-type:\s*[\"']?\[?\[?translation", text):
+        return True
+    return "[[translations]]" in text or "midad topic - translations" in text
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -199,7 +251,9 @@ def main(argv: list[str] | None = None) -> int:
     original = note.read_text(encoding="utf-8")
     yaml, body = _split_frontmatter(original)
     tafsir = args.tafsir or _looks_like_tafsir(yaml)
-    updated = update_markdown(body, quran=not args.no_quran, tafsir=tafsir)
+    translation = _is_translation(note, yaml)
+    updated = update_markdown(body, quran=not args.no_quran, tafsir=tafsir,
+                              translation=translation)
     result = (yaml.rstrip("\n") + "\n\n" + updated) if yaml else updated
     changed = result != original
     if changed:
